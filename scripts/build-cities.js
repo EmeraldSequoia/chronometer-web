@@ -321,80 +321,159 @@ console.log(`  ${adList.length} unique admin1 names`);
 cities.sort((a, b) => b.population - a.population);
 
 // ---------------------------------------------------------------------------
-// 9. Output compact JS
+// 9. Build columnar output (format v2)
 // ---------------------------------------------------------------------------
+//
+// Instead of 167k array-of-arrays (which JSON.parse explodes into ~45 MB of
+// per-object heap), we emit parallel columns: numeric fields as base64-packed
+// little-endian typed-array buffers, and text fields as single newline-joined
+// strings sliced on demand at runtime. See planning/2026-06-13-observatory-
+// cities-columnar.md and src/shared/city-search.ts for the consumer.
 
-console.log('=== Phase 8: Writing output ===');
+console.log('=== Phase 9: Building columns ===');
 
-// Build city array: [name, asciiName, ccIdx, ad1Idx, lat, lon, tzIdx, pop, altNames?, admin2?]
-const cityRows = cities.map(c => {
-    const row = [
-        c.name,
-        c.asciiname,
-        ccIndex.get(c.countryCode),
-        adIndex.get(c.admin1Name),
-        c.lat,
-        c.lon,
-        tzIndex.get(c.timezone),
-        c.population,
-    ];
-    // Only include alt names that would help with search:
-    // keep variants whose ASCII-folded form starts differently from the primary name
-    // (prefix search on asciiname already handles same-prefix variants)
-    let filteredAlts = '';
+const DELIM = '\n';
+
+function assertNoDelim(s, what, i) {
+    if (s.indexOf(DELIM) !== -1) {
+        throw new Error(`Field contains newline delimiter (${what} @ row ${i}): ${JSON.stringify(s.slice(0, 80))}`);
+    }
+}
+
+// Pack a typed array as base64 of its raw little-endian bytes. Node runs on
+// little-endian hosts; the runtime decoder byte-swaps only on big-endian.
+function packB64(typedArr) {
+    return Buffer.from(typedArr.buffer, typedArr.byteOffset, typedArr.byteLength).toString('base64');
+}
+
+// ── City columns ──
+const N = cities.length;
+const cLat = new Int32Array(N);   // round(deg * 1000) — exact to 3 decimals
+const cLon = new Int32Array(N);
+const cPop = new Uint32Array(N);
+const cTz = new Uint16Array(N);   // index into TZ
+const cCc = new Uint16Array(N);   // index into CC
+const cAd1 = new Uint16Array(N);  // index into AD
+const nameParts = new Array(N);
+const asciiParts = new Array(N);
+const altParts = new Array(N);
+const ad2 = {};                   // sparse: rowIndex -> county name
+
+let foldedAdded = 0;
+for (let i = 0; i < N; i++) {
+    const c = cities[i];
+    cLat[i] = Math.round(c.lat * 1000);
+    cLon[i] = Math.round(c.lon * 1000);
+    cPop[i] = c.population;
+    cTz[i] = tzIndex.get(c.timezone);
+    cCc[i] = ccIndex.get(c.countryCode);
+    cAd1[i] = adIndex.get(c.admin1Name);
+
+    // Filtered alt names: keep variants whose ASCII-folded form starts
+    // differently from the primary name (prefix search on asciiname already
+    // handles same-prefix variants).
+    const primaryAscii = c.asciiname;  // already lowercase
+    const prefix3 = primaryAscii.substring(0, 3);
+    const seen = new Set([primaryAscii]);
+    const useful = [];
     if (c.alternatenames) {
-        const primaryAscii = c.asciiname;  // already lowercase
-        const prefix3 = primaryAscii.substring(0, 3);
-        const seen = new Set([primaryAscii]);
-        const useful = [];
         for (const alt of c.alternatenames.split(',')) {
             const altAscii = toASCII(alt.trim());
             if (!altAscii || altAscii.length <= 1 || seen.has(altAscii)) continue;
             seen.add(altAscii);
-            // Keep if the first 3 chars differ from the primary name
             if (altAscii.substring(0, 3) !== prefix3) {
                 useful.push(altAscii);
             }
         }
-        filteredAlts = useful.join(',');
     }
-    if (filteredAlts || c.needsAdmin2) {
-        row.push(filteredAlts || '');
+    // Fold the old "original UTF-8 name" search branch into alts at build time:
+    // search previously also matched toASCII(name). Storing it here preserves
+    // that recall without a costly per-row fold at query time. (May itself be
+    // non-Latin, e.g. CJK — fine.)
+    //
+    // This deliberately bypasses the prefix3 filter and the `seen` set above:
+    // GeoNames asciiname uses ae/oe/ue expansion (e.g. "Stöckheim" → asciiname
+    // "stoeckheim"), so toASCII(name) ("stockheim") can share the first 3 chars
+    // with asciiname yet diverge later — the asciiname prefix search does NOT
+    // cover it, and the prefix3 filter would have dropped it. Dedupe only
+    // against the actual output list.
+    const foldedName = toASCII(c.name);
+    if (foldedName && foldedName.length > 1 && foldedName !== primaryAscii && !useful.includes(foldedName)) {
+        useful.push(foldedName);
+        foldedAdded++;
     }
-    if (c.needsAdmin2 && c.admin2Name) {
-        row.push(c.admin2Name);
-    }
-    return row;
-});
+    const altStr = useful.join(',');
 
-// Build airport array: [iata, displayCity, lat, lon, tzIdx, ccIdx]
-const airportRows = airports.map(a => [
-    a.iata,
-    a.displayCity,
-    a.lat,
-    a.lon,
-    tzIndex.get(a.timezone),
-    ccIndex.get(a.countryCode),
-]);
+    assertNoDelim(c.name, 'name', i);
+    assertNoDelim(primaryAscii, 'ascii', i);
+    assertNoDelim(altStr, 'alts', i);
 
-// Sort airports by IATA code
-airportRows.sort((a, b) => a[0].localeCompare(b[0]));
+    nameParts[i] = c.name;
+    asciiParts[i] = primaryAscii;
+    altParts[i] = altStr;
 
-// Use JSON.parse() instead of JS array literals to avoid iOS Safari's
-// recursive-descent parser blowing the stack on 167K-element arrays.
+    if (c.needsAdmin2 && c.admin2Name) ad2[i] = c.admin2Name;
+}
+console.log(`  ${N} cities, ${foldedAdded} original-name folds added to alts, ${Object.keys(ad2).length} admin2 entries`);
+
+const names = nameParts.join(DELIM);
+const ascii = asciiParts.join(DELIM);
+const alts = altParts.join(DELIM);
+
+// ── Airport columns (sorted by IATA) ──
+const aSorted = airports.slice().sort((a, b) => a.iata.localeCompare(b.iata));
+const aN = aSorted.length;
+const aLat = new Int32Array(aN);
+const aLon = new Int32Array(aN);
+const aTz = new Uint16Array(aN);
+const aCc = new Uint16Array(aN);
+const aIataParts = new Array(aN);
+const aCityParts = new Array(aN);
+for (let i = 0; i < aN; i++) {
+    const a = aSorted[i];
+    aLat[i] = Math.round(a.lat * 1000);
+    aLon[i] = Math.round(a.lon * 1000);
+    aTz[i] = tzIndex.get(a.timezone);
+    aCc[i] = ccIndex.get(a.countryCode);
+    assertNoDelim(a.iata, 'iata', i);
+    assertNoDelim(a.displayCity, 'displayCity', i);
+    aIataParts[i] = a.iata;
+    aCityParts[i] = a.displayCity;
+}
+const aIata = aIataParts.join(DELIM);
+const aCity = aCityParts.join(DELIM);
+console.log(`  ${aN} airports`);
+
+// ---------------------------------------------------------------------------
+// 10. Write output
+// ---------------------------------------------------------------------------
+
+console.log('=== Phase 10: Writing output ===');
+
+// Numeric columns are base64 typed-array buffers; text columns are big
+// newline-joined strings; lookup tables stay as small JSON arrays. Wrapped in
+// JSON.parse() of a single string to avoid iOS Safari's recursive-descent
+// parser blowing the stack — but note the heavy data is now strings + base64,
+// never 167k array literals.
 const dataObj = {
+    v: 2,
+    N, aN,
     TZ: tzList,
     CC: ccList,
     AD: adList,
-    CITIES: cityRows,
-    AIRPORTS: airportRows,
+    ad2,
+    cLat: packB64(cLat), cLon: packB64(cLon), cPop: packB64(cPop),
+    cTz: packB64(cTz), cCc: packB64(cCc), cAd1: packB64(cAd1),
+    names, ascii, alts,
+    aLat: packB64(aLat), aLon: packB64(aLon), aTz: packB64(aTz), aCc: packB64(aCc),
+    aIata, aCity,
 };
 
 // JSON.stringify the data, then embed it as a JS string literal.
-// We must escape backslashes and single-quotes for the JS string,
-// and use single quotes to avoid escaping all the double quotes in JSON.
+// We escape backslashes and single-quotes for the JS string, and use single
+// quotes to avoid escaping all the double quotes in JSON. JSON.stringify already
+// escapes the newline delimiters (\n), and backslash-doubling preserves them.
 const jsonStr = JSON.stringify(dataObj);
-// Escape backslashes first, then single quotes, then newlines
 const escapedJson = jsonStr
     .replace(/\\/g, '\\\\')
     .replace(/'/g, "\\'");
@@ -403,8 +482,12 @@ const output = `// Auto-generated by scripts/build-cities.js — do not edit
 // Source: GeoNames cities1000 + alternateNamesV2 (CC BY 4.0)
 // Generated: ${new Date().toISOString()}
 //
-// City row: [name, asciiName, ccIdx, ad1Idx, lat, lon, tzIdx, pop, altNames?, admin2?]
-// Airport row: [iata, displayCity, lat, lon, tzIdx, ccIdx]
+// Format v2 (columnar). See planning/2026-06-13-observatory-cities-columnar.md.
+//   Numeric columns (cLat,cLon,cPop,cTz,cCc,cAd1,aLat,aLon,aTz,aCc): base64 of
+//     raw little-endian typed-array bytes. lat/lon are round(deg*1000) Int32.
+//   Text columns (names,ascii,alts,aIata,aCity): newline-joined; row i is the
+//     slice between the i-th and (i+1)-th newline.
+//   ad2: sparse { rowIndex: countyName } for disambiguated cities.
 // Uses JSON.parse to avoid iOS Safari stack overflow on large array literals.
 
 (function() {

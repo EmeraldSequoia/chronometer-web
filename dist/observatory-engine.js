@@ -13732,24 +13732,127 @@
   var TZ = [];
   var CC = [];
   var AD = [];
-  var CITIES = [];
-  var AIRPORTS = [];
+  var N = 0;
+  var cLat = new Int32Array(0);
+  var cLon = new Int32Array(0);
+  var cPop = new Uint32Array(0);
+  var cTz = new Uint16Array(0);
+  var cCc = new Uint16Array(0);
+  var cAd1 = new Uint16Array(0);
+  var names = "";
+  var nameOff = new Uint32Array(0);
+  var ascii = "";
+  var asciiOff = new Uint32Array(0);
+  var alts = "";
+  var altOff = new Uint32Array(0);
+  var ad2 = /* @__PURE__ */ new Map();
+  var aN = 0;
+  var aLat = new Int32Array(0);
+  var aLon = new Int32Array(0);
+  var aTz = new Uint16Array(0);
+  var aCc = new Uint16Array(0);
+  var aIata = "";
+  var aIataOff = new Uint32Array(0);
+  var aCity = "";
+  var aCityOff = new Uint32Array(0);
   var loaded = false;
-  var C_NAME = 0;
-  var C_ASCII = 1;
-  var C_CC = 2;
-  var C_AD1 = 3;
-  var C_LAT = 4;
-  var C_LON = 5;
-  var C_TZ = 6;
-  var C_POP = 7;
-  var C_ALT = 8;
-  var C_AD2 = 9;
-  var A_IATA = 0;
-  var A_CITY = 1;
-  var A_LAT = 2;
-  var A_LON = 3;
-  var A_TZ = 4;
+  var IS_LE = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
+  function b64ToBytes(s) {
+    const bin = atob(s);
+    const len = bin.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+  function swapInPlace(bytes, width) {
+    for (let i = 0; i < bytes.length; i += width) {
+      for (let j = 0; j < width >> 1; j++) {
+        const t = bytes[i + j];
+        bytes[i + j] = bytes[i + width - 1 - j];
+        bytes[i + width - 1 - j] = t;
+      }
+    }
+  }
+  function decodeI32(s) {
+    const b = b64ToBytes(s);
+    if (!IS_LE) swapInPlace(b, 4);
+    return new Int32Array(b.buffer);
+  }
+  function decodeU32(s) {
+    const b = b64ToBytes(s);
+    if (!IS_LE) swapInPlace(b, 4);
+    return new Uint32Array(b.buffer);
+  }
+  function decodeU16(s) {
+    const b = b64ToBytes(s);
+    if (!IS_LE) swapInPlace(b, 2);
+    return new Uint16Array(b.buffer);
+  }
+  function buildOffsets(str, rows) {
+    const off = new Uint32Array(rows + 1);
+    let r = 1;
+    let pos = str.indexOf("\n");
+    while (pos !== -1) {
+      off[r++] = pos + 1;
+      pos = str.indexOf("\n", pos + 1);
+    }
+    off[rows] = str.length + 1;
+    return off;
+  }
+  function rowStr(str, off, i) {
+    return str.slice(off[i], off[i + 1] - 1);
+  }
+  function rowLen(off, i) {
+    return off[i + 1] - 1 - off[i];
+  }
+  function startsWithAt(h, start, q) {
+    for (let k = 0; k < q.length; k++) {
+      if (h.charCodeAt(start + k) !== q.charCodeAt(k)) return false;
+    }
+    return true;
+  }
+  function rowOfOffset(off, pos) {
+    let lo = 0;
+    let hi = off.length - 2;
+    while (lo < hi) {
+      const mid = lo + hi + 1 >> 1;
+      if (off[mid] <= pos) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  }
+  function ingest(raw) {
+    TZ = raw.TZ;
+    CC = raw.CC;
+    AD = raw.AD;
+    N = raw.N;
+    aN = raw.aN;
+    cLat = decodeI32(raw.cLat);
+    cLon = decodeI32(raw.cLon);
+    cPop = decodeU32(raw.cPop);
+    cTz = decodeU16(raw.cTz);
+    cCc = decodeU16(raw.cCc);
+    cAd1 = decodeU16(raw.cAd1);
+    names = raw.names;
+    ascii = raw.ascii;
+    alts = raw.alts;
+    nameOff = buildOffsets(names, N);
+    asciiOff = buildOffsets(ascii, N);
+    altOff = buildOffsets(alts, N);
+    ad2 = /* @__PURE__ */ new Map();
+    for (const k in raw.ad2) ad2.set(+k, raw.ad2[k]);
+    aLat = decodeI32(raw.aLat);
+    aLon = decodeI32(raw.aLon);
+    aTz = decodeU16(raw.aTz);
+    aCc = decodeU16(raw.aCc);
+    aIata = raw.aIata;
+    aCity = raw.aCity;
+    aIataOff = buildOffsets(aIata, aN);
+    aCityOff = buildOffsets(aCity, aN);
+    loaded = true;
+    window.ChronometerCities = void 0;
+    console.log(`[CitySearch] Loaded ${N} cities, ${aN} airports`);
+  }
   function toASCII(s) {
     return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   }
@@ -13760,26 +13863,12 @@
     return new Promise((resolve, reject) => {
       const existing = window.ChronometerCities;
       if (existing) {
-        TZ = existing.TZ;
-        CC = existing.CC;
-        AD = existing.AD;
-        CITIES = existing.CITIES;
-        AIRPORTS = existing.AIRPORTS;
-        loaded = true;
-        console.log(`[CitySearch] Loaded ${CITIES.length} cities, ${AIRPORTS.length} airports`);
+        ingest(existing);
         resolve();
         return;
       }
       window._chronCitiesCallback = (data) => {
-        if (data) {
-          TZ = data.TZ;
-          CC = data.CC;
-          AD = data.AD;
-          CITIES = data.CITIES;
-          AIRPORTS = data.AIRPORTS;
-          loaded = true;
-          console.log(`[CitySearch] Loaded ${CITIES.length} cities, ${AIRPORTS.length} airports`);
-        }
+        if (data) ingest(data);
       };
       const script = document.createElement("script");
       script.src = "cities-data.js";
@@ -13816,85 +13905,81 @@
   function isCityDataLoaded() {
     return loaded;
   }
+  function cityLabel(i, name) {
+    let label = name;
+    const a2 = ad2.get(i);
+    if (a2) label += ` (${a2})`;
+    const admin1 = AD[cAd1[i]] || "";
+    if (admin1) label += `, ${admin1}`;
+    const cc = CC[cCc[i]] || "";
+    if (cc) label += `, ${cc}`;
+    return label;
+  }
   function searchCities(query, limit = 20) {
     if (!loaded || !query || query.length < 2) return [];
     const q = toASCII(query.trim());
     if (!q) return [];
     const qUpper = query.trim().toUpperCase();
     const results = [];
-    for (const a of AIRPORTS) {
-      const iata = a[A_IATA];
-      if (iata.startsWith(qUpper) || iata === qUpper) {
-        results.push({
-          result: {
-            label: `${iata}  ${a[A_CITY]} airport`,
-            shortLabel: `${iata} ${a[A_CITY]} airport`,
-            lat: a[A_LAT],
-            lon: a[A_LON],
-            timezone: TZ[a[A_TZ]] || "",
-            isAirport: true
-          },
-          priority: iata === qUpper ? 0 : 1,
-          // exact match first
-          pop: 0
-        });
-      }
+    for (let i = 0; i < aN; i++) {
+      if (!startsWithAt(aIata, aIataOff[i], qUpper)) continue;
+      const iata = rowStr(aIata, aIataOff, i);
+      const city = rowStr(aCity, aCityOff, i);
+      results.push({
+        result: {
+          label: `${iata}  ${city} airport`,
+          shortLabel: `${iata} ${city} airport`,
+          lat: aLat[i] / 1e3,
+          lon: aLon[i] / 1e3,
+          timezone: TZ[aTz[i]] || "",
+          isAirport: true
+        },
+        priority: rowLen(aIataOff, i) === qUpper.length ? 0 : 1,
+        // exact match first
+        pop: 0
+      });
     }
-    for (const c of CITIES) {
-      const asciiName = c[C_ASCII];
-      const name = c[C_NAME];
-      const pop = c[C_POP];
-      let matched = false;
-      let priority = 3;
-      if (asciiName.startsWith(q)) {
-        matched = true;
-        priority = asciiName === q ? 0 : 1;
-      }
-      if (!matched) {
-        const nameLower = name.toLowerCase();
-        if (nameLower.startsWith(q) || toASCII(name).startsWith(q)) {
-          matched = true;
-          priority = 2;
+    const matchedRows = /* @__PURE__ */ new Set();
+    for (let i = 0; i < N; i++) {
+      if (!startsWithAt(ascii, asciiOff[i], q)) continue;
+      matchedRows.add(i);
+      const name = rowStr(names, nameOff, i);
+      results.push({
+        result: {
+          label: cityLabel(i, name),
+          shortLabel: name,
+          lat: cLat[i] / 1e3,
+          lon: cLon[i] / 1e3,
+          timezone: TZ[cTz[i]] || "",
+          isAirport: false
+        },
+        priority: rowLen(asciiOff, i) === q.length ? 0 : 1,
+        pop: cPop[i]
+      });
+    }
+    let pos = alts.indexOf(q);
+    while (pos >= 0) {
+      const prev = pos === 0 ? 10 : alts.charCodeAt(pos - 1);
+      if (prev === 10 || prev === 44) {
+        const i = rowOfOffset(altOff, pos);
+        if (!matchedRows.has(i)) {
+          matchedRows.add(i);
+          const name = rowStr(names, nameOff, i);
+          results.push({
+            result: {
+              label: cityLabel(i, name),
+              shortLabel: name,
+              lat: cLat[i] / 1e3,
+              lon: cLon[i] / 1e3,
+              timezone: TZ[cTz[i]] || "",
+              isAirport: false
+            },
+            priority: 3,
+            pop: cPop[i]
+          });
         }
       }
-      if (!matched && c[C_ALT]) {
-        const alts = c[C_ALT];
-        if (alts.includes(q)) {
-          for (const alt of alts.split(",")) {
-            if (alt.startsWith(q)) {
-              matched = true;
-              priority = 3;
-              break;
-            }
-          }
-        }
-      }
-      if (matched) {
-        const cc = CC[c[C_CC]] || "";
-        const admin1 = AD[c[C_AD1]] || "";
-        let label = name;
-        if (c[C_AD2]) {
-          label += ` (${c[C_AD2]})`;
-        }
-        if (admin1) {
-          label += `, ${admin1}`;
-        }
-        if (cc) {
-          label += `, ${cc}`;
-        }
-        results.push({
-          result: {
-            label,
-            shortLabel: name,
-            lat: c[C_LAT],
-            lon: c[C_LON],
-            timezone: TZ[c[C_TZ]] || "",
-            isAirport: false
-          },
-          priority,
-          pop
-        });
-      }
+      pos = alts.indexOf(q, pos + 1);
     }
     results.sort((a, b) => {
       if (a.priority !== b.priority) return a.priority - b.priority;
@@ -13903,15 +13988,13 @@
     return results.slice(0, limit).map((r) => r.result);
   }
   function findClosestCity(lat2, lon2) {
-    if (!loaded || CITIES.length === 0) return null;
+    if (!loaded || N === 0) return null;
     let bestDist = Infinity;
     let bestIdx = -1;
     const cosLat = Math.cos(lat2 * Math.PI / 180);
-    for (let i = 0; i < CITIES.length; i++) {
-      const cLat = CITIES[i][C_LAT];
-      const cLon = CITIES[i][C_LON];
-      const dLat = cLat - lat2;
-      const dLon = (cLon - lon2) * cosLat;
+    for (let i = 0; i < N; i++) {
+      const dLat = cLat[i] / 1e3 - lat2;
+      const dLon = (cLon[i] / 1e3 - lon2) * cosLat;
       const dist = dLat * dLat + dLon * dLon;
       if (dist < bestDist) {
         bestDist = dist;
@@ -13919,20 +14002,13 @@
       }
     }
     if (bestIdx < 0) return null;
-    const c = CITIES[bestIdx];
-    const name = c[C_NAME];
-    const cc = CC[c[C_CC]] || "";
-    const admin1 = AD[c[C_AD1]] || "";
-    let label = name;
-    if (c[C_AD2]) label += ` (${c[C_AD2]})`;
-    if (admin1) label += `, ${admin1}`;
-    if (cc) label += `, ${cc}`;
+    const name = rowStr(names, nameOff, bestIdx);
     return {
-      label,
+      label: cityLabel(bestIdx, name),
       shortLabel: name,
-      lat: c[C_LAT],
-      lon: c[C_LON],
-      timezone: TZ[c[C_TZ]] || "",
+      lat: cLat[bestIdx] / 1e3,
+      lon: cLon[bestIdx] / 1e3,
+      timezone: TZ[cTz[bestIdx]] || "",
       isAirport: false,
       distanceDeg: Math.sqrt(bestDist)
     };

@@ -43,9 +43,40 @@ A Node.js script (`scripts/build-cities.js`) processes GeoNames data into a comp
 5. Detect duplicates and add admin2 for disambiguation
 6. Build lookup tables (timezone, country, admin1 → numeric index)
 7. Sort by population descending
-8. Output compact JS arrays
+8. Output **columnar** data (format v2, see below)
 
-**Sizes**: Raw ~25 MB → compact JS ~6–8 MB → gzipped ~2–3 MB.
+**Sizes**: Raw ~25 MB → compact JS ~17 MB → gzipped ~2–3 MB.
+
+### Data Format (v2, columnar)
+
+To avoid `JSON.parse` materializing 167k array-of-arrays + ~425k small strings
+(~45 MB heap), the data is stored as parallel columns (~22 MB resident). See
+[planning/2026-06-13-observatory-cities-columnar.md](../planning/2026-06-13-observatory-cities-columnar.md).
+
+The module assigns `window.ChronometerCities` (one `JSON.parse` of a single
+string — no large array literals, to dodge the iOS Safari stack overflow):
+
+- **Numeric columns** (`cLat`, `cLon`, `cPop`, `cTz`, `cCc`, `cAd1`, plus airport
+  `aLat`/`aLon`/`aTz`/`aCc`): base64 of raw **little-endian** typed-array bytes.
+  `lat`/`lon` are `round(deg * 1000)` as `Int32` (exact to 3 decimals). The
+  decoder (`city-search.ts`) byte-swaps only on big-endian hosts.
+- **Text columns** (`names`, `ascii`, `alts`, `aIata`, `aCity`): single
+  newline-joined strings; row *i* is the slice between newline *i* and *i+1*.
+  Offset indices are rebuilt at load by scanning for `\n` (not shipped).
+- **`ad2`**: sparse `{ rowIndex: countyName }` for disambiguated cities.
+
+Search reads columns directly: a no-allocation `startsWithAt` for ASCII-name
+prefix matching, and a single `indexOf` scan over the concatenated `alts` blob
+(with comma/newline boundary checks) for alternate-name matching. The old
+"original UTF-8 name" match branch is folded into `alts` at build time.
+
+**Regenerating:** `node scripts/build-cities.js` rebuilds the file from the
+GeoNames sources in `scripts/geonames-data/`.
+
+**Validation:** `src/__tests__/city-search.test.ts` covers the decode + search
+paths against a synthetic dataset. `scripts/parity-cities.mjs` is the one-shot
+v1→v2 migration validator — it compares the columnar search against the previous
+array-of-arrays form in git HEAD (no-op once HEAD is already v2).
 
 ### Search Implementation
 

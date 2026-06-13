@@ -1,15 +1,13 @@
 /**
  * City search engine for the location picker.
  * Provides prefix-based autocomplete over GeoNames cities1000 + IATA airports.
+ *
+ * Data is stored columnar (format v2, see scripts/build-cities.js and
+ * planning/2026-06-13-observatory-cities-columnar.md): numeric fields live in
+ * typed arrays, text fields in newline-joined strings sliced on demand. This
+ * avoids materializing 167k array-of-arrays + ~425k small strings (~45 MB heap)
+ * — the columnar form is ~22 MB.
  */
-
-// These will be populated by importing cities-data.js
-let TZ: string[] = [];
-let CC: string[] = [];
-let AD: string[] = [];
-let CITIES: any[][] = [];
-let AIRPORTS: any[][] = [];
-let loaded = false;
 
 /** City search result. */
 export interface CityResult {
@@ -26,38 +24,176 @@ export interface CityResult {
     distanceDeg?: number;
 }
 
-// City row indices
-const C_NAME = 0;
-const C_ASCII = 1;
-const C_CC = 2;
-const C_AD1 = 3;
-const C_LAT = 4;
-const C_LON = 5;
-const C_TZ = 6;
-const C_POP = 7;
-const C_ALT = 8;
-const C_AD2 = 9;
+// ── Lookup tables ──
+let TZ: string[] = [];
+let CC: string[] = [];
+let AD: string[] = [];
 
-// Airport row indices
-const A_IATA = 0;
-const A_CITY = 1;
-const A_LAT = 2;
-const A_LON = 3;
-const A_TZ = 4;
-const A_CC = 5;
+// ── City columns (indexed by row, sorted by population descending) ──
+let N = 0;
+let cLat: Int32Array = new Int32Array(0);  // round(deg * 1000)
+let cLon: Int32Array = new Int32Array(0);
+let cPop: Uint32Array = new Uint32Array(0);
+let cTz: Uint16Array = new Uint16Array(0);
+let cCc: Uint16Array = new Uint16Array(0);
+let cAd1: Uint16Array = new Uint16Array(0);
+let names = '';   let nameOff: Uint32Array = new Uint32Array(0);   // original UTF-8 (display)
+let ascii = '';   let asciiOff: Uint32Array = new Uint32Array(0);  // ASCII-folded (search)
+let alts = '';    let altOff: Uint32Array = new Uint32Array(0);    // comma-joined alt blobs (search)
+let ad2: Map<number, string> = new Map();  // sparse: row index -> county name
+
+// ── Airport columns (sorted by IATA) ──
+let aN = 0;
+let aLat: Int32Array = new Int32Array(0);
+let aLon: Int32Array = new Int32Array(0);
+let aTz: Uint16Array = new Uint16Array(0);
+let aCc: Uint16Array = new Uint16Array(0);
+let aIata = '';   let aIataOff: Uint32Array = new Uint32Array(0);
+let aCity = '';   let aCityOff: Uint32Array = new Uint32Array(0);
+
+let loaded = false;
+
+// ============================================================================
+// Decode helpers
+// ============================================================================
+
+/** True on little-endian hosts (effectively all browsers). */
+const IS_LE = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
+
+/** Decode a base64 string to a fresh Uint8Array (buffer offset 0, aligned). */
+function b64ToBytes(s: string): Uint8Array {
+    const bin = atob(s);
+    const len = bin.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+}
+
+/** Reverse each `width`-byte group in place (only used on big-endian hosts). */
+function swapInPlace(bytes: Uint8Array, width: number): void {
+    for (let i = 0; i < bytes.length; i += width) {
+        for (let j = 0; j < width >> 1; j++) {
+            const t = bytes[i + j];
+            bytes[i + j] = bytes[i + width - 1 - j];
+            bytes[i + width - 1 - j] = t;
+        }
+    }
+}
+
+function decodeI32(s: string): Int32Array {
+    const b = b64ToBytes(s);
+    if (!IS_LE) swapInPlace(b, 4);
+    return new Int32Array(b.buffer);
+}
+function decodeU32(s: string): Uint32Array {
+    const b = b64ToBytes(s);
+    if (!IS_LE) swapInPlace(b, 4);
+    return new Uint32Array(b.buffer);
+}
+function decodeU16(s: string): Uint16Array {
+    const b = b64ToBytes(s);
+    if (!IS_LE) swapInPlace(b, 2);
+    return new Uint16Array(b.buffer);
+}
+
+/**
+ * Build a row-offset index for a newline-joined string of `rows` rows.
+ * Row i spans [off[i], off[i+1] - 1) (the -1 drops the trailing delimiter).
+ * off has rows+1 entries; off[0]=0 and off[rows]=str.length+1 (sentinel).
+ */
+function buildOffsets(str: string, rows: number): Uint32Array {
+    const off = new Uint32Array(rows + 1);
+    let r = 1;
+    let pos = str.indexOf('\n');
+    while (pos !== -1) {
+        off[r++] = pos + 1;
+        pos = str.indexOf('\n', pos + 1);
+    }
+    off[rows] = str.length + 1;
+    return off;
+}
+
+/** Extract row i's text from a newline-joined string via its offset index. */
+function rowStr(str: string, off: Uint32Array, i: number): string {
+    return str.slice(off[i], off[i + 1] - 1);
+}
+
+/** Length of row i (without allocating the substring). */
+function rowLen(off: Uint32Array, i: number): number {
+    return off[i + 1] - 1 - off[i];
+}
+
+/**
+ * True if `q` is a prefix of the row starting at `start` in `h`.
+ * Allocation-free. Safe across row boundaries: the '\n' delimiter never appears
+ * in a query, so a query longer than the row mismatches at the delimiter.
+ */
+function startsWithAt(h: string, start: number, q: string): boolean {
+    for (let k = 0; k < q.length; k++) {
+        if (h.charCodeAt(start + k) !== q.charCodeAt(k)) return false;
+    }
+    return true;
+}
+
+/** Largest i with off[i] <= pos (which row a char position belongs to). */
+function rowOfOffset(off: Uint32Array, pos: number): number {
+    let lo = 0;
+    let hi = off.length - 2;  // last valid row index
+    while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (off[mid] <= pos) lo = mid; else hi = mid - 1;
+    }
+    return lo;
+}
+
+// ============================================================================
+// Loading
+// ============================================================================
+
+/** Decode the v2 payload into the columnar module state. */
+function ingest(raw: any): void {
+    TZ = raw.TZ; CC = raw.CC; AD = raw.AD;
+    N = raw.N; aN = raw.aN;
+
+    cLat = decodeI32(raw.cLat); cLon = decodeI32(raw.cLon); cPop = decodeU32(raw.cPop);
+    cTz = decodeU16(raw.cTz); cCc = decodeU16(raw.cCc); cAd1 = decodeU16(raw.cAd1);
+    names = raw.names; ascii = raw.ascii; alts = raw.alts;
+    nameOff = buildOffsets(names, N);
+    asciiOff = buildOffsets(ascii, N);
+    altOff = buildOffsets(alts, N);
+
+    ad2 = new Map();
+    for (const k in raw.ad2) ad2.set(+k, raw.ad2[k]);
+
+    aLat = decodeI32(raw.aLat); aLon = decodeI32(raw.aLon);
+    aTz = decodeU16(raw.aTz); aCc = decodeU16(raw.aCc);
+    aIata = raw.aIata; aCity = raw.aCity;
+    aIataOff = buildOffsets(aIata, aN);
+    aCityOff = buildOffsets(aCity, aN);
+
+    loaded = true;
+
+    // Release the raw payload. The numeric base64 blobs (~4 MB) are now decoded
+    // into typed arrays, and the text columns survive via the module-level
+    // string references above (JS strings are shared by reference). Dropping the
+    // global lets the GC reclaim the redundant base64 strings and the wrapper.
+    (window as any).ChronometerCities = undefined;
+
+    console.log(`[CitySearch] Loaded ${N} cities, ${aN} airports`);
+}
 
 /** ASCII-fold a string for diacritics-insensitive search. */
 function toASCII(s: string): string {
     return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
 
+/** Error message from last load attempt, if any. */
+export let loadError: string = '';
+
 /**
  * Load the city database. Must be called before search().
  * Loads cities-data.js via a script tag (works from file:// too).
  */
-/** Error message from last load attempt, if any. */
-export let loadError: string = '';
-
 export function loadCityData(): Promise<void> {
     if (loaded) return Promise.resolve();
     if (loadError) return Promise.reject(new Error(loadError));
@@ -66,13 +202,7 @@ export function loadCityData(): Promise<void> {
         // Check if already loaded (e.g., bundled in standalone HTML)
         const existing = (window as any).ChronometerCities;
         if (existing) {
-            TZ = existing.TZ;
-            CC = existing.CC;
-            AD = existing.AD;
-            CITIES = existing.CITIES;
-            AIRPORTS = existing.AIRPORTS;
-            loaded = true;
-            console.log(`[CitySearch] Loaded ${CITIES.length} cities, ${AIRPORTS.length} airports`);
+            ingest(existing);
             resolve();
             return;
         }
@@ -81,15 +211,7 @@ export function loadCityData(): Promise<void> {
         // This is more reliable than checking a global after onload,
         // because script.onload fires on download success — not execution success.
         (window as any)._chronCitiesCallback = (data: any) => {
-            if (data) {
-                TZ = data.TZ;
-                CC = data.CC;
-                AD = data.AD;
-                CITIES = data.CITIES;
-                AIRPORTS = data.AIRPORTS;
-                loaded = true;
-                console.log(`[CitySearch] Loaded ${CITIES.length} cities, ${AIRPORTS.length} airports`);
-            }
+            if (data) ingest(data);
         };
 
         const script = document.createElement('script');
@@ -134,6 +256,22 @@ export function isCityDataLoaded(): boolean {
     return loaded;
 }
 
+// ============================================================================
+// Search
+// ============================================================================
+
+/** Build the "City (County), State, Country" display label for city row i. */
+function cityLabel(i: number, name: string): string {
+    let label = name;
+    const a2 = ad2.get(i);
+    if (a2) label += ` (${a2})`;
+    const admin1 = AD[cAd1[i]] || '';
+    if (admin1) label += `, ${admin1}`;
+    const cc = CC[cCc[i]] || '';
+    if (cc) label += `, ${cc}`;
+    return label;
+}
+
 /**
  * Search for cities matching the given query string.
  * Returns up to `limit` results sorted by relevance (exact prefix first, then population).
@@ -148,91 +286,71 @@ export function searchCities(query: string, limit: number = 20): CityResult[] {
     const results: { result: CityResult; priority: number; pop: number }[] = [];
 
     // Search airports by IATA code (exact prefix match)
-    for (const a of AIRPORTS) {
-        const iata: string = a[A_IATA];
-        if (iata.startsWith(qUpper) || iata === qUpper) {
-            results.push({
-                result: {
-                    label: `${iata}  ${a[A_CITY]} airport`,
-                    shortLabel: `${iata} ${a[A_CITY]} airport`,
-                    lat: a[A_LAT],
-                    lon: a[A_LON],
-                    timezone: TZ[a[A_TZ]] || '',
-                    isAirport: true,
-                },
-                priority: iata === qUpper ? 0 : 1,  // exact match first
-                pop: 0,
-            });
-        }
+    for (let i = 0; i < aN; i++) {
+        if (!startsWithAt(aIata, aIataOff[i], qUpper)) continue;
+        const iata = rowStr(aIata, aIataOff, i);
+        const city = rowStr(aCity, aCityOff, i);
+        results.push({
+            result: {
+                label: `${iata}  ${city} airport`,
+                shortLabel: `${iata} ${city} airport`,
+                lat: aLat[i] / 1000,
+                lon: aLon[i] / 1000,
+                timezone: TZ[aTz[i]] || '',
+                isAirport: true,
+            },
+            priority: rowLen(aIataOff, i) === qUpper.length ? 0 : 1,  // exact match first
+            pop: 0,
+        });
     }
 
-    // Search cities
-    for (const c of CITIES) {
-        const asciiName: string = c[C_ASCII];
-        const name: string = c[C_NAME];
-        const pop: number = c[C_POP];
+    const matchedRows = new Set<number>();
 
-        let matched = false;
-        let priority = 3;  // default: alt name match
+    // Cities — primary ASCII name (prefix match), priorities 0 (exact) / 1.
+    for (let i = 0; i < N; i++) {
+        if (!startsWithAt(ascii, asciiOff[i], q)) continue;
+        matchedRows.add(i);
+        const name = rowStr(names, nameOff, i);
+        results.push({
+            result: {
+                label: cityLabel(i, name),
+                shortLabel: name,
+                lat: cLat[i] / 1000,
+                lon: cLon[i] / 1000,
+                timezone: TZ[cTz[i]] || '',
+                isAirport: false,
+            },
+            priority: rowLen(asciiOff, i) === q.length ? 0 : 1,
+            pop: cPop[i],
+        });
+    }
 
-        // Check primary ASCII name (prefix match)
-        if (asciiName.startsWith(q)) {
-            matched = true;
-            priority = asciiName === q ? 0 : 1;  // exact match first
-        }
-
-        // Check original UTF-8 name
-        if (!matched) {
-            const nameLower = name.toLowerCase();
-            if (nameLower.startsWith(q) || toASCII(name).startsWith(q)) {
-                matched = true;
-                priority = 2;
+    // Cities — alternate-name prefix match (priority 3). Scan the concatenated
+    // alt blob globally and map each hit back to its row. A hit is a prefix
+    // match iff it sits at an alt-entry boundary (start of row, or after a comma).
+    let pos = alts.indexOf(q);
+    while (pos >= 0) {
+        const prev = pos === 0 ? 10 : alts.charCodeAt(pos - 1);  // 10 = '\n'
+        if (prev === 10 || prev === 44 /* ',' */) {
+            const i = rowOfOffset(altOff, pos);
+            if (!matchedRows.has(i)) {
+                matchedRows.add(i);
+                const name = rowStr(names, nameOff, i);
+                results.push({
+                    result: {
+                        label: cityLabel(i, name),
+                        shortLabel: name,
+                        lat: cLat[i] / 1000,
+                        lon: cLon[i] / 1000,
+                        timezone: TZ[cTz[i]] || '',
+                        isAirport: false,
+                    },
+                    priority: 3,
+                    pop: cPop[i],
+                });
             }
         }
-
-        // Check alternate names
-        if (!matched && c[C_ALT]) {
-            const alts: string = c[C_ALT];
-            // Quick check before splitting
-            if (alts.includes(q)) {
-                for (const alt of alts.split(',')) {
-                    if (alt.startsWith(q)) {
-                        matched = true;
-                        priority = 3;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (matched) {
-            // Build display label
-            const cc = CC[c[C_CC]] || '';
-            const admin1 = AD[c[C_AD1]] || '';
-            let label = name;
-            if (c[C_AD2]) {
-                label += ` (${c[C_AD2]})`;
-            }
-            if (admin1) {
-                label += `, ${admin1}`;
-            }
-            if (cc) {
-                label += `, ${cc}`;
-            }
-
-            results.push({
-                result: {
-                    label,
-                    shortLabel: name,
-                    lat: c[C_LAT],
-                    lon: c[C_LON],
-                    timezone: TZ[c[C_TZ]] || '',
-                    isAirport: false,
-                },
-                priority,
-                pop,
-            });
-        }
+        pos = alts.indexOf(q, pos + 1);
     }
 
     // Sort: lower priority first, then by population descending
@@ -250,7 +368,7 @@ export function searchCities(query: string, limit: number = 20): CityResult[] {
  * Returns null if city data is not loaded.
  */
 export function findClosestCity(lat: number, lon: number): CityResult | null {
-    if (!loaded || CITIES.length === 0) return null;
+    if (!loaded || N === 0) return null;
 
     let bestDist = Infinity;
     let bestIdx = -1;
@@ -258,11 +376,9 @@ export function findClosestCity(lat: number, lon: number): CityResult | null {
     // Equirectangular approximation (fast, good enough for nearest-city)
     const cosLat = Math.cos(lat * Math.PI / 180);
 
-    for (let i = 0; i < CITIES.length; i++) {
-        const cLat: number = CITIES[i][C_LAT];
-        const cLon: number = CITIES[i][C_LON];
-        const dLat = cLat - lat;
-        const dLon = (cLon - lon) * cosLat;
+    for (let i = 0; i < N; i++) {
+        const dLat = cLat[i] / 1000 - lat;
+        const dLon = (cLon[i] / 1000 - lon) * cosLat;
         const dist = dLat * dLat + dLon * dLon;
         if (dist < bestDist) {
             bestDist = dist;
@@ -272,21 +388,13 @@ export function findClosestCity(lat: number, lon: number): CityResult | null {
 
     if (bestIdx < 0) return null;
 
-    const c = CITIES[bestIdx];
-    const name: string = c[C_NAME];
-    const cc = CC[c[C_CC]] || '';
-    const admin1 = AD[c[C_AD1]] || '';
-    let label = name;
-    if (c[C_AD2]) label += ` (${c[C_AD2]})`;
-    if (admin1) label += `, ${admin1}`;
-    if (cc) label += `, ${cc}`;
-
+    const name = rowStr(names, nameOff, bestIdx);
     return {
-        label,
+        label: cityLabel(bestIdx, name),
         shortLabel: name,
-        lat: c[C_LAT],
-        lon: c[C_LON],
-        timezone: TZ[c[C_TZ]] || '',
+        lat: cLat[bestIdx] / 1000,
+        lon: cLon[bestIdx] / 1000,
+        timezone: TZ[cTz[bestIdx]] || '',
         isAirport: false,
         distanceDeg: Math.sqrt(bestDist),
     };
