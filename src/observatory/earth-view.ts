@@ -88,6 +88,14 @@ let lastMaskSslat = NaN;
 let lastMaskWidth = 0;
 let lastMaskHeight = 0;
 
+/**
+ * Scratch canvas for compositing the day image with the shifted night mask.
+ * Reused across frames (resized only when dimensions change) to avoid
+ * allocating a fresh OffscreenCanvas every frame.
+ */
+let dayMaskCanvas: OffscreenCanvas | null = null;
+let dayMaskCtx: OffscreenCanvasRenderingContext2D | null = null;
+
 /** Flag for images loaded. */
 let imagesReady = false;
 let tableReady = false;
@@ -359,13 +367,19 @@ export function drawEarthView(
 
     // 3b. Draw day image (will be revealed through the mask)
     // We need to composite: day image visible where mask is transparent.
-    // Strategy: draw day image on a temp canvas, apply mask, then draw to main.
-    const dayMaskCanvas = new OffscreenCanvas(physW, physH);
-    const dayMaskCtx = dayMaskCanvas.getContext('2d')!;
+    // Strategy: draw day image on a scratch canvas, apply mask, then draw to main.
+    // The scratch canvas is reused across frames (recreated only on resize).
+    if (!dayMaskCanvas || dayMaskCanvas.width !== physW || dayMaskCanvas.height !== physH) {
+        dayMaskCanvas = new OffscreenCanvas(physW, physH);
+        dayMaskCtx = dayMaskCanvas.getContext('2d')!;
+    }
+
+    // Clear any content from the previous frame before recompositing.
+    dayMaskCtx!.clearRect(0, 0, physW, physH);
 
     // Draw day image scaled to fill
     if (currentDayImage && currentDayImage.complete) {
-        dayMaskCtx.drawImage(currentDayImage, 0, 0, physW, physH);
+        dayMaskCtx!.drawImage(currentDayImage, 0, 0, physW, physH);
     }
 
     // Apply the shifted mask: punch out the night regions
@@ -373,7 +387,7 @@ export function drawEarthView(
     // We use 'destination-out' to remove pixels where the mask is opaque.
     // This means the day image remains where it's day, and is removed where it's night.
     if (maskCanvas) {
-        dayMaskCtx.globalCompositeOperation = 'destination-out';
+        dayMaskCtx!.globalCompositeOperation = 'destination-out';
 
         // Compute pixel shift from sslng
         // sslng = longitude where sun is overhead, in [-π, π]
@@ -390,18 +404,18 @@ export function drawEarthView(
         dx = ((dx % physW) + physW) % physW;
 
         // Draw mask with wrapping (two drawImage calls)
-        dayMaskCtx.drawImage(maskCanvas, dx, 0);
+        dayMaskCtx!.drawImage(maskCanvas, dx, 0);
         if (dx > 0) {
-            dayMaskCtx.drawImage(maskCanvas, dx - physW, 0);
+            dayMaskCtx!.drawImage(maskCanvas, dx - physW, 0);
         } else {
-            dayMaskCtx.drawImage(maskCanvas, dx + physW, 0);
+            dayMaskCtx!.drawImage(maskCanvas, dx + physW, 0);
         }
 
-        dayMaskCtx.globalCompositeOperation = 'source-over';
+        dayMaskCtx!.globalCompositeOperation = 'source-over';
     }
 
     // Draw the composited day-with-mask onto the main canvas (over the night)
-    ctx.drawImage(dayMaskCanvas, ex, ey, L.earthW, L.earthH);
+    ctx.drawImage(dayMaskCanvas!, ex, ey, L.earthW, L.earthH);
 
     // ── 4. Observer dot ──
     // Map observer lat/lon to pixel coordinates

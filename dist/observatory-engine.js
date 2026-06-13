@@ -18258,6 +18258,8 @@
   var lastMaskSslat = NaN;
   var lastMaskWidth = 0;
   var lastMaskHeight = 0;
+  var dayMaskCanvas = null;
+  var dayMaskCtx = null;
   var imagesReady = false;
   var tableReady = false;
   function loadAltitudeTable() {
@@ -18408,8 +18410,11 @@
       ctx2.fillStyle = "#0a0a14";
       ctx2.fillRect(ex, ey, L.earthW, L.earthH);
     }
-    const dayMaskCanvas = new OffscreenCanvas(physW, physH);
-    const dayMaskCtx = dayMaskCanvas.getContext("2d");
+    if (!dayMaskCanvas || dayMaskCanvas.width !== physW || dayMaskCanvas.height !== physH) {
+      dayMaskCanvas = new OffscreenCanvas(physW, physH);
+      dayMaskCtx = dayMaskCanvas.getContext("2d");
+    }
+    dayMaskCtx.clearRect(0, 0, physW, physH);
     if (currentDayImage && currentDayImage.complete) {
       dayMaskCtx.drawImage(currentDayImage, 0, 0, physW, physH);
     }
