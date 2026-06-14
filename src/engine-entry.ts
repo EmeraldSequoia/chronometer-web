@@ -42,7 +42,8 @@ import { expandAnalemma, tickAnalemma, resetAnalemmaSchedule } from './watch/ana
 import { evalAttr } from './watch/watch-env.js';
 import { TimeController, TICK_INTERVAL_MS, displaySecondsPerTick } from './shared/time-controller.js';
 
-import { readUrlState, writeUrlState, initNavigationLinks, updateNavigationLinks } from './shared/url-state.js';
+import { initNavigationLinks, updateNavigationLinks } from './shared/url-state.js';
+import { getState, setState, initAppState } from './shared/app-state.js';
 import { createFpsIndicator } from './shared/fps-indicator.js';
 import { initHelpPopover } from './shared/help-popover.js';
 import { loadCityData, searchCities, findClosestCity, isCityDataLoaded, loadError } from './shared/city-search.js';
@@ -54,6 +55,10 @@ import { findNextDstTransition, findPrevDstTransition } from './shared/dst-detec
 import { initTimeControls, writeTimeStateToUrl } from './shared/time-controls-ui.js';
 import { MIN_DISPLAY_DATE_MS, MAX_DISPLAY_DATE_MS } from './astronomy/es-time.js';
 import { getBezelBackgroundColor, updateDynamicCompositeIcon } from './shared/composite-icon.js';
+
+// Select the state backend before any getState()/setState() call. Phase 1-2
+// keeps the URL backend active (behavior-preserving); Phase 3 enables storage.
+initAppState({ app: 'chronometer' });
 
 /** Convert a face name like "Mauna Kea" or "Haleakalā" to a filename like "mauna-kea" */
 function faceNameToSlug(name: string): string {
@@ -254,7 +259,7 @@ async function main() {
     initNavigationLinks();
 
     // --- Read URL state early (needed for embed mode guard below) ---
-    const urlState = readUrlState();
+    const urlState = getState();
     const isEmbedMode = urlState.embed;
     if (isEmbedMode) {
         document.body.classList.add('embed-mode');
@@ -320,7 +325,7 @@ async function main() {
         if (!locationTimezone) {
             locationTimezone = resolveTimezone(lat, lon, null);
             tzDeltaMs = computeTzDeltaMs(locationTimezone);
-            writeUrlState({ tz: locationTimezone });
+            setState({ tz: locationTimezone });
         }
         // We haven't tried geolocation — check the Permissions API if available
         if (navigator.permissions) {
@@ -631,7 +636,7 @@ async function main() {
      */
     function restoreKyotoState(face: FaceInstance): void {
         if (!face.watch.wadokei) return;
-        const s = readUrlState();
+        const s = getState();
         if (s.kyhand === '1') face.env.kyHandMode = 1;
         if (s.kmode === '1') face.env.variables.set('kyMode', 1);
     }
@@ -1991,7 +1996,7 @@ async function main() {
         // Reschedule DST timer — location timezone may have changed
         scheduleDstRebuild();
         if (writeToUrl) {
-            writeUrlState({ lat: newLat, lon: newLon, city: source || null, tz: locationTimezone || null });
+            setState({ lat: newLat, lon: newLon, city: source || null, tz: locationTimezone || null });
         }
         // Update the map preview and show Done button
         updateMapPreview(newLat, newLon);
@@ -2015,7 +2020,7 @@ async function main() {
             lpUseBrowser.textContent = browserBtnLabel;
             applyLocation(result.lat, result.lon, '', '', 'browser', false, null);
             // Write bloc=1 and clear lat/lon/city so next reload asks browser again
-            writeUrlState({ bloc: true, lat: null, lon: null, city: null });
+            setState({ bloc: true, lat: null, lon: null, city: null });
         } else if (result.status === 'denied') {
             // User denied — disable the button
             geoPermission = 'denied';
@@ -2735,12 +2740,12 @@ async function main() {
             let changed = false;
             if (handMode !== null && env.kyHandMode !== handMode) {
                 env.kyHandMode = handMode;
-                writeUrlState({ kyhand: handMode === 1 ? '1' : null });
+                setState({ kyhand: handMode === 1 ? '1' : null });
                 changed = true;
             }
             if (rateMode !== null && (env.variables.get('kyMode') || 0) !== rateMode) {
                 env.variables.set('kyMode', rateMode);
-                writeUrlState({ kmode: rateMode === 1 ? '1' : null });
+                setState({ kmode: rateMode === 1 ? '1' : null });
                 changed = true;
             }
 
@@ -2801,7 +2806,7 @@ async function main() {
         }
 
         // Initialize from URL
-        const kyState = readUrlState();
+        const kyState = getState();
         if (kyState.kyhand === '1') getEnv().kyHandMode = 1;
         if (kyState.kmode === '1') getEnv().variables.set('kyMode', 1);
         updateUI();

@@ -13,7 +13,7 @@
 
 import { createAstroEnvironment, computeTzDeltaMs } from '../shared/astro-env.js';
 import type { Environment } from '../expr/evaluator.js';
-import { readUrlState, writeUrlState } from '../shared/url-state.js';
+import { getState, setState, initAppState } from '../shared/app-state.js';
 import { resolveTimezone } from '../shared/tz-resolve.js';
 import { findClosestCity } from '../shared/city-search.js';
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
@@ -77,7 +77,8 @@ let ctx: CanvasRenderingContext2D;
 const timeController = new TimeController();
 
 // --- Location state ---
-const urlState = readUrlState();
+initAppState({ app: 'observatory' });
+const urlState = getState();
 const hasUrlLocation = urlState.lat !== null && urlState.lon !== null;
 let lat = urlState.lat ?? 0;
 let lon = urlState.lon ?? 0;
@@ -161,7 +162,7 @@ function onCanvasClick(ev: MouseEvent): void {
         // Move the dial target, then reset so dialAlt/dialAz re-evaluate and
         // animate to the new body (same sweep as a location change).
         env.variables.set('dialPlanet', selectedPlanet);
-        writeUrlState({ op: selectedPlanet });
+        setState({ op: selectedPlanet });
         updater?.reset();
         scheduleFrame();
     }
@@ -486,9 +487,9 @@ function setupLocationDialog(): void {
             needsPrompt = false;
 
             if (info.sourceType === 'browser') {
-                writeUrlState({ bloc: true, lat: null, lon: null, city: null, tz: null });
+                setState({ bloc: true, lat: null, lon: null, city: null, tz: null });
             } else {
-                writeUrlState({ lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
+                setState({ lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
             }
 
             // Re-evaluate all values at the new location: sentinel-scheduled
@@ -607,7 +608,7 @@ function setupNoonToggle(): void {
         if (value === noonOnTop) return;
         noonOnTop = value;
         env.variables.set('noonOnTop', noonOnTop ? 1 : 0);
-        writeUrlState({ onoon: noonOnTop });
+        setState({ onoon: noonOnTop });
         updater?.reset();
         updateHighlight();
         // The loop may be idle (stopped); the toggle must trigger a redraw.

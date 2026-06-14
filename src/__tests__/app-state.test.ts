@@ -1,0 +1,161 @@
+// @vitest-environment jsdom
+import { describe, test, expect, beforeEach } from 'vitest';
+import { storageWorks, __test__ } from '../shared/app-state.js';
+
+const { namespaceOf, isDefaultValue, LocalStorageBackend, InMemoryBackend, STORAGE_KEY_PREFIX } = __test__;
+
+function clearStorage() {
+    localStorage.clear();
+    // Reset the URL so URL-only fields default cleanly.
+    window.history.replaceState(null, '', '/');
+}
+
+beforeEach(clearStorage);
+
+describe('namespaceOf', () => {
+    test('shared location/time fields route to shared', () => {
+        for (const f of ['lat', 'lon', 'city', 'tz', 'bloc', 't', 'off', 'dir'] as const) {
+            expect(namespaceOf(f, 'chronometer')).toBe('shared');
+            expect(namespaceOf(f, 'observatory')).toBe('shared');
+            expect(namespaceOf(f, 'inspector')).toBe('shared');
+        }
+    });
+
+    test('app-specific fields route to their fixed namespace', () => {
+        expect(namespaceOf('picks', 'observatory')).toBe('chronometer');
+        expect(namespaceOf('kyhand', 'inspector')).toBe('chronometer');
+        expect(namespaceOf('kmode', 'chronometer')).toBe('chronometer');
+        expect(namespaceOf('op', 'chronometer')).toBe('observatory');
+        expect(namespaceOf('onoon', 'inspector')).toBe('observatory');
+    });
+
+    test('tp is per-app', () => {
+        expect(namespaceOf('tp', 'chronometer')).toBe('chronometer');
+        expect(namespaceOf('tp', 'observatory')).toBe('observatory');
+        expect(namespaceOf('tp', 'inspector')).toBe('inspector');
+        expect(namespaceOf('tp', 'index')).toBeNull();
+    });
+
+    test('URL-only fields are never persisted', () => {
+        expect(namespaceOf('embed', 'chronometer')).toBeNull();
+        expect(namespaceOf('fps', 'observatory')).toBeNull();
+        expect(namespaceOf('tc', 'inspector')).toBeNull();
+    });
+});
+
+describe('isDefaultValue', () => {
+    test('null/undefined are default', () => {
+        expect(isDefaultValue('lat', null)).toBe(true);
+        expect(isDefaultValue('city', undefined)).toBe(true);
+    });
+    test('field-specific defaults', () => {
+        expect(isDefaultValue('dir', 1)).toBe(true);
+        expect(isDefaultValue('dir', -1)).toBe(false);
+        expect(isDefaultValue('tp', 'd')).toBe(true);
+        expect(isDefaultValue('tp', 'a')).toBe(false);
+        expect(isDefaultValue('bloc', false)).toBe(true);
+        expect(isDefaultValue('bloc', true)).toBe(false);
+        expect(isDefaultValue('op', 0)).toBe(true);
+        expect(isDefaultValue('op', 3)).toBe(false);
+        expect(isDefaultValue('onoon', false)).toBe(true);
+    });
+    test('non-default scalar values are kept', () => {
+        expect(isDefaultValue('lat', 37.7)).toBe(false);
+        expect(isDefaultValue('t', 123456)).toBe(false);
+    });
+});
+
+describe('smoke test', () => {
+    test('returns true when localStorage works', () => {
+        expect(storageWorks()).toBe(true);
+        // Probe key must be cleaned up afterward.
+        expect(localStorage.getItem(STORAGE_KEY_PREFIX + '__probe__')).toBeNull();
+    });
+});
+
+describe('LocalStorageBackend', () => {
+    test('write routes fields to the correct namespaces', () => {
+        const be = new LocalStorageBackend('chronometer');
+        be.write({ lat: 37.7, lon: -122.4, city: 'San Francisco', picks: 'bbmk', tp: 'a' });
+
+        const shared = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + 'shared')!);
+        expect(shared.lat).toBe(37.7);
+        expect(shared.lon).toBe(-122.4);
+        expect(shared.city).toBe('San Francisco');
+        expect('picks' in shared).toBe(false);
+
+        const chrono = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + 'chronometer')!);
+        expect(chrono.picks).toBe('bbmk');
+        expect(chrono.tp).toBe('a');
+    });
+
+    test('read merges shared + app namespaces over defaults', () => {
+        const be = new LocalStorageBackend('observatory');
+        be.write({ lat: 10, lon: 20, op: 3, onoon: true });
+        const state = be.read();
+        expect(state.lat).toBe(10);
+        expect(state.lon).toBe(20);
+        expect(state.op).toBe(3);
+        expect(state.onoon).toBe(true);
+        // Untouched fields keep their defaults.
+        expect(state.dir).toBe(1);
+        expect(state.tp).toBe('d');
+        expect(state.city).toBeNull();
+    });
+
+    test('observatory does not see chronometer picks', () => {
+        new LocalStorageBackend('chronometer').write({ picks: 'bbmk' });
+        const obs = new LocalStorageBackend('observatory').read();
+        expect(obs.picks).toBeNull();
+    });
+
+    test('default values are omitted / removed from storage', () => {
+        const be = new LocalStorageBackend('observatory');
+        be.write({ op: 3 });
+        expect(localStorage.getItem(STORAGE_KEY_PREFIX + 'observatory')).not.toBeNull();
+        // Setting back to the default (Sun = 0) removes the now-empty namespace.
+        be.write({ op: 0 });
+        expect(localStorage.getItem(STORAGE_KEY_PREFIX + 'observatory')).toBeNull();
+    });
+
+    test('round-trips a representative state', () => {
+        const be = new LocalStorageBackend('chronometer');
+        be.write({ lat: 51.5, lon: -0.13, city: 'London', tz: 'Europe/London', t: 1700000000000, dir: -1, picks: 'mktr' });
+        const s = be.read();
+        expect(s.lat).toBe(51.5);
+        expect(s.lon).toBe(-0.13);
+        expect(s.city).toBe('London');
+        expect(s.tz).toBe('Europe/London');
+        expect(s.t).toBe(1700000000000);
+        expect(s.dir).toBe(-1);
+        expect(s.picks).toBe('mktr');
+    });
+
+    test('URL-only fields come from the URL, not storage', () => {
+        window.history.replaceState(null, '', '/?fps&embed=1');
+        const s = new LocalStorageBackend('chronometer').read();
+        expect(s.fps).toBe(true);
+        expect(s.embed).toBe(true);
+    });
+});
+
+describe('InMemoryBackend', () => {
+    test('holds state in memory and never writes localStorage', () => {
+        const be = new InMemoryBackend();
+        be.write({ lat: 1, lon: 2, op: 5 });
+        const s = be.read();
+        expect(s.lat).toBe(1);
+        expect(s.lon).toBe(2);
+        expect(s.op).toBe(5);
+        // Nothing persisted.
+        expect(localStorage.length).toBe(0);
+    });
+
+    test('ignores URL-only fields on write but reflects them from the URL', () => {
+        window.history.replaceState(null, '', '/?fps');
+        const be = new InMemoryBackend();
+        be.write({ embed: true });
+        const s = be.read();
+        expect(s.fps).toBe(true); // from URL
+    });
+});

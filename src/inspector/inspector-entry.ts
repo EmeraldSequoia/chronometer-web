@@ -19,7 +19,7 @@ import {
 import { TimeController } from '../shared/time-controller.js';
 import { initTimeControls, writeTimeStateToUrl, type TimeControlsAPI } from '../shared/time-controls-ui.js';
 import { createFpsIndicator } from '../shared/fps-indicator.js';
-import { readUrlState, writeUrlState } from '../shared/url-state.js';
+import { getState, setState, initAppState } from '../shared/app-state.js';
 import { resolveTimezone } from '../shared/tz-resolve.js';
 import { findClosestCity } from '../shared/city-search.js';
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
@@ -54,7 +54,8 @@ timeDisplay.textContent = '';
 timeDisplay.append(timeMainEl, timeSubsecEl);
 
 // --- Resolve location from URL params ---
-const urlState = readUrlState();
+initAppState({ app: 'inspector' });
+const urlState = getState();
 const hasUrlLocation = urlState.lat !== null && urlState.lon !== null;
 let lat = urlState.lat ?? 0;
 let lon = urlState.lon ?? 0;
@@ -143,9 +144,9 @@ const locationDialog = initLocationDialog({
         // Write to URL so the location persists on reload
         if (info.sourceType === 'browser') {
             // For browser location, use bloc=1 so next reload re-asks
-            writeUrlState({ bloc: true, lat: null, lon: null, city: null, tz: null });
+            setState({ bloc: true, lat: null, lon: null, city: null, tz: null });
         } else {
-            writeUrlState({ lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
+            setState({ lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
         }
 
         // Rebuild the astronomy environment with new location

@@ -13728,6 +13728,232 @@
     });
   }
 
+  // src/shared/app-state.ts
+  var LOCALSTORAGE_ENABLED = false;
+  var SCHEMA_VERSION = 1;
+  var STORAGE_KEY_PREFIX = "ec:";
+  var SHARED_FIELDS = /* @__PURE__ */ new Set([
+    "lat",
+    "lon",
+    "city",
+    "tz",
+    "bloc",
+    "t",
+    "off",
+    "dir"
+  ]);
+  var URL_ONLY_FIELDS = /* @__PURE__ */ new Set([
+    "embed",
+    "fps",
+    "tc"
+  ]);
+  function namespaceOf(field, app) {
+    if (URL_ONLY_FIELDS.has(field)) return null;
+    if (SHARED_FIELDS.has(field)) return "shared";
+    switch (field) {
+      case "picks":
+      case "kyhand":
+      case "kmode":
+        return "chronometer";
+      case "op":
+      case "onoon":
+        return "observatory";
+      case "tp":
+        return app === "index" || app === "pick" ? null : app;
+      default:
+        return null;
+    }
+  }
+  function defaultState() {
+    return {
+      lat: null,
+      lon: null,
+      city: null,
+      bloc: false,
+      tc: false,
+      t: null,
+      off: null,
+      dir: 1,
+      tz: null,
+      picks: null,
+      tp: "d",
+      embed: false,
+      fps: false,
+      kyhand: null,
+      kmode: null,
+      op: null,
+      onoon: false
+    };
+  }
+  function isDefaultValue(field, value) {
+    if (value === null || value === void 0) return true;
+    switch (field) {
+      case "dir":
+        return value === 1;
+      case "tp":
+        return value === "d";
+      case "bloc":
+      case "tc":
+      case "embed":
+      case "fps":
+      case "onoon":
+        return value === false;
+      case "op":
+        return value === 0;
+      default:
+        return false;
+    }
+  }
+  var UrlBackend = class {
+    read() {
+      return readUrlState();
+    }
+    write(changes) {
+      writeUrlState(changes);
+    }
+  };
+  var LocalStorageBackend = class {
+    constructor(app) {
+      this.app = app;
+    }
+    read() {
+      const state = defaultState();
+      const url = readUrlState();
+      state.embed = url.embed;
+      state.fps = url.fps;
+      state.tc = url.tc;
+      Object.assign(state, readNamespace("shared"));
+      const appNs = appNamespace(this.app);
+      if (appNs) Object.assign(state, readNamespace(appNs));
+      return state;
+    }
+    write(changes) {
+      const buckets = /* @__PURE__ */ new Map();
+      for (const key of Object.keys(changes)) {
+        const ns = namespaceOf(key, this.app);
+        if (!ns) continue;
+        let bucket = buckets.get(ns);
+        if (!bucket) {
+          bucket = {};
+          buckets.set(ns, bucket);
+        }
+        bucket[key] = changes[key];
+      }
+      for (const [ns, bucket] of buckets) {
+        mergeNamespace(ns, bucket);
+      }
+    }
+  };
+  function appNamespace(app) {
+    switch (app) {
+      case "chronometer":
+        return "chronometer";
+      case "observatory":
+        return "observatory";
+      case "inspector":
+        return "inspector";
+      // pick-page reads the chronometer picks; index reads shared only.
+      case "pick":
+        return "chronometer";
+      case "index":
+        return null;
+    }
+  }
+  function readNamespace(ns) {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_PREFIX + ns);
+      if (!raw) return {};
+      const obj = JSON.parse(raw);
+      delete obj.v;
+      return obj;
+    } catch {
+      return {};
+    }
+  }
+  function mergeNamespace(ns, changes) {
+    const key = STORAGE_KEY_PREFIX + ns;
+    try {
+      let current;
+      try {
+        current = JSON.parse(localStorage.getItem(key) || "{}");
+      } catch {
+        current = {};
+      }
+      for (const field of Object.keys(changes)) {
+        const value = changes[field];
+        if (isDefaultValue(field, value)) {
+          delete current[field];
+        } else {
+          current[field] = value;
+        }
+      }
+      delete current.v;
+      if (Object.keys(current).length === 0) {
+        localStorage.removeItem(key);
+      } else {
+        current.v = SCHEMA_VERSION;
+        localStorage.setItem(key, JSON.stringify(current));
+      }
+    } catch (err) {
+      handleWriteFailure(err);
+    }
+  }
+  var InMemoryBackend = class {
+    constructor(seed) {
+      this.state = { ...defaultState(), ...seed || {} };
+    }
+    read() {
+      const url = readUrlState();
+      return { ...this.state, embed: url.embed, fps: url.fps, tc: url.tc };
+    }
+    write(changes) {
+      for (const key of Object.keys(changes)) {
+        if (URL_ONLY_FIELDS.has(key)) continue;
+        this.state[key] = changes[key];
+      }
+    }
+  };
+  function storageWorks() {
+    try {
+      const k = STORAGE_KEY_PREFIX + "__probe__";
+      localStorage.setItem(k, "1");
+      const ok = localStorage.getItem(k) === "1";
+      localStorage.removeItem(k);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+  var activeBackend = null;
+  var writeFailureHandler = null;
+  function handleWriteFailure(err) {
+    if (writeFailureHandler) writeFailureHandler(err);
+    else console.warn("[app-state] persist failed:", err);
+  }
+  function initAppState(options) {
+    if (!LOCALSTORAGE_ENABLED) {
+      activeBackend = new UrlBackend();
+      return;
+    }
+    if (storageWorks()) {
+      activeBackend = new LocalStorageBackend(options.app);
+    } else if (window.location.protocol === "file:") {
+      activeBackend = new UrlBackend();
+    } else {
+      activeBackend = new InMemoryBackend();
+    }
+  }
+  function backend() {
+    if (!activeBackend) activeBackend = new UrlBackend();
+    return activeBackend;
+  }
+  function getState() {
+    return backend().read();
+  }
+  function setState(changes) {
+    backend().write(changes);
+  }
+
   // src/shared/city-search.ts
   var TZ = [];
   var CC = [];
@@ -15133,12 +15359,12 @@
   };
   function writeTimeStateToUrl(tc) {
     if (tc.isRealTime) {
-      writeUrlState({ t: null, off: null, dir: 1 });
+      setState({ t: null, off: null, dir: 1 });
     } else if (!tc.isStopped && tc.currentRate === null && tc.currentDirection === 1) {
-      writeUrlState({ off: tc.timeOffset, t: null, dir: 1 });
+      setState({ off: tc.timeOffset, t: null, dir: 1 });
     } else {
       const dir = tc.isStopped ? 0 : tc.currentDirection;
-      writeUrlState({ t: tc.getDisplayTime().getTime(), off: null, dir });
+      setState({ t: tc.getDisplayTime().getTime(), off: null, dir });
     }
   }
   function initTimeControls(config) {
@@ -15480,7 +15706,7 @@
       timeBarLabel.textContent = "\u23F1 Hide time controller";
       timeBarLabel.classList.add("active");
       updateTimeUI();
-      writeUrlState({ tc: true });
+      setState({ tc: true });
       onPopoverToggle?.(true);
     }
     function hidePopover() {
@@ -15489,7 +15715,7 @@
       timeBarLabel.textContent = "\u23F1 Show time controller";
       timeBarLabel.classList.remove("active");
       updateTimeUI();
-      writeUrlState({ tc: false });
+      setState({ tc: false });
       onPopoverToggle?.(false);
     }
     function nowClicked() {
@@ -15582,7 +15808,7 @@
         const el = btn;
         el.classList.toggle("active", el.dataset.tab === (tabName === "a" ? "astro" : "date"));
       });
-      writeUrlState({ tp: tabName });
+      setState({ tp: tabName });
       if (popoverOpen) {
         setTimeout(() => {
           onPopoverToggle?.(true);
@@ -19255,7 +19481,8 @@
   var canvas;
   var ctx;
   var timeController = new TimeController();
-  var urlState = readUrlState();
+  initAppState({ app: "observatory" });
+  var urlState = getState();
   var hasUrlLocation = urlState.lat !== null && urlState.lon !== null;
   var lat = urlState.lat ?? 0;
   var lon = urlState.lon ?? 0;
@@ -19304,7 +19531,7 @@
     if (onAlt || onAz) {
       selectedPlanet = cycleSelectablePlanet(selectedPlanet, onAlt ? 1 : -1);
       env.variables.set("dialPlanet", selectedPlanet);
-      writeUrlState({ op: selectedPlanet });
+      setState({ op: selectedPlanet });
       updater?.reset();
       scheduleFrame();
     }
@@ -19498,9 +19725,9 @@
         locationTimezone = info.timezone;
         needsPrompt = false;
         if (info.sourceType === "browser") {
-          writeUrlState({ bloc: true, lat: null, lon: null, city: null, tz: null });
+          setState({ bloc: true, lat: null, lon: null, city: null, tz: null });
         } else {
-          writeUrlState({ lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
+          setState({ lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
         }
         updater?.reset();
         rebuildEnv();
@@ -19575,7 +19802,7 @@
       if (value === noonOnTop) return;
       noonOnTop = value;
       env.variables.set("noonOnTop", noonOnTop ? 1 : 0);
-      writeUrlState({ onoon: noonOnTop });
+      setState({ onoon: noonOnTop });
       updater?.reset();
       updateHighlight();
       scheduleFrame();

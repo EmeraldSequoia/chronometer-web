@@ -22,7 +22,7 @@ import {
     dateToDateInterval, dateIntervalToDate,
     MIN_DISPLAY_DATE_MS, MAX_DISPLAY_DATE_MS,
 } from '../astronomy/es-time.js';
-import { writeUrlState } from './url-state.js';
+import { setState } from './app-state.js';
 
 // ---------------------------------------------------------------------------
 // Config & API interfaces
@@ -132,12 +132,12 @@ const stepMap: Record<string, [TimeUnit, 1 | -1]> = {
  */
 export function writeTimeStateToUrl(tc: TimeController): void {
     if (tc.isRealTime) {
-        writeUrlState({ t: null, off: null, dir: 1 });
+        setState({ t: null, off: null, dir: 1 });
     } else if (!tc.isStopped && tc.currentRate === null && tc.currentDirection === 1) {
-        writeUrlState({ off: tc.timeOffset, t: null, dir: 1 });
+        setState({ off: tc.timeOffset, t: null, dir: 1 });
     } else {
         const dir = tc.isStopped ? 0 : tc.currentDirection;
-        writeUrlState({ t: tc.getDisplayTime().getTime(), off: null, dir: dir as 0 | 1 | -1 });
+        setState({ t: tc.getDisplayTime().getTime(), off: null, dir: dir as 0 | 1 | -1 });
     }
 }
 
@@ -536,7 +536,7 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
         timeBarLabel.textContent = '⏱ Hide time controller';
         timeBarLabel.classList.add('active');
         updateTimeUI();
-        writeUrlState({ tc: true });
+        setState({ tc: true });
         onPopoverToggle?.(true);
     }
 
@@ -546,7 +546,7 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
         timeBarLabel.textContent = '⏱ Show time controller';
         timeBarLabel.classList.remove('active');
         updateTimeUI();
-        writeUrlState({ tc: false });
+        setState({ tc: false });
         onPopoverToggle?.(false);
     }
 
@@ -680,7 +680,7 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
             const el = btn as HTMLElement;
             el.classList.toggle('active', el.dataset.tab === (tabName === 'a' ? 'astro' : 'date'));
         });
-        writeUrlState({ tp: tabName });
+        setState({ tp: tabName });
         // Notify consumer for relayout after the CSS transition
         if (popoverOpen) {
             setTimeout(() => {
