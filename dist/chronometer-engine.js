@@ -18765,6 +18765,14 @@
     padding: 8px 10px; margin: 0 0 14px;
     text-align: left;
 }
+
+.ec-url-badge {
+    position: fixed; left: 10px; bottom: 8px; z-index: 999;
+    font-size: 11px; color: #99a; opacity: 0.7;
+    background: rgba(0, 0, 0, 0.3); padding: 2px 8px; border-radius: 6px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    pointer-events: none; user-select: none;
+}
 `;
   function ensureModalStyles() {
     if (document.getElementById(STYLE_ID)) return;
@@ -18849,6 +18857,31 @@
     toast.append(span, close);
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 12e3);
+  }
+  function showParadigmNotice() {
+    ensureModalStyles();
+    const toast = document.createElement("div");
+    toast.className = "ec-toast";
+    const span = document.createElement("span");
+    span.textContent = "Your settings now save in this browser instead of the URL. Use the Share button to copy a link to a view; local storage can be cleared along with your browser history.";
+    const close = document.createElement("button");
+    close.className = "ec-toast-close";
+    close.setAttribute("aria-label", "Dismiss");
+    close.textContent = "\xD7";
+    close.addEventListener("click", () => toast.remove());
+    toast.append(span, close);
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 16e3);
+  }
+  function showUrlModeBadge() {
+    ensureModalStyles();
+    if (document.getElementById("ec-url-badge")) return;
+    const badge = document.createElement("div");
+    badge.id = "ec-url-badge";
+    badge.className = "ec-url-badge";
+    badge.textContent = "(URL)";
+    badge.title = "Local storage is unavailable here, so settings are kept in the URL.";
+    document.body.appendChild(badge);
   }
 
   // src/shared/app-state.ts
@@ -19118,6 +19151,7 @@
     if (!storageWorks()) {
       if (window.location.protocol === "file:") {
         activeBackend = new UrlBackend();
+        showUrlModeBadge();
       } else {
         activeBackend = new InMemoryBackend(readUrlState());
         warnNoPersistence();
@@ -19127,11 +19161,13 @@
     const ls = new LocalStorageBackend(appName);
     if (!hasShareableParamsInUrl()) {
       activeBackend = ls;
+      maybeShowParadigmNotice();
       return;
     }
     if (shareableUrlEqualsStored(ls)) {
       clearShareableParamsFromUrl();
       activeBackend = ls;
+      maybeShowParadigmNotice();
       return;
     }
     activeBackend = new UrlBackend();
@@ -19155,6 +19191,19 @@
     if (warnedNoPersistence) return;
     warnedNoPersistence = true;
     showStorageWarning("Your settings can't be saved in this browser and won't persist after you reload.");
+  }
+  function maybeShowParadigmNotice() {
+    let meta = {};
+    try {
+      meta = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + "meta") || "{}");
+    } catch {
+    }
+    if (meta.noticeSeen) return;
+    try {
+      localStorage.setItem(STORAGE_KEY_PREFIX + "meta", JSON.stringify({ ...meta, noticeSeen: true, v: SCHEMA_VERSION }));
+    } catch {
+    }
+    showParadigmNotice();
   }
   function downgradeToInMemory() {
     if (activeBackend instanceof InMemoryBackend) return;

@@ -22,7 +22,7 @@
  */
 
 import { readUrlState, writeUrlState, setPicksProvider, type UrlState } from './url-state.js';
-import { showIncomingSettingsDialog, showStorageWarning } from './incoming-settings-dialog.js';
+import { showIncomingSettingsDialog, showStorageWarning, showParadigmNotice, showUrlModeBadge } from './incoming-settings-dialog.js';
 
 // ============================================================================
 // Configuration
@@ -387,6 +387,7 @@ export function initAppState(options: InitAppStateOptions): void {
         if (window.location.protocol === 'file:') {
             // file:// has no server logs and never calls OSM — URL params are leak-free.
             activeBackend = new UrlBackend();
+            showUrlModeBadge();
         } else {
             // http(s): never write the URL; keep state in memory only, warn once.
             activeBackend = new InMemoryBackend(readUrlState());
@@ -400,6 +401,7 @@ export function initAppState(options: InitAppStateOptions): void {
     if (!hasShareableParamsInUrl()) {
         // Common case going forward: clean URL, read from storage.
         activeBackend = ls;
+        maybeShowParadigmNotice();
         return;
     }
 
@@ -408,6 +410,7 @@ export function initAppState(options: InitAppStateOptions): void {
         // Identical to stored defaults — silently adopt and clean the URL.
         clearShareableParamsFromUrl();
         activeBackend = ls;
+        maybeShowParadigmNotice();
         return;
     }
 
@@ -439,6 +442,23 @@ function warnNoPersistence(): void {
     if (warnedNoPersistence) return;
     warnedNoPersistence = true;
     showStorageWarning("Your settings can't be saved in this browser and won't persist after you reload.");
+}
+
+/**
+ * Show the one-time "settings now save in this browser" notice. The seen-flag is
+ * persisted in ec:meta so it appears at most once per device. No-op outside
+ * normal storage mode (the caller only invokes it on a clean storage-mode load).
+ */
+function maybeShowParadigmNotice(): void {
+    let meta: Record<string, unknown> = {};
+    try {
+        meta = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + 'meta') || '{}');
+    } catch { /* corrupt/blocked — treat as unseen */ }
+    if (meta.noticeSeen) return;
+    try {
+        localStorage.setItem(STORAGE_KEY_PREFIX + 'meta', JSON.stringify({ ...meta, noticeSeen: true, v: SCHEMA_VERSION }));
+    } catch { /* if we can't persist the flag, still show it this once */ }
+    showParadigmNotice();
 }
 
 /** Downgrade to in-memory state after a failed persist (e.g. quota exhausted). */

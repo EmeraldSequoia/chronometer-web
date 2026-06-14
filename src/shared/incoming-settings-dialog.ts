@@ -73,6 +73,14 @@ const CSS = `
     padding: 8px 10px; margin: 0 0 14px;
     text-align: left;
 }
+
+.ec-url-badge {
+    position: fixed; left: 10px; bottom: 8px; z-index: 999;
+    font-size: 11px; color: #99a; opacity: 0.7;
+    background: rgba(0, 0, 0, 0.3); padding: 2px 8px; border-radius: 6px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    pointer-events: none; user-select: none;
+}
 `;
 
 /** Ensure the shared modal/toast styles are present (idempotent). */
@@ -197,4 +205,45 @@ export function showStorageWarning(message: string): void {
 
     // Auto-dismiss after a while so it doesn't linger forever.
     setTimeout(() => toast.remove(), 12000);
+}
+
+/**
+ * One-time notice explaining the move from URL parameters to local storage.
+ * Shown once per device (the caller persists the "seen" flag).
+ */
+export function showParadigmNotice(): void {
+    ensureModalStyles();
+    const toast = document.createElement('div');
+    toast.className = 'ec-toast';
+
+    const span = document.createElement('span');
+    span.textContent = 'Your settings now save in this browser instead of the URL. ' +
+        'Use the Share button to copy a link to a view; local storage can be cleared ' +
+        'along with your browser history.';
+
+    const close = document.createElement('button');
+    close.className = 'ec-toast-close';
+    close.setAttribute('aria-label', 'Dismiss');
+    close.textContent = '×';
+    close.addEventListener('click', () => toast.remove());
+
+    toast.append(span, close);
+    document.body.appendChild(toast);
+
+    setTimeout(() => toast.remove(), 16000);
+}
+
+/**
+ * Discreet, persistent badge shown when the app is running in URL-parameter
+ * fallback mode (local storage unavailable on a file:// page). Idempotent.
+ */
+export function showUrlModeBadge(): void {
+    ensureModalStyles();
+    if (document.getElementById('ec-url-badge')) return;
+    const badge = document.createElement('div');
+    badge.id = 'ec-url-badge';
+    badge.className = 'ec-url-badge';
+    badge.textContent = '(URL)';
+    badge.title = 'Local storage is unavailable here, so settings are kept in the URL.';
+    document.body.appendChild(badge);
 }
