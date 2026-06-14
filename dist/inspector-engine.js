@@ -15151,6 +15151,15 @@
       adoptCurrentStateAsDefault(new LocalStorageBackend(appName));
     }
   }
+  function onSharedChange(callback) {
+    const handler = (e) => {
+      if (!(activeBackend instanceof LocalStorageBackend)) return;
+      if (e.key !== null && !e.key.startsWith(STORAGE_KEY_PREFIX)) return;
+      callback(getState());
+    };
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
+  }
 
   // src/shared/time-controls-ui.ts
   var unitToRateIndex = {
@@ -17450,6 +17459,49 @@
   var refToggle = document.getElementById("ref-toggle");
   var refPanel = document.getElementById("ref-panel");
   initShareButton({ getState });
+  function applyTimeFromState(s) {
+    if (s.off !== null) {
+      timeController.setOffset(s.off);
+      return true;
+    }
+    if (s.t !== null) {
+      timeController.setTime(new Date(s.t));
+      if (s.dir === 1) {
+        timeController.setDirection(1);
+        timeController.setRate(null);
+      } else if (s.dir === -1) {
+        timeController.setDirection(-1);
+        timeController.setRate(null);
+      }
+      return true;
+    }
+    if (!timeController.isRealTime) {
+      timeController.reset();
+      return true;
+    }
+    return false;
+  }
+  onSharedChange((s) => {
+    let changed = false;
+    if (s.lat !== null && s.lon !== null && (s.lat !== lat || s.lon !== lon || (s.tz || void 0) !== locationTimezone)) {
+      lat = s.lat;
+      lon = s.lon;
+      locationTimezone = s.tz || resolveTimezone(lat, lon, null);
+      tzDeltaMs = computeTzDeltaMs(locationTimezone);
+      needsPrompt = false;
+      urlState.city = s.city;
+      env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
+      updateLocationDisplay();
+      rebuildExprValues();
+      resetAllSchedules();
+      changed = true;
+    }
+    if (applyTimeFromState(s)) changed = true;
+    if (changed) {
+      updateTimeDisplay();
+      scheduleFrame();
+    }
+  });
   function buildReferencePanel() {
     const all = getAllCompletions();
     const groups = /* @__PURE__ */ new Map();

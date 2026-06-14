@@ -19180,6 +19180,15 @@
       adoptCurrentStateAsDefault(new LocalStorageBackend(appName));
     }
   }
+  function onSharedChange(callback) {
+    const handler = (e) => {
+      if (!(activeBackend instanceof LocalStorageBackend)) return;
+      if (e.key !== null && !e.key.startsWith(STORAGE_KEY_PREFIX)) return;
+      callback(getState());
+    };
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
+  }
 
   // src/shared/fps-indicator.ts
   var FPS_WATCHDOG_MS = 1e3;
@@ -22427,6 +22436,41 @@
       }
     });
     initShareButton({ getState });
+    onSharedChange((s) => {
+      let changed = false;
+      if (s.lat !== null && s.lon !== null && (s.lat !== lat || s.lon !== lon || (s.tz || void 0) !== (locationTimezone || void 0))) {
+        locationSource = s.city || "";
+        locationFullLabel = s.city || "";
+        locationSourceType = s.city ? "url-city" : "manual";
+        locationTimezone = resolveTimezone(s.lat, s.lon, s.tz || null);
+        tzDeltaMs = computeTzDeltaMs(locationTimezone);
+        rebuildAllForLocation(s.lat, s.lon);
+        scheduleDstRebuild();
+        needsPrompt = false;
+        changed = true;
+      }
+      if (s.off !== null) {
+        timeController.setOffset(s.off);
+        changed = true;
+      } else if (s.t !== null) {
+        timeController.setTime(new Date(s.t));
+        if (s.dir === 1) {
+          timeController.setDirection(1);
+          timeController.setRate(null);
+        } else if (s.dir === -1) {
+          timeController.setDirection(-1);
+          timeController.setRate(null);
+        }
+        changed = true;
+      } else if (!timeController.isRealTime) {
+        timeController.reset();
+        changed = true;
+      }
+      if (changed) {
+        stopScheduler();
+        startScheduler();
+      }
+    });
     initHelpPopover({
       onFirstOpen: (helpContent) => {
         helpContent.querySelectorAll(".face-help-section[data-face]").forEach((el) => {

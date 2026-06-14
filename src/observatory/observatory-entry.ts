@@ -13,7 +13,7 @@
 
 import { createAstroEnvironment, computeTzDeltaMs } from '../shared/astro-env.js';
 import type { Environment } from '../expr/evaluator.js';
-import { getState, setState, initAppState } from '../shared/app-state.js';
+import { getState, setState, initAppState, onSharedChange } from '../shared/app-state.js';
 import { resolveTimezone } from '../shared/tz-resolve.js';
 import { findClosestCity } from '../shared/city-search.js';
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
@@ -654,6 +654,46 @@ function init(): void {
     // Chronometer-only sections via the app=observatory param (see help.html).
     initHelpPopover({ generalHelpUrl: 'help.html?embed=1&app=observatory' });
     initShareButton({ getState });
+
+    // Live cross-tab sync: apply shared location/time and Observatory config
+    // (selected planet, noon-on-top) when another tab/app changes them.
+    onSharedChange((s) => {
+        let changed = false;
+
+        if (s.lat !== null && s.lon !== null &&
+            (s.lat !== lat || s.lon !== lon || (s.tz || undefined) !== locationTimezone)) {
+            lat = s.lat;
+            lon = s.lon;
+            locationTimezone = s.tz || resolveTimezone(lat, lon, null);
+            needsPrompt = false;
+            urlState.city = s.city;
+            updateLocationDisplay();
+            timeUI?.updateTimezoneDisplay();
+            changed = true;
+        }
+
+        const op = (s.op !== null && SELECTABLE_PLANETS.has(s.op)) ? s.op : 0;
+        if (op !== selectedPlanet) { selectedPlanet = op; changed = true; }
+
+        if (s.onoon !== noonOnTop) {
+            noonOnTop = s.onoon;
+            const toggle = document.getElementById('noon-toggle');
+            toggle?.querySelector('[data-mode="midnight"]')?.classList.toggle('active', !noonOnTop);
+            toggle?.querySelector('[data-mode="noon"]')?.classList.toggle('active', noonOnTop);
+            changed = true;
+        }
+
+        // Time (setTime/setOffset/reset fire onTick → rebuildEnv automatically).
+        if (s.off !== null) { timeController.setOffset(s.off); changed = true; }
+        else if (s.t !== null) {
+            timeController.setTime(new Date(s.t));
+            if (s.dir === 1) { timeController.setDirection(1); timeController.setRate(null); }
+            else if (s.dir === -1) { timeController.setDirection(-1); timeController.setRate(null); }
+            changed = true;
+        } else if (!timeController.isRealTime) { timeController.reset(); changed = true; }
+
+        if (changed) { updater?.reset(); rebuildEnv(); }
+    });
 
     // Wire up time controller env rebuild on tick. The controller fires onTick on
     // every transition (reset/stop/setTime/setOffset/setRate/setDirection) as well

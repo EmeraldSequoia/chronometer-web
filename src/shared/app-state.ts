@@ -490,12 +490,23 @@ async function promptSessionReprompt(): Promise<void> {
 }
 
 /**
- * Subscribe to cross-tab shared-state changes (Phase 5). No-op for the
- * URL/in-memory backends. Returns an unsubscribe function.
+ * Subscribe to cross-tab state changes. The browser fires a `storage` event in
+ * *other* same-origin tabs whenever this origin's localStorage changes, so an
+ * open app live-updates when another tab (or app) changes the shared location/
+ * time or this app's own namespace. Returns an unsubscribe function.
+ *
+ * Only meaningful under the LocalStorageBackend — a session-only (URL) or
+ * in-memory tab is intentionally session-local and ignores other tabs.
  */
-export function onSharedChange(_callback: (state: UrlState) => void): () => void {
-    // Implemented in Phase 5 (storage-event live sync).
-    return () => {};
+export function onSharedChange(callback: (state: UrlState) => void): () => void {
+    const handler = (e: StorageEvent) => {
+        if (!(activeBackend instanceof LocalStorageBackend)) return;
+        // e.key is null for localStorage.clear(); otherwise filter to our keys.
+        if (e.key !== null && !e.key.startsWith(STORAGE_KEY_PREFIX)) return;
+        callback(getState());
+    };
+    window.addEventListener('storage', handler);
+    return () => window.removeEventListener('storage', handler);
 }
 
 // Re-export the type so consumers can import everything state-related from here.

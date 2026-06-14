@@ -19,7 +19,7 @@ import {
 import { TimeController } from '../shared/time-controller.js';
 import { initTimeControls, writeTimeStateToUrl, type TimeControlsAPI } from '../shared/time-controls-ui.js';
 import { createFpsIndicator } from '../shared/fps-indicator.js';
-import { getState, setState, initAppState } from '../shared/app-state.js';
+import { getState, setState, initAppState, onSharedChange } from '../shared/app-state.js';
 import { initShareButton } from '../shared/share-button.js';
 import { resolveTimezone } from '../shared/tz-resolve.js';
 import { findClosestCity } from '../shared/city-search.js';
@@ -579,6 +579,41 @@ const refPanel = document.getElementById('ref-panel')!;
 
 // Share button — copy a link encoding the current time/location/config.
 initShareButton({ getState });
+
+// Live cross-tab sync: when another tab (or app) changes the shared location
+// or time, apply it here without a reload.
+function applyTimeFromState(s: ReturnType<typeof getState>): boolean {
+    if (s.off !== null) { timeController.setOffset(s.off); return true; }
+    if (s.t !== null) {
+        timeController.setTime(new Date(s.t));
+        if (s.dir === 1) { timeController.setDirection(1); timeController.setRate(null); }
+        else if (s.dir === -1) { timeController.setDirection(-1); timeController.setRate(null); }
+        return true;
+    }
+    // Real-time: only reset if not already real-time (avoid churn on a live clock).
+    if (!timeController.isRealTime) { timeController.reset(); return true; }
+    return false;
+}
+
+onSharedChange((s) => {
+    let changed = false;
+    if (s.lat !== null && s.lon !== null &&
+        (s.lat !== lat || s.lon !== lon || (s.tz || undefined) !== locationTimezone)) {
+        lat = s.lat;
+        lon = s.lon;
+        locationTimezone = s.tz || resolveTimezone(lat, lon, null);
+        tzDeltaMs = computeTzDeltaMs(locationTimezone);
+        needsPrompt = false;
+        urlState.city = s.city;
+        env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
+        updateLocationDisplay();
+        rebuildExprValues();
+        resetAllSchedules();
+        changed = true;
+    }
+    if (applyTimeFromState(s)) changed = true;
+    if (changed) { updateTimeDisplay(); scheduleFrame(); }
+});
 
 function buildReferencePanel(): void {
     const all = getAllCompletions();

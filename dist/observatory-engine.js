@@ -14229,6 +14229,15 @@
       adoptCurrentStateAsDefault(new LocalStorageBackend(appName));
     }
   }
+  function onSharedChange(callback) {
+    const handler = (e) => {
+      if (!(activeBackend instanceof LocalStorageBackend)) return;
+      if (e.key !== null && !e.key.startsWith(STORAGE_KEY_PREFIX)) return;
+      callback(getState());
+    };
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
+  }
 
   // src/shared/city-search.ts
   var TZ = [];
@@ -20178,6 +20187,52 @@
     updateLocationDisplay();
     initHelpPopover({ generalHelpUrl: "help.html?embed=1&app=observatory" });
     initShareButton({ getState });
+    onSharedChange((s) => {
+      let changed = false;
+      if (s.lat !== null && s.lon !== null && (s.lat !== lat || s.lon !== lon || (s.tz || void 0) !== locationTimezone)) {
+        lat = s.lat;
+        lon = s.lon;
+        locationTimezone = s.tz || resolveTimezone(lat, lon, null);
+        needsPrompt = false;
+        urlState.city = s.city;
+        updateLocationDisplay();
+        timeUI?.updateTimezoneDisplay();
+        changed = true;
+      }
+      const op = s.op !== null && SELECTABLE_PLANETS.has(s.op) ? s.op : 0;
+      if (op !== selectedPlanet) {
+        selectedPlanet = op;
+        changed = true;
+      }
+      if (s.onoon !== noonOnTop) {
+        noonOnTop = s.onoon;
+        const toggle = document.getElementById("noon-toggle");
+        toggle?.querySelector('[data-mode="midnight"]')?.classList.toggle("active", !noonOnTop);
+        toggle?.querySelector('[data-mode="noon"]')?.classList.toggle("active", noonOnTop);
+        changed = true;
+      }
+      if (s.off !== null) {
+        timeController.setOffset(s.off);
+        changed = true;
+      } else if (s.t !== null) {
+        timeController.setTime(new Date(s.t));
+        if (s.dir === 1) {
+          timeController.setDirection(1);
+          timeController.setRate(null);
+        } else if (s.dir === -1) {
+          timeController.setDirection(-1);
+          timeController.setRate(null);
+        }
+        changed = true;
+      } else if (!timeController.isRealTime) {
+        timeController.reset();
+        changed = true;
+      }
+      if (changed) {
+        updater?.reset();
+        rebuildEnv();
+      }
+    });
     timeController.onTick = () => rebuildEnv();
     env.variables.set("noonOnTop", noonOnTop ? 1 : 0);
     env.variables.set("dialPlanet", selectedPlanet);

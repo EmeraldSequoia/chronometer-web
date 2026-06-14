@@ -43,7 +43,7 @@ import { evalAttr } from './watch/watch-env.js';
 import { TimeController, TICK_INTERVAL_MS, displaySecondsPerTick } from './shared/time-controller.js';
 
 import { initNavigationLinks, updateNavigationLinks } from './shared/url-state.js';
-import { getState, setState, initAppState } from './shared/app-state.js';
+import { getState, setState, initAppState, onSharedChange } from './shared/app-state.js';
 import { createFpsIndicator } from './shared/fps-indicator.js';
 import { initHelpPopover } from './shared/help-popover.js';
 import { initShareButton } from './shared/share-button.js';
@@ -2332,6 +2332,35 @@ async function main() {
 
     // --- Share button ---
     initShareButton({ getState });
+
+    // --- Live cross-tab sync ---
+    // When another tab/app changes the shared location or time, apply it here
+    // without a reload (discrete updates; the storage event only fires on a
+    // real cross-tab write, never for this tab's own writes).
+    onSharedChange((s) => {
+        let changed = false;
+        if (s.lat !== null && s.lon !== null &&
+            (s.lat !== lat || s.lon !== lon || (s.tz || undefined) !== (locationTimezone || undefined))) {
+            locationSource = s.city || '';
+            locationFullLabel = s.city || '';
+            locationSourceType = s.city ? 'url-city' : 'manual';
+            locationTimezone = resolveTimezone(s.lat, s.lon, s.tz || null);
+            tzDeltaMs = computeTzDeltaMs(locationTimezone);
+            rebuildAllForLocation(s.lat, s.lon);  // sets lat/lon, rebuilds, updates display, kicks scheduler
+            scheduleDstRebuild();
+            needsPrompt = false;
+            changed = true;
+        }
+        // Time (setTime/setOffset/reset fire onTick → rebuildEnvironments).
+        if (s.off !== null) { timeController.setOffset(s.off); changed = true; }
+        else if (s.t !== null) {
+            timeController.setTime(new Date(s.t));
+            if (s.dir === 1) { timeController.setDirection(1); timeController.setRate(null); }
+            else if (s.dir === -1) { timeController.setDirection(-1); timeController.setRate(null); }
+            changed = true;
+        } else if (!timeController.isRealTime) { timeController.reset(); changed = true; }
+        if (changed) { stopScheduler(); startScheduler(); }
+    });
 
     // --- Info button & popup (shared wiring + face-specific fixups) ---
     initHelpPopover({
