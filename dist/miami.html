@@ -1706,9 +1706,8 @@
               </p>
               <hr class="help-separator" />
               <p>
-                Session state is persisted via URL only -- bookmark or share the
-                URL to save your session. No cookies or local storage are used.
-                See
+                Your settings are saved in this browser's local storage on this
+                device. Use the Share button to copy a link to a view. See
                 <a
                   href="privacy.html"
                   class="help-subpage-link"
@@ -1726,7 +1725,7 @@
               <div id="help-content">
                 <!-- Populated from help-template on first info click -->
               </div>
-              <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v1.4.253</div>
+              <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v1.4.254</div>
             </div>
 
             <div id="info-sub-view">
@@ -1762,8 +1761,9 @@
 <ul>
   <li>Your <strong>IP address</strong></li>
   <li>
-    The <strong>URL requested</strong>, including query-string parameters such
-    as latitude, longitude, city name, and timezone
+    The <strong>URL requested</strong>. The app normally keeps the URL clean;
+    query-string parameters (latitude, longitude, city name, timezone, etc.)
+    appear only when you create or open a shared link
   </li>
   <li>
     <strong>Timestamp</strong>, HTTP status code, referrer, and browser
@@ -1812,16 +1812,30 @@
   geocoding service is contacted.
 </p>
 
-<h2>URL Parameters</h2>
+<h2>Local Storage &amp; Sharing</h2>
 <p>
-  The app stores your location settings (latitude, longitude, city name,
-  timezone) as URL query parameters. This is the only persistence mechanism — no
-  cookies or local storage are used.
+  The app saves your settings (location, time, and per-app configuration) in your
+  browser's <strong>local storage</strong> — on your device only. This data is
+  never sent to any application server, and it persists across visits without any
+  cookies.
 </p>
 <p>
-  <strong>Note:</strong> Because these parameters are part of the URL, they are
-  visible in your browser history and, when served over HTTP or HTTPS, in the
-  hosting provider's access logs.
+  You can clear local storage at any time through your browser's settings
+  (typically alongside your browsing history).
+</p>
+<p>
+  When you use the <strong>Share</strong> button, the app builds a URL that
+  encodes the current view so you can send it to someone else or open it on
+  another device. Opening such a link lets you either use those settings just for
+  that visit or save them as your defaults.
+</p>
+<p>
+  <strong>Note:</strong> Because shared links carry settings as URL query
+  parameters, those parameters are visible in your browser history and, when
+  served over HTTP or HTTPS, in the hosting provider's access logs — but only for
+  links you deliberately create or open. On <code>file://</code> pages where
+  local storage is unavailable, the app falls back to keeping settings in the
+  URL.
 </p>
 
 <h2>Third-Party Services</h2>
@@ -2348,10 +2362,10 @@ represents daytime) is reproduced on all the rings.
         style="display: none"
       >
         <div class="lp-hint-icon">📍</div>
-        <div class="lp-hint-text">No location specified via URL</div>
+        <div class="lp-hint-text">No location set yet</div>
         <div class="lp-hint-sub">
-          To skip this dialog in the future, bookmark the page after selecting a
-          location below
+          Choose a location below — it's saved on this device, so you won't be
+          asked again
         </div>
       </div>
       <div class="lp-no-location-text" id="lp-no-location-default">

@@ -1,6 +1,20 @@
 # LocalStorage-backed state with URL sharing
 
-Status: **planning / awaiting review** — 2026-06-13
+Status: **implemented** — 2026-06-13 (plan); 2026-06-14 (built across phases 1–8)
+
+Implementation notes (2026-06-14):
+- New `src/shared/app-state.ts` (three backends, smoke test, protocol-aware
+  fallback, namespace routing, incoming-settings decision tree, session re-prompt,
+  cross-tab `onSharedChange` sync) and `src/shared/incoming-settings-dialog.ts`
+  (incoming/re-prompt dialog, storage warning, paradigm notice, `(URL)` badge).
+- `buildShareUrl` + `src/shared/share-button.ts`; Share button in all three apps.
+- `picks` migrated to the `chronometer` namespace; pick.html/selected.html and
+  the home page route via storage with clean URLs (nav links mode-aware via
+  `setPicksProvider`).
+- Docs updated: privacy partial, help.html, observatory/vienna help, the
+  per-app "session state" note, and the location-dialog copy.
+- One deferred design idea remains future work: simultaneous live scrubbing
+  across multiple windows (needs more than `storage`-event sync).
 
 ## Goal
 

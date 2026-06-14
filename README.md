@@ -15,7 +15,7 @@ This project (the web version here) is under very active development as of May 2
 ### Option 2: Download and open locally
 
 1. Download the `dist/` directory from this repository. The easiest way is to download the `dist.zip` archive from the [latest release](https://github.com/emeraldsequoia/chronometer-web/releases), or clone the repo and use the `dist/` directory directly.
-2. Unzip (if needed) and double-click **`index.html`** to open it in your browser, or open any of the individual face HTML files (e.g. `mauna-kea.html`). If you bookmark the page after setting the location, you can use that bookmark later and it will include the location settings (as URL parameters) so you don't have to set the location again.
+2. Unzip (if needed) and double-click **`index.html`** to open it in your browser, or open any of the individual face HTML files (e.g. `mauna-kea.html`). Your location and other settings are saved in the browser's local storage on your device, so you only set them once. (On `file://` pages where local storage is unavailable, the app falls back to keeping settings in the URL — bookmark the page to keep them.)
 
 Almost everything works when opened via `file://` URLs. The exceptions are:
 
@@ -40,7 +40,11 @@ This produces the `dist/` directory containing all HTML, JS, and image assets, a
 
 ### URL parameters
 
-Regardless of whether the app is opened via `file://` or `https://`, URL parameters can be used to control the observer location:
+Settings normally live in the browser's local storage and the address bar stays
+clean. The **Share** button builds a URL that encodes the current view for
+sending to another person or device; opening such a link lets you use the
+settings just for that visit or save them as your defaults. You can also pass
+these parameters by hand to control the observer location:
 
 | Parameter | Description |
 |-----------|-------------|
