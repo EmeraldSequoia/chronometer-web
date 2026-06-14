@@ -18679,8 +18679,146 @@
     updateNavigationLinks();
   }
 
+  // src/shared/incoming-settings-dialog.ts
+  var STYLE_ID = "ec-settings-dialog-style";
+  var CSS = `
+.ec-modal-backdrop {
+    position: fixed; inset: 0; z-index: 1000;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px 16px;
+    background: rgba(0, 0, 0, 0.5);
+}
+.ec-modal {
+    position: relative;
+    background: rgba(26, 26, 46, 0.98);
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border: 1px solid #3a3a5e; border-radius: 14px;
+    padding: 26px 30px; min-width: 300px; max-width: 400px; width: 100%;
+    box-shadow: 0 8px 48px rgba(0, 0, 0, 0.6);
+    text-align: center;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.ec-modal-title {
+    font-size: 16px; color: #e0d8c8; margin: 0 0 10px; font-weight: 400;
+}
+.ec-modal-text {
+    font-size: 13px; color: #aab; line-height: 1.5; margin: 0 0 20px;
+}
+.ec-modal-buttons { display: flex; flex-direction: column; gap: 8px; }
+.ec-modal-btn {
+    border-radius: 6px; font-size: 13px; padding: 9px 16px;
+    cursor: pointer; transition: background 0.15s, color 0.15s;
+    background: #2a2a4e; border: 1px solid #3a3a5e; color: #aac;
+}
+.ec-modal-btn:hover { background: #3a3a6e; color: #ddf; }
+.ec-modal-btn.ec-primary {
+    background: #34507a; border-color: #4a6fa5; color: #dde9ff;
+}
+.ec-modal-btn.ec-primary:hover { background: #3f5f92; color: #fff; }
+
+.ec-toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    z-index: 1001; max-width: 340px;
+    background: rgba(26, 26, 46, 0.98); border: 1px solid #3a3a5e;
+    border-radius: 10px; padding: 12px 16px;
+    box-shadow: 0 6px 32px rgba(0, 0, 0, 0.5);
+    color: #ccd; font-size: 12.5px; line-height: 1.45;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    display: flex; align-items: center; gap: 12px;
+}
+.ec-toast-close {
+    background: none; border: none; color: #889; font-size: 18px;
+    cursor: pointer; padding: 0 2px; line-height: 1;
+}
+.ec-toast-close:hover { color: #ccd; }
+`;
+  function ensureStyles() {
+    if (document.getElementById(STYLE_ID)) return;
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = CSS;
+    document.head.appendChild(style);
+  }
+  var COPY = {
+    incoming: {
+      title: "Use these shared settings?",
+      text: "This link includes a saved time, location, or configuration. Save them as your default on this device, or use them just for this visit?",
+      save: "Save as my default",
+      session: "Use for this visit only"
+    },
+    reprompt: {
+      title: "Save your changes?",
+      text: "You changed a setting while viewing shared settings. Save your current settings as the default on this device, or keep them only for this visit?",
+      save: "Save as my default",
+      session: "Keep for this visit only"
+    }
+  };
+  function showIncomingSettingsDialog(options) {
+    ensureStyles();
+    const copy = COPY[options.mode];
+    return new Promise((resolve) => {
+      const backdrop = document.createElement("div");
+      backdrop.className = "ec-modal-backdrop";
+      const modal = document.createElement("div");
+      modal.className = "ec-modal";
+      modal.setAttribute("role", "dialog");
+      modal.setAttribute("aria-modal", "true");
+      const title = document.createElement("h2");
+      title.className = "ec-modal-title";
+      title.textContent = copy.title;
+      const text = document.createElement("p");
+      text.className = "ec-modal-text";
+      text.textContent = copy.text;
+      const buttons = document.createElement("div");
+      buttons.className = "ec-modal-buttons";
+      const saveBtn = document.createElement("button");
+      saveBtn.className = "ec-modal-btn ec-primary";
+      saveBtn.textContent = copy.save;
+      const sessionBtn = document.createElement("button");
+      sessionBtn.className = "ec-modal-btn";
+      sessionBtn.textContent = copy.session;
+      buttons.append(saveBtn, sessionBtn);
+      modal.append(title, text, buttons);
+      backdrop.append(modal);
+      document.body.appendChild(backdrop);
+      let done = false;
+      const finish = (choice) => {
+        if (done) return;
+        done = true;
+        document.removeEventListener("keydown", onKey);
+        backdrop.remove();
+        resolve(choice);
+      };
+      const onKey = (e) => {
+        if (e.key === "Escape") finish("session");
+      };
+      saveBtn.addEventListener("click", () => finish("save"));
+      sessionBtn.addEventListener("click", () => finish("session"));
+      backdrop.addEventListener("click", (e) => {
+        if (e.target === backdrop) finish("session");
+      });
+      document.addEventListener("keydown", onKey);
+      saveBtn.focus();
+    });
+  }
+  function showStorageWarning(message) {
+    ensureStyles();
+    const toast = document.createElement("div");
+    toast.className = "ec-toast";
+    const span = document.createElement("span");
+    span.textContent = message;
+    const close = document.createElement("button");
+    close.className = "ec-toast-close";
+    close.setAttribute("aria-label", "Dismiss");
+    close.textContent = "\xD7";
+    close.addEventListener("click", () => toast.remove());
+    toast.append(span, close);
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 12e3);
+  }
+
   // src/shared/app-state.ts
-  var LOCALSTORAGE_ENABLED = false;
+  var LOCALSTORAGE_ENABLED = true;
   var SCHEMA_VERSION = 1;
   var STORAGE_KEY_PREFIX = "ec:";
   var SHARED_FIELDS = /* @__PURE__ */ new Set([
@@ -18696,13 +18834,13 @@
   var URL_ONLY_FIELDS = /* @__PURE__ */ new Set([
     "embed",
     "fps",
-    "tc"
+    "tc",
+    "picks"
   ]);
   function namespaceOf(field, app) {
     if (URL_ONLY_FIELDS.has(field)) return null;
     if (SHARED_FIELDS.has(field)) return "shared";
     switch (field) {
-      case "picks":
       case "kyhand":
       case "kmode":
         return "chronometer";
@@ -18769,13 +18907,13 @@
     }
     read() {
       const state = defaultState();
-      const url = readUrlState();
-      state.embed = url.embed;
-      state.fps = url.fps;
-      state.tc = url.tc;
       Object.assign(state, readNamespace("shared"));
       const appNs = appNamespace(this.app);
       if (appNs) Object.assign(state, readNamespace(appNs));
+      const url = readUrlState();
+      for (const field of URL_ONLY_FIELDS) {
+        state[field] = url[field];
+      }
       return state;
     }
     write(changes) {
@@ -18823,30 +18961,26 @@
   }
   function mergeNamespace(ns, changes) {
     const key = STORAGE_KEY_PREFIX + ns;
+    let current;
     try {
-      let current;
-      try {
-        current = JSON.parse(localStorage.getItem(key) || "{}");
-      } catch {
-        current = {};
-      }
-      for (const field of Object.keys(changes)) {
-        const value = changes[field];
-        if (isDefaultValue(field, value)) {
-          delete current[field];
-        } else {
-          current[field] = value;
-        }
-      }
-      delete current.v;
-      if (Object.keys(current).length === 0) {
-        localStorage.removeItem(key);
+      current = JSON.parse(localStorage.getItem(key) || "{}");
+    } catch {
+      current = {};
+    }
+    for (const field of Object.keys(changes)) {
+      const value = changes[field];
+      if (isDefaultValue(field, value)) {
+        delete current[field];
       } else {
-        current.v = SCHEMA_VERSION;
-        localStorage.setItem(key, JSON.stringify(current));
+        current[field] = value;
       }
-    } catch (err) {
-      handleWriteFailure(err);
+    }
+    delete current.v;
+    if (Object.keys(current).length === 0) {
+      localStorage.removeItem(key);
+    } else {
+      current.v = SCHEMA_VERSION;
+      localStorage.setItem(key, JSON.stringify(current));
     }
   }
   var InMemoryBackend = class {
@@ -18855,7 +18989,11 @@
     }
     read() {
       const url = readUrlState();
-      return { ...this.state, embed: url.embed, fps: url.fps, tc: url.tc };
+      const state = { ...this.state };
+      for (const field of URL_ONLY_FIELDS) {
+        state[field] = url[field];
+      }
+      return state;
     }
     write(changes) {
       for (const key of Object.keys(changes)) {
@@ -18875,34 +19013,145 @@
       return false;
     }
   }
-  var activeBackend = null;
-  var writeFailureHandler = null;
-  function handleWriteFailure(err) {
-    if (writeFailureHandler) writeFailureHandler(err);
-    else console.warn("[app-state] persist failed:", err);
+  var TIME_FIELDS = /* @__PURE__ */ new Set(["t", "off", "dir"]);
+  var SHAREABLE_FIELDS = [
+    "lat",
+    "lon",
+    "city",
+    "tz",
+    "bloc",
+    "t",
+    "off",
+    "dir",
+    "kyhand",
+    "kmode",
+    "op",
+    "onoon",
+    "tp"
+  ];
+  var SHAREABLE_URL_KEYS = [
+    "lat",
+    "lon",
+    "long",
+    "city",
+    "loc",
+    "tz",
+    "bloc",
+    "t",
+    "off",
+    "dir",
+    "kyhand",
+    "kmode",
+    "op",
+    "onoon",
+    "tp"
+  ];
+  var CLEARED_URL_KEYS = [...SHAREABLE_URL_KEYS, "tc"];
+  function hasShareableParamsInUrl() {
+    const params = new URLSearchParams(window.location.search);
+    return SHAREABLE_URL_KEYS.some((k) => params.has(k));
   }
+  function shareableUrlEqualsStored(ls) {
+    const url = readUrlState();
+    const stored = ls.read();
+    return SHAREABLE_FIELDS.every((f) => url[f] === stored[f]);
+  }
+  function clearShareableParamsFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    for (const k of CLEARED_URL_KEYS) params.delete(k);
+    const qs = params.toString();
+    history.replaceState(null, "", window.location.pathname + (qs ? "?" + qs : ""));
+  }
+  var activeBackend = null;
+  var appName = "index";
+  var sessionRePromptArmed = false;
+  var warnedNoPersistence = false;
   function initAppState(options) {
+    appName = options.app;
     if (!LOCALSTORAGE_ENABLED) {
       activeBackend = new UrlBackend();
       return;
     }
-    if (storageWorks()) {
-      activeBackend = new LocalStorageBackend(options.app);
-    } else if (window.location.protocol === "file:") {
+    if (readUrlState().embed) {
       activeBackend = new UrlBackend();
-    } else {
-      activeBackend = new InMemoryBackend();
+      return;
     }
+    if (!storageWorks()) {
+      if (window.location.protocol === "file:") {
+        activeBackend = new UrlBackend();
+      } else {
+        activeBackend = new InMemoryBackend(readUrlState());
+        warnNoPersistence();
+      }
+      return;
+    }
+    const ls = new LocalStorageBackend(appName);
+    if (!hasShareableParamsInUrl()) {
+      activeBackend = ls;
+      return;
+    }
+    if (shareableUrlEqualsStored(ls)) {
+      clearShareableParamsFromUrl();
+      activeBackend = ls;
+      return;
+    }
+    activeBackend = new UrlBackend();
+    void promptIncomingSettings(ls);
+  }
+  async function promptIncomingSettings(ls) {
+    const choice = await showIncomingSettingsDialog({ mode: "incoming" });
+    if (choice === "save") {
+      adoptCurrentStateAsDefault(ls);
+    } else {
+      sessionRePromptArmed = true;
+    }
+  }
+  function adoptCurrentStateAsDefault(ls) {
+    ls.write(getState());
+    clearShareableParamsFromUrl();
+    activeBackend = ls;
+    sessionRePromptArmed = false;
+  }
+  function warnNoPersistence() {
+    if (warnedNoPersistence) return;
+    warnedNoPersistence = true;
+    showStorageWarning("Your settings can't be saved in this browser and won't persist after you reload.");
+  }
+  function downgradeToInMemory() {
+    if (activeBackend instanceof InMemoryBackend) return;
+    const seed = activeBackend ? activeBackend.read() : void 0;
+    activeBackend = new InMemoryBackend(seed);
+    warnNoPersistence();
   }
   function backend() {
     if (!activeBackend) activeBackend = new UrlBackend();
     return activeBackend;
   }
+  function hasNonTimePersistableChange(changes) {
+    return Object.keys(changes).some(
+      (k) => !TIME_FIELDS.has(k) && namespaceOf(k, appName) !== null
+    );
+  }
   function getState() {
     return backend().read();
   }
   function setState(changes) {
-    backend().write(changes);
+    try {
+      backend().write(changes);
+    } catch {
+      downgradeToInMemory();
+      backend().write(changes);
+    }
+    if (sessionRePromptArmed && hasNonTimePersistableChange(changes)) {
+      sessionRePromptArmed = false;
+      void promptSessionReprompt();
+    }
+  }
+  async function promptSessionReprompt() {
+    const choice = await showIncomingSettingsDialog({ mode: "reprompt" });
+    if (choice === "save") {
+      adoptCurrentStateAsDefault(new LocalStorageBackend(appName));
+    }
   }
 
   // src/shared/fps-indicator.ts

@@ -22,6 +22,7 @@
  */
 
 import { readUrlState, writeUrlState, type UrlState } from './url-state.js';
+import { showIncomingSettingsDialog, showStorageWarning } from './incoming-settings-dialog.js';
 
 // ============================================================================
 // Configuration
@@ -30,9 +31,8 @@ import { readUrlState, writeUrlState, type UrlState } from './url-state.js';
 /**
  * Master switch for the LocalStorage migration. While false, initAppState()
  * always selects UrlBackend and behavior is identical to the URL-only era.
- * Phase 3 sets this true and introduces the incoming-settings dialog.
  */
-const LOCALSTORAGE_ENABLED = false;
+const LOCALSTORAGE_ENABLED = true;
 
 /** Schema version stamped into each stored blob, for future migrations. */
 const SCHEMA_VERSION = 1;
@@ -61,9 +61,14 @@ const SHARED_FIELDS: ReadonlySet<keyof UrlState> = new Set([
  * URL-only fields. These are never persisted to storage; they are always read
  * from the URL (e.g. ?embed=1 for an iframe, ?fps for the diagnostic readout)
  * and `tc` (time-controller popover visibility) is transient.
+ *
+ * `picks` is here transitionally: face selection still flows via URL navigation
+ * (pick.html → selected.html) until Phase 6 reworks that flow to use storage.
+ * Treating it as URL-only keeps that navigation working and prevents an
+ * internal `?picks=...` link from triggering the incoming-settings dialog.
  */
 const URL_ONLY_FIELDS: ReadonlySet<keyof UrlState> = new Set([
-    'embed', 'fps', 'tc',
+    'embed', 'fps', 'tc', 'picks',
 ]);
 
 /**
@@ -77,7 +82,6 @@ function namespaceOf(field: keyof UrlState, app: AppName): Namespace | null {
     if (URL_ONLY_FIELDS.has(field)) return null;
     if (SHARED_FIELDS.has(field)) return 'shared';
     switch (field) {
-        case 'picks':
         case 'kyhand':
         case 'kmode':
             return 'chronometer';
@@ -156,15 +160,16 @@ class LocalStorageBackend implements StateBackend {
 
     read(): UrlState {
         const state = defaultState();
-        // URL-only fields are always sourced from the URL, even in storage mode.
-        const url = readUrlState();
-        state.embed = url.embed;
-        state.fps = url.fps;
-        state.tc = url.tc;
         // Shared location/time, then this app's own namespace, override defaults.
         Object.assign(state, readNamespace('shared'));
         const appNs = appNamespace(this.app);
         if (appNs) Object.assign(state, readNamespace(appNs));
+        // URL-only fields are always sourced from the URL, even in storage mode.
+        // (Applied last so they win over anything stored.)
+        const url = readUrlState();
+        for (const field of URL_ONLY_FIELDS) {
+            (state as unknown as Record<string, unknown>)[field] = url[field];
+        }
         return state;
     }
 
@@ -209,33 +214,29 @@ function readNamespace(ns: Namespace): Partial<UrlState> {
 
 function mergeNamespace(ns: Namespace, changes: Partial<UrlState>): void {
     const key = STORAGE_KEY_PREFIX + ns;
+    let current: Record<string, unknown>;
     try {
-        let current: Record<string, unknown>;
-        try {
-            current = JSON.parse(localStorage.getItem(key) || '{}');
-        } catch {
-            current = {};
-        }
-        for (const field of Object.keys(changes) as (keyof UrlState)[]) {
-            const value = changes[field];
-            if (isDefaultValue(field, value)) {
-                delete current[field];
-            } else {
-                current[field] = value as unknown;
-            }
-        }
-        // Drop the version stamp when deciding whether any real data remains.
-        delete current.v;
-        if (Object.keys(current).length === 0) {
-            localStorage.removeItem(key);
+        current = JSON.parse(localStorage.getItem(key) || '{}');
+    } catch {
+        current = {};
+    }
+    for (const field of Object.keys(changes) as (keyof UrlState)[]) {
+        const value = changes[field];
+        if (isDefaultValue(field, value)) {
+            delete current[field];
         } else {
-            current.v = SCHEMA_VERSION;
-            localStorage.setItem(key, JSON.stringify(current));
+            current[field] = value as unknown;
         }
-    } catch (err) {
-        // Quota exhausted or storage revoked mid-session. Phase 3 will switch to
-        // the InMemoryBackend and warn the user once; for now, surface to console.
-        handleWriteFailure(err);
+    }
+    // Drop the version stamp when deciding whether any real data remains.
+    delete current.v;
+    if (Object.keys(current).length === 0) {
+        localStorage.removeItem(key);
+    } else {
+        current.v = SCHEMA_VERSION;
+        // setItem may throw (quota / revoked storage); the error propagates to
+        // setState(), which downgrades to the InMemoryBackend and warns once.
+        localStorage.setItem(key, JSON.stringify(current));
     }
 }
 
@@ -251,9 +252,13 @@ class InMemoryBackend implements StateBackend {
     }
 
     read(): UrlState {
-        // URL-only fields still come from the URL (e.g. ?embed, ?fps).
+        // URL-only fields still come from the URL (e.g. ?embed, ?fps, ?picks).
         const url = readUrlState();
-        return { ...this.state, embed: url.embed, fps: url.fps, tc: url.tc };
+        const state = { ...this.state };
+        for (const field of URL_ONLY_FIELDS) {
+            (state as Record<string, unknown>)[field] = url[field];
+        }
+        return state;
     }
 
     write(changes: Partial<UrlState>): void {
@@ -286,26 +291,65 @@ export function storageWorks(): boolean {
 }
 
 // ============================================================================
+// Shareable-parameter sets (for the incoming-settings decision tree)
+// ============================================================================
+
+/** Time-state fields. Changes to these never trigger the session re-prompt. */
+const TIME_FIELDS: ReadonlySet<keyof UrlState> = new Set(['t', 'off', 'dir']);
+
+/**
+ * UrlState fields that constitute a "shareable setting" — used to decide
+ * whether incoming URL params differ from the stored defaults. Excludes
+ * URL-only fields (embed/fps/tc/picks).
+ */
+const SHAREABLE_FIELDS: readonly (keyof UrlState)[] = [
+    'lat', 'lon', 'city', 'tz', 'bloc', 't', 'off', 'dir',
+    'kyhand', 'kmode', 'op', 'onoon', 'tp',
+];
+
+/**
+ * Raw URL query keys considered "shareable". Presence of any of these triggers
+ * the incoming-settings flow. Excludes `picks` (internal pick-page navigation,
+ * Phase 6), `tc` (transient), and `embed`/`fps` (URL-only flags).
+ */
+const SHAREABLE_URL_KEYS: readonly string[] = [
+    'lat', 'lon', 'long', 'city', 'loc', 'tz', 'bloc',
+    't', 'off', 'dir', 'kyhand', 'kmode', 'op', 'onoon', 'tp',
+];
+
+/** Query keys cleared from the URL when settings are adopted into storage. */
+const CLEARED_URL_KEYS: readonly string[] = [...SHAREABLE_URL_KEYS, 'tc'];
+
+function hasShareableParamsInUrl(): boolean {
+    const params = new URLSearchParams(window.location.search);
+    return SHAREABLE_URL_KEYS.some((k) => params.has(k));
+}
+
+/** True when the URL's shareable values match what's already stored. */
+function shareableUrlEqualsStored(ls: LocalStorageBackend): boolean {
+    const url = readUrlState();
+    const stored = ls.read();
+    return SHAREABLE_FIELDS.every((f) => url[f] === stored[f]);
+}
+
+/** Remove shareable params from the URL, preserving fps/embed/picks/unknowns. */
+function clearShareableParamsFromUrl(): void {
+    const params = new URLSearchParams(window.location.search);
+    for (const k of CLEARED_URL_KEYS) params.delete(k);
+    const qs = params.toString();
+    history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
+}
+
+// ============================================================================
 // Module state + public API
 // ============================================================================
 
 let activeBackend: StateBackend | null = null;
-let writeFailureHandler: ((err: unknown) => void) | null = null;
-
-function handleWriteFailure(err: unknown): void {
-    if (writeFailureHandler) writeFailureHandler(err);
-    else console.warn('[app-state] persist failed:', err);
-}
-
-/**
- * Register a callback invoked (at most meaningfully once, by the caller's
- * contract) when a LocalStorage write fails mid-session. Phase 3 uses this to
- * switch to the InMemoryBackend and show a one-time "settings won't be saved"
- * warning.
- */
-export function setWriteFailureHandler(fn: (err: unknown) => void): void {
-    writeFailureHandler = fn;
-}
+let appName: AppName = 'index';
+/** Armed in session-only mode; the first non-time edit re-prompts to save. */
+let sessionRePromptArmed = false;
+/** Ensures the "settings won't be saved" warning shows at most once. */
+let warnedNoPersistence = false;
 
 export interface InitAppStateOptions {
     /** Which app is running (selects the per-app storage namespace). */
@@ -316,31 +360,103 @@ export interface InitAppStateOptions {
  * Initialize the state backend for this app. Must be called once at startup,
  * before the first getState()/setState().
  *
- * Phase 1-2: always selects UrlBackend (LOCALSTORAGE_ENABLED is false), so
- * behavior is identical to the URL-only era. Phase 3 will run the protocol-aware
- * decision tree here.
+ * Runs the protocol-aware decision tree:
+ *   - embed mode → URL-only.
+ *   - storage broken → file:// falls back to URL params (leak-free); http(s)
+ *     keeps state in memory only and warns once (never writes the URL).
+ *   - storage OK → read from storage; if the URL carries shareable params that
+ *     differ from storage, prompt the user (save-as-default vs session-only).
  */
 export function initAppState(options: InitAppStateOptions): void {
+    appName = options.app;
+
     if (!LOCALSTORAGE_ENABLED) {
         activeBackend = new UrlBackend();
         return;
     }
-    // --- Phase 3+ (not yet active): protocol-aware backend selection ---
-    if (storageWorks()) {
-        activeBackend = new LocalStorageBackend(options.app);
-    } else if (window.location.protocol === 'file:') {
-        // file:// has no server logs and never calls OSM — URL params are leak-free.
+
+    if (readUrlState().embed) {
         activeBackend = new UrlBackend();
-    } else {
-        // http(s): never write the URL; keep state in memory only, warn once.
-        activeBackend = new InMemoryBackend();
+        return;
     }
+
+    if (!storageWorks()) {
+        if (window.location.protocol === 'file:') {
+            // file:// has no server logs and never calls OSM — URL params are leak-free.
+            activeBackend = new UrlBackend();
+        } else {
+            // http(s): never write the URL; keep state in memory only, warn once.
+            activeBackend = new InMemoryBackend(readUrlState());
+            warnNoPersistence();
+        }
+        return;
+    }
+
+    const ls = new LocalStorageBackend(appName);
+
+    if (!hasShareableParamsInUrl()) {
+        // Common case going forward: clean URL, read from storage.
+        activeBackend = ls;
+        return;
+    }
+
+    // The URL carries shareable params (a shared link or a legacy bookmark).
+    if (shareableUrlEqualsStored(ls)) {
+        // Identical to stored defaults — silently adopt and clean the URL.
+        clearShareableParamsFromUrl();
+        activeBackend = ls;
+        return;
+    }
+
+    // Differ: show the shared values immediately (URL backend) and ask the user
+    // asynchronously whether to keep them as defaults or just for this visit.
+    activeBackend = new UrlBackend();
+    void promptIncomingSettings(ls);
+}
+
+async function promptIncomingSettings(ls: LocalStorageBackend): Promise<void> {
+    const choice = await showIncomingSettingsDialog({ mode: 'incoming' });
+    if (choice === 'save') {
+        adoptCurrentStateAsDefault(ls);
+    } else {
+        // Session-only: keep the URL params; re-prompt on the first non-time edit.
+        sessionRePromptArmed = true;
+    }
+}
+
+/** Persist the current effective state to storage, then clean the URL. */
+function adoptCurrentStateAsDefault(ls: LocalStorageBackend): void {
+    ls.write(getState());
+    clearShareableParamsFromUrl();
+    activeBackend = ls;
+    sessionRePromptArmed = false;
+}
+
+function warnNoPersistence(): void {
+    if (warnedNoPersistence) return;
+    warnedNoPersistence = true;
+    showStorageWarning("Your settings can't be saved in this browser and won't persist after you reload.");
+}
+
+/** Downgrade to in-memory state after a failed persist (e.g. quota exhausted). */
+function downgradeToInMemory(): void {
+    if (activeBackend instanceof InMemoryBackend) return;
+    const seed = activeBackend ? activeBackend.read() : undefined;
+    activeBackend = new InMemoryBackend(seed);
+    warnNoPersistence();
 }
 
 function backend(): StateBackend {
     // Lazy default keeps call order forgiving if a consumer reads before init.
     if (!activeBackend) activeBackend = new UrlBackend();
     return activeBackend;
+}
+
+/** True when `changes` includes a persistable, non-time field. */
+function hasNonTimePersistableChange(changes: Partial<UrlState>): boolean {
+    return (Object.keys(changes) as (keyof UrlState)[]).some(
+        (k) => !TIME_FIELDS.has(k) && namespaceOf(k, appName) !== null,
+    );
 }
 
 /** Read the full merged application state. */
@@ -350,7 +466,27 @@ export function getState(): UrlState {
 
 /** Write a partial set of state changes, routed to the active backend. */
 export function setState(changes: Partial<UrlState>): void {
-    backend().write(changes);
+    try {
+        backend().write(changes);
+    } catch {
+        // Persist failed mid-session — keep going in memory and replay the change.
+        downgradeToInMemory();
+        backend().write(changes);
+    }
+
+    // Session-only mode: the first edit that changes a non-time setting offers
+    // to save the current state as the default (re-prompt on first edit).
+    if (sessionRePromptArmed && hasNonTimePersistableChange(changes)) {
+        sessionRePromptArmed = false;
+        void promptSessionReprompt();
+    }
+}
+
+async function promptSessionReprompt(): Promise<void> {
+    const choice = await showIncomingSettingsDialog({ mode: 'reprompt' });
+    if (choice === 'save') {
+        adoptCurrentStateAsDefault(new LocalStorageBackend(appName));
+    }
 }
 
 /**
@@ -374,4 +510,7 @@ export const __test__ = {
     UrlBackend,
     defaultState,
     STORAGE_KEY_PREFIX,
+    hasShareableParamsInUrl,
+    shareableUrlEqualsStored,
+    clearShareableParamsFromUrl,
 };

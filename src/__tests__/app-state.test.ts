@@ -2,7 +2,10 @@
 import { describe, test, expect, beforeEach } from 'vitest';
 import { storageWorks, __test__ } from '../shared/app-state.js';
 
-const { namespaceOf, isDefaultValue, LocalStorageBackend, InMemoryBackend, STORAGE_KEY_PREFIX } = __test__;
+const {
+    namespaceOf, isDefaultValue, LocalStorageBackend, InMemoryBackend, STORAGE_KEY_PREFIX,
+    hasShareableParamsInUrl, shareableUrlEqualsStored, clearShareableParamsFromUrl,
+} = __test__;
 
 function clearStorage() {
     localStorage.clear();
@@ -22,7 +25,6 @@ describe('namespaceOf', () => {
     });
 
     test('app-specific fields route to their fixed namespace', () => {
-        expect(namespaceOf('picks', 'observatory')).toBe('chronometer');
         expect(namespaceOf('kyhand', 'inspector')).toBe('chronometer');
         expect(namespaceOf('kmode', 'chronometer')).toBe('chronometer');
         expect(namespaceOf('op', 'chronometer')).toBe('observatory');
@@ -40,6 +42,8 @@ describe('namespaceOf', () => {
         expect(namespaceOf('embed', 'chronometer')).toBeNull();
         expect(namespaceOf('fps', 'observatory')).toBeNull();
         expect(namespaceOf('tc', 'inspector')).toBeNull();
+        // picks flows via URL navigation (Phase 6 will migrate it to storage).
+        expect(namespaceOf('picks', 'chronometer')).toBeNull();
     });
 });
 
@@ -76,17 +80,26 @@ describe('smoke test', () => {
 describe('LocalStorageBackend', () => {
     test('write routes fields to the correct namespaces', () => {
         const be = new LocalStorageBackend('chronometer');
-        be.write({ lat: 37.7, lon: -122.4, city: 'San Francisco', picks: 'bbmk', tp: 'a' });
+        be.write({ lat: 37.7, lon: -122.4, city: 'San Francisco', kyhand: '1', tp: 'a' });
 
         const shared = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + 'shared')!);
         expect(shared.lat).toBe(37.7);
         expect(shared.lon).toBe(-122.4);
         expect(shared.city).toBe('San Francisco');
-        expect('picks' in shared).toBe(false);
+        expect('kyhand' in shared).toBe(false);
 
         const chrono = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + 'chronometer')!);
-        expect(chrono.picks).toBe('bbmk');
+        expect(chrono.kyhand).toBe('1');
         expect(chrono.tp).toBe('a');
+    });
+
+    test('picks is not persisted — it stays URL-driven (transitional)', () => {
+        const be = new LocalStorageBackend('chronometer');
+        be.write({ picks: 'bbmk' });
+        expect(localStorage.getItem(STORAGE_KEY_PREFIX + 'chronometer')).toBeNull();
+        // Read sources picks from the URL, not storage.
+        window.history.replaceState(null, '', '/?picks=mktr');
+        expect(be.read().picks).toBe('mktr');
     });
 
     test('read merges shared + app namespaces over defaults', () => {
@@ -103,10 +116,11 @@ describe('LocalStorageBackend', () => {
         expect(state.city).toBeNull();
     });
 
-    test('observatory does not see chronometer picks', () => {
-        new LocalStorageBackend('chronometer').write({ picks: 'bbmk' });
+    test('observatory does not see chronometer-namespaced fields', () => {
+        new LocalStorageBackend('chronometer').write({ kyhand: '1', kmode: '1' });
         const obs = new LocalStorageBackend('observatory').read();
-        expect(obs.picks).toBeNull();
+        expect(obs.kyhand).toBeNull();
+        expect(obs.kmode).toBeNull();
     });
 
     test('default values are omitted / removed from storage', () => {
@@ -120,7 +134,7 @@ describe('LocalStorageBackend', () => {
 
     test('round-trips a representative state', () => {
         const be = new LocalStorageBackend('chronometer');
-        be.write({ lat: 51.5, lon: -0.13, city: 'London', tz: 'Europe/London', t: 1700000000000, dir: -1, picks: 'mktr' });
+        be.write({ lat: 51.5, lon: -0.13, city: 'London', tz: 'Europe/London', t: 1700000000000, dir: -1, kyhand: '1' });
         const s = be.read();
         expect(s.lat).toBe(51.5);
         expect(s.lon).toBe(-0.13);
@@ -128,14 +142,45 @@ describe('LocalStorageBackend', () => {
         expect(s.tz).toBe('Europe/London');
         expect(s.t).toBe(1700000000000);
         expect(s.dir).toBe(-1);
-        expect(s.picks).toBe('mktr');
+        expect(s.kyhand).toBe('1');
     });
 
     test('URL-only fields come from the URL, not storage', () => {
-        window.history.replaceState(null, '', '/?fps&embed=1');
+        window.history.replaceState(null, '', '/?fps&embed=1&picks=bbmk');
         const s = new LocalStorageBackend('chronometer').read();
         expect(s.fps).toBe(true);
         expect(s.embed).toBe(true);
+        expect(s.picks).toBe('bbmk');
+    });
+});
+
+describe('incoming-settings detection', () => {
+    test('hasShareableParamsInUrl detects shareable keys, ignores fps/embed/picks', () => {
+        window.history.replaceState(null, '', '/?fps&embed=1&picks=bbmk');
+        expect(hasShareableParamsInUrl()).toBe(false);
+        window.history.replaceState(null, '', '/?lat=10&lon=20');
+        expect(hasShareableParamsInUrl()).toBe(true);
+        window.history.replaceState(null, '', '/?tp=a');
+        expect(hasShareableParamsInUrl()).toBe(true);
+    });
+
+    test('shareableUrlEqualsStored is true only when URL matches storage', () => {
+        const ls = new LocalStorageBackend('observatory');
+        ls.write({ lat: 10, lon: 20, op: 3 });
+        window.history.replaceState(null, '', '/?lat=10&lon=20&op=3');
+        expect(shareableUrlEqualsStored(ls)).toBe(true);
+        window.history.replaceState(null, '', '/?lat=10&lon=20&op=5');
+        expect(shareableUrlEqualsStored(ls)).toBe(false);
+    });
+
+    test('clearShareableParamsFromUrl strips shareable params, keeps fps/picks', () => {
+        window.history.replaceState(null, '', '/?lat=10&lon=20&op=3&fps&picks=bbmk');
+        clearShareableParamsFromUrl();
+        const p = new URLSearchParams(window.location.search);
+        expect(p.has('lat')).toBe(false);
+        expect(p.has('op')).toBe(false);
+        expect(p.has('fps')).toBe(true);
+        expect(p.has('picks')).toBe(true);
     });
 });
 
