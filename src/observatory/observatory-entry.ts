@@ -20,6 +20,7 @@ import { initLocationDialog, requestBrowserLocation } from '../shared/location-d
 import { TimeController } from '../shared/time-controller.js';
 import { initTimeControls } from '../shared/time-controls-ui.js';
 import { initHelpPopover } from '../shared/help-popover.js';
+import { initShareButton } from '../shared/share-button.js';
 import type { TimeControlsAPI } from '../shared/time-controls-ui.js';
 import { computeLayout, type ChromeParams, type LayoutParams } from './layout.js';
 import { getBackgroundCache, invalidateBackgroundCache, waitForBackgroundImage } from './background.js';
@@ -652,6 +653,7 @@ function init(): void {
     // Help ("ℹ") popover — shared wiring; the General Help iframe drops the
     // Chronometer-only sections via the app=observatory param (see help.html).
     initHelpPopover({ generalHelpUrl: 'help.html?embed=1&app=observatory' });
+    initShareButton({ getState });
 
     // Wire up time controller env rebuild on tick. The controller fires onTick on
     // every transition (reset/stop/setTime/setOffset/setRate/setDirection) as well

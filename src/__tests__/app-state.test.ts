@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, test, expect, beforeEach } from 'vitest';
 import { storageWorks, __test__ } from '../shared/app-state.js';
+import { buildShareUrl } from '../shared/url-state.js';
 
 const {
     namespaceOf, isDefaultValue, LocalStorageBackend, InMemoryBackend, STORAGE_KEY_PREFIX,
@@ -181,6 +182,54 @@ describe('incoming-settings detection', () => {
         expect(p.has('op')).toBe(false);
         expect(p.has('fps')).toBe(true);
         expect(p.has('picks')).toBe(true);
+    });
+});
+
+describe('buildShareUrl', () => {
+    const base = 'https://example.com/observatory.html';
+    const defaults = __test__.defaultState();
+
+    test('includes location and rounds lat/lon to 3 dp', () => {
+        const u = new URL(buildShareUrl({ ...defaults, lat: 48.8566, lon: 2.3522, city: 'Paris' }, base));
+        expect(u.searchParams.get('lat')).toBe('48.857');
+        expect(u.searchParams.get('lon')).toBe('2.352');
+        expect(u.searchParams.get('city')).toBe('Paris');
+    });
+
+    test('omits time for a live real-time clock', () => {
+        const u = new URL(buildShareUrl({ ...defaults, lat: 1, lon: 2 }, base));
+        expect(u.searchParams.has('t')).toBe(false);
+        expect(u.searchParams.has('off')).toBe(false);
+        expect(u.searchParams.has('dir')).toBe(false);
+    });
+
+    test('includes time when stopped/offset/reversed', () => {
+        const stopped = new URL(buildShareUrl({ ...defaults, t: 1700000000000, dir: 0 }, base));
+        expect(stopped.searchParams.get('t')).toBe('1700000000000');
+        expect(stopped.searchParams.get('dir')).toBe('0');
+        const offset = new URL(buildShareUrl({ ...defaults, off: 3600000 }, base));
+        expect(offset.searchParams.get('off')).toBe('3600000');
+    });
+
+    test('includes bloc and app config, excludes fps/embed/tc', () => {
+        const u = new URL(buildShareUrl({
+            ...defaults, bloc: true, op: 3, onoon: true, tp: 'a', picks: 'bbmk',
+            kyhand: '1', fps: true, embed: true, tc: true,
+        }, base));
+        expect(u.searchParams.get('bloc')).toBe('1');
+        expect(u.searchParams.get('op')).toBe('3');
+        expect(u.searchParams.get('onoon')).toBe('1');
+        expect(u.searchParams.get('tp')).toBe('a');
+        expect(u.searchParams.get('picks')).toBe('bbmk');
+        expect(u.searchParams.get('kyhand')).toBe('1');
+        expect(u.searchParams.has('fps')).toBe(false);
+        expect(u.searchParams.has('embed')).toBe(false);
+        expect(u.searchParams.has('tc')).toBe(false);
+    });
+
+    test('omits default op (Sun=0)', () => {
+        const u = new URL(buildShareUrl({ ...defaults, op: 0 }, base));
+        expect(u.searchParams.has('op')).toBe(false);
     });
 });
 

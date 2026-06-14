@@ -65,9 +65,18 @@ const CSS = `
     cursor: pointer; padding: 0 2px; line-height: 1;
 }
 .ec-toast-close:hover { color: #ccd; }
+
+.ec-modal-input {
+    width: 100%; box-sizing: border-box;
+    background: #1d1d30; border: 1px solid #3a3a5e; border-radius: 6px;
+    color: #cdd; font-size: 12px; font-family: monospace;
+    padding: 8px 10px; margin: 0 0 14px;
+    text-align: left;
+}
 `;
 
-function ensureStyles(): void {
+/** Ensure the shared modal/toast styles are present (idempotent). */
+export function ensureModalStyles(): void {
     if (document.getElementById(STYLE_ID)) return;
     const style = document.createElement('style');
     style.id = STYLE_ID;
@@ -106,7 +115,7 @@ const COPY: Record<'incoming' | 'reprompt', { title: string; text: string; save:
  * which never overwrites stored defaults).
  */
 export function showIncomingSettingsDialog(options: IncomingSettingsOptions): Promise<SettingsChoice> {
-    ensureStyles();
+    ensureModalStyles();
     const copy = COPY[options.mode];
 
     return new Promise<SettingsChoice>((resolve) => {
@@ -170,7 +179,7 @@ export function showIncomingSettingsDialog(options: IncomingSettingsOptions): Pr
  * cannot be saved in this browser/mode and won't persist after reload.
  */
 export function showStorageWarning(message: string): void {
-    ensureStyles();
+    ensureModalStyles();
     const toast = document.createElement('div');
     toast.className = 'ec-toast';
 

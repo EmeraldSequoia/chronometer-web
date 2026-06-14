@@ -46,6 +46,7 @@ import { initNavigationLinks, updateNavigationLinks } from './shared/url-state.j
 import { getState, setState, initAppState } from './shared/app-state.js';
 import { createFpsIndicator } from './shared/fps-indicator.js';
 import { initHelpPopover } from './shared/help-popover.js';
+import { initShareButton } from './shared/share-button.js';
 import { loadCityData, searchCities, findClosestCity, isCityDataLoaded, loadError } from './shared/city-search.js';
 import type { CityResult } from './shared/city-search.js';
 import { renderGlobe, loadOSMTile } from './shared/mini-map.js';
@@ -2329,6 +2330,9 @@ async function main() {
     });
 
 
+    // --- Share button ---
+    initShareButton({ getState });
+
     // --- Info button & popup (shared wiring + face-specific fixups) ---
     initHelpPopover({
         onFirstOpen: (helpContent) => {
@@ -3448,7 +3452,7 @@ async function main() {
     if (isEmbedMode) {
         const removeIds = [
             'location-panel', 'time-bar', 'back-link', 'all-faces-link',
-            'selected-faces-link', 'info-btn', 'fullscreen-btn', 'face-name', 'time-popover',
+            'selected-faces-link', 'info-btn', 'share-btn', 'fullscreen-btn', 'face-name', 'time-popover',
             'location-prompt', 'planet-selector', 'vienna-noon-toggle',
             'kyoto-hand-toggle', 'kyoto-mode-toggle',
             'change-cities-btn', 'edit-picks-link', 'info-overlay',

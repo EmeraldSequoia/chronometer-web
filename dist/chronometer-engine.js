@@ -18624,6 +18624,25 @@
     history.replaceState(null, "", newUrl);
     updateNavigationLinks();
   }
+  function buildShareUrl(state, baseUrl) {
+    const url = new URL(baseUrl ?? window.location.origin + window.location.pathname);
+    const p = url.searchParams;
+    if (state.lat !== null && state.lat !== void 0) p.set("lat", state.lat.toFixed(3));
+    if (state.lon !== null && state.lon !== void 0) p.set("lon", state.lon.toFixed(3));
+    if (state.city) p.set("city", state.city);
+    if (state.tz) p.set("tz", state.tz);
+    if (state.bloc) p.set("bloc", "1");
+    if (state.off !== null && state.off !== void 0) p.set("off", state.off.toString());
+    if (state.t !== null && state.t !== void 0) p.set("t", state.t.toString());
+    if (state.dir !== 1) p.set("dir", state.dir.toString());
+    if (state.picks) p.set("picks", state.picks);
+    if (state.kyhand) p.set("kyhand", state.kyhand);
+    if (state.kmode) p.set("kmode", state.kmode);
+    if (state.op !== null && state.op !== void 0 && state.op !== 0) p.set("op", state.op.toString());
+    if (state.onoon) p.set("onoon", "1");
+    if (state.tp === "a") p.set("tp", "a");
+    return url.toString();
+  }
   function updateNavigationLinks() {
     const search = window.location.search;
     const backLink = document.getElementById("back-link");
@@ -18731,8 +18750,16 @@
     cursor: pointer; padding: 0 2px; line-height: 1;
 }
 .ec-toast-close:hover { color: #ccd; }
+
+.ec-modal-input {
+    width: 100%; box-sizing: border-box;
+    background: #1d1d30; border: 1px solid #3a3a5e; border-radius: 6px;
+    color: #cdd; font-size: 12px; font-family: monospace;
+    padding: 8px 10px; margin: 0 0 14px;
+    text-align: left;
+}
 `;
-  function ensureStyles() {
+  function ensureModalStyles() {
     if (document.getElementById(STYLE_ID)) return;
     const style = document.createElement("style");
     style.id = STYLE_ID;
@@ -18754,7 +18781,7 @@
     }
   };
   function showIncomingSettingsDialog(options) {
-    ensureStyles();
+    ensureModalStyles();
     const copy = COPY[options.mode];
     return new Promise((resolve) => {
       const backdrop = document.createElement("div");
@@ -18802,7 +18829,7 @@
     });
   }
   function showStorageWarning(message) {
-    ensureStyles();
+    ensureModalStyles();
     const toast = document.createElement("div");
     toast.className = "ec-toast";
     const span = document.createElement("span");
@@ -19294,6 +19321,79 @@
         }
       });
     }
+  }
+
+  // src/shared/share-button.ts
+  function initShareButton(options) {
+    const shareBtn = document.getElementById("share-btn");
+    if (!shareBtn) return;
+    shareBtn.addEventListener("click", () => {
+      showShareDialog(buildShareUrl(options.getState()));
+    });
+  }
+  function showShareDialog(url) {
+    ensureModalStyles();
+    const backdrop = document.createElement("div");
+    backdrop.className = "ec-modal-backdrop";
+    const modal = document.createElement("div");
+    modal.className = "ec-modal";
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    const title = document.createElement("h2");
+    title.className = "ec-modal-title";
+    title.textContent = "Share this view";
+    const text = document.createElement("p");
+    text.className = "ec-modal-text";
+    text.textContent = "Anyone who opens this link sees this time, location, and setup. They choose whether to keep it as their default.";
+    const input = document.createElement("input");
+    input.className = "ec-modal-input";
+    input.type = "text";
+    input.readOnly = true;
+    input.value = url;
+    const buttons = document.createElement("div");
+    buttons.className = "ec-modal-buttons";
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "ec-modal-btn ec-primary";
+    copyBtn.textContent = "Copy link";
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "ec-modal-btn";
+    closeBtn.textContent = "Close";
+    buttons.append(copyBtn, closeBtn);
+    modal.append(title, text, input, buttons);
+    backdrop.append(modal);
+    document.body.appendChild(backdrop);
+    let done = false;
+    const close = () => {
+      if (done) return;
+      done = true;
+      document.removeEventListener("keydown", onKey);
+      backdrop.remove();
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") close();
+    };
+    const selectAll = () => {
+      input.focus();
+      input.select();
+    };
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(url);
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => {
+          copyBtn.textContent = "Copy link";
+        }, 1500);
+      } catch {
+        selectAll();
+        copyBtn.textContent = "Press \u2318C to copy";
+      }
+    });
+    closeBtn.addEventListener("click", close);
+    backdrop.addEventListener("click", (e) => {
+      if (e.target === backdrop) close();
+    });
+    document.addEventListener("keydown", onKey);
+    selectAll();
   }
 
   // src/shared/city-search.ts
@@ -22326,6 +22426,7 @@
         }
       }
     });
+    initShareButton({ getState });
     initHelpPopover({
       onFirstOpen: (helpContent) => {
         helpContent.querySelectorAll(".face-help-section[data-face]").forEach((el) => {
@@ -23223,6 +23324,7 @@
         "all-faces-link",
         "selected-faces-link",
         "info-btn",
+        "share-btn",
         "fullscreen-btn",
         "face-name",
         "time-popover",

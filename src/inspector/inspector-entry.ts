@@ -20,6 +20,7 @@ import { TimeController } from '../shared/time-controller.js';
 import { initTimeControls, writeTimeStateToUrl, type TimeControlsAPI } from '../shared/time-controls-ui.js';
 import { createFpsIndicator } from '../shared/fps-indicator.js';
 import { getState, setState, initAppState } from '../shared/app-state.js';
+import { initShareButton } from '../shared/share-button.js';
 import { resolveTimezone } from '../shared/tz-resolve.js';
 import { findClosestCity } from '../shared/city-search.js';
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
@@ -575,6 +576,9 @@ exprInput.addEventListener('blur', () => {
 
 const refToggle = document.getElementById('ref-toggle')!;
 const refPanel = document.getElementById('ref-panel')!;
+
+// Share button — copy a link encoding the current time/location/config.
+initShareButton({ getState });
 
 function buildReferencePanel(): void {
     const all = getAllCompletions();

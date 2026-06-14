@@ -219,6 +219,47 @@ export function getQueryString(): string {
 }
 
 /**
+ * Build a shareable absolute URL encoding the given state.
+ *
+ * "If it's in the URL today, include it" — with these exceptions:
+ *   - `fps`, `embed` (diagnostic / iframe-deployment flags) and `tc` (transient
+ *     popover visibility) are never shared.
+ *   - Time (`t`/`off`/`dir`) is included only when "interesting" — i.e. the
+ *     clock is stopped, reversed, or running with an offset. A live real-time
+ *     clock contributes nothing, so the recipient sees their own current time.
+ *   - `bloc` is included (the recipient's session/save choice resolves intent).
+ *
+ * @param state   The state to serialize (typically app-state's getState()).
+ * @param baseUrl Optional base; defaults to the current origin + pathname.
+ */
+export function buildShareUrl(state: UrlState, baseUrl?: string): string {
+    const url = new URL(baseUrl ?? (window.location.origin + window.location.pathname));
+    const p = url.searchParams;
+
+    // --- Location ---
+    if (state.lat !== null && state.lat !== undefined) p.set('lat', state.lat.toFixed(3));
+    if (state.lon !== null && state.lon !== undefined) p.set('lon', state.lon.toFixed(3));
+    if (state.city) p.set('city', state.city);
+    if (state.tz) p.set('tz', state.tz);
+    if (state.bloc) p.set('bloc', '1');
+
+    // --- Time (only when not a plain live real-time clock) ---
+    if (state.off !== null && state.off !== undefined) p.set('off', state.off.toString());
+    if (state.t !== null && state.t !== undefined) p.set('t', state.t.toString());
+    if (state.dir !== 1) p.set('dir', state.dir.toString());
+
+    // --- App configuration ---
+    if (state.picks) p.set('picks', state.picks);
+    if (state.kyhand) p.set('kyhand', state.kyhand);
+    if (state.kmode) p.set('kmode', state.kmode);
+    if (state.op !== null && state.op !== undefined && state.op !== 0) p.set('op', state.op.toString());
+    if (state.onoon) p.set('onoon', '1');
+    if (state.tp === 'a') p.set('tp', 'a');
+
+    return url.toString();
+}
+
+/**
  * Update all navigation links on the page to carry the current query params.
  * This ensures lat/lon/tc/t/dir are preserved across page transitions.
  */
