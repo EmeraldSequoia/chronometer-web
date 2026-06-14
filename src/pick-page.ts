@@ -15,6 +15,9 @@
 
 import { FACES } from './faces/generated/faces-list.js';
 import { updateDynamicCompositeIcon } from './shared/composite-icon.js';
+import { initAppState, getState, setState } from './shared/app-state.js';
+
+initAppState({ app: 'pick' });
 
 const faceByAbbrev = new Map(FACES.map(f => [f.abbrev, f]));
 
@@ -44,9 +47,9 @@ const homeLink = document.getElementById('pick-home-link') as HTMLAnchorElement;
 // URL helpers
 // ============================================================================
 
-/** Parse picks from the URL `picks` param (concatenated 2-letter codes). */
-function readPicksFromUrl(): string[] {
-    const param = new URLSearchParams(window.location.search).get('picks');
+/** Parse the current picks (concatenated 2-letter codes) from app state. */
+function readPicks(): string[] {
+    const param = getState().picks;
     if (!param || param.length < 2) return [];
     const result: string[] = [];
     for (let i = 0; i + 1 < param.length; i += 2) {
@@ -56,18 +59,6 @@ function readPicksFromUrl(): string[] {
         }
     }
     return result;
-}
-
-/** Build a URL preserving all current params but setting `picks`. */
-function buildDoneUrl(): string {
-    const params = new URLSearchParams(window.location.search);
-    if (selectedOrder.length > 0) {
-        params.set('picks', selectedOrder.join(''));
-    } else {
-        params.delete('picks');
-    }
-    const qs = params.toString();
-    return 'selected.html' + (qs ? '?' + qs : '');
 }
 
 /** Update the home link to preserve query params. */
@@ -372,7 +363,12 @@ sheetDone.addEventListener('click', () => {
 
 function navigateDone(): void {
     if (selectedOrder.length === 0) return;
-    window.location.href = buildDoneUrl();
+    // Persist picks via app-state. In storage mode this writes to localStorage
+    // and leaves the URL clean; in URL-fallback mode it writes the `picks` param
+    // onto the current URL. Either way, carrying window.location.search to
+    // selected.html does the right thing.
+    setState({ picks: selectedOrder.join('') });
+    window.location.href = 'selected.html' + window.location.search;
 }
 
 // Escape key: close sheet if open, otherwise trigger Done
@@ -391,8 +387,8 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
 // ============================================================================
 
 (function init() {
-    // Restore from URL
-    selectedOrder = readPicksFromUrl();
+    // Restore the current selection from app state (storage or URL).
+    selectedOrder = readPicks();
 
     // Build grid and update UI
     buildGrid();

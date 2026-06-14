@@ -201,7 +201,7 @@ async function main() {
     // On selected.html, filter and reorder faces by the picks parameter
     const isSelectedPage = window.location.pathname.endsWith('selected.html');
     if (isSelectedPage) {
-        const picksParam = new URLSearchParams(window.location.search).get('picks');
+        const picksParam = getState().picks;
         if (picksParam && picksParam.length >= 2) {
             // Parse picks string into array of 2-letter abbreviations
             const abbrevs: string[] = [];

@@ -28,6 +28,7 @@ describe('namespaceOf', () => {
     test('app-specific fields route to their fixed namespace', () => {
         expect(namespaceOf('kyhand', 'inspector')).toBe('chronometer');
         expect(namespaceOf('kmode', 'chronometer')).toBe('chronometer');
+        expect(namespaceOf('picks', 'observatory')).toBe('chronometer');
         expect(namespaceOf('op', 'chronometer')).toBe('observatory');
         expect(namespaceOf('onoon', 'inspector')).toBe('observatory');
     });
@@ -43,8 +44,6 @@ describe('namespaceOf', () => {
         expect(namespaceOf('embed', 'chronometer')).toBeNull();
         expect(namespaceOf('fps', 'observatory')).toBeNull();
         expect(namespaceOf('tc', 'inspector')).toBeNull();
-        // picks flows via URL navigation (Phase 6 will migrate it to storage).
-        expect(namespaceOf('picks', 'chronometer')).toBeNull();
     });
 });
 
@@ -94,13 +93,14 @@ describe('LocalStorageBackend', () => {
         expect(chrono.tp).toBe('a');
     });
 
-    test('picks is not persisted — it stays URL-driven (transitional)', () => {
+    test('picks persists to the chronometer namespace', () => {
         const be = new LocalStorageBackend('chronometer');
         be.write({ picks: 'bbmk' });
-        expect(localStorage.getItem(STORAGE_KEY_PREFIX + 'chronometer')).toBeNull();
-        // Read sources picks from the URL, not storage.
-        window.history.replaceState(null, '', '/?picks=mktr');
-        expect(be.read().picks).toBe('mktr');
+        const chrono = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + 'chronometer')!);
+        expect(chrono.picks).toBe('bbmk');
+        expect(be.read().picks).toBe('bbmk');
+        // pick-page reads the same chronometer picks.
+        expect(new LocalStorageBackend('pick').read().picks).toBe('bbmk');
     });
 
     test('read merges shared + app namespaces over defaults', () => {
@@ -147,21 +147,20 @@ describe('LocalStorageBackend', () => {
     });
 
     test('URL-only fields come from the URL, not storage', () => {
-        window.history.replaceState(null, '', '/?fps&embed=1&picks=bbmk');
+        window.history.replaceState(null, '', '/?fps&embed=1');
         const s = new LocalStorageBackend('chronometer').read();
         expect(s.fps).toBe(true);
         expect(s.embed).toBe(true);
-        expect(s.picks).toBe('bbmk');
     });
 });
 
 describe('incoming-settings detection', () => {
-    test('hasShareableParamsInUrl detects shareable keys, ignores fps/embed/picks', () => {
-        window.history.replaceState(null, '', '/?fps&embed=1&picks=bbmk');
+    test('hasShareableParamsInUrl detects shareable keys, ignores fps/embed/tc', () => {
+        window.history.replaceState(null, '', '/?fps&embed=1&tc=1');
         expect(hasShareableParamsInUrl()).toBe(false);
         window.history.replaceState(null, '', '/?lat=10&lon=20');
         expect(hasShareableParamsInUrl()).toBe(true);
-        window.history.replaceState(null, '', '/?tp=a');
+        window.history.replaceState(null, '', '/?picks=bbmk');
         expect(hasShareableParamsInUrl()).toBe(true);
     });
 
@@ -174,14 +173,14 @@ describe('incoming-settings detection', () => {
         expect(shareableUrlEqualsStored(ls)).toBe(false);
     });
 
-    test('clearShareableParamsFromUrl strips shareable params, keeps fps/picks', () => {
+    test('clearShareableParamsFromUrl strips shareable params (incl. picks), keeps fps', () => {
         window.history.replaceState(null, '', '/?lat=10&lon=20&op=3&fps&picks=bbmk');
         clearShareableParamsFromUrl();
         const p = new URLSearchParams(window.location.search);
         expect(p.has('lat')).toBe(false);
         expect(p.has('op')).toBe(false);
+        expect(p.has('picks')).toBe(false);
         expect(p.has('fps')).toBe(true);
-        expect(p.has('picks')).toBe(true);
     });
 });
 

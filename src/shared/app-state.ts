@@ -21,7 +21,7 @@
  * See planning/2026-06-13-localstorage-state-and-sharing.md.
  */
 
-import { readUrlState, writeUrlState, type UrlState } from './url-state.js';
+import { readUrlState, writeUrlState, setPicksProvider, type UrlState } from './url-state.js';
 import { showIncomingSettingsDialog, showStorageWarning } from './incoming-settings-dialog.js';
 
 // ============================================================================
@@ -61,14 +61,9 @@ const SHARED_FIELDS: ReadonlySet<keyof UrlState> = new Set([
  * URL-only fields. These are never persisted to storage; they are always read
  * from the URL (e.g. ?embed=1 for an iframe, ?fps for the diagnostic readout)
  * and `tc` (time-controller popover visibility) is transient.
- *
- * `picks` is here transitionally: face selection still flows via URL navigation
- * (pick.html → selected.html) until Phase 6 reworks that flow to use storage.
- * Treating it as URL-only keeps that navigation working and prevents an
- * internal `?picks=...` link from triggering the incoming-settings dialog.
  */
 const URL_ONLY_FIELDS: ReadonlySet<keyof UrlState> = new Set([
-    'embed', 'fps', 'tc', 'picks',
+    'embed', 'fps', 'tc',
 ]);
 
 /**
@@ -82,6 +77,7 @@ function namespaceOf(field: keyof UrlState, app: AppName): Namespace | null {
     if (URL_ONLY_FIELDS.has(field)) return null;
     if (SHARED_FIELDS.has(field)) return 'shared';
     switch (field) {
+        case 'picks':
         case 'kyhand':
         case 'kmode':
             return 'chronometer';
@@ -194,9 +190,11 @@ function appNamespace(app: AppName): Namespace | null {
         case 'chronometer': return 'chronometer';
         case 'observatory': return 'observatory';
         case 'inspector': return 'inspector';
-        // pick-page reads the chronometer picks; index reads shared only.
+        // The home and pick pages both surface the chronometer face set (the
+        // pick-card / selected-faces routing reads `picks`), so they read the
+        // chronometer namespace too.
         case 'pick': return 'chronometer';
-        case 'index': return null;
+        case 'index': return 'chronometer';
     }
 }
 
@@ -304,17 +302,18 @@ const TIME_FIELDS: ReadonlySet<keyof UrlState> = new Set(['t', 'off', 'dir']);
  */
 const SHAREABLE_FIELDS: readonly (keyof UrlState)[] = [
     'lat', 'lon', 'city', 'tz', 'bloc', 't', 'off', 'dir',
-    'kyhand', 'kmode', 'op', 'onoon', 'tp',
+    'picks', 'kyhand', 'kmode', 'op', 'onoon', 'tp',
 ];
 
 /**
  * Raw URL query keys considered "shareable". Presence of any of these triggers
- * the incoming-settings flow. Excludes `picks` (internal pick-page navigation,
- * Phase 6), `tc` (transient), and `embed`/`fps` (URL-only flags).
+ * the incoming-settings flow. Excludes `tc` (transient) and `embed`/`fps`
+ * (URL-only flags). `picks` is included: pick.html now writes it to storage and
+ * navigates with a clean URL, so a `?picks=` URL is an external/shared link.
  */
 const SHAREABLE_URL_KEYS: readonly string[] = [
     'lat', 'lon', 'long', 'city', 'loc', 'tz', 'bloc',
-    't', 'off', 'dir', 'kyhand', 'kmode', 'op', 'onoon', 'tp',
+    't', 'off', 'dir', 'picks', 'kyhand', 'kmode', 'op', 'onoon', 'tp',
 ];
 
 /** Query keys cleared from the URL when settings are adopted into storage. */
@@ -369,6 +368,10 @@ export interface InitAppStateOptions {
  */
 export function initAppState(options: InitAppStateOptions): void {
     appName = options.app;
+
+    // Navigation links route pick.html vs selected.html on whether picks exist;
+    // source that from the active backend (storage in storage mode, URL otherwise).
+    setPicksProvider(() => getState().picks);
 
     if (!LOCALSTORAGE_ENABLED) {
         activeBackend = new UrlBackend();

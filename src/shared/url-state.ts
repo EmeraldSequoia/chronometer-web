@@ -116,6 +116,10 @@ export function writeUrlState(changes: Partial<UrlState>): void {
             params.delete('lon');
         }
     }
+    if ('picks' in changes) {
+        if (changes.picks) params.set('picks', changes.picks);
+        else params.delete('picks');
+    }
     if ('kyhand' in changes) {
         if (changes.kyhand) params.set('kyhand', changes.kyhand);
         else params.delete('kyhand');
@@ -260,8 +264,26 @@ export function buildShareUrl(state: UrlState, baseUrl?: string): string {
 }
 
 /**
+ * Source for "do picks exist?" used to route the selected-faces link to
+ * selected.html vs pick.html. Defaults to reading the URL; app-state overrides
+ * this (via setPicksProvider) to read the active backend, so storage-mode pages
+ * route correctly even though the URL is clean.
+ */
+let picksProvider: () => string | null = () =>
+    new URLSearchParams(window.location.search).get('picks');
+
+/** Override how navigation routing determines whether picks exist. */
+export function setPicksProvider(fn: () => string | null): void {
+    picksProvider = fn;
+}
+
+/**
  * Update all navigation links on the page to carry the current query params.
  * This ensures lat/lon/tc/t/dir are preserved across page transitions.
+ *
+ * In storage mode the URL is clean, so copying window.location.search yields
+ * clean links (state travels via localStorage); in the URL fallback / session
+ * mode the params are copied as before.
  */
 export function updateNavigationLinks(): void {
     const search = window.location.search;
@@ -282,8 +304,7 @@ export function updateNavigationLinks(): void {
     // Update selected-faces-link (2×2 icon → selected.html or pick.html)
     const selectedLink = document.getElementById('selected-faces-link') as HTMLAnchorElement | null;
     if (selectedLink) {
-        const params = new URLSearchParams(search);
-        const hasPicks = !!params.get('picks');
+        const hasPicks = !!picksProvider();
         const baseHref = hasPicks ? 'selected.html' : 'pick.html';
         const url = new URL(baseHref, window.location.href);
         url.search = search;

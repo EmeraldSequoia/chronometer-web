@@ -11,6 +11,10 @@
 import { loadCityData, searchCities, findClosestCity, isCityDataLoaded, loadError } from './shared/city-search.js';
 import type { CityResult } from './shared/city-search.js';
 import { renderGlobe, loadOSMTile } from './shared/mini-map.js';
+import { initAppState, getState, setState } from './shared/app-state.js';
+
+// Select the state backend before any getState()/setState() call.
+initAppState({ app: 'index' });
 
 // ============================================================================
 // Constants
@@ -27,43 +31,8 @@ const isFileProtocol = window.location.protocol === 'file:';
 loadCityData().catch(() => {});
 
 // ============================================================================
-// URL state helpers
+// Navigation link updates
 // ============================================================================
-
-function readUrlState(): { lat: number | null; lon: number | null; city: string | null; bloc: boolean } {
-    const params = new URLSearchParams(window.location.search);
-    const latStr = params.get('lat');
-    const lonStr = params.get('lon') || params.get('long');
-    return {
-        lat: latStr !== null && !isNaN(parseFloat(latStr)) ? parseFloat(latStr) : null,
-        lon: lonStr !== null && !isNaN(parseFloat(lonStr)) ? parseFloat(lonStr) : null,
-        city: params.get('city'),
-        bloc: params.get('bloc') === '1',
-    };
-}
-
-function writeUrlState(changes: { lat?: number | null; lon?: number | null; city?: string | null; bloc?: boolean }) {
-    const params = new URLSearchParams(window.location.search);
-    if ('lat' in changes) {
-        if (changes.lat != null) params.set('lat', changes.lat.toFixed(3));
-        else params.delete('lat');
-    }
-    if ('lon' in changes) {
-        if (changes.lon != null) params.set('lon', changes.lon.toFixed(3));
-        else params.delete('lon');
-    }
-    if ('city' in changes) {
-        if (changes.city) params.set('city', changes.city);
-        else params.delete('city');
-    }
-    if ('bloc' in changes) {
-        if (changes.bloc) params.set('bloc', '1');
-        else params.delete('bloc');
-    }
-    params.delete('long'); params.delete('loc');
-    const qs = params.toString();
-    history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
-}
 
 /** Update all face-card links to include the current URL search params. */
 function updateLinks() {
@@ -79,8 +48,7 @@ function updateLinks() {
     // Smart pick card: show "Selected Faces" if picks exist, else "Pick Faces"
     const pickCard = document.getElementById('pick-card') as HTMLAnchorElement | null;
     if (pickCard) {
-        const params = new URLSearchParams(search);
-        const hasPicks = !!params.get('picks');
+        const hasPicks = !!getState().picks;
         const baseHref = hasPicks ? 'selected.html' : 'pick.html';
         const url = new URL(baseHref, window.location.href);
         url.search = search;
@@ -234,7 +202,7 @@ function applyLocation(newLat: number, newLon: number, source: string, fullLabel
     locationFullLabel = fullLabel;
     locationSourceType = sourceType;
     if (writeToUrl) {
-        writeUrlState({ lat: newLat, lon: newLon, city: source || null });
+        setState({ lat: newLat, lon: newLon, city: source || null });
     }
     updateLinks();
     updateMapPreview(newLat, newLon);
@@ -259,7 +227,7 @@ lpUseBrowser.addEventListener('click', async () => {
         lpUseBrowser.textContent = browserBtnLabel;
         applyLocation(result.lat, result.lon, '', '', 'browser', false);
         // Write bloc=1 and clear lat/lon/city so next reload asks browser again
-        writeUrlState({ bloc: true, lat: null, lon: null, city: null });
+        setState({ bloc: true, lat: null, lon: null, city: null });
         updateLinks();
     } else if (result.status === 'denied') {
         // User denied — disable the button
@@ -412,7 +380,7 @@ lpCityInput.addEventListener('keydown', (e: KeyboardEvent) => {
 // ============================================================================
 
 (async function init() {
-    const urlState = readUrlState();
+    const urlState = getState();
 
     if (urlState.lat !== null && urlState.lon !== null) {
         hasLocation = true;

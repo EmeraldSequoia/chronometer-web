@@ -18539,6 +18539,10 @@
         params.delete("lon");
       }
     }
+    if ("picks" in changes) {
+      if (changes.picks) params.set("picks", changes.picks);
+      else params.delete("picks");
+    }
     if ("kyhand" in changes) {
       if (changes.kyhand) params.set("kyhand", changes.kyhand);
       else params.delete("kyhand");
@@ -18643,6 +18647,10 @@
     if (state.tp === "a") p.set("tp", "a");
     return url.toString();
   }
+  var picksProvider = () => new URLSearchParams(window.location.search).get("picks");
+  function setPicksProvider(fn) {
+    picksProvider = fn;
+  }
   function updateNavigationLinks() {
     const search = window.location.search;
     const backLink = document.getElementById("back-link");
@@ -18659,8 +18667,7 @@
     }
     const selectedLink = document.getElementById("selected-faces-link");
     if (selectedLink) {
-      const params = new URLSearchParams(search);
-      const hasPicks = !!params.get("picks");
+      const hasPicks = !!picksProvider();
       const baseHref = hasPicks ? "selected.html" : "pick.html";
       const url = new URL(baseHref, window.location.href);
       url.search = search;
@@ -18861,13 +18868,13 @@
   var URL_ONLY_FIELDS = /* @__PURE__ */ new Set([
     "embed",
     "fps",
-    "tc",
-    "picks"
+    "tc"
   ]);
   function namespaceOf(field, app) {
     if (URL_ONLY_FIELDS.has(field)) return null;
     if (SHARED_FIELDS.has(field)) return "shared";
     switch (field) {
+      case "picks":
       case "kyhand":
       case "kmode":
         return "chronometer";
@@ -18968,11 +18975,13 @@
         return "observatory";
       case "inspector":
         return "inspector";
-      // pick-page reads the chronometer picks; index reads shared only.
+      // The home and pick pages both surface the chronometer face set (the
+      // pick-card / selected-faces routing reads `picks`), so they read the
+      // chronometer namespace too.
       case "pick":
         return "chronometer";
       case "index":
-        return null;
+        return "chronometer";
     }
   }
   function readNamespace(ns) {
@@ -19050,6 +19059,7 @@
     "t",
     "off",
     "dir",
+    "picks",
     "kyhand",
     "kmode",
     "op",
@@ -19067,6 +19077,7 @@
     "t",
     "off",
     "dir",
+    "picks",
     "kyhand",
     "kmode",
     "op",
@@ -19095,6 +19106,7 @@
   var warnedNoPersistence = false;
   function initAppState(options) {
     appName = options.app;
+    setPicksProvider(() => getState().picks);
     if (!LOCALSTORAGE_ENABLED) {
       activeBackend = new UrlBackend();
       return;
@@ -20864,7 +20876,7 @@
     }
     const isSelectedPage = window.location.pathname.endsWith("selected.html");
     if (isSelectedPage) {
-      const picksParam = new URLSearchParams(window.location.search).get("picks");
+      const picksParam = getState().picks;
       if (picksParam && picksParam.length >= 2) {
         const abbrevs = [];
         for (let i = 0; i + 1 < picksParam.length; i += 2) {

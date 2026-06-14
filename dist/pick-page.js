@@ -325,7 +325,682 @@
     }
   }
 
+  // src/shared/url-state.ts
+  function readUrlState() {
+    const params = new URLSearchParams(window.location.search);
+    const latStr = params.get("lat");
+    const lonStr = params.get("lon") || params.get("long");
+    const lat = latStr !== null ? parseFloat(latStr) : NaN;
+    const lon = lonStr !== null ? parseFloat(lonStr) : NaN;
+    const city = params.get("city");
+    const blocStr = params.get("bloc");
+    const tcStr = params.get("tc");
+    const tStr = params.get("t");
+    const offStr = params.get("off");
+    const dirStr = params.get("dir");
+    let dir = 1;
+    if (dirStr === "-1") dir = -1;
+    else if (dirStr === "0") dir = 0;
+    return {
+      lat: !isNaN(lat) ? lat : null,
+      lon: !isNaN(lon) ? lon : null,
+      city: city || null,
+      bloc: blocStr === "1",
+      tc: tcStr === "1",
+      t: tStr !== null ? parseInt(tStr, 10) : null,
+      off: offStr !== null ? parseInt(offStr, 10) : null,
+      dir,
+      tz: params.get("tz") || null,
+      picks: params.get("picks") || null,
+      tp: params.get("tp") === "a" ? "a" : "d",
+      embed: params.get("embed") === "1",
+      fps: params.has("fps"),
+      kyhand: params.get("kyhand"),
+      kmode: params.get("kmode"),
+      op: (() => {
+        const s = params.get("op");
+        const n = s !== null ? parseInt(s, 10) : NaN;
+        return Number.isFinite(n) ? n : null;
+      })(),
+      onoon: params.get("onoon") === "1"
+    };
+  }
+  function writeUrlState(changes) {
+    const params = new URLSearchParams(window.location.search);
+    if ("lat" in changes) {
+      if (changes.lat !== null && changes.lat !== void 0) {
+        params.set("lat", changes.lat.toFixed(3));
+      } else {
+        params.delete("lat");
+      }
+    }
+    if ("lon" in changes) {
+      if (changes.lon !== null && changes.lon !== void 0) {
+        params.set("lon", changes.lon.toFixed(3));
+      } else {
+        params.delete("lon");
+      }
+    }
+    if ("picks" in changes) {
+      if (changes.picks) params.set("picks", changes.picks);
+      else params.delete("picks");
+    }
+    if ("kyhand" in changes) {
+      if (changes.kyhand) params.set("kyhand", changes.kyhand);
+      else params.delete("kyhand");
+    }
+    if ("kmode" in changes) {
+      if (changes.kmode) params.set("kmode", changes.kmode);
+      else params.delete("kmode");
+    }
+    if ("city" in changes) {
+      if (changes.city) {
+        params.set("city", changes.city);
+      } else {
+        params.delete("city");
+      }
+    }
+    if ("bloc" in changes) {
+      if (changes.bloc) {
+        params.set("bloc", "1");
+      } else {
+        params.delete("bloc");
+      }
+    }
+    if ("tc" in changes) {
+      if (changes.tc) {
+        params.set("tc", "1");
+      } else {
+        params.delete("tc");
+      }
+    }
+    if ("t" in changes) {
+      if (changes.t !== null && changes.t !== void 0) {
+        params.set("t", changes.t.toString());
+      } else {
+        params.delete("t");
+      }
+    }
+    if ("off" in changes) {
+      if (changes.off !== null && changes.off !== void 0) {
+        params.set("off", changes.off.toString());
+      } else {
+        params.delete("off");
+      }
+    }
+    if ("dir" in changes) {
+      if (changes.dir !== void 0 && changes.dir !== 1) {
+        params.set("dir", changes.dir.toString());
+      } else {
+        params.delete("dir");
+      }
+    }
+    if ("tz" in changes) {
+      if (changes.tz) {
+        params.set("tz", changes.tz);
+      } else {
+        params.delete("tz");
+      }
+    }
+    if ("tp" in changes) {
+      if (changes.tp === "a") {
+        params.set("tp", "a");
+      } else {
+        params.delete("tp");
+      }
+    }
+    if ("op" in changes) {
+      if (changes.op !== null && changes.op !== void 0 && changes.op !== 0) {
+        params.set("op", changes.op.toString());
+      } else {
+        params.delete("op");
+      }
+    }
+    if ("onoon" in changes) {
+      if (changes.onoon) {
+        params.set("onoon", "1");
+      } else {
+        params.delete("onoon");
+      }
+    }
+    params.delete("long");
+    params.delete("loc");
+    const qs = params.toString();
+    const newUrl = window.location.pathname + (qs ? "?" + qs : "");
+    history.replaceState(null, "", newUrl);
+    updateNavigationLinks();
+  }
+  var picksProvider = () => new URLSearchParams(window.location.search).get("picks");
+  function setPicksProvider(fn) {
+    picksProvider = fn;
+  }
+  function updateNavigationLinks() {
+    const search = window.location.search;
+    const backLink = document.getElementById("back-link");
+    if (backLink) {
+      const url = new URL(backLink.getAttribute("data-base-href") || "index.html", window.location.href);
+      url.search = search;
+      backLink.href = url.toString();
+    }
+    const allFacesLink = document.getElementById("all-faces-link");
+    if (allFacesLink) {
+      const url = new URL(allFacesLink.getAttribute("data-base-href") || "all.html", window.location.href);
+      url.search = search;
+      allFacesLink.href = url.toString();
+    }
+    const selectedLink = document.getElementById("selected-faces-link");
+    if (selectedLink) {
+      const hasPicks = !!picksProvider();
+      const baseHref = hasPicks ? "selected.html" : "pick.html";
+      const url = new URL(baseHref, window.location.href);
+      url.search = search;
+      selectedLink.href = url.toString();
+      selectedLink.title = hasPicks ? "Selected Faces" : "Pick Faces";
+    }
+    const editPicksLink = document.getElementById("edit-picks-link");
+    if (editPicksLink) {
+      const url = new URL("pick.html", window.location.href);
+      url.search = search;
+      editPicksLink.href = url.toString();
+    }
+    document.querySelectorAll("a.face-card").forEach((a) => {
+      const anchor = a;
+      const url = new URL(anchor.getAttribute("data-base-href") || anchor.getAttribute("href"), window.location.href);
+      url.search = search;
+      anchor.href = url.toString();
+    });
+  }
+
+  // src/shared/incoming-settings-dialog.ts
+  var STYLE_ID = "ec-settings-dialog-style";
+  var CSS = `
+.ec-modal-backdrop {
+    position: fixed; inset: 0; z-index: 1000;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px 16px;
+    background: rgba(0, 0, 0, 0.5);
+}
+.ec-modal {
+    position: relative;
+    background: rgba(26, 26, 46, 0.98);
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border: 1px solid #3a3a5e; border-radius: 14px;
+    padding: 26px 30px; min-width: 300px; max-width: 400px; width: 100%;
+    box-shadow: 0 8px 48px rgba(0, 0, 0, 0.6);
+    text-align: center;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.ec-modal-title {
+    font-size: 16px; color: #e0d8c8; margin: 0 0 10px; font-weight: 400;
+}
+.ec-modal-text {
+    font-size: 13px; color: #aab; line-height: 1.5; margin: 0 0 20px;
+}
+.ec-modal-buttons { display: flex; flex-direction: column; gap: 8px; }
+.ec-modal-btn {
+    border-radius: 6px; font-size: 13px; padding: 9px 16px;
+    cursor: pointer; transition: background 0.15s, color 0.15s;
+    background: #2a2a4e; border: 1px solid #3a3a5e; color: #aac;
+}
+.ec-modal-btn:hover { background: #3a3a6e; color: #ddf; }
+.ec-modal-btn.ec-primary {
+    background: #34507a; border-color: #4a6fa5; color: #dde9ff;
+}
+.ec-modal-btn.ec-primary:hover { background: #3f5f92; color: #fff; }
+
+.ec-toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    z-index: 1001; max-width: 340px;
+    background: rgba(26, 26, 46, 0.98); border: 1px solid #3a3a5e;
+    border-radius: 10px; padding: 12px 16px;
+    box-shadow: 0 6px 32px rgba(0, 0, 0, 0.5);
+    color: #ccd; font-size: 12.5px; line-height: 1.45;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    display: flex; align-items: center; gap: 12px;
+}
+.ec-toast-close {
+    background: none; border: none; color: #889; font-size: 18px;
+    cursor: pointer; padding: 0 2px; line-height: 1;
+}
+.ec-toast-close:hover { color: #ccd; }
+
+.ec-modal-input {
+    width: 100%; box-sizing: border-box;
+    background: #1d1d30; border: 1px solid #3a3a5e; border-radius: 6px;
+    color: #cdd; font-size: 12px; font-family: monospace;
+    padding: 8px 10px; margin: 0 0 14px;
+    text-align: left;
+}
+`;
+  function ensureModalStyles() {
+    if (document.getElementById(STYLE_ID)) return;
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = CSS;
+    document.head.appendChild(style);
+  }
+  var COPY = {
+    incoming: {
+      title: "Use these shared settings?",
+      text: "This link includes a saved time, location, or configuration. Save them as your default on this device, or use them just for this visit?",
+      save: "Save as my default",
+      session: "Use for this visit only"
+    },
+    reprompt: {
+      title: "Save your changes?",
+      text: "You changed a setting while viewing shared settings. Save your current settings as the default on this device, or keep them only for this visit?",
+      save: "Save as my default",
+      session: "Keep for this visit only"
+    }
+  };
+  function showIncomingSettingsDialog(options) {
+    ensureModalStyles();
+    const copy = COPY[options.mode];
+    return new Promise((resolve) => {
+      const backdrop = document.createElement("div");
+      backdrop.className = "ec-modal-backdrop";
+      const modal = document.createElement("div");
+      modal.className = "ec-modal";
+      modal.setAttribute("role", "dialog");
+      modal.setAttribute("aria-modal", "true");
+      const title = document.createElement("h2");
+      title.className = "ec-modal-title";
+      title.textContent = copy.title;
+      const text = document.createElement("p");
+      text.className = "ec-modal-text";
+      text.textContent = copy.text;
+      const buttons = document.createElement("div");
+      buttons.className = "ec-modal-buttons";
+      const saveBtn = document.createElement("button");
+      saveBtn.className = "ec-modal-btn ec-primary";
+      saveBtn.textContent = copy.save;
+      const sessionBtn = document.createElement("button");
+      sessionBtn.className = "ec-modal-btn";
+      sessionBtn.textContent = copy.session;
+      buttons.append(saveBtn, sessionBtn);
+      modal.append(title, text, buttons);
+      backdrop.append(modal);
+      document.body.appendChild(backdrop);
+      let done = false;
+      const finish = (choice) => {
+        if (done) return;
+        done = true;
+        document.removeEventListener("keydown", onKey);
+        backdrop.remove();
+        resolve(choice);
+      };
+      const onKey = (e) => {
+        if (e.key === "Escape") finish("session");
+      };
+      saveBtn.addEventListener("click", () => finish("save"));
+      sessionBtn.addEventListener("click", () => finish("session"));
+      backdrop.addEventListener("click", (e) => {
+        if (e.target === backdrop) finish("session");
+      });
+      document.addEventListener("keydown", onKey);
+      saveBtn.focus();
+    });
+  }
+  function showStorageWarning(message) {
+    ensureModalStyles();
+    const toast = document.createElement("div");
+    toast.className = "ec-toast";
+    const span = document.createElement("span");
+    span.textContent = message;
+    const close = document.createElement("button");
+    close.className = "ec-toast-close";
+    close.setAttribute("aria-label", "Dismiss");
+    close.textContent = "\xD7";
+    close.addEventListener("click", () => toast.remove());
+    toast.append(span, close);
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 12e3);
+  }
+
+  // src/shared/app-state.ts
+  var LOCALSTORAGE_ENABLED = true;
+  var SCHEMA_VERSION = 1;
+  var STORAGE_KEY_PREFIX = "ec:";
+  var SHARED_FIELDS = /* @__PURE__ */ new Set([
+    "lat",
+    "lon",
+    "city",
+    "tz",
+    "bloc",
+    "t",
+    "off",
+    "dir"
+  ]);
+  var URL_ONLY_FIELDS = /* @__PURE__ */ new Set([
+    "embed",
+    "fps",
+    "tc"
+  ]);
+  function namespaceOf(field, app) {
+    if (URL_ONLY_FIELDS.has(field)) return null;
+    if (SHARED_FIELDS.has(field)) return "shared";
+    switch (field) {
+      case "picks":
+      case "kyhand":
+      case "kmode":
+        return "chronometer";
+      case "op":
+      case "onoon":
+        return "observatory";
+      case "tp":
+        return app === "index" || app === "pick" ? null : app;
+      default:
+        return null;
+    }
+  }
+  function defaultState() {
+    return {
+      lat: null,
+      lon: null,
+      city: null,
+      bloc: false,
+      tc: false,
+      t: null,
+      off: null,
+      dir: 1,
+      tz: null,
+      picks: null,
+      tp: "d",
+      embed: false,
+      fps: false,
+      kyhand: null,
+      kmode: null,
+      op: null,
+      onoon: false
+    };
+  }
+  function isDefaultValue(field, value) {
+    if (value === null || value === void 0) return true;
+    switch (field) {
+      case "dir":
+        return value === 1;
+      case "tp":
+        return value === "d";
+      case "bloc":
+      case "tc":
+      case "embed":
+      case "fps":
+      case "onoon":
+        return value === false;
+      case "op":
+        return value === 0;
+      default:
+        return false;
+    }
+  }
+  var UrlBackend = class {
+    read() {
+      return readUrlState();
+    }
+    write(changes) {
+      writeUrlState(changes);
+    }
+  };
+  var LocalStorageBackend = class {
+    constructor(app) {
+      this.app = app;
+    }
+    read() {
+      const state = defaultState();
+      Object.assign(state, readNamespace("shared"));
+      const appNs = appNamespace(this.app);
+      if (appNs) Object.assign(state, readNamespace(appNs));
+      const url = readUrlState();
+      for (const field of URL_ONLY_FIELDS) {
+        state[field] = url[field];
+      }
+      return state;
+    }
+    write(changes) {
+      const buckets = /* @__PURE__ */ new Map();
+      for (const key of Object.keys(changes)) {
+        const ns = namespaceOf(key, this.app);
+        if (!ns) continue;
+        let bucket = buckets.get(ns);
+        if (!bucket) {
+          bucket = {};
+          buckets.set(ns, bucket);
+        }
+        bucket[key] = changes[key];
+      }
+      for (const [ns, bucket] of buckets) {
+        mergeNamespace(ns, bucket);
+      }
+    }
+  };
+  function appNamespace(app) {
+    switch (app) {
+      case "chronometer":
+        return "chronometer";
+      case "observatory":
+        return "observatory";
+      case "inspector":
+        return "inspector";
+      // The home and pick pages both surface the chronometer face set (the
+      // pick-card / selected-faces routing reads `picks`), so they read the
+      // chronometer namespace too.
+      case "pick":
+        return "chronometer";
+      case "index":
+        return "chronometer";
+    }
+  }
+  function readNamespace(ns) {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_PREFIX + ns);
+      if (!raw) return {};
+      const obj = JSON.parse(raw);
+      delete obj.v;
+      return obj;
+    } catch {
+      return {};
+    }
+  }
+  function mergeNamespace(ns, changes) {
+    const key = STORAGE_KEY_PREFIX + ns;
+    let current;
+    try {
+      current = JSON.parse(localStorage.getItem(key) || "{}");
+    } catch {
+      current = {};
+    }
+    for (const field of Object.keys(changes)) {
+      const value = changes[field];
+      if (isDefaultValue(field, value)) {
+        delete current[field];
+      } else {
+        current[field] = value;
+      }
+    }
+    delete current.v;
+    if (Object.keys(current).length === 0) {
+      localStorage.removeItem(key);
+    } else {
+      current.v = SCHEMA_VERSION;
+      localStorage.setItem(key, JSON.stringify(current));
+    }
+  }
+  var InMemoryBackend = class {
+    constructor(seed) {
+      this.state = { ...defaultState(), ...seed || {} };
+    }
+    read() {
+      const url = readUrlState();
+      const state = { ...this.state };
+      for (const field of URL_ONLY_FIELDS) {
+        state[field] = url[field];
+      }
+      return state;
+    }
+    write(changes) {
+      for (const key of Object.keys(changes)) {
+        if (URL_ONLY_FIELDS.has(key)) continue;
+        this.state[key] = changes[key];
+      }
+    }
+  };
+  function storageWorks() {
+    try {
+      const k = STORAGE_KEY_PREFIX + "__probe__";
+      localStorage.setItem(k, "1");
+      const ok = localStorage.getItem(k) === "1";
+      localStorage.removeItem(k);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+  var TIME_FIELDS = /* @__PURE__ */ new Set(["t", "off", "dir"]);
+  var SHAREABLE_FIELDS = [
+    "lat",
+    "lon",
+    "city",
+    "tz",
+    "bloc",
+    "t",
+    "off",
+    "dir",
+    "picks",
+    "kyhand",
+    "kmode",
+    "op",
+    "onoon",
+    "tp"
+  ];
+  var SHAREABLE_URL_KEYS = [
+    "lat",
+    "lon",
+    "long",
+    "city",
+    "loc",
+    "tz",
+    "bloc",
+    "t",
+    "off",
+    "dir",
+    "picks",
+    "kyhand",
+    "kmode",
+    "op",
+    "onoon",
+    "tp"
+  ];
+  var CLEARED_URL_KEYS = [...SHAREABLE_URL_KEYS, "tc"];
+  function hasShareableParamsInUrl() {
+    const params = new URLSearchParams(window.location.search);
+    return SHAREABLE_URL_KEYS.some((k) => params.has(k));
+  }
+  function shareableUrlEqualsStored(ls) {
+    const url = readUrlState();
+    const stored = ls.read();
+    return SHAREABLE_FIELDS.every((f) => url[f] === stored[f]);
+  }
+  function clearShareableParamsFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    for (const k of CLEARED_URL_KEYS) params.delete(k);
+    const qs = params.toString();
+    history.replaceState(null, "", window.location.pathname + (qs ? "?" + qs : ""));
+  }
+  var activeBackend = null;
+  var appName = "index";
+  var sessionRePromptArmed = false;
+  var warnedNoPersistence = false;
+  function initAppState(options) {
+    appName = options.app;
+    setPicksProvider(() => getState().picks);
+    if (!LOCALSTORAGE_ENABLED) {
+      activeBackend = new UrlBackend();
+      return;
+    }
+    if (readUrlState().embed) {
+      activeBackend = new UrlBackend();
+      return;
+    }
+    if (!storageWorks()) {
+      if (window.location.protocol === "file:") {
+        activeBackend = new UrlBackend();
+      } else {
+        activeBackend = new InMemoryBackend(readUrlState());
+        warnNoPersistence();
+      }
+      return;
+    }
+    const ls = new LocalStorageBackend(appName);
+    if (!hasShareableParamsInUrl()) {
+      activeBackend = ls;
+      return;
+    }
+    if (shareableUrlEqualsStored(ls)) {
+      clearShareableParamsFromUrl();
+      activeBackend = ls;
+      return;
+    }
+    activeBackend = new UrlBackend();
+    void promptIncomingSettings(ls);
+  }
+  async function promptIncomingSettings(ls) {
+    const choice = await showIncomingSettingsDialog({ mode: "incoming" });
+    if (choice === "save") {
+      adoptCurrentStateAsDefault(ls);
+    } else {
+      sessionRePromptArmed = true;
+    }
+  }
+  function adoptCurrentStateAsDefault(ls) {
+    ls.write(getState());
+    clearShareableParamsFromUrl();
+    activeBackend = ls;
+    sessionRePromptArmed = false;
+  }
+  function warnNoPersistence() {
+    if (warnedNoPersistence) return;
+    warnedNoPersistence = true;
+    showStorageWarning("Your settings can't be saved in this browser and won't persist after you reload.");
+  }
+  function downgradeToInMemory() {
+    if (activeBackend instanceof InMemoryBackend) return;
+    const seed = activeBackend ? activeBackend.read() : void 0;
+    activeBackend = new InMemoryBackend(seed);
+    warnNoPersistence();
+  }
+  function backend() {
+    if (!activeBackend) activeBackend = new UrlBackend();
+    return activeBackend;
+  }
+  function hasNonTimePersistableChange(changes) {
+    return Object.keys(changes).some(
+      (k) => !TIME_FIELDS.has(k) && namespaceOf(k, appName) !== null
+    );
+  }
+  function getState() {
+    return backend().read();
+  }
+  function setState(changes) {
+    try {
+      backend().write(changes);
+    } catch {
+      downgradeToInMemory();
+      backend().write(changes);
+    }
+    if (sessionRePromptArmed && hasNonTimePersistableChange(changes)) {
+      sessionRePromptArmed = false;
+      void promptSessionReprompt();
+    }
+  }
+  async function promptSessionReprompt() {
+    const choice = await showIncomingSettingsDialog({ mode: "reprompt" });
+    if (choice === "save") {
+      adoptCurrentStateAsDefault(new LocalStorageBackend(appName));
+    }
+  }
+
   // src/pick-page.ts
+  initAppState({ app: "pick" });
   var faceByAbbrev = new Map(FACES.map((f) => [f.abbrev, f]));
   var selectedOrder = [];
   var pickGrid = document.getElementById("pick-grid");
@@ -338,8 +1013,8 @@
   var sheetList = document.getElementById("sheet-list");
   var sheetDone = document.getElementById("sheet-done");
   var homeLink = document.getElementById("pick-home-link");
-  function readPicksFromUrl() {
-    const param = new URLSearchParams(window.location.search).get("picks");
+  function readPicks() {
+    const param = getState().picks;
     if (!param || param.length < 2) return [];
     const result = [];
     for (let i = 0; i + 1 < param.length; i += 2) {
@@ -349,16 +1024,6 @@
       }
     }
     return result;
-  }
-  function buildDoneUrl() {
-    const params = new URLSearchParams(window.location.search);
-    if (selectedOrder.length > 0) {
-      params.set("picks", selectedOrder.join(""));
-    } else {
-      params.delete("picks");
-    }
-    const qs = params.toString();
-    return "selected.html" + (qs ? "?" + qs : "");
   }
   function updateHomeLink() {
     const url = new URL("index.html", window.location.href);
@@ -568,7 +1233,8 @@
   });
   function navigateDone() {
     if (selectedOrder.length === 0) return;
-    window.location.href = buildDoneUrl();
+    setState({ picks: selectedOrder.join("") });
+    window.location.href = "selected.html" + window.location.search;
   }
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
@@ -580,7 +1246,7 @@
     }
   });
   (function init() {
-    selectedOrder = readPicksFromUrl();
+    selectedOrder = readPicks();
     buildGrid();
     if (selectedOrder.length > 0) {
       reorderGrid();
