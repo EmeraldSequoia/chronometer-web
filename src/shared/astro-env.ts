@@ -341,7 +341,7 @@ export function registerAstroFunctions(
     functions.set('secondValueAngle', () => liveTime().s * 2 * Math.PI / 60);
     functions.set('secondNumberAngle', () => Math.floor(liveTime().s) * 2 * Math.PI / 60);
     functions.set('secondValue', () => liveTime().s);
-    functions.set('hour24Number', () => liveTime().h24);
+    functions.set('hour24Number', () => (liveTime().h24 + browserDSTTranitionAdjustmentMs/3600000) % 24);
     // minuteNumber: integer minute (0–59). Discrete counterpart to minuteValue
     // (which is the fractional minute used for continuous hands).
     functions.set('minuteNumber', () => Math.floor(liveTime().m));
@@ -349,7 +349,7 @@ export function registerAstroFunctions(
     // t.m already includes seconds/60, so t.h24 + t.m/60 gives the full fractional hour.
     functions.set('hour24Value', () => {
         const t = liveTime();
-        return t.h24 + t.m / 60;
+        return (t.h24 + t.m / 60 + browserDSTTranitionAdjustmentMs/3600000) % 24;
     });
     // hour24ValueAngle: 24-hour time as angle (2π/24 per hour)
     functions.set('hour24ValueAngle', () => {
