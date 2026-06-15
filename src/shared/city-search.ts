@@ -149,6 +149,30 @@ function rowOfOffset(off: Uint32Array, pos: number): number {
 // ============================================================================
 // Loading
 // ============================================================================
+//
+// Protocol-aware (see planning/2026-06-14-observatory-cities-lazy-load.md):
+//   http(s): fetch cities-data.json.gz once into a resident ~2-3 MB compressed
+//            blob (prefetchCityData), then decompress + parse on demand. The
+//            blob is download-once insurance independent of HTTP-cache eviction.
+//   file://: fetch()/XHR of local files is blocked, and local reads have no
+//            latency to hide — so load the <script> form (cities-data.js) on
+//            demand, re-injecting it if released.
+
+const isFileProtocol = typeof location !== 'undefined' && location.protocol === 'file:';
+
+/** Resident compressed payload (gzip of cities-data.json), http(s) only. */
+let compressedBlob: Uint8Array | null = null;
+/** In-flight prefetch (so concurrent callers share one download). */
+let prefetchPromise: Promise<void> | null = null;
+/** In-flight load (so concurrent callers share one parse). */
+let loadPromise: Promise<void> | null = null;
+
+/** Whether the fetch + gunzip path is usable in this environment. */
+function canUseFetchPath(): boolean {
+    return !isFileProtocol
+        && typeof fetch !== 'undefined'
+        && typeof DecompressionStream !== 'undefined';
+}
 
 /** Decode the v2 payload into the columnar module state. */
 function ingest(raw: any): void {
@@ -190,26 +214,35 @@ function toASCII(s: string): string {
 /** Error message from last load attempt, if any. */
 export let loadError: string = '';
 
-/**
- * Load the city database. Must be called before search().
- * Loads cities-data.js via a script tag (works from file:// too).
- */
-export function loadCityData(): Promise<void> {
-    if (loaded) return Promise.resolve();
-    if (loadError) return Promise.reject(new Error(loadError));
+/** Fetch the compressed JSON payload as raw bytes (http(s) only). */
+async function fetchCompressed(): Promise<Uint8Array> {
+    const resp = await fetch('cities-data.json.gz');
+    if (!resp.ok) throw new Error(`fetch cities-data.json.gz: HTTP ${resp.status}`);
+    return new Uint8Array(await resp.arrayBuffer());
+}
 
+/** Gunzip raw bytes to the decompressed UTF-8 text. */
+async function gunzipToText(bytes: Uint8Array): Promise<string> {
+    const ds = new DecompressionStream('gzip');
+    const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(ds);
+    return await new Response(stream).text();
+}
+
+/** Ensure the compressed blob is resident, reusing any in-flight prefetch. */
+async function ensureCompressed(): Promise<Uint8Array> {
+    if (compressedBlob) return compressedBlob;
+    if (prefetchPromise) await prefetchPromise;
+    if (compressedBlob) return compressedBlob;
+    compressedBlob = await fetchCompressed();
+    return compressedBlob;
+}
+
+/** Load via on-demand <script> injection (file:// and fetch-path fallback). */
+function loadViaScript(): Promise<void> {
     return new Promise((resolve, reject) => {
-        // Check if already loaded (e.g., bundled in standalone HTML)
-        const existing = (window as any).ChronometerCities;
-        if (existing) {
-            ingest(existing);
-            resolve();
-            return;
-        }
-
-        // Register a callback that the data file will invoke on execution.
-        // This is more reliable than checking a global after onload,
-        // because script.onload fires on download success — not execution success.
+        // Register a callback that the data file invokes on execution. This is
+        // more reliable than checking a global after onload, because onload fires
+        // on download success — not execution success.
         (window as any)._chronCitiesCallback = (data: any) => {
             if (data) ingest(data);
         };
@@ -217,7 +250,6 @@ export function loadCityData(): Promise<void> {
         const script = document.createElement('script');
         script.src = 'cities-data.js';
 
-        // Catch JS parse/runtime errors from the script
         const errorHandler = (evt: ErrorEvent) => {
             if (evt.filename && evt.filename.includes('cities-data')) {
                 window.removeEventListener('error', errorHandler);
@@ -231,10 +263,9 @@ export function loadCityData(): Promise<void> {
         script.onload = () => {
             window.removeEventListener('error', errorHandler);
             delete (window as any)._chronCitiesCallback;
-            if (loaded) {
-                resolve();
-            } else {
-                // Callback was never invoked — script parsed but didn't execute properly
+            script.remove();
+            if (loaded) resolve();
+            else {
                 loadError = 'cities-data.js loaded but data callback was not invoked';
                 console.error(`[CitySearch] ${loadError}`);
                 reject(new Error(loadError));
@@ -249,6 +280,74 @@ export function loadCityData(): Promise<void> {
         };
         document.head.appendChild(script);
     });
+}
+
+/** Load via fetch + gunzip + parse (http(s)), falling back to <script>. */
+async function loadViaFetch(): Promise<void> {
+    try {
+        const bytes = await ensureCompressed();
+        ingest(JSON.parse(await gunzipToText(bytes)));
+    } catch (err) {
+        console.warn('[CitySearch] fetch/gz load failed, falling back to <script>', err);
+        await loadViaScript();
+    }
+}
+
+/**
+ * Begin downloading the compressed city DB into a resident ~2-3 MB blob
+ * *without* parsing it (http(s) only). Idempotent and best-effort — failures are
+ * swallowed (loadCityData() retries / falls back). No-op on file:// and when the
+ * data is already loaded. Callers gate this on save-data / embed.
+ */
+export function prefetchCityData(): Promise<void> {
+    if (loaded || loadError || compressedBlob || !canUseFetchPath()) return Promise.resolve();
+    if (prefetchPromise) return prefetchPromise;
+    prefetchPromise = fetchCompressed()
+        .then(bytes => { compressedBlob = bytes; })
+        .catch(err => { console.warn('[CitySearch] prefetch failed (will retry on demand)', err); });
+    return prefetchPromise;
+}
+
+/**
+ * Load + parse the city database. Must complete before search()/findClosestCity.
+ * Uses the resident compressed blob when present (no network round-trip).
+ */
+export function loadCityData(): Promise<void> {
+    if (loaded) return Promise.resolve();
+    if (loadError) return Promise.reject(new Error(loadError));
+    if (loadPromise) return loadPromise;
+
+    // Fast path: a standalone HTML build may have set the global directly.
+    const existing = (window as any).ChronometerCities;
+    if (existing) {
+        ingest(existing);
+        return Promise.resolve();
+    }
+
+    loadPromise = (canUseFetchPath() ? loadViaFetch() : loadViaScript())
+        .finally(() => { loadPromise = null; });
+    return loadPromise;
+}
+
+/**
+ * Drop the parsed columnar form to free memory (~22 MB). The resident compressed
+ * blob (http(s)) is kept so the next loadCityData() re-parses without a network
+ * round-trip; on file:// the next load re-injects the <script>.
+ */
+export function releaseCityData(): void {
+    if (!loaded) return;
+    loaded = false;
+    N = 0; aN = 0;
+    TZ = []; CC = []; AD = [];
+    cLat = new Int32Array(0); cLon = new Int32Array(0); cPop = new Uint32Array(0);
+    cTz = new Uint16Array(0); cCc = new Uint16Array(0); cAd1 = new Uint16Array(0);
+    names = ''; ascii = ''; alts = '';
+    nameOff = new Uint32Array(0); asciiOff = new Uint32Array(0); altOff = new Uint32Array(0);
+    ad2 = new Map();
+    aLat = new Int32Array(0); aLon = new Int32Array(0); aTz = new Uint16Array(0); aCc = new Uint16Array(0);
+    aIata = ''; aCity = '';
+    aIataOff = new Uint32Array(0); aCityOff = new Uint32Array(0);
+    console.log('[CitySearch] Released parsed city data');
 }
 
 /** Check if city data is loaded. */

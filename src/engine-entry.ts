@@ -43,11 +43,12 @@ import { evalAttr } from './watch/watch-env.js';
 import { TimeController, TICK_INTERVAL_MS, displaySecondsPerTick } from './shared/time-controller.js';
 
 import { initNavigationLinks, updateNavigationLinks } from './shared/url-state.js';
-import { getState, setState, initAppState, onSharedChange, getSlotOverrides, setSlotOverrides } from './shared/app-state.js';
+import { getState, setState, initAppState, onSharedChange, getSlotOverrides, setSlotOverrides, isPersistentMode } from './shared/app-state.js';
 import { createFpsIndicator } from './shared/fps-indicator.js';
 import { initHelpPopover } from './shared/help-popover.js';
 import { initShareButton } from './shared/share-button.js';
-import { loadCityData, searchCities, findClosestCity, isCityDataLoaded, loadError } from './shared/city-search.js';
+import { loadCityData, prefetchCityData, releaseCityData, searchCities, findClosestCity, isCityDataLoaded, loadError } from './shared/city-search.js';
+import { showStorageWarning } from './shared/incoming-settings-dialog.js';
 import type { CityResult } from './shared/city-search.js';
 import { renderGlobe, loadOSMTile } from './shared/mini-map.js';
 import { resolveTimezone } from './shared/tz-resolve.js';
@@ -87,6 +88,15 @@ type GeoResult =
  * @param timeoutMs  If provided, give up after this many ms (TIMEOUT).
  *                   If omitted, wait indefinitely for user response.
  */
+// A seeded-bloc refresh failure may mean we're showing a stale last-known
+// location — tell the user once per session via the shared dismissible toast.
+let blocRefreshNoticeShown = false;
+function notifyBlocRefreshFailed(): void {
+    if (blocRefreshNoticeShown) return;
+    blocRefreshNoticeShown = true;
+    showStorageWarning('Could not retrieve location from browser — falling back to last known location.');
+}
+
 function requestBrowserLocation(timeoutMs?: number): Promise<GeoResult> {
     if (!navigator.geolocation) return Promise.resolve({ status: 'unavailable' });
     return new Promise((resolve) => {
@@ -266,33 +276,13 @@ async function main() {
         document.body.classList.add('embed-mode');
     }
 
-    // Preload city database in the background so it's ready when the user
-    // opens the location dialog. Once loaded, update the location display
-    // to show the nearest city name for browser/manual locations.
-    // In embed mode, skip loading entirely — city data is ~19 MB and not needed.
-    if (!isEmbedMode) {
-        loadCityData().then(() => {
-            updateLocationDisplay();
-            // Update Gaia-style observer slot names now that city data is available
-            for (const face of faces) {
-                if (face.watch.worldTimeSubdials && face.terraSlotOverrides?.[1]?.cityName === 'Observer') {
-                    const closest = findClosestCity(lat, lon);
-                    if (closest) {
-                        face.terraSlotOverrides[1].cityName = closest.shortLabel;
-                    }
-                }
-                // Update Terra global-location slot city name if it fell back to Olson
-                if (face.watch.worldTimeRing && face.globalLocationSlot !== undefined) {
-                    const glSlot = face.terraSlotOverrides?.[face.globalLocationSlot];
-                    if (glSlot && !locationSource && (lat !== 0 || lon !== 0)) {
-                        const closest = findClosestCity(lat, lon);
-                        if (closest) {
-                            glSlot.cityName = closest.shortLabel;
-                        }
-                    }
-                }
-            }
-        }).catch(() => {});
+    // Prefetch the city DB in the background (held as a ~7.5 MB compressed blob,
+    // parsed on demand) unless the user asked to conserve data. Embed mode never
+    // touches the DB. The DB is parsed lazily — when the dialog opens, or when an
+    // unnamed observer location needs reverse-geocoding (see updateLocationDisplay
+    // / backfillObserverSlots). See planning/2026-06-14-observatory-cities-lazy-load.md.
+    if (!isEmbedMode && !(navigator as any).connection?.saveData) {
+        prefetchCityData();
     }
 
     // --- Resolve location ---
@@ -308,6 +298,9 @@ async function main() {
     // Track whether browser geolocation is available
     // 'granted' = we got a position, 'denied' = user rejected or unavailable, 'unknown' = never tried
     let geoPermission: 'granted' | 'denied' | 'unknown' = 'unknown';
+    // True when bloc is set *and* we seeded from a stored last-known location:
+    // show the seed immediately, then refresh geolocation quietly in the background.
+    let needsBlocRefresh = false;
 
     if (isEmbedMode) {
         // Embed mode: hardcode location, use browser timezone. No geolocation needed.
@@ -322,6 +315,9 @@ async function main() {
         lon = urlState.lon;
         locationSource = urlState.city || '';
         locationSourceType = urlState.city ? 'url-city' : 'manual';
+        // Seeded bloc: keep showing this stored location, but refresh geolocation
+        // quietly in the background once the watch is up (see below).
+        needsBlocRefresh = urlState.bloc === true;
         // If no tz in URL (old link), resolve it now
         if (!locationTimezone) {
             locationTimezone = resolveTimezone(lat, lon, null);
@@ -345,6 +341,11 @@ async function main() {
             geoPermission = 'granted';
             locationTimezone = resolveTimezone(lat, lon, null);
             tzDeltaMs = computeTzDeltaMs(locationTimezone);
+            // Seed the fix so the next reload shows it immediately (no 0,0 flash)
+            // and can skip the DB while stationary. Automatic write — gated on
+            // persistent mode; the city name is filled by updateLocationDisplay's
+            // on-demand reverse-geocode.
+            if (isPersistentMode()) setState({ bloc: true, lat, lon, tz: locationTimezone || null });
         } else if (result.status === 'denied') {
             // User explicitly denied — show prompt with button disabled
             lat = 0; lon = 0;
@@ -368,6 +369,33 @@ async function main() {
         locationSourceType = 'none';
         needsPrompt = true;
         geoPermission = 'unknown';
+    }
+
+    /** True while the location dialog/prompt is on screen. */
+    function dialogOpen(): boolean {
+        const lp = document.getElementById('location-prompt');
+        return !!lp && lp.style.display !== 'none';
+    }
+
+    /**
+     * Label the Terra/Gaia observer slot(s) with the nearest-city name once the
+     * DB is parsed (coords unchanged — label only). Only for an *unnamed*
+     * observer; named locations already carry their name via locationSource.
+     * Replaces the old eager post-load "backfill" pass, now run on demand.
+     */
+    function backfillObserverSlots(): void {
+        if (locationSource || (lat === 0 && lon === 0) || !isCityDataLoaded()) return;
+        const closest = findClosestCity(lat, lon);
+        if (!closest) return;
+        for (const face of faces) {
+            if (face.watch.worldTimeSubdials && face.terraSlotOverrides?.[1]) {
+                face.terraSlotOverrides[1].cityName = closest.shortLabel;
+            }
+            if (face.watch.worldTimeRing && face.globalLocationSlot !== undefined) {
+                const glSlot = face.terraSlotOverrides?.[face.globalLocationSlot];
+                if (glSlot) glSlot.cityName = closest.shortLabel;
+            }
+        }
     }
 
     function updateLocationDisplay() {
@@ -395,6 +423,19 @@ async function main() {
             } else {
                 sourceLabel.textContent = '';
             }
+        } else if (!isCityDataLoaded() && (lat !== 0 || lon !== 0) && !isEmbedMode) {
+            // DB not parsed yet — show coords-only for now and resolve in the
+            // background (parse on demand), then re-render, label the observer
+            // slots, and persist the derived city so future loads skip the DB.
+            sourceLabel.textContent = '';
+            loadCityData().then(() => {
+                if (locationSource) return;       // a named location was set meanwhile
+                updateLocationDisplay();          // now loaded → renders nearest city
+                backfillObserverSlots();
+                const c = findClosestCity(lat, lon);
+                if (c && isPersistentMode() && !getState().city) setState({ city: c.shortLabel });
+                if (!dialogOpen()) releaseCityData();
+            }).catch(() => {});
         } else {
             sourceLabel.textContent = '';
         }
@@ -594,6 +635,12 @@ async function main() {
             if (!observerName && isCityDataLoaded() && (lat !== 0 || lon !== 0)) {
                 const closest = findClosestCity(lat, lon);
                 if (closest) observerName = closest.shortLabel;
+            }
+            // No-DB fallback to the timezone's representative city (matching the
+            // Terra global slot), so lazy-loading shows e.g. "Los Angeles" rather
+            // than the bare "Observer" placeholder before any reverse-geocode.
+            if (!observerName && locationTimezone) {
+                observerName = olsonIdToCityName(locationTimezone);
             }
             overrides[1] = {
                 cityName: observerName || 'Observer',
@@ -1997,7 +2044,8 @@ async function main() {
         // Reschedule DST timer — location timezone may have changed
         scheduleDstRebuild();
         if (writeToUrl) {
-            setState({ lat: newLat, lon: newLon, city: source || null, tz: locationTimezone || null });
+            // Explicit non-browser location → clear any prior bloc intent.
+            setState({ bloc: false, lat: newLat, lon: newLon, city: source || null, tz: locationTimezone || null });
         }
         // Update the map preview and show Done button
         updateMapPreview(newLat, newLon);
@@ -2020,8 +2068,10 @@ async function main() {
         if (result.status === 'success') {
             lpUseBrowser.textContent = browserBtnLabel;
             applyLocation(result.lat, result.lon, '', '', 'browser', false, null);
-            // Write bloc=1 and clear lat/lon/city so next reload asks browser again
-            setState({ bloc: true, lat: null, lon: null, city: null });
+            // Persist bloc intent *with* the fix as a seed, so a reload shows it
+            // immediately (no 0,0 flash) and can skip the DB while stationary.
+            const derived = isCityDataLoaded() ? (findClosestCity(result.lat, result.lon)?.shortLabel ?? null) : null;
+            setState({ bloc: true, lat: result.lat, lon: result.lon, city: derived, tz: locationTimezone || null });
         } else if (result.status === 'denied') {
             // User denied — disable the button
             geoPermission = 'denied';
@@ -3487,6 +3537,27 @@ async function main() {
     // Show location prompt if no location was available
     if (!isEmbedMode && needsPrompt) {
         showLocationPrompt(true);  // with blur
+    }
+
+    // Seeded bloc: the display already shows the stored last-known location.
+    // Refresh geolocation quietly in the background and update only if we've
+    // moved beyond the reuse threshold; a failed/denied refresh keeps the seed.
+    if (needsBlocRefresh) {
+        // Tint the location name yellow while the background fix is in flight; a
+        // failed/denied refresh keeps the (valid) seed — genuine "no location" /
+        // "DB unavailable" errors surface elsewhere.
+        if (sourceLabel) sourceLabel.style.color = '#e6b800';
+        requestBrowserLocation(10000).then(result => {
+            if (result.status !== 'success') { notifyBlocRefreshFailed(); return; }
+            if (haversineKm(lat, lon, result.lat, result.lon) <= 16) return;  // stationary
+            applyLocation(result.lat, result.lon, '', '', 'browser', false, null);
+            // Moved: reseed and clear the stale city so updateLocationDisplay
+            // reverse-geocodes the new spot.
+            if (isPersistentMode()) setState({ bloc: true, lat: result.lat, lon: result.lon, city: null, tz: locationTimezone || null });
+            updateLocationDisplay();
+        }).catch(() => notifyBlocRefreshFailed()).finally(() => {
+            if (sourceLabel) sourceLabel.style.color = '';
+        });
     }
 }
 

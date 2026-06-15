@@ -346,9 +346,11 @@ echo "  → support.html"
 inject_partials < "$SRC/disclaimer.html" > "$DIST/disclaimer.html"
 echo "  → disclaimer.html"
 
-# cities-data.js — city database for location picker
+# cities-data.js — city database for location picker.
+# file:// loads the <script> form; http(s) fetches the compressed JSON blob.
 cp "$SRC/cities-data.js" "$DIST/cities-data.js"
 echo "  → cities-data.js ($(du -h "$DIST/cities-data.js" | cut -f1))"
+node scripts/make-cities-gz.mjs "$DIST"
 
 # Copy thumbnail images — fail if any expected thumbnail is missing
 for face in "${FACES[@]}"; do

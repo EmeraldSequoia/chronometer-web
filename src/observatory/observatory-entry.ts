@@ -13,10 +13,11 @@
 
 import { createAstroEnvironment, computeTzDeltaMs } from '../shared/astro-env.js';
 import type { Environment } from '../expr/evaluator.js';
-import { getState, setState, initAppState, onSharedChange } from '../shared/app-state.js';
+import { getState, setState, initAppState, onSharedChange, isPersistentMode } from '../shared/app-state.js';
 import { resolveTimezone } from '../shared/tz-resolve.js';
-import { findClosestCity } from '../shared/city-search.js';
+import { findClosestCity, prefetchCityData, loadCityData, releaseCityData, isCityDataLoaded } from '../shared/city-search.js';
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
+import { showStorageWarning } from '../shared/incoming-settings-dialog.js';
 import { TimeController } from '../shared/time-controller.js';
 import { initTimeControls } from '../shared/time-controls-ui.js';
 import { initHelpPopover } from '../shared/help-popover.js';
@@ -85,6 +86,26 @@ let lat = urlState.lat ?? 0;
 let lon = urlState.lon ?? 0;
 let locationTimezone: string | undefined = urlState.tz || undefined;
 let needsPrompt = !hasUrlLocation && !urlState.bloc;
+
+// Yellow tint for the location name while a seeded-bloc geolocation refresh is
+// in flight (a lightweight stand-in for a fuller "updating location" indicator).
+const LOCATING_TINT = '#e6b800';
+
+// A seeded-bloc refresh failure is not necessarily benign: the seed could be a
+// stale last-known location (possibly months old). Tell the user once per
+// session, via the shared dismissible toast, that we fell back to it.
+let blocRefreshNoticeShown = false;
+function notifyBlocRefreshFailed(): void {
+    if (blocRefreshNoticeShown) return;
+    blocRefreshNoticeShown = true;
+    showStorageWarning('Could not retrieve location from browser — falling back to last known location.');
+}
+
+// Prefetch the city DB in the background (held as a ~7.5 MB compressed blob,
+// parsed on demand) so opening the location dialog is instant even on flaky
+// networks. Skipped when the user asked to conserve data. See
+// planning/2026-06-14-observatory-cities-lazy-load.md.
+if (!(navigator as any).connection?.saveData) prefetchCityData();
 
 // Restore time state from URL (so deep-links carry the time too — matching
 // Chronometer and the Inspector's "open in <app>" links).
@@ -454,13 +475,48 @@ function updateLocationDisplay(): void {
         nameEl.textContent = 'No location set';
         return;
     }
-    const cityName = urlState.city || null;
+    const cityName = getState().city || null;
     if (cityName) {
         nameEl.textContent = cityName;
-    } else {
-        const closest = findClosestCity(lat, lon);
-        nameEl.textContent = closest?.shortLabel ?? `${lat.toFixed(3)}°, ${lon.toFixed(3)}°`;
+        return;
     }
+
+    // No stored name for these coordinates. Show the nearest city if the DB is
+    // already parsed; otherwise show coordinates and resolve in the background
+    // (parsing on demand). Persist the derived name only in persistent mode, so
+    // a future load skips the DB; never persist in session-only/in-memory mode.
+    const applyClosest = (): boolean => {
+        const closest = findClosestCity(lat, lon);
+        if (!closest) return false;
+        nameEl.textContent = closest.shortLabel;
+        if (isPersistentMode() && !getState().city) setState({ city: closest.shortLabel });
+        return true;
+    };
+
+    if (isCityDataLoaded() && applyClosest()) return;
+
+    nameEl.textContent = `${lat.toFixed(3)}°, ${lon.toFixed(3)}°`;
+    loadCityData().then(() => {
+        if (getState().city) return;            // a named location was set meanwhile
+        applyClosest();
+        if (!dialogShown()) releaseCityData();   // one-shot: drop unless dialog open
+    }).catch(() => {});
+}
+
+/** True while the location dialog/prompt is on screen. */
+function dialogShown(): boolean {
+    const lp = document.getElementById('location-prompt');
+    return !!lp && lp.style.display !== 'none';
+}
+
+/** Great-circle distance in km (for the bloc "moved?" reuse threshold). */
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2
+        + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
 }
 
 function rebuildEnv(): void {
@@ -488,9 +544,12 @@ function setupLocationDialog(): void {
             needsPrompt = false;
 
             if (info.sourceType === 'browser') {
-                setState({ bloc: true, lat: null, lon: null, city: null, tz: null });
+                // Persist bloc intent *with* the fix, so a reload seeds the
+                // display (no 0,0 flash) and can skip the DB while stationary.
+                const derived = isCityDataLoaded() ? findClosestCity(info.lat, info.lon)?.shortLabel : null;
+                setState({ bloc: true, lat: info.lat, lon: info.lon, city: derived ?? null, tz: info.timezone || null });
             } else {
-                setState({ lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
+                setState({ bloc: false, lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
             }
 
             // Re-evaluate all values at the new location: sentinel-scheduled
@@ -553,6 +612,11 @@ function setupLocationDialog(): void {
                         lon = result.lon;
                         locationTimezone = tz;
                         needsPrompt = false;
+                        // Seed the fix so the next reload shows it immediately and
+                        // can skip the DB while stationary (automatic write — gated
+                        // on persistent mode; the city name is filled by
+                        // updateLocationDisplay's reverse-geocode).
+                        if (isPersistentMode()) setState({ bloc: true, lat, lon, tz });
                         locationDialog.updateState(lat, lon, 'browser', '', '');
                         // Async location arrived after buildObsValues ran at the
                         // startup default — re-evaluate everything (esp. the
@@ -574,6 +638,33 @@ function setupLocationDialog(): void {
                         locationDialog.show();
                     });
                 }
+            });
+        } else if (urlState.bloc && hasUrlLocation) {
+            // Seeded bloc: the display already shows the stored last-known
+            // location, so refresh quietly in the background — no "locating"
+            // panel. Tint the location name yellow while the fix is in flight.
+            // Only update if the new fix moved beyond the reuse threshold; a
+            // failed/denied refresh keeps the seed and shows a one-time notice
+            // (the seed may be stale), via notifyBlocRefreshFailed.
+            const blocNameEl = document.getElementById('location-name');
+            if (blocNameEl) blocNameEl.style.color = LOCATING_TINT;
+            requestBrowserLocation(10000).then(result => {
+                if (result.status !== 'success') { notifyBlocRefreshFailed(); return; }
+                if (haversineKm(lat, lon, result.lat, result.lon) <= 16) return;  // stationary
+                const tz = resolveTimezone(result.lat, result.lon, null);
+                lat = result.lat;
+                lon = result.lon;
+                locationTimezone = tz;
+                // Moved: the stored city name is stale — clear it so
+                // updateLocationDisplay reverse-geocodes the new spot; reseed.
+                if (isPersistentMode()) setState({ bloc: true, lat, lon, city: null, tz });
+                locationDialog.updateState(lat, lon, 'browser', '', '');
+                updater?.reset();
+                rebuildEnv();
+                updateLocationDisplay();
+                timeUI?.updateTimezoneDisplay();
+            }).catch(() => notifyBlocRefreshFailed()).finally(() => {
+                if (blocNameEl) blocNameEl.style.color = '';
             });
         }
     }

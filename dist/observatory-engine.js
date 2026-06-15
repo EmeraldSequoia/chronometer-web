@@ -14366,6 +14366,9 @@
       void promptSessionReprompt();
     }
   }
+  function isPersistentMode() {
+    return backend() instanceof LocalStorageBackend;
+  }
   function getSlotOverrides() {
     const b = backend();
     if (b instanceof LocalStorageBackend) return storedSlotMap();
@@ -14518,6 +14521,13 @@
     }
     return lo;
   }
+  var isFileProtocol = typeof location !== "undefined" && location.protocol === "file:";
+  var compressedBlob = null;
+  var prefetchPromise = null;
+  var loadPromise = null;
+  function canUseFetchPath() {
+    return !isFileProtocol && typeof fetch !== "undefined" && typeof DecompressionStream !== "undefined";
+  }
   function ingest(raw) {
     TZ = raw.TZ;
     CC = raw.CC;
@@ -14554,16 +14564,25 @@
     return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   }
   var loadError = "";
-  function loadCityData() {
-    if (loaded) return Promise.resolve();
-    if (loadError) return Promise.reject(new Error(loadError));
+  async function fetchCompressed() {
+    const resp = await fetch("cities-data.json.gz");
+    if (!resp.ok) throw new Error(`fetch cities-data.json.gz: HTTP ${resp.status}`);
+    return new Uint8Array(await resp.arrayBuffer());
+  }
+  async function gunzipToText(bytes) {
+    const ds = new DecompressionStream("gzip");
+    const stream = new Blob([bytes]).stream().pipeThrough(ds);
+    return await new Response(stream).text();
+  }
+  async function ensureCompressed() {
+    if (compressedBlob) return compressedBlob;
+    if (prefetchPromise) await prefetchPromise;
+    if (compressedBlob) return compressedBlob;
+    compressedBlob = await fetchCompressed();
+    return compressedBlob;
+  }
+  function loadViaScript() {
     return new Promise((resolve, reject) => {
-      const existing = window.ChronometerCities;
-      if (existing) {
-        ingest(existing);
-        resolve();
-        return;
-      }
       window._chronCitiesCallback = (data) => {
         if (data) ingest(data);
       };
@@ -14581,9 +14600,9 @@
       script.onload = () => {
         window.removeEventListener("error", errorHandler);
         delete window._chronCitiesCallback;
-        if (loaded) {
-          resolve();
-        } else {
+        script.remove();
+        if (loaded) resolve();
+        else {
           loadError = "cities-data.js loaded but data callback was not invoked";
           console.error(`[CitySearch] ${loadError}`);
           reject(new Error(loadError));
@@ -14598,6 +14617,70 @@
       };
       document.head.appendChild(script);
     });
+  }
+  async function loadViaFetch() {
+    try {
+      const bytes = await ensureCompressed();
+      ingest(JSON.parse(await gunzipToText(bytes)));
+    } catch (err) {
+      console.warn("[CitySearch] fetch/gz load failed, falling back to <script>", err);
+      await loadViaScript();
+    }
+  }
+  function prefetchCityData() {
+    if (loaded || loadError || compressedBlob || !canUseFetchPath()) return Promise.resolve();
+    if (prefetchPromise) return prefetchPromise;
+    prefetchPromise = fetchCompressed().then((bytes) => {
+      compressedBlob = bytes;
+    }).catch((err) => {
+      console.warn("[CitySearch] prefetch failed (will retry on demand)", err);
+    });
+    return prefetchPromise;
+  }
+  function loadCityData() {
+    if (loaded) return Promise.resolve();
+    if (loadError) return Promise.reject(new Error(loadError));
+    if (loadPromise) return loadPromise;
+    const existing = window.ChronometerCities;
+    if (existing) {
+      ingest(existing);
+      return Promise.resolve();
+    }
+    loadPromise = (canUseFetchPath() ? loadViaFetch() : loadViaScript()).finally(() => {
+      loadPromise = null;
+    });
+    return loadPromise;
+  }
+  function releaseCityData() {
+    if (!loaded) return;
+    loaded = false;
+    N = 0;
+    aN = 0;
+    TZ = [];
+    CC = [];
+    AD = [];
+    cLat = new Int32Array(0);
+    cLon = new Int32Array(0);
+    cPop = new Uint32Array(0);
+    cTz = new Uint16Array(0);
+    cCc = new Uint16Array(0);
+    cAd1 = new Uint16Array(0);
+    names = "";
+    ascii = "";
+    alts = "";
+    nameOff = new Uint32Array(0);
+    asciiOff = new Uint32Array(0);
+    altOff = new Uint32Array(0);
+    ad2 = /* @__PURE__ */ new Map();
+    aLat = new Int32Array(0);
+    aLon = new Int32Array(0);
+    aTz = new Uint16Array(0);
+    aCc = new Uint16Array(0);
+    aIata = "";
+    aCity = "";
+    aIataOff = new Uint32Array(0);
+    aCityOff = new Uint32Array(0);
+    console.log("[CitySearch] Released parsed city data");
   }
   function isCityDataLoaded() {
     return loaded;
@@ -14946,7 +15029,7 @@
     const lpFullContent = document.getElementById("lp-full-content");
     const lpLocating = document.getElementById("lp-locating");
     const lpLocatingManual = document.getElementById("lp-locating-manual");
-    const isFileProtocol = window.location.protocol === "file:";
+    const isFileProtocol2 = window.location.protocol === "file:";
     let currentLat = config.initialLat ?? 0;
     let currentLon = config.initialLon ?? 0;
     let locationSource = "";
@@ -14956,8 +15039,6 @@
     let geoPermission = config.geoPermission ?? "unknown";
     let locating = false;
     const browserBtnLabel = lpUseBrowser.textContent || "Use device location via browser";
-    loadCityData().catch(() => {
-    });
     function buildLocationNameHTML() {
       if (locationSourceType === "url-city" && locationFullLabel) {
         return `${locationFullLabel} <span class="lp-loc-source">(from cities database)</span>`;
@@ -14989,7 +15070,7 @@
       lpStatusSection.classList.add("visible");
       lpNoLocation.classList.add("hidden");
       renderGlobe(lpGlobe, mapLat, mapLon);
-      if (isFileProtocol) {
+      if (isFileProtocol2) {
         lpOsmContainer.style.display = "none";
         lpOsmAttribution.style.display = "none";
         lpGlobe.width = 160;
@@ -15040,6 +15121,12 @@
       lpFullContent.style.display = "";
       locationPrompt.style.display = "";
       config.onShow?.();
+      loadCityData().then(() => {
+        if (locationPrompt.style.display !== "none") {
+          lpLocationName.innerHTML = buildLocationNameHTML();
+        }
+      }).catch(() => {
+      });
       lpLatInput.value = currentLat !== 0 || currentLon !== 0 ? currentLat.toFixed(3) : "";
       lpLonInput.value = currentLat !== 0 || currentLon !== 0 ? currentLon.toFixed(3) : "";
       if (lpCityInput) {
@@ -15067,7 +15154,7 @@
       }
       lpDialogFooter.classList.toggle("visible", !needsPrompt2 || hasLocation);
       const btn = lpUseBrowser;
-      const deniedTooltip = isFileProtocol ? "Not all browsers support location access from file:// URLs" : "Browser location was not granted \u2014 check your browser settings to allow it";
+      const deniedTooltip = isFileProtocol2 ? "Not all browsers support location access from file:// URLs" : "Browser location was not granted \u2014 check your browser settings to allow it";
       if (geoPermission === "denied") {
         btn.disabled = true;
         btn.dataset.tooltip = deniedTooltip;
@@ -15090,6 +15177,7 @@
     function dismissDialog() {
       locating = false;
       locationPrompt.style.display = "none";
+      releaseCityData();
       config.onDismiss?.();
     }
     function canDismiss() {
@@ -15113,7 +15201,7 @@
         const btn = lpUseBrowser;
         btn.disabled = true;
         btn.textContent = browserBtnLabel + " (unavailable)";
-        btn.dataset.tooltip = isFileProtocol ? "Not all browsers support location access from file:// URLs" : "Browser location was not granted \u2014 check your browser settings to allow it";
+        btn.dataset.tooltip = isFileProtocol2 ? "Not all browsers support location access from file:// URLs" : "Browser location was not granted \u2014 check your browser settings to allow it";
       } else {
         lpUseBrowser.textContent = browserBtnLabel;
       }
@@ -20032,6 +20120,14 @@
   var lon = urlState.lon ?? 0;
   var locationTimezone = urlState.tz || void 0;
   var needsPrompt = !hasUrlLocation && !urlState.bloc;
+  var LOCATING_TINT = "#e6b800";
+  var blocRefreshNoticeShown = false;
+  function notifyBlocRefreshFailed() {
+    if (blocRefreshNoticeShown) return;
+    blocRefreshNoticeShown = true;
+    showStorageWarning("Could not retrieve location from browser \u2014 falling back to last known location.");
+  }
+  if (!navigator.connection?.saveData) prefetchCityData();
   if (urlState.off !== null && !isNaN(urlState.off)) {
     timeController.setOffset(urlState.off);
   } else if (urlState.t !== null && !isNaN(urlState.t)) {
@@ -20240,13 +20336,37 @@
       nameEl.textContent = "No location set";
       return;
     }
-    const cityName = urlState.city || null;
+    const cityName = getState().city || null;
     if (cityName) {
       nameEl.textContent = cityName;
-    } else {
-      const closest = findClosestCity(lat, lon);
-      nameEl.textContent = closest?.shortLabel ?? `${lat.toFixed(3)}\xB0, ${lon.toFixed(3)}\xB0`;
+      return;
     }
+    const applyClosest = () => {
+      const closest = findClosestCity(lat, lon);
+      if (!closest) return false;
+      nameEl.textContent = closest.shortLabel;
+      if (isPersistentMode() && !getState().city) setState({ city: closest.shortLabel });
+      return true;
+    };
+    if (isCityDataLoaded() && applyClosest()) return;
+    nameEl.textContent = `${lat.toFixed(3)}\xB0, ${lon.toFixed(3)}\xB0`;
+    loadCityData().then(() => {
+      if (getState().city) return;
+      applyClosest();
+      if (!dialogShown()) releaseCityData();
+    }).catch(() => {
+    });
+  }
+  function dialogShown() {
+    const lp = document.getElementById("location-prompt");
+    return !!lp && lp.style.display !== "none";
+  }
+  function haversineKm2(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
   }
   function rebuildEnv() {
     tzDeltaMs = computeTzDeltaMs(locationTimezone);
@@ -20269,9 +20389,10 @@
         locationTimezone = info.timezone;
         needsPrompt = false;
         if (info.sourceType === "browser") {
-          setState({ bloc: true, lat: null, lon: null, city: null, tz: null });
+          const derived = isCityDataLoaded() ? findClosestCity(info.lat, info.lon)?.shortLabel : null;
+          setState({ bloc: true, lat: info.lat, lon: info.lon, city: derived ?? null, tz: info.timezone || null });
         } else {
-          setState({ lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
+          setState({ bloc: false, lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
         }
         updater?.reset();
         rebuildEnv();
@@ -20313,6 +20434,7 @@
               lon = result.lon;
               locationTimezone = tz;
               needsPrompt = false;
+              if (isPersistentMode()) setState({ bloc: true, lat, lon, tz });
               locationDialog.updateState(lat, lon, "browser", "", "");
               updater?.reset();
               rebuildEnv();
@@ -20329,6 +20451,28 @@
               locationDialog.show();
             });
           }
+        });
+      } else if (urlState.bloc && hasUrlLocation) {
+        const blocNameEl = document.getElementById("location-name");
+        if (blocNameEl) blocNameEl.style.color = LOCATING_TINT;
+        requestBrowserLocation(1e4).then((result) => {
+          if (result.status !== "success") {
+            notifyBlocRefreshFailed();
+            return;
+          }
+          if (haversineKm2(lat, lon, result.lat, result.lon) <= 16) return;
+          const tz = resolveTimezone(result.lat, result.lon, null);
+          lat = result.lat;
+          lon = result.lon;
+          locationTimezone = tz;
+          if (isPersistentMode()) setState({ bloc: true, lat, lon, city: null, tz });
+          locationDialog.updateState(lat, lon, "browser", "", "");
+          updater?.reset();
+          rebuildEnv();
+          updateLocationDisplay();
+          timeUI?.updateTimezoneDisplay();
+        }).catch(() => notifyBlocRefreshFailed()).finally(() => {
+          if (blocNameEl) blocNameEl.style.color = "";
         });
       }
     }

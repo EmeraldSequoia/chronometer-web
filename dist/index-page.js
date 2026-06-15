@@ -93,6 +93,13 @@
     }
     return lo;
   }
+  var isFileProtocol = typeof location !== "undefined" && location.protocol === "file:";
+  var compressedBlob = null;
+  var prefetchPromise = null;
+  var loadPromise = null;
+  function canUseFetchPath() {
+    return !isFileProtocol && typeof fetch !== "undefined" && typeof DecompressionStream !== "undefined";
+  }
   function ingest(raw) {
     TZ = raw.TZ;
     CC = raw.CC;
@@ -129,16 +136,25 @@
     return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   }
   var loadError = "";
-  function loadCityData() {
-    if (loaded) return Promise.resolve();
-    if (loadError) return Promise.reject(new Error(loadError));
+  async function fetchCompressed() {
+    const resp = await fetch("cities-data.json.gz");
+    if (!resp.ok) throw new Error(`fetch cities-data.json.gz: HTTP ${resp.status}`);
+    return new Uint8Array(await resp.arrayBuffer());
+  }
+  async function gunzipToText(bytes) {
+    const ds = new DecompressionStream("gzip");
+    const stream = new Blob([bytes]).stream().pipeThrough(ds);
+    return await new Response(stream).text();
+  }
+  async function ensureCompressed() {
+    if (compressedBlob) return compressedBlob;
+    if (prefetchPromise) await prefetchPromise;
+    if (compressedBlob) return compressedBlob;
+    compressedBlob = await fetchCompressed();
+    return compressedBlob;
+  }
+  function loadViaScript() {
     return new Promise((resolve, reject) => {
-      const existing = window.ChronometerCities;
-      if (existing) {
-        ingest(existing);
-        resolve();
-        return;
-      }
       window._chronCitiesCallback = (data) => {
         if (data) ingest(data);
       };
@@ -156,9 +172,9 @@
       script.onload = () => {
         window.removeEventListener("error", errorHandler);
         delete window._chronCitiesCallback;
-        if (loaded) {
-          resolve();
-        } else {
+        script.remove();
+        if (loaded) resolve();
+        else {
           loadError = "cities-data.js loaded but data callback was not invoked";
           console.error(`[CitySearch] ${loadError}`);
           reject(new Error(loadError));
@@ -173,6 +189,29 @@
       };
       document.head.appendChild(script);
     });
+  }
+  async function loadViaFetch() {
+    try {
+      const bytes = await ensureCompressed();
+      ingest(JSON.parse(await gunzipToText(bytes)));
+    } catch (err) {
+      console.warn("[CitySearch] fetch/gz load failed, falling back to <script>", err);
+      await loadViaScript();
+    }
+  }
+  function loadCityData() {
+    if (loaded) return Promise.resolve();
+    if (loadError) return Promise.reject(new Error(loadError));
+    if (loadPromise) return loadPromise;
+    const existing = window.ChronometerCities;
+    if (existing) {
+      ingest(existing);
+      return Promise.resolve();
+    }
+    loadPromise = (canUseFetchPath() ? loadViaFetch() : loadViaScript()).finally(() => {
+      loadPromise = null;
+    });
+    return loadPromise;
   }
   function isCityDataLoaded() {
     return loaded;
@@ -1271,7 +1310,7 @@
 
   // src/index-page.ts
   initAppState({ app: "index" });
-  var isFileProtocol = window.location.protocol === "file:";
+  var isFileProtocol2 = window.location.protocol === "file:";
   loadCityData().catch(() => {
   });
   function updateLinks() {
@@ -1344,7 +1383,7 @@
     locationPrompt.style.display = "";
     if (geoDenied) {
       lpUseBrowser.disabled = true;
-      lpUseBrowser.dataset.tooltip = isFileProtocol ? "Not all browsers support location access from file:// URLs" : "Browser location was not granted \u2014 check your browser settings to allow it";
+      lpUseBrowser.dataset.tooltip = isFileProtocol2 ? "Not all browsers support location access from file:// URLs" : "Browser location was not granted \u2014 check your browser settings to allow it";
       lpUseBrowser.textContent = browserBtnLabel + " (unavailable)";
     }
     if (hasLocation) {
@@ -1385,7 +1424,7 @@
     lpStatusSection.classList.add("visible");
     lpNoLocation.classList.add("hidden");
     renderGlobe(lpGlobe, mapLat, mapLon);
-    if (isFileProtocol) {
+    if (isFileProtocol2) {
       lpOsmContainer.style.display = "none";
       lpOsmAttribution.style.display = "none";
       lpGlobe.width = 160;
@@ -1434,7 +1473,7 @@
       const btn = lpUseBrowser;
       btn.disabled = true;
       btn.textContent = browserBtnLabel + " (unavailable)";
-      btn.dataset.tooltip = isFileProtocol ? "Not all browsers support location access from file:// URLs" : "Browser location was not granted \u2014 check your browser settings to allow it";
+      btn.dataset.tooltip = isFileProtocol2 ? "Not all browsers support location access from file:// URLs" : "Browser location was not granted \u2014 check your browser settings to allow it";
     } else {
       lpUseBrowser.textContent = browserBtnLabel;
     }

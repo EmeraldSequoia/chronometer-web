@@ -19,11 +19,12 @@ import {
 import { TimeController } from '../shared/time-controller.js';
 import { initTimeControls, writeTimeStateToUrl, type TimeControlsAPI } from '../shared/time-controls-ui.js';
 import { createFpsIndicator } from '../shared/fps-indicator.js';
-import { getState, setState, initAppState, onSharedChange } from '../shared/app-state.js';
+import { getState, setState, initAppState, onSharedChange, isPersistentMode } from '../shared/app-state.js';
 import { initShareButton } from '../shared/share-button.js';
 import { resolveTimezone } from '../shared/tz-resolve.js';
-import { findClosestCity } from '../shared/city-search.js';
+import { findClosestCity, prefetchCityData, loadCityData, releaseCityData, isCityDataLoaded } from '../shared/city-search.js';
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
+import { showStorageWarning } from '../shared/incoming-settings-dialog.js';
 import { EXPR_METADATA, CATEGORY_ORDER, type ExprEntry } from './expr-metadata.js';
 import { CATALOG, tagIsAngular, tagIsDiscrete, type CatalogCell, type Tag } from './catalog.js';
 
@@ -62,6 +63,40 @@ let lat = urlState.lat ?? 0;
 let lon = urlState.lon ?? 0;
 let locationTimezone: string | undefined = urlState.tz || undefined;
 let needsPrompt = !hasUrlLocation && !urlState.bloc;
+
+// Prefetch the city DB in the background (held as a ~7.5 MB compressed blob,
+// parsed on demand) unless the user asked to conserve data. See
+// planning/2026-06-14-observatory-cities-lazy-load.md.
+if (!(navigator as any).connection?.saveData) prefetchCityData();
+
+// Yellow tint for the location name while a seeded-bloc geolocation refresh is
+// in flight (lightweight stand-in for a fuller "updating location" indicator).
+const LOCATING_TINT = '#e6b800';
+
+// A seeded-bloc refresh failure may mean we're showing a stale last-known
+// location — tell the user once per session via the shared dismissible toast.
+let blocRefreshNoticeShown = false;
+function notifyBlocRefreshFailed(): void {
+    if (blocRefreshNoticeShown) return;
+    blocRefreshNoticeShown = true;
+    showStorageWarning('Could not retrieve location from browser — falling back to last known location.');
+}
+
+/** True while the location dialog/prompt is on screen. */
+function dialogShown(): boolean {
+    const lp = document.getElementById('location-prompt');
+    return !!lp && lp.style.display !== 'none';
+}
+
+/** Great-circle distance in km (for the bloc "moved?" reuse threshold). */
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2
+        + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+}
 
 // If no timezone in URL, resolve it from lat/lon (only if we have a location)
 if (!locationTimezone && hasUrlLocation) {
@@ -108,17 +143,31 @@ function updateLocationDisplay(): void {
         locationDetail.textContent = 'Use the Set button to choose a location';
         return;
     }
-    const cityName = urlState.city || null;
+    const cityName = getState().city || null;
     if (cityName) {
         locationName.textContent = cityName;
-    } else {
-        // Try to find the closest city
+    } else if (isCityDataLoaded()) {
         const closest = findClosestCity(lat, lon);
         if (closest) {
             locationName.textContent = closest.shortLabel;
+            if (isPersistentMode() && !getState().city) setState({ city: closest.shortLabel });
         } else {
             locationName.textContent = `${lat.toFixed(3)}°, ${lon.toFixed(3)}°`;
         }
+    } else {
+        // DB not parsed yet — show coords and resolve in the background (parse on
+        // demand), persisting the derived city so future loads skip the DB.
+        locationName.textContent = `${lat.toFixed(3)}°, ${lon.toFixed(3)}°`;
+        loadCityData().then(() => {
+            if (!getState().city) {
+                const c = findClosestCity(lat, lon);
+                if (c) {
+                    locationName.textContent = c.shortLabel;
+                    if (isPersistentMode()) setState({ city: c.shortLabel });
+                }
+            }
+            if (!dialogShown()) releaseCityData();
+        }).catch(() => {});
     }
     const tzInfo = formatTimezoneInfo(locationTimezone);
     const tzDisplayStr = locationTimezone || 'Browser TZ';
@@ -142,12 +191,14 @@ const locationDialog = initLocationDialog({
         tzDeltaMs = computeTzDeltaMs(locationTimezone);
         needsPrompt = false;
 
-        // Write to URL so the location persists on reload
+        // Persist so the location survives reload.
         if (info.sourceType === 'browser') {
-            // For browser location, use bloc=1 so next reload re-asks
-            setState({ bloc: true, lat: null, lon: null, city: null, tz: null });
+            // Persist bloc intent *with* the fix, so a reload seeds the display
+            // (no 0,0 flash) and can skip the DB while stationary.
+            const derived = isCityDataLoaded() ? (findClosestCity(info.lat, info.lon)?.shortLabel ?? null) : null;
+            setState({ bloc: true, lat: info.lat, lon: info.lon, city: derived, tz: info.timezone || null });
         } else {
-            setState({ lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
+            setState({ bloc: false, lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
         }
 
         // Rebuild the astronomy environment with new location
@@ -183,6 +234,10 @@ if (locationDialog) {
                 locationTimezone = tz;
                 tzDeltaMs = computeTzDeltaMs(locationTimezone);
                 needsPrompt = false;
+                // Seed the fix so the next reload shows it immediately (no 0,0
+                // flash) and can skip the DB while stationary; the city name is
+                // filled by updateLocationDisplay's reverse-geocode.
+                if (isPersistentMode()) setState({ bloc: true, lat, lon, tz: locationTimezone || null });
                 locationDialog.updateState(lat, lon, 'browser', '', '');
                 env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
                 updateLocationDisplay();
@@ -199,6 +254,34 @@ if (locationDialog) {
                 }
                 locationDialog.show();
             }
+        });
+    } else if (urlState.bloc && hasUrlLocation) {
+        // Seeded bloc: the display already shows the stored last-known location.
+        // Tint it yellow while refreshing geolocation quietly in the background;
+        // update only if we've moved beyond the reuse threshold. Failure/denial
+        // keeps the (valid) seed — genuine "no location"/"DB unavailable" errors
+        // surface elsewhere.
+        if (locationName) locationName.style.color = LOCATING_TINT;
+        requestBrowserLocation(10000).then(result => {
+            if (result.status !== 'success') { notifyBlocRefreshFailed(); return; }
+            if (haversineKm(lat, lon, result.lat, result.lon) <= 16) return;  // stationary
+            const tz = resolveTimezone(result.lat, result.lon, null);
+            lat = result.lat;
+            lon = result.lon;
+            locationTimezone = tz;
+            tzDeltaMs = computeTzDeltaMs(locationTimezone);
+            // Moved: reseed and clear the stale city so updateLocationDisplay
+            // reverse-geocodes the new spot.
+            if (isPersistentMode()) setState({ bloc: true, lat, lon, city: null, tz });
+            locationDialog.updateState(lat, lon, 'browser', '', '');
+            env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
+            updateLocationDisplay();
+            updateTimeDisplay();
+            rebuildExprValues();
+            resetAllSchedules();
+            scheduleFrame();
+        }).catch(() => notifyBlocRefreshFailed()).finally(() => {
+            if (locationName) locationName.style.color = '';
         });
     }
 }

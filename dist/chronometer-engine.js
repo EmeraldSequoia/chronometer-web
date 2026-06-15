@@ -15473,6 +15473,9 @@
       void promptSessionReprompt();
     }
   }
+  function isPersistentMode() {
+    return backend() instanceof LocalStorageBackend;
+  }
   function getSlotOverrides() {
     const b = backend();
     if (b instanceof LocalStorageBackend) return storedSlotMap();
@@ -19680,6 +19683,13 @@
     }
     return lo;
   }
+  var isFileProtocol = typeof location !== "undefined" && location.protocol === "file:";
+  var compressedBlob = null;
+  var prefetchPromise = null;
+  var loadPromise = null;
+  function canUseFetchPath() {
+    return !isFileProtocol && typeof fetch !== "undefined" && typeof DecompressionStream !== "undefined";
+  }
   function ingest(raw) {
     TZ = raw.TZ;
     CC = raw.CC;
@@ -19716,16 +19726,25 @@
     return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   }
   var loadError = "";
-  function loadCityData() {
-    if (loaded) return Promise.resolve();
-    if (loadError) return Promise.reject(new Error(loadError));
+  async function fetchCompressed() {
+    const resp = await fetch("cities-data.json.gz");
+    if (!resp.ok) throw new Error(`fetch cities-data.json.gz: HTTP ${resp.status}`);
+    return new Uint8Array(await resp.arrayBuffer());
+  }
+  async function gunzipToText(bytes) {
+    const ds = new DecompressionStream("gzip");
+    const stream = new Blob([bytes]).stream().pipeThrough(ds);
+    return await new Response(stream).text();
+  }
+  async function ensureCompressed() {
+    if (compressedBlob) return compressedBlob;
+    if (prefetchPromise) await prefetchPromise;
+    if (compressedBlob) return compressedBlob;
+    compressedBlob = await fetchCompressed();
+    return compressedBlob;
+  }
+  function loadViaScript() {
     return new Promise((resolve, reject) => {
-      const existing = window.ChronometerCities;
-      if (existing) {
-        ingest(existing);
-        resolve();
-        return;
-      }
       window._chronCitiesCallback = (data) => {
         if (data) ingest(data);
       };
@@ -19743,9 +19762,9 @@
       script.onload = () => {
         window.removeEventListener("error", errorHandler);
         delete window._chronCitiesCallback;
-        if (loaded) {
-          resolve();
-        } else {
+        script.remove();
+        if (loaded) resolve();
+        else {
           loadError = "cities-data.js loaded but data callback was not invoked";
           console.error(`[CitySearch] ${loadError}`);
           reject(new Error(loadError));
@@ -19760,6 +19779,70 @@
       };
       document.head.appendChild(script);
     });
+  }
+  async function loadViaFetch() {
+    try {
+      const bytes = await ensureCompressed();
+      ingest(JSON.parse(await gunzipToText(bytes)));
+    } catch (err) {
+      console.warn("[CitySearch] fetch/gz load failed, falling back to <script>", err);
+      await loadViaScript();
+    }
+  }
+  function prefetchCityData() {
+    if (loaded || loadError || compressedBlob || !canUseFetchPath()) return Promise.resolve();
+    if (prefetchPromise) return prefetchPromise;
+    prefetchPromise = fetchCompressed().then((bytes) => {
+      compressedBlob = bytes;
+    }).catch((err) => {
+      console.warn("[CitySearch] prefetch failed (will retry on demand)", err);
+    });
+    return prefetchPromise;
+  }
+  function loadCityData() {
+    if (loaded) return Promise.resolve();
+    if (loadError) return Promise.reject(new Error(loadError));
+    if (loadPromise) return loadPromise;
+    const existing = window.ChronometerCities;
+    if (existing) {
+      ingest(existing);
+      return Promise.resolve();
+    }
+    loadPromise = (canUseFetchPath() ? loadViaFetch() : loadViaScript()).finally(() => {
+      loadPromise = null;
+    });
+    return loadPromise;
+  }
+  function releaseCityData() {
+    if (!loaded) return;
+    loaded = false;
+    N = 0;
+    aN = 0;
+    TZ = [];
+    CC = [];
+    AD = [];
+    cLat = new Int32Array(0);
+    cLon = new Int32Array(0);
+    cPop = new Uint32Array(0);
+    cTz = new Uint16Array(0);
+    cCc = new Uint16Array(0);
+    cAd1 = new Uint16Array(0);
+    names = "";
+    ascii = "";
+    alts = "";
+    nameOff = new Uint32Array(0);
+    asciiOff = new Uint32Array(0);
+    altOff = new Uint32Array(0);
+    ad2 = /* @__PURE__ */ new Map();
+    aLat = new Int32Array(0);
+    aLon = new Int32Array(0);
+    aTz = new Uint16Array(0);
+    aCc = new Uint16Array(0);
+    aIata = "";
+    aCity = "";
+    aIataOff = new Uint32Array(0);
+    aCityOff = new Uint32Array(0);
+    console.log("[CitySearch] Released parsed city data");
   }
   function isCityDataLoaded() {
     return loaded;
@@ -20988,6 +21071,12 @@
   function faceNameToSlug(name) {
     return name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, "-");
   }
+  var blocRefreshNoticeShown = false;
+  function notifyBlocRefreshFailed() {
+    if (blocRefreshNoticeShown) return;
+    blocRefreshNoticeShown = true;
+    showStorageWarning("Could not retrieve location from browser \u2014 falling back to last known location.");
+  }
   function requestBrowserLocation(timeoutMs) {
     if (!navigator.geolocation) return Promise.resolve({ status: "unavailable" });
     return new Promise((resolve) => {
@@ -21100,28 +21189,8 @@
     if (isEmbedMode) {
       document.body.classList.add("embed-mode");
     }
-    if (!isEmbedMode) {
-      loadCityData().then(() => {
-        updateLocationDisplay();
-        for (const face of faces) {
-          if (face.watch.worldTimeSubdials && face.terraSlotOverrides?.[1]?.cityName === "Observer") {
-            const closest = findClosestCity(lat, lon);
-            if (closest) {
-              face.terraSlotOverrides[1].cityName = closest.shortLabel;
-            }
-          }
-          if (face.watch.worldTimeRing && face.globalLocationSlot !== void 0) {
-            const glSlot = face.terraSlotOverrides?.[face.globalLocationSlot];
-            if (glSlot && !locationSource && (lat !== 0 || lon !== 0)) {
-              const closest = findClosestCity(lat, lon);
-              if (closest) {
-                glSlot.cityName = closest.shortLabel;
-              }
-            }
-          }
-        }
-      }).catch(() => {
-      });
+    if (!isEmbedMode && !navigator.connection?.saveData) {
+      prefetchCityData();
     }
     let lat, lon;
     let locationSource = "";
@@ -21131,6 +21200,7 @@
     let locationTimezone = urlState.tz || void 0;
     let tzDeltaMs = computeTzDeltaMs(locationTimezone);
     let geoPermission = "unknown";
+    let needsBlocRefresh = false;
     if (isEmbedMode) {
       lat = 0;
       lon = 0;
@@ -21143,6 +21213,7 @@
       lon = urlState.lon;
       locationSource = urlState.city || "";
       locationSourceType = urlState.city ? "url-city" : "manual";
+      needsBlocRefresh = urlState.bloc === true;
       if (!locationTimezone) {
         locationTimezone = resolveTimezone(lat, lon, null);
         tzDeltaMs = computeTzDeltaMs(locationTimezone);
@@ -21165,6 +21236,7 @@
         geoPermission = "granted";
         locationTimezone = resolveTimezone(lat, lon, null);
         tzDeltaMs = computeTzDeltaMs(locationTimezone);
+        if (isPersistentMode()) setState({ bloc: true, lat, lon, tz: locationTimezone || null });
       } else if (result.status === "denied") {
         lat = 0;
         lon = 0;
@@ -21188,6 +21260,24 @@
       needsPrompt = true;
       geoPermission = "unknown";
     }
+    function dialogOpen() {
+      const lp = document.getElementById("location-prompt");
+      return !!lp && lp.style.display !== "none";
+    }
+    function backfillObserverSlots() {
+      if (locationSource || lat === 0 && lon === 0 || !isCityDataLoaded()) return;
+      const closest = findClosestCity(lat, lon);
+      if (!closest) return;
+      for (const face of faces) {
+        if (face.watch.worldTimeSubdials && face.terraSlotOverrides?.[1]) {
+          face.terraSlotOverrides[1].cityName = closest.shortLabel;
+        }
+        if (face.watch.worldTimeRing && face.globalLocationSlot !== void 0) {
+          const glSlot = face.terraSlotOverrides?.[face.globalLocationSlot];
+          if (glSlot) glSlot.cityName = closest.shortLabel;
+        }
+      }
+    }
     function updateLocationDisplay() {
       locationDisplay.innerHTML = `Latitude&nbsp;<span style="font-family:monospace">${lat.toFixed(3)}</span>&nbsp;&ensp;Longitude&nbsp;<span style="font-family:monospace">${lon.toFixed(3)}</span>`;
       if (locationSource) {
@@ -21210,6 +21300,17 @@
         } else {
           sourceLabel.textContent = "";
         }
+      } else if (!isCityDataLoaded() && (lat !== 0 || lon !== 0) && !isEmbedMode) {
+        sourceLabel.textContent = "";
+        loadCityData().then(() => {
+          if (locationSource) return;
+          updateLocationDisplay();
+          backfillObserverSlots();
+          const c = findClosestCity(lat, lon);
+          if (c && isPersistentMode() && !getState().city) setState({ city: c.shortLabel });
+          if (!dialogOpen()) releaseCityData();
+        }).catch(() => {
+        });
       } else {
         sourceLabel.textContent = "";
       }
@@ -21364,6 +21465,9 @@
         if (!observerName && isCityDataLoaded() && (lat !== 0 || lon !== 0)) {
           const closest = findClosestCity(lat, lon);
           if (closest) observerName = closest.shortLabel;
+        }
+        if (!observerName && locationTimezone) {
+          observerName = olsonIdToCityName(locationTimezone);
         }
         overrides[1] = {
           cityName: observerName || "Observer",
@@ -22274,7 +22378,7 @@
       locationPrompt.style.display = "none";
       grid.classList.remove("blurred");
     }
-    const isFileProtocol = window.location.protocol === "file:";
+    const isFileProtocol2 = window.location.protocol === "file:";
     function useImperial() {
       const locale = navigator.language || "en-US";
       const region = locale.split("-")[1]?.toUpperCase() || "";
@@ -22345,7 +22449,7 @@
       lpStatusSection.classList.add("visible");
       lpNoLocation.classList.add("hidden");
       renderGlobe(lpGlobe, mapLat, mapLon);
-      if (isFileProtocol) {
+      if (isFileProtocol2) {
         lpOsmContainer.style.display = "none";
         lpOsmAttribution.style.display = "none";
         lpGlobe.width = 160;
@@ -22371,7 +22475,7 @@
       rebuildAllForLocation(newLat, newLon);
       scheduleDstRebuild();
       if (writeToUrl) {
-        setState({ lat: newLat, lon: newLon, city: source || null, tz: locationTimezone || null });
+        setState({ bloc: false, lat: newLat, lon: newLon, city: source || null, tz: locationTimezone || null });
       }
       updateMapPreview(newLat, newLon);
       lpDialogFooter.classList.add("visible");
@@ -22389,7 +22493,8 @@
       if (result.status === "success") {
         lpUseBrowser.textContent = browserBtnLabel;
         applyLocation(result.lat, result.lon, "", "", "browser", false, null);
-        setState({ bloc: true, lat: null, lon: null, city: null });
+        const derived = isCityDataLoaded() ? findClosestCity(result.lat, result.lon)?.shortLabel ?? null : null;
+        setState({ bloc: true, lat: result.lat, lon: result.lon, city: derived, tz: locationTimezone || null });
       } else if (result.status === "denied") {
         geoPermission = "denied";
         const btn = lpUseBrowser;
@@ -23557,6 +23662,21 @@
     }
     if (!isEmbedMode && needsPrompt) {
       showLocationPrompt(true);
+    }
+    if (needsBlocRefresh) {
+      if (sourceLabel) sourceLabel.style.color = "#e6b800";
+      requestBrowserLocation(1e4).then((result) => {
+        if (result.status !== "success") {
+          notifyBlocRefreshFailed();
+          return;
+        }
+        if (haversineKm(lat, lon, result.lat, result.lon) <= 16) return;
+        applyLocation(result.lat, result.lon, "", "", "browser", false, null);
+        if (isPersistentMode()) setState({ bloc: true, lat: result.lat, lon: result.lon, city: null, tz: locationTimezone || null });
+        updateLocationDisplay();
+      }).catch(() => notifyBlocRefreshFailed()).finally(() => {
+        if (sourceLabel) sourceLabel.style.color = "";
+      });
     }
   }
   window.Chronometer = {

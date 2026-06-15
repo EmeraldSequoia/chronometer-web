@@ -15,7 +15,7 @@
  * Does NOT import from src/watch/ — safe for Inspector/Observatory.
  */
 
-import { loadCityData, searchCities, findClosestCity, isCityDataLoaded, loadError } from './city-search.js';
+import { loadCityData, releaseCityData, searchCities, findClosestCity, isCityDataLoaded, loadError } from './city-search.js';
 import type { CityResult } from './city-search.js';
 import { renderGlobe, loadOSMTile } from './mini-map.js';
 import { resolveTimezone } from './tz-resolve.js';
@@ -218,8 +218,9 @@ export function initLocationDialog(config: LocationDialogConfig): LocationDialog
     let locating = false;
     const browserBtnLabel = (lpUseBrowser as HTMLButtonElement).textContent || 'Use device location via browser';
 
-    // Preload city database in the background
-    loadCityData().catch(() => {});
+    // The city DB is loaded lazily: prefetched by the app entry (gated on
+    // save-data) and parsed on demand when the dialog opens (showDialog) or a
+    // search runs. Not loaded here at construction time.
 
     // --- Location name formatting ---
 
@@ -333,6 +334,15 @@ export function initLocationDialog(config: LocationDialogConfig): LocationDialog
         locationPrompt.style.display = '';
         config.onShow?.();
 
+        // Parse the city DB on demand (it may never have been parsed, or was
+        // released on a prior dismiss). Re-render the nearest-city name once it
+        // arrives — until then buildLocationNameHTML falls back to coordinates.
+        loadCityData().then(() => {
+            if (locationPrompt.style.display !== 'none') {
+                lpLocationName.innerHTML = buildLocationNameHTML();
+            }
+        }).catch(() => {});
+
         // Pre-fill coordinate inputs
         lpLatInput.value = (currentLat !== 0 || currentLon !== 0) ? currentLat.toFixed(3) : '';
         lpLonInput.value = (currentLat !== 0 || currentLon !== 0) ? currentLon.toFixed(3) : '';
@@ -393,6 +403,11 @@ export function initLocationDialog(config: LocationDialogConfig): LocationDialog
     function dismissDialog() {
         locating = false;
         locationPrompt.style.display = 'none';
+        // Parse-then-drop: free the ~22 MB parsed form now that search is done.
+        // The compressed blob stays resident, so reopening re-parses instantly
+        // without a network round-trip. The host's onLocationChange has already
+        // fired (and read any nearest-city name) before dismiss.
+        releaseCityData();
         config.onDismiss?.();
     }
 

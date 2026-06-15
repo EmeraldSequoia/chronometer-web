@@ -593,6 +593,19 @@ export function setState(changes: Partial<UrlState>): void {
 }
 
 /**
+ * True when state is persisted to localStorage (the default backend) — not a
+ * session-only URL or in-memory fallback. Gate *automatic*, non-user writes on
+ * this (e.g. seeding `bloc` with the latest geolocation fix, or backfilling a
+ * reverse-geocoded city name): they're only worth persisting when they'll
+ * actually stick, and writing them in session-only mode would mutate the shared
+ * URL and could spuriously trip the first-edit re-prompt. Genuine user edits
+ * should call `setState` unconditionally.
+ */
+export function isPersistentMode(): boolean {
+    return backend() instanceof LocalStorageBackend;
+}
+
+/**
  * Read Terra/Gaia per-slot city overrides as a flat key→value map (e.g.
  * `{ r5: 'Denver', r5tz: 'America/Denver', ... }`), sourced from the active
  * backend (storage / in-memory / URL).
