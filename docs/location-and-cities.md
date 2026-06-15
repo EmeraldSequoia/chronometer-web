@@ -4,10 +4,14 @@ The location system provides the observer's position (latitude, longitude, timez
 
 ## Location Source Priority
 
-When determining the observer's location, the system checks in this order:
+Location (like all settings) is read through `app-state.ts`'s `getState()`,
+which sources it from LocalStorage in the normal case and from URL parameters
+only for shared links / the `file://` fallback. When determining the observer's
+location, the system checks in this order:
 
-1. **URL parameters** — `lat`, `lon`, and optionally `city` and `tz`
-2. **Browser geolocation** — if `bloc=1` is in the URL
+1. **Stored / incoming `lat`, `lon`** (+ optional `city`, `tz`) — from LocalStorage,
+   or from URL parameters when opening a shared link
+2. **Browser geolocation** — if `bloc` is set (stored or in the URL)
 3. **City search** — user searches by name and selects a city
 4. **Manual coordinates** — user enters lat/lon directly
 5. **Location prompt** — if none of the above, the location panel opens
@@ -120,7 +124,8 @@ When opened via `file://` protocol (double-clicking HTML):
 ## Integration with Watch Environment
 
 When a location is set (from any source), the system:
-1. Updates `lat`, `lon`, and `timezone` in the URL state
+1. Persists `lat`, `lon`, and `timezone` via `setState()` (LocalStorage in the
+   normal case; the URL only in fallback mode)
 2. Calls `rebuildAllForLocation()` which re-runs `buildSlotOverrides()` for world-time faces
 3. Creates fresh `Environment` objects with new lat/lon
 4. Resets hand schedules and rebuilds static caches
@@ -133,7 +138,8 @@ When a location is set (from any source), the system:
 | `src/cities-data.js` | Bundled city database (generated, tracked in git) |
 | `src/cities-data.d.ts` | TypeScript declarations for city data |
 | `src/engine-entry.ts` | Location update handling, `rebuildAllForLocation()` |
-| `src/url-state.ts` | URL parameter reading/writing for location |
+| `src/shared/app-state.ts` | State persistence front door (`getState`/`setState`) |
+| `src/url-state.ts` | URL serializer for location (sharing + URL fallback) |
 | `src/mini-map.ts` | Blue Marble globe and OSM tile map |
 | `src/tz-resolve.ts` | Timezone resolution utilities |
 | `scripts/build-cities.js` | GeoNames → JS data pipeline |

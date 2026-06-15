@@ -9,6 +9,7 @@
  */
 
 import { buildShareUrl, type UrlState } from './url-state.js';
+import { getSlotOverrides } from './app-state.js';
 import { ensureModalStyles } from './incoming-settings-dialog.js';
 
 export interface ShareButtonOptions {
@@ -20,7 +21,7 @@ export function initShareButton(options: ShareButtonOptions): void {
     const shareBtn = document.getElementById('share-btn');
     if (!shareBtn) return;
     shareBtn.addEventListener('click', () => {
-        showShareDialog(buildShareUrl(options.getState()));
+        showShareDialog(buildShareUrl(options.getState(), { slots: getSlotOverrides() }));
     });
 }
 

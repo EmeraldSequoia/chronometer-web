@@ -43,7 +43,7 @@ import { evalAttr } from './watch/watch-env.js';
 import { TimeController, TICK_INTERVAL_MS, displaySecondsPerTick } from './shared/time-controller.js';
 
 import { initNavigationLinks, updateNavigationLinks } from './shared/url-state.js';
-import { getState, setState, initAppState, onSharedChange } from './shared/app-state.js';
+import { getState, setState, initAppState, onSharedChange, getSlotOverrides, setSlotOverrides } from './shared/app-state.js';
 import { createFpsIndicator } from './shared/fps-indicator.js';
 import { initHelpPopover } from './shared/help-popover.js';
 import { initShareButton } from './shared/share-button.js';
@@ -506,15 +506,15 @@ async function main() {
         globalLocationSlot?: number;
     }
     function buildSlotOverrides(watch: Watch): SlotOverrideResult | undefined {
-        const params = new URLSearchParams(window.location.search);
+        const slotParams = getSlotOverrides();
         if (watch.worldTimeRing) {
-            // Collect user overrides from URL
+            // Collect user overrides from persisted slot state
             const userOverrides: Record<number, TerraSlot> = {};
             for (let slot = 1; slot <= 24; slot++) {
-                const name = params.get(`r${slot}`);
-                const tz = params.get(`r${slot}tz`);
-                const latStr = params.get(`r${slot}lat`);
-                const lonStr = params.get(`r${slot}lon`);
+                const name = slotParams[`r${slot}`] ?? null;
+                const tz = slotParams[`r${slot}tz`] ?? null;
+                const latStr = slotParams[`r${slot}lat`] ?? null;
+                const lonStr = slotParams[`r${slot}lon`] ?? null;
                 if (name && tz) {
                     userOverrides[slot] = {
                         cityName: name,
@@ -600,12 +600,12 @@ async function main() {
                 olsonId: locationTimezone || '',
                 lat, lon,
             };
-            // Slots 2–N: URL overrides or defaults
+            // Slots 2–N: user overrides or defaults
             for (let slot = 2; slot <= nSubdials; slot++) {
-                const name = params.get(`d${slot}`);
-                const tz = params.get(`d${slot}tz`);
-                const latStr = params.get(`d${slot}lat`);
-                const lonStr = params.get(`d${slot}lon`);
+                const name = slotParams[`d${slot}`] ?? null;
+                const tz = slotParams[`d${slot}tz`] ?? null;
+                const latStr = slotParams[`d${slot}lat`] ?? null;
+                const lonStr = slotParams[`d${slot}lon`] ?? null;
                 if (name && tz) {
                     overrides[slot] = {
                         cityName: name,
@@ -2495,9 +2495,8 @@ async function main() {
                 { key: 'neptune', name: 'Neptune', param: 'neptune' },
             ];
 
-            // Determine current selection from URL or default
-            const params = new URLSearchParams(window.location.search);
-            const currentBody = (params.get('body') || 'jupiter').toLowerCase();
+            // Determine current selection from persisted state or default
+            const currentBody = (getState().body || 'jupiter').toLowerCase();
             let selectedIdx = planetOrder.findIndex(p => p.param === currentBody);
             if (selectedIdx < 0) selectedIdx = 5; // Jupiter
 
@@ -2568,12 +2567,10 @@ async function main() {
                 // Update body labels in astro panel
                 updateBodyLabels(p.name, planetNumberForIdx[idx]);
 
-                // Update URL parameter (without reload)
-                const url = new URL(window.location.href);
-                url.searchParams.set('body', p.param);
-                window.history.replaceState({}, '', url.toString());
+                // Persist the body selection (storage in storage mode, URL otherwise).
+                setState({ body: p.param });
 
-                // Propagate body param to navigation links (all faces, selected, index)
+                // Keep navigation links in sync (carries the param in URL-fallback mode).
                 updateNavigationLinks();
 
                 // Rebuild face with new body — preserve hand states for smooth animation
@@ -2680,15 +2677,8 @@ async function main() {
                 stopScheduler();
                 startScheduler();
 
-                // 8. Update URL
-                const params = new URLSearchParams(window.location.search);
-                if (noonOnTop) {
-                    params.set('vnoon', '1');
-                } else {
-                    params.delete('vnoon');
-                }
-                const qs = params.toString();
-                history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
+                // 8. Persist the noon-on-top choice (storage in storage mode, URL otherwise).
+                setState({ vnoon: noonOnTop });
                 updateNavigationLinks();
 
                 // 9. Update pill highlight
@@ -2891,28 +2881,25 @@ async function main() {
                 return slots;
             }
 
-            /** Write slot overrides to URL */
+            /** Persist Terra ring slot overrides via app-state. */
             function writeTerraOverridesToUrl() {
-                const params = new URLSearchParams(window.location.search);
+                const changes: Record<string, string | null> = {};
+                // Clear all ring slot keys, then set the current overrides.
                 for (let slot = 1; slot <= 24; slot++) {
-                    params.delete(`r${slot}`);
-                    params.delete(`r${slot}tz`);
-                    params.delete(`r${slot}lat`);
-                    params.delete(`r${slot}lon`);
+                    changes[`r${slot}`] = null;
+                    changes[`r${slot}tz`] = null;
+                    changes[`r${slot}lat`] = null;
+                    changes[`r${slot}lon`] = null;
                 }
                 if (terraFace!.terraSlotOverrides) {
                     for (const [slotStr, data] of Object.entries(terraFace!.terraSlotOverrides)) {
-                        params.set(`r${slotStr}`, data.cityName);
-                        params.set(`r${slotStr}tz`, data.olsonId);
-                        params.set(`r${slotStr}lat`, data.lat.toFixed(3));
-                        params.set(`r${slotStr}lon`, data.lon.toFixed(3));
+                        changes[`r${slotStr}`] = data.cityName;
+                        changes[`r${slotStr}tz`] = data.olsonId;
+                        changes[`r${slotStr}lat`] = data.lat.toFixed(3);
+                        changes[`r${slotStr}lon`] = data.lon.toFixed(3);
                     }
                 }
-                params.delete('long');
-                params.delete('loc');
-                const qs = params.toString();
-                const newUrl = window.location.pathname + (qs ? '?' + qs : '');
-                history.replaceState(null, '', newUrl);
+                setSlotOverrides(changes);
                 updateNavigationLinks();
             }
 
@@ -3210,31 +3197,27 @@ async function main() {
                 timeBarEl.parentElement!.insertBefore(changeCitiesBtn, timeBarEl);
             }
 
-            /** Write Gaia subdial overrides to URL */
+            /** Persist Gaia subdial overrides via app-state. */
             function writeGaiaOverridesToUrl() {
-                const params = new URLSearchParams(window.location.search);
                 const nSubdials = gaiaFace!.watch.maxSeparateLoc || 4;
+                const changes: Record<string, string | null> = {};
                 for (let slot = 2; slot <= nSubdials; slot++) {
-                    params.delete(`d${slot}`);
-                    params.delete(`d${slot}tz`);
-                    params.delete(`d${slot}lat`);
-                    params.delete(`d${slot}lon`);
+                    changes[`d${slot}`] = null;
+                    changes[`d${slot}tz`] = null;
+                    changes[`d${slot}lat`] = null;
+                    changes[`d${slot}lon`] = null;
                 }
                 if (gaiaFace!.terraSlotOverrides) {
                     for (const [slotStr, data] of Object.entries(gaiaFace!.terraSlotOverrides)) {
                         const s = Number(slotStr);
                         if (s < 2) continue; // don't write observer slot
-                        params.set(`d${slotStr}`, data.cityName);
-                        params.set(`d${slotStr}tz`, data.olsonId);
-                        params.set(`d${slotStr}lat`, data.lat.toFixed(3));
-                        params.set(`d${slotStr}lon`, data.lon.toFixed(3));
+                        changes[`d${slotStr}`] = data.cityName;
+                        changes[`d${slotStr}tz`] = data.olsonId;
+                        changes[`d${slotStr}lat`] = data.lat.toFixed(3);
+                        changes[`d${slotStr}lon`] = data.lon.toFixed(3);
                     }
                 }
-                params.delete('long');
-                params.delete('loc');
-                const qs = params.toString();
-                const newUrl = window.location.pathname + (qs ? '?' + qs : '');
-                history.replaceState(null, '', newUrl);
+                setSlotOverrides(changes);
                 updateNavigationLinks();
             }
 

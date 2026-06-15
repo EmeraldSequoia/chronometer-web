@@ -80,6 +80,8 @@ function namespaceOf(field: keyof UrlState, app: AppName): Namespace | null {
         case 'picks':
         case 'kyhand':
         case 'kmode':
+        case 'body':
+        case 'vnoon':
             return 'chronometer';
         case 'op':
         case 'onoon':
@@ -101,6 +103,7 @@ function defaultState(): UrlState {
         lat: null, lon: null, city: null, bloc: false, tc: false,
         t: null, off: null, dir: 1, tz: null, picks: null, tp: 'd',
         embed: false, fps: false, kyhand: null, kmode: null, op: null, onoon: false,
+        body: null, vnoon: false,
     };
 }
 
@@ -119,6 +122,7 @@ function isDefaultValue(field: keyof UrlState, value: unknown): boolean {
         case 'embed':
         case 'fps':
         case 'onoon':
+        case 'vnoon':
             return value === false;
         case 'op': return value === 0;
         default: return false;
@@ -302,7 +306,7 @@ const TIME_FIELDS: ReadonlySet<keyof UrlState> = new Set(['t', 'off', 'dir']);
  */
 const SHAREABLE_FIELDS: readonly (keyof UrlState)[] = [
     'lat', 'lon', 'city', 'tz', 'bloc', 't', 'off', 'dir',
-    'picks', 'kyhand', 'kmode', 'op', 'onoon', 'tp',
+    'picks', 'kyhand', 'kmode', 'op', 'onoon', 'body', 'vnoon', 'tp',
 ];
 
 /**
@@ -313,28 +317,101 @@ const SHAREABLE_FIELDS: readonly (keyof UrlState)[] = [
  */
 const SHAREABLE_URL_KEYS: readonly string[] = [
     'lat', 'lon', 'long', 'city', 'loc', 'tz', 'bloc',
-    't', 'off', 'dir', 'picks', 'kyhand', 'kmode', 'op', 'onoon', 'tp',
+    't', 'off', 'dir', 'picks', 'kyhand', 'kmode', 'op', 'onoon', 'body', 'vnoon', 'tp',
 ];
 
 /** Query keys cleared from the URL when settings are adopted into storage. */
 const CLEARED_URL_KEYS: readonly string[] = [...SHAREABLE_URL_KEYS, 'tc'];
 
+/**
+ * Terra/Gaia per-slot city overrides are a *variable* set of keys, not scalar
+ * UrlState fields, so they get their own dedicated storage blob and helpers.
+ * Keys look like `r5`, `r5tz`, `r5lat`, `r5lon` (Terra ring) and `d2`, `d2tz`,
+ * … (Gaia subdials). They are shareable, so they participate in the incoming
+ * detection / equality / clearing logic below.
+ */
+const SLOT_STORAGE_KEY = STORAGE_KEY_PREFIX + 'slots';
+const SLOT_KEY_RE = /^[rd]\d+(tz|lat|lon)?$/;
+
+/** Read the flat slot map from the URL query string. */
+function urlSlotMap(): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [k, v] of new URLSearchParams(window.location.search)) {
+        if (SLOT_KEY_RE.test(k)) out[k] = v;
+    }
+    return out;
+}
+
+/** Read the flat slot map from the dedicated storage blob. */
+function storedSlotMap(): Record<string, string> {
+    try {
+        const obj = JSON.parse(localStorage.getItem(SLOT_STORAGE_KEY) || '{}');
+        delete obj.v;
+        return obj;
+    } catch {
+        return {};
+    }
+}
+
+function urlHasSlotParams(): boolean {
+    for (const k of new URLSearchParams(window.location.search).keys()) {
+        if (SLOT_KEY_RE.test(k)) return true;
+    }
+    return false;
+}
+
 function hasShareableParamsInUrl(): boolean {
     const params = new URLSearchParams(window.location.search);
-    return SHAREABLE_URL_KEYS.some((k) => params.has(k));
+    return SHAREABLE_URL_KEYS.some((k) => params.has(k)) || urlHasSlotParams();
 }
 
 /** True when the URL's shareable values match what's already stored. */
 function shareableUrlEqualsStored(ls: LocalStorageBackend): boolean {
     const url = readUrlState();
     const stored = ls.read();
-    return SHAREABLE_FIELDS.every((f) => url[f] === stored[f]);
+    if (!SHAREABLE_FIELDS.every((f) => url[f] === stored[f])) return false;
+    // Compare slot maps too.
+    const u = urlSlotMap();
+    const s = storedSlotMap();
+    const keys = new Set([...Object.keys(u), ...Object.keys(s)]);
+    for (const k of keys) if (u[k] !== s[k]) return false;
+    return true;
 }
 
-/** Remove shareable params from the URL, preserving fps/embed/picks/unknowns. */
+/**
+ * The subset of scalar shareable fields actually *present* in the URL, with
+ * their parsed values. Used when adopting a shared link so absent fields don't
+ * clobber existing stored defaults (a partial link merges, it doesn't replace).
+ */
+function urlScalarOverrides(): Partial<UrlState> {
+    const params = new URLSearchParams(window.location.search);
+    const url = readUrlState();
+    const out: Partial<UrlState> = {};
+    const has = (...keys: string[]) => keys.some((k) => params.has(k));
+    if (has('lat')) out.lat = url.lat;
+    if (has('lon', 'long')) out.lon = url.lon;
+    if (has('city')) out.city = url.city;
+    if (has('tz')) out.tz = url.tz;
+    if (has('bloc')) out.bloc = url.bloc;
+    if (has('t')) out.t = url.t;
+    if (has('off')) out.off = url.off;
+    if (has('dir')) out.dir = url.dir;
+    if (has('picks')) out.picks = url.picks;
+    if (has('kyhand')) out.kyhand = url.kyhand;
+    if (has('kmode')) out.kmode = url.kmode;
+    if (has('op')) out.op = url.op;
+    if (has('onoon')) out.onoon = url.onoon;
+    if (has('body')) out.body = url.body;
+    if (has('vnoon')) out.vnoon = url.vnoon;
+    if (has('tp')) out.tp = url.tp;
+    return out;
+}
+
+/** Remove shareable params (incl. slot keys) from the URL, preserving fps/embed/unknowns. */
 function clearShareableParamsFromUrl(): void {
     const params = new URLSearchParams(window.location.search);
     for (const k of CLEARED_URL_KEYS) params.delete(k);
+    for (const k of [...params.keys()]) if (SLOT_KEY_RE.test(k)) params.delete(k);
     const qs = params.toString();
     history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
 }
@@ -349,6 +426,8 @@ let appName: AppName = 'index';
 let sessionRePromptArmed = false;
 /** Ensures the "settings won't be saved" warning shows at most once. */
 let warnedNoPersistence = false;
+/** Terra/Gaia slot overrides held in memory under the InMemoryBackend. */
+let inMemorySlots: Record<string, string> = {};
 
 export interface InitAppStateOptions {
     /** Which app is running (selects the per-app storage namespace). */
@@ -430,11 +509,18 @@ async function promptIncomingSettings(ls: LocalStorageBackend): Promise<void> {
     }
 }
 
-/** Persist the current effective state to storage, then clean the URL. */
+/**
+ * Merge the incoming shared link's settings into storage, then clean the URL.
+ * Only fields actually present in the URL are written, so a partial link merges
+ * into existing defaults rather than clobbering unspecified fields.
+ */
 function adoptCurrentStateAsDefault(ls: LocalStorageBackend): void {
-    ls.write(getState());
+    const overrides = urlScalarOverrides();  // only fields present in the URL
+    const slots = urlSlotMap();              // only slot keys present in the URL
+    activeBackend = ls;                       // switch before writing so writes target storage
+    ls.write(overrides);
+    if (Object.keys(slots).length > 0) setSlotOverrides(slots);
     clearShareableParamsFromUrl();
-    activeBackend = ls;
     sessionRePromptArmed = false;
 }
 
@@ -465,6 +551,7 @@ function maybeShowParadigmNotice(): void {
 function downgradeToInMemory(): void {
     if (activeBackend instanceof InMemoryBackend) return;
     const seed = activeBackend ? activeBackend.read() : undefined;
+    inMemorySlots = getSlotOverrides();   // preserve current slots across the switch
     activeBackend = new InMemoryBackend(seed);
     warnNoPersistence();
 }
@@ -503,6 +590,60 @@ export function setState(changes: Partial<UrlState>): void {
         sessionRePromptArmed = false;
         void promptSessionReprompt();
     }
+}
+
+/**
+ * Read Terra/Gaia per-slot city overrides as a flat key→value map (e.g.
+ * `{ r5: 'Denver', r5tz: 'America/Denver', ... }`), sourced from the active
+ * backend (storage / in-memory / URL).
+ */
+export function getSlotOverrides(): Record<string, string> {
+    const b = backend();
+    if (b instanceof LocalStorageBackend) return storedSlotMap();
+    if (b instanceof InMemoryBackend) return { ...inMemorySlots };
+    return urlSlotMap();
+}
+
+/**
+ * Merge slot-override changes (null value deletes a key) into the active backend.
+ */
+export function setSlotOverrides(changes: Record<string, string | null>): void {
+    const b = backend();
+
+    if (b instanceof InMemoryBackend) {
+        for (const [k, v] of Object.entries(changes)) {
+            if (v == null) delete inMemorySlots[k]; else inMemorySlots[k] = v;
+        }
+        return;
+    }
+
+    if (b instanceof LocalStorageBackend) {
+        const cur = storedSlotMap() as Record<string, unknown>;
+        for (const [k, v] of Object.entries(changes)) {
+            if (v == null) delete cur[k]; else cur[k] = v;
+        }
+        delete cur.v;
+        try {
+            if (Object.keys(cur).length === 0) {
+                localStorage.removeItem(SLOT_STORAGE_KEY);
+            } else {
+                cur.v = SCHEMA_VERSION;
+                localStorage.setItem(SLOT_STORAGE_KEY, JSON.stringify(cur));
+            }
+        } catch {
+            downgradeToInMemory();
+            setSlotOverrides(changes);
+        }
+        return;
+    }
+
+    // UrlBackend: write slot keys into the URL query string.
+    const params = new URLSearchParams(window.location.search);
+    for (const [k, v] of Object.entries(changes)) {
+        if (v == null) params.delete(k); else params.set(k, v);
+    }
+    const qs = params.toString();
+    history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
 }
 
 async function promptSessionReprompt(): Promise<void> {

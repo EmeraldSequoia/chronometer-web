@@ -31,7 +31,7 @@ Permanent reference documentation for the Chronometer Web codebase, organized by
 - [**Location & Cities**](location-and-cities.md) — Location system, GeoNames city picker, `file://` limitations
 - [**Timezone & DST**](timezone-and-dst.md) — Timezone offset model, DST transition detection, environment rebuilds
 - [**Help System**](help-system.md) — Per-face help content, Android source extraction, lazy-loading architecture
-- [**Face Picker**](face-picker.md) — Face selection/reordering, `picks` URL parameter, selected faces page
+- [**Face Picker**](face-picker.md) — Face selection/reordering, the `picks` setting, selected faces page
 - [**Embedding**](embedding.md) — Embedding Terra in other websites via iframe
 
 ### Development

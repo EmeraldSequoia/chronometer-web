@@ -30,7 +30,7 @@ PATH="/usr/local/bin:$PATH" bash build.sh
    - Watch environment (`watch-env.ts`)
    - Time controller
    - City search
-   - Location/URL state management
+   - State management (`app-state.ts` — LocalStorage/URL/in-memory — and `url-state.ts`)
 
 2. **`face-<name>.js`** (per-face bundles) — Each face gets its own bundle containing:
    - The face's XML definition (imported as text)
@@ -129,7 +129,8 @@ Note: Help HTML fragments are injected directly into each face's HTML file at bu
 The app is designed to work from `file://` URLs:
 - No web server required
 - Users can download `dist/` and double-click `index.html`
-- Bookmarking preserves location settings via URL parameters
+- Settings persist in LocalStorage; where it's unavailable on `file://`, the app
+  falls back to keeping settings in the URL (bookmark to preserve them)
 - See [Location & Cities — file:// Limitations](location-and-cities.md#file-url-limitations) for the few features that don't work without a server
 
 ## Verification

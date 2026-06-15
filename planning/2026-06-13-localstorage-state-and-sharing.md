@@ -16,6 +16,31 @@ Implementation notes (2026-06-14):
 - One deferred design idea remains future work: simultaneous live scrubbing
   across multiple windows (needs more than `storage`-event sync).
 
+Addendum (2026-06-14, after the notes above):
+- **Migrated two toggles that the initial phases missed** because they bypassed
+  the state model (read directly from the URL in `watch-env.ts`): Venezia's
+  `body` (planet selector) and Vienna's `vnoon` (noon-on-top). Both are now
+  `UrlState` fields in the `chronometer` namespace, shareable, and storage-backed
+  with clean URLs. `watch-env.ts` now reads `body`/`vnoon`/`kmode`/`kyhand` via
+  `getState()`; the Venezia selector and Vienna toggle persist via `setState()`.
+- **Developer docs pass:** updated `docs/` (architecture-overview, adding-a-new-app,
+  location-and-cities, build-system, development-rules, face-picker, observatory,
+  inspector, xml-syntax, animation, docs/README) to describe `app-state.ts` as
+  the persistence front door and `url-state.ts` as the URL serializer.
+- **Migrated Terra/Gaia per-slot city overrides** (`r1..r24`, `d2..dN`, each with
+  `tz`/`lat`/`lon`) — the "share my Terra cities" use case. Because they're a
+  variable, structured set (not scalar `UrlState` fields), they get a dedicated
+  storage blob `ec:slots` and a dedicated API in `app-state.ts`
+  (`getSlotOverrides()` / `setSlotOverrides()`). `buildSlotOverrides()` reads via
+  `getSlotOverrides()`; the Terra/Gaia city dialogs persist via
+  `setSlotOverrides()`; `buildShareUrl()` appends them; and they participate in
+  the incoming-settings detection / equality / clearing logic.
+  - While doing this, fixed a **partial-link data-loss bug**: adopting a shared
+    link now merges only the fields *present* in the URL (`urlScalarOverrides()` +
+    present slot keys) instead of writing the full `UrlState`, so a partial link
+    (e.g. slots-only) no longer clobbers existing stored location/config.
+- `embed` and `fps` remain intentionally URL-only (deployment / diagnostic flags).
+
 ## Goal
 
 Switch the default persistence mechanism for the three apps (Chronometer,

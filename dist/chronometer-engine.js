@@ -14639,6 +14639,899 @@
     }
   }
 
+  // src/shared/url-state.ts
+  function readUrlState() {
+    const params = new URLSearchParams(window.location.search);
+    const latStr = params.get("lat");
+    const lonStr = params.get("lon") || params.get("long");
+    const lat = latStr !== null ? parseFloat(latStr) : NaN;
+    const lon = lonStr !== null ? parseFloat(lonStr) : NaN;
+    const city = params.get("city");
+    const blocStr = params.get("bloc");
+    const tcStr = params.get("tc");
+    const tStr = params.get("t");
+    const offStr = params.get("off");
+    const dirStr = params.get("dir");
+    let dir = 1;
+    if (dirStr === "-1") dir = -1;
+    else if (dirStr === "0") dir = 0;
+    return {
+      lat: !isNaN(lat) ? lat : null,
+      lon: !isNaN(lon) ? lon : null,
+      city: city || null,
+      bloc: blocStr === "1",
+      tc: tcStr === "1",
+      t: tStr !== null ? parseInt(tStr, 10) : null,
+      off: offStr !== null ? parseInt(offStr, 10) : null,
+      dir,
+      tz: params.get("tz") || null,
+      picks: params.get("picks") || null,
+      tp: params.get("tp") === "a" ? "a" : "d",
+      embed: params.get("embed") === "1",
+      fps: params.has("fps"),
+      kyhand: params.get("kyhand"),
+      kmode: params.get("kmode"),
+      op: (() => {
+        const s = params.get("op");
+        const n = s !== null ? parseInt(s, 10) : NaN;
+        return Number.isFinite(n) ? n : null;
+      })(),
+      onoon: params.get("onoon") === "1",
+      body: params.get("body") || null,
+      vnoon: params.get("vnoon") === "1"
+    };
+  }
+  function writeUrlState(changes) {
+    const params = new URLSearchParams(window.location.search);
+    if ("lat" in changes) {
+      if (changes.lat !== null && changes.lat !== void 0) {
+        params.set("lat", changes.lat.toFixed(3));
+      } else {
+        params.delete("lat");
+      }
+    }
+    if ("lon" in changes) {
+      if (changes.lon !== null && changes.lon !== void 0) {
+        params.set("lon", changes.lon.toFixed(3));
+      } else {
+        params.delete("lon");
+      }
+    }
+    if ("picks" in changes) {
+      if (changes.picks) params.set("picks", changes.picks);
+      else params.delete("picks");
+    }
+    if ("kyhand" in changes) {
+      if (changes.kyhand) params.set("kyhand", changes.kyhand);
+      else params.delete("kyhand");
+    }
+    if ("kmode" in changes) {
+      if (changes.kmode) params.set("kmode", changes.kmode);
+      else params.delete("kmode");
+    }
+    if ("city" in changes) {
+      if (changes.city) {
+        params.set("city", changes.city);
+      } else {
+        params.delete("city");
+      }
+    }
+    if ("bloc" in changes) {
+      if (changes.bloc) {
+        params.set("bloc", "1");
+      } else {
+        params.delete("bloc");
+      }
+    }
+    if ("tc" in changes) {
+      if (changes.tc) {
+        params.set("tc", "1");
+      } else {
+        params.delete("tc");
+      }
+    }
+    if ("t" in changes) {
+      if (changes.t !== null && changes.t !== void 0) {
+        params.set("t", changes.t.toString());
+      } else {
+        params.delete("t");
+      }
+    }
+    if ("off" in changes) {
+      if (changes.off !== null && changes.off !== void 0) {
+        params.set("off", changes.off.toString());
+      } else {
+        params.delete("off");
+      }
+    }
+    if ("dir" in changes) {
+      if (changes.dir !== void 0 && changes.dir !== 1) {
+        params.set("dir", changes.dir.toString());
+      } else {
+        params.delete("dir");
+      }
+    }
+    if ("tz" in changes) {
+      if (changes.tz) {
+        params.set("tz", changes.tz);
+      } else {
+        params.delete("tz");
+      }
+    }
+    if ("tp" in changes) {
+      if (changes.tp === "a") {
+        params.set("tp", "a");
+      } else {
+        params.delete("tp");
+      }
+    }
+    if ("op" in changes) {
+      if (changes.op !== null && changes.op !== void 0 && changes.op !== 0) {
+        params.set("op", changes.op.toString());
+      } else {
+        params.delete("op");
+      }
+    }
+    if ("onoon" in changes) {
+      if (changes.onoon) {
+        params.set("onoon", "1");
+      } else {
+        params.delete("onoon");
+      }
+    }
+    if ("body" in changes) {
+      if (changes.body) params.set("body", changes.body);
+      else params.delete("body");
+    }
+    if ("vnoon" in changes) {
+      if (changes.vnoon) params.set("vnoon", "1");
+      else params.delete("vnoon");
+    }
+    params.delete("long");
+    params.delete("loc");
+    const qs = params.toString();
+    const newUrl = window.location.pathname + (qs ? "?" + qs : "");
+    history.replaceState(null, "", newUrl);
+    updateNavigationLinks();
+  }
+  function buildShareUrl(state, options = {}) {
+    const url = new URL(options.baseUrl ?? window.location.origin + window.location.pathname);
+    const p = url.searchParams;
+    if (state.lat !== null && state.lat !== void 0) p.set("lat", state.lat.toFixed(3));
+    if (state.lon !== null && state.lon !== void 0) p.set("lon", state.lon.toFixed(3));
+    if (state.city) p.set("city", state.city);
+    if (state.tz) p.set("tz", state.tz);
+    if (state.bloc) p.set("bloc", "1");
+    if (state.off !== null && state.off !== void 0) p.set("off", state.off.toString());
+    if (state.t !== null && state.t !== void 0) p.set("t", state.t.toString());
+    if (state.dir !== 1) p.set("dir", state.dir.toString());
+    if (state.picks) p.set("picks", state.picks);
+    if (state.kyhand) p.set("kyhand", state.kyhand);
+    if (state.kmode) p.set("kmode", state.kmode);
+    if (state.op !== null && state.op !== void 0 && state.op !== 0) p.set("op", state.op.toString());
+    if (state.onoon) p.set("onoon", "1");
+    if (state.body) p.set("body", state.body);
+    if (state.vnoon) p.set("vnoon", "1");
+    if (state.tp === "a") p.set("tp", "a");
+    if (options.slots) {
+      for (const [k, v] of Object.entries(options.slots)) p.set(k, v);
+    }
+    return url.toString();
+  }
+  var picksProvider = () => new URLSearchParams(window.location.search).get("picks");
+  function setPicksProvider(fn) {
+    picksProvider = fn;
+  }
+  function updateNavigationLinks() {
+    const search = window.location.search;
+    const backLink = document.getElementById("back-link");
+    if (backLink) {
+      const url = new URL(backLink.getAttribute("data-base-href") || "index.html", window.location.href);
+      url.search = search;
+      backLink.href = url.toString();
+    }
+    const allFacesLink = document.getElementById("all-faces-link");
+    if (allFacesLink) {
+      const url = new URL(allFacesLink.getAttribute("data-base-href") || "all.html", window.location.href);
+      url.search = search;
+      allFacesLink.href = url.toString();
+    }
+    const selectedLink = document.getElementById("selected-faces-link");
+    if (selectedLink) {
+      const hasPicks = !!picksProvider();
+      const baseHref = hasPicks ? "selected.html" : "pick.html";
+      const url = new URL(baseHref, window.location.href);
+      url.search = search;
+      selectedLink.href = url.toString();
+      selectedLink.title = hasPicks ? "Selected Faces" : "Pick Faces";
+    }
+    const editPicksLink = document.getElementById("edit-picks-link");
+    if (editPicksLink) {
+      const url = new URL("pick.html", window.location.href);
+      url.search = search;
+      editPicksLink.href = url.toString();
+    }
+    document.querySelectorAll("a.face-card").forEach((a) => {
+      const anchor = a;
+      const url = new URL(anchor.getAttribute("data-base-href") || anchor.getAttribute("href"), window.location.href);
+      url.search = search;
+      anchor.href = url.toString();
+    });
+  }
+  function initNavigationLinks() {
+    const backLink = document.getElementById("back-link");
+    if (backLink && !backLink.hasAttribute("data-base-href")) {
+      backLink.setAttribute("data-base-href", backLink.getAttribute("href") || "index.html");
+    }
+    const allFacesLink = document.getElementById("all-faces-link");
+    if (allFacesLink && !allFacesLink.hasAttribute("data-base-href")) {
+      allFacesLink.setAttribute("data-base-href", allFacesLink.getAttribute("href") || "all.html");
+    }
+    document.querySelectorAll("a.face-card").forEach((a) => {
+      const anchor = a;
+      if (!anchor.hasAttribute("data-base-href")) {
+        anchor.setAttribute("data-base-href", anchor.getAttribute("href"));
+      }
+    });
+    updateNavigationLinks();
+  }
+
+  // src/shared/incoming-settings-dialog.ts
+  var STYLE_ID = "ec-settings-dialog-style";
+  var CSS = `
+.ec-modal-backdrop {
+    position: fixed; inset: 0; z-index: 1000;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px 16px;
+    background: rgba(0, 0, 0, 0.5);
+}
+.ec-modal {
+    position: relative;
+    background: rgba(26, 26, 46, 0.98);
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border: 1px solid #3a3a5e; border-radius: 14px;
+    padding: 26px 30px; min-width: 300px; max-width: 400px; width: 100%;
+    box-shadow: 0 8px 48px rgba(0, 0, 0, 0.6);
+    text-align: center;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.ec-modal-title {
+    font-size: 16px; color: #e0d8c8; margin: 0 0 10px; font-weight: 400;
+}
+.ec-modal-text {
+    font-size: 13px; color: #aab; line-height: 1.5; margin: 0 0 20px;
+}
+.ec-modal-buttons { display: flex; flex-direction: column; gap: 8px; }
+.ec-modal-btn {
+    border-radius: 6px; font-size: 13px; padding: 9px 16px;
+    cursor: pointer; transition: background 0.15s, color 0.15s;
+    background: #2a2a4e; border: 1px solid #3a3a5e; color: #aac;
+}
+.ec-modal-btn:hover { background: #3a3a6e; color: #ddf; }
+.ec-modal-btn.ec-primary {
+    background: #34507a; border-color: #4a6fa5; color: #dde9ff;
+}
+.ec-modal-btn.ec-primary:hover { background: #3f5f92; color: #fff; }
+
+.ec-toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    z-index: 1001; max-width: 340px;
+    background: rgba(26, 26, 46, 0.98); border: 1px solid #3a3a5e;
+    border-radius: 10px; padding: 12px 16px;
+    box-shadow: 0 6px 32px rgba(0, 0, 0, 0.5);
+    color: #ccd; font-size: 12.5px; line-height: 1.45;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    display: flex; align-items: center; gap: 12px;
+}
+.ec-toast-close {
+    background: none; border: none; color: #889; font-size: 18px;
+    cursor: pointer; padding: 0 2px; line-height: 1;
+}
+.ec-toast-close:hover { color: #ccd; }
+
+.ec-modal-input {
+    width: 100%; box-sizing: border-box;
+    background: #1d1d30; border: 1px solid #3a3a5e; border-radius: 6px;
+    color: #cdd; font-size: 12px; font-family: monospace;
+    padding: 8px 10px; margin: 0 0 14px;
+    text-align: left;
+}
+
+.ec-url-badge {
+    position: fixed; left: 10px; bottom: 8px; z-index: 999;
+    font-size: 11px; color: #99a; opacity: 0.7;
+    background: rgba(0, 0, 0, 0.3); padding: 2px 8px; border-radius: 6px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    pointer-events: none; user-select: none;
+}
+`;
+  function ensureModalStyles() {
+    if (document.getElementById(STYLE_ID)) return;
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = CSS;
+    document.head.appendChild(style);
+  }
+  var COPY = {
+    incoming: {
+      title: "Use these shared settings?",
+      text: "This link includes a saved time, location, or configuration. Save them as your default on this device, or use them just for this visit?",
+      save: "Save as my default",
+      session: "Use for this visit only"
+    },
+    reprompt: {
+      title: "Save your changes?",
+      text: "You changed a setting while viewing shared settings. Save your current settings as the default on this device, or keep them only for this visit?",
+      save: "Save as my default",
+      session: "Keep for this visit only"
+    }
+  };
+  function showIncomingSettingsDialog(options) {
+    ensureModalStyles();
+    const copy = COPY[options.mode];
+    return new Promise((resolve) => {
+      const backdrop = document.createElement("div");
+      backdrop.className = "ec-modal-backdrop";
+      const modal = document.createElement("div");
+      modal.className = "ec-modal";
+      modal.setAttribute("role", "dialog");
+      modal.setAttribute("aria-modal", "true");
+      const title = document.createElement("h2");
+      title.className = "ec-modal-title";
+      title.textContent = copy.title;
+      const text = document.createElement("p");
+      text.className = "ec-modal-text";
+      text.textContent = copy.text;
+      const buttons = document.createElement("div");
+      buttons.className = "ec-modal-buttons";
+      const saveBtn = document.createElement("button");
+      saveBtn.className = "ec-modal-btn ec-primary";
+      saveBtn.textContent = copy.save;
+      const sessionBtn = document.createElement("button");
+      sessionBtn.className = "ec-modal-btn";
+      sessionBtn.textContent = copy.session;
+      buttons.append(saveBtn, sessionBtn);
+      modal.append(title, text, buttons);
+      backdrop.append(modal);
+      document.body.appendChild(backdrop);
+      let done = false;
+      const finish = (choice) => {
+        if (done) return;
+        done = true;
+        document.removeEventListener("keydown", onKey);
+        backdrop.remove();
+        resolve(choice);
+      };
+      const onKey = (e) => {
+        if (e.key === "Escape") finish("session");
+      };
+      saveBtn.addEventListener("click", () => finish("save"));
+      sessionBtn.addEventListener("click", () => finish("session"));
+      backdrop.addEventListener("click", (e) => {
+        if (e.target === backdrop) finish("session");
+      });
+      document.addEventListener("keydown", onKey);
+      saveBtn.focus();
+    });
+  }
+  function showStorageWarning(message) {
+    ensureModalStyles();
+    const toast = document.createElement("div");
+    toast.className = "ec-toast";
+    const span = document.createElement("span");
+    span.textContent = message;
+    const close = document.createElement("button");
+    close.className = "ec-toast-close";
+    close.setAttribute("aria-label", "Dismiss");
+    close.textContent = "\xD7";
+    close.addEventListener("click", () => toast.remove());
+    toast.append(span, close);
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 12e3);
+  }
+  function showParadigmNotice() {
+    ensureModalStyles();
+    const toast = document.createElement("div");
+    toast.className = "ec-toast";
+    const span = document.createElement("span");
+    span.textContent = "Your settings now save in this browser instead of the URL. Use the Share button to copy a link to a view; local storage can be cleared along with your browser history.";
+    const close = document.createElement("button");
+    close.className = "ec-toast-close";
+    close.setAttribute("aria-label", "Dismiss");
+    close.textContent = "\xD7";
+    close.addEventListener("click", () => toast.remove());
+    toast.append(span, close);
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 16e3);
+  }
+  function showUrlModeBadge() {
+    ensureModalStyles();
+    if (document.getElementById("ec-url-badge")) return;
+    const badge = document.createElement("div");
+    badge.id = "ec-url-badge";
+    badge.className = "ec-url-badge";
+    badge.textContent = "(URL)";
+    badge.title = "Local storage is unavailable here, so settings are kept in the URL.";
+    document.body.appendChild(badge);
+  }
+
+  // src/shared/app-state.ts
+  var LOCALSTORAGE_ENABLED = true;
+  var SCHEMA_VERSION = 1;
+  var STORAGE_KEY_PREFIX = "ec:";
+  var SHARED_FIELDS = /* @__PURE__ */ new Set([
+    "lat",
+    "lon",
+    "city",
+    "tz",
+    "bloc",
+    "t",
+    "off",
+    "dir"
+  ]);
+  var URL_ONLY_FIELDS = /* @__PURE__ */ new Set([
+    "embed",
+    "fps",
+    "tc"
+  ]);
+  function namespaceOf(field, app) {
+    if (URL_ONLY_FIELDS.has(field)) return null;
+    if (SHARED_FIELDS.has(field)) return "shared";
+    switch (field) {
+      case "picks":
+      case "kyhand":
+      case "kmode":
+      case "body":
+      case "vnoon":
+        return "chronometer";
+      case "op":
+      case "onoon":
+        return "observatory";
+      case "tp":
+        return app === "index" || app === "pick" ? null : app;
+      default:
+        return null;
+    }
+  }
+  function defaultState() {
+    return {
+      lat: null,
+      lon: null,
+      city: null,
+      bloc: false,
+      tc: false,
+      t: null,
+      off: null,
+      dir: 1,
+      tz: null,
+      picks: null,
+      tp: "d",
+      embed: false,
+      fps: false,
+      kyhand: null,
+      kmode: null,
+      op: null,
+      onoon: false,
+      body: null,
+      vnoon: false
+    };
+  }
+  function isDefaultValue(field, value) {
+    if (value === null || value === void 0) return true;
+    switch (field) {
+      case "dir":
+        return value === 1;
+      case "tp":
+        return value === "d";
+      case "bloc":
+      case "tc":
+      case "embed":
+      case "fps":
+      case "onoon":
+      case "vnoon":
+        return value === false;
+      case "op":
+        return value === 0;
+      default:
+        return false;
+    }
+  }
+  var UrlBackend = class {
+    read() {
+      return readUrlState();
+    }
+    write(changes) {
+      writeUrlState(changes);
+    }
+  };
+  var LocalStorageBackend = class {
+    constructor(app) {
+      this.app = app;
+    }
+    read() {
+      const state = defaultState();
+      Object.assign(state, readNamespace("shared"));
+      const appNs = appNamespace(this.app);
+      if (appNs) Object.assign(state, readNamespace(appNs));
+      const url = readUrlState();
+      for (const field of URL_ONLY_FIELDS) {
+        state[field] = url[field];
+      }
+      return state;
+    }
+    write(changes) {
+      const buckets = /* @__PURE__ */ new Map();
+      for (const key of Object.keys(changes)) {
+        const ns = namespaceOf(key, this.app);
+        if (!ns) continue;
+        let bucket = buckets.get(ns);
+        if (!bucket) {
+          bucket = {};
+          buckets.set(ns, bucket);
+        }
+        bucket[key] = changes[key];
+      }
+      for (const [ns, bucket] of buckets) {
+        mergeNamespace(ns, bucket);
+      }
+    }
+  };
+  function appNamespace(app) {
+    switch (app) {
+      case "chronometer":
+        return "chronometer";
+      case "observatory":
+        return "observatory";
+      case "inspector":
+        return "inspector";
+      // The home and pick pages both surface the chronometer face set (the
+      // pick-card / selected-faces routing reads `picks`), so they read the
+      // chronometer namespace too.
+      case "pick":
+        return "chronometer";
+      case "index":
+        return "chronometer";
+    }
+  }
+  function readNamespace(ns) {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_PREFIX + ns);
+      if (!raw) return {};
+      const obj = JSON.parse(raw);
+      delete obj.v;
+      return obj;
+    } catch {
+      return {};
+    }
+  }
+  function mergeNamespace(ns, changes) {
+    const key = STORAGE_KEY_PREFIX + ns;
+    let current;
+    try {
+      current = JSON.parse(localStorage.getItem(key) || "{}");
+    } catch {
+      current = {};
+    }
+    for (const field of Object.keys(changes)) {
+      const value = changes[field];
+      if (isDefaultValue(field, value)) {
+        delete current[field];
+      } else {
+        current[field] = value;
+      }
+    }
+    delete current.v;
+    if (Object.keys(current).length === 0) {
+      localStorage.removeItem(key);
+    } else {
+      current.v = SCHEMA_VERSION;
+      localStorage.setItem(key, JSON.stringify(current));
+    }
+  }
+  var InMemoryBackend = class {
+    constructor(seed) {
+      this.state = { ...defaultState(), ...seed || {} };
+    }
+    read() {
+      const url = readUrlState();
+      const state = { ...this.state };
+      for (const field of URL_ONLY_FIELDS) {
+        state[field] = url[field];
+      }
+      return state;
+    }
+    write(changes) {
+      for (const key of Object.keys(changes)) {
+        if (URL_ONLY_FIELDS.has(key)) continue;
+        this.state[key] = changes[key];
+      }
+    }
+  };
+  function storageWorks() {
+    try {
+      const k = STORAGE_KEY_PREFIX + "__probe__";
+      localStorage.setItem(k, "1");
+      const ok = localStorage.getItem(k) === "1";
+      localStorage.removeItem(k);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+  var TIME_FIELDS = /* @__PURE__ */ new Set(["t", "off", "dir"]);
+  var SHAREABLE_FIELDS = [
+    "lat",
+    "lon",
+    "city",
+    "tz",
+    "bloc",
+    "t",
+    "off",
+    "dir",
+    "picks",
+    "kyhand",
+    "kmode",
+    "op",
+    "onoon",
+    "body",
+    "vnoon",
+    "tp"
+  ];
+  var SHAREABLE_URL_KEYS = [
+    "lat",
+    "lon",
+    "long",
+    "city",
+    "loc",
+    "tz",
+    "bloc",
+    "t",
+    "off",
+    "dir",
+    "picks",
+    "kyhand",
+    "kmode",
+    "op",
+    "onoon",
+    "body",
+    "vnoon",
+    "tp"
+  ];
+  var CLEARED_URL_KEYS = [...SHAREABLE_URL_KEYS, "tc"];
+  var SLOT_STORAGE_KEY = STORAGE_KEY_PREFIX + "slots";
+  var SLOT_KEY_RE = /^[rd]\d+(tz|lat|lon)?$/;
+  function urlSlotMap() {
+    const out = {};
+    for (const [k, v] of new URLSearchParams(window.location.search)) {
+      if (SLOT_KEY_RE.test(k)) out[k] = v;
+    }
+    return out;
+  }
+  function storedSlotMap() {
+    try {
+      const obj = JSON.parse(localStorage.getItem(SLOT_STORAGE_KEY) || "{}");
+      delete obj.v;
+      return obj;
+    } catch {
+      return {};
+    }
+  }
+  function urlHasSlotParams() {
+    for (const k of new URLSearchParams(window.location.search).keys()) {
+      if (SLOT_KEY_RE.test(k)) return true;
+    }
+    return false;
+  }
+  function hasShareableParamsInUrl() {
+    const params = new URLSearchParams(window.location.search);
+    return SHAREABLE_URL_KEYS.some((k) => params.has(k)) || urlHasSlotParams();
+  }
+  function shareableUrlEqualsStored(ls) {
+    const url = readUrlState();
+    const stored = ls.read();
+    if (!SHAREABLE_FIELDS.every((f) => url[f] === stored[f])) return false;
+    const u = urlSlotMap();
+    const s = storedSlotMap();
+    const keys = /* @__PURE__ */ new Set([...Object.keys(u), ...Object.keys(s)]);
+    for (const k of keys) if (u[k] !== s[k]) return false;
+    return true;
+  }
+  function urlScalarOverrides() {
+    const params = new URLSearchParams(window.location.search);
+    const url = readUrlState();
+    const out = {};
+    const has = (...keys) => keys.some((k) => params.has(k));
+    if (has("lat")) out.lat = url.lat;
+    if (has("lon", "long")) out.lon = url.lon;
+    if (has("city")) out.city = url.city;
+    if (has("tz")) out.tz = url.tz;
+    if (has("bloc")) out.bloc = url.bloc;
+    if (has("t")) out.t = url.t;
+    if (has("off")) out.off = url.off;
+    if (has("dir")) out.dir = url.dir;
+    if (has("picks")) out.picks = url.picks;
+    if (has("kyhand")) out.kyhand = url.kyhand;
+    if (has("kmode")) out.kmode = url.kmode;
+    if (has("op")) out.op = url.op;
+    if (has("onoon")) out.onoon = url.onoon;
+    if (has("body")) out.body = url.body;
+    if (has("vnoon")) out.vnoon = url.vnoon;
+    if (has("tp")) out.tp = url.tp;
+    return out;
+  }
+  function clearShareableParamsFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    for (const k of CLEARED_URL_KEYS) params.delete(k);
+    for (const k of [...params.keys()]) if (SLOT_KEY_RE.test(k)) params.delete(k);
+    const qs = params.toString();
+    history.replaceState(null, "", window.location.pathname + (qs ? "?" + qs : ""));
+  }
+  var activeBackend = null;
+  var appName = "index";
+  var sessionRePromptArmed = false;
+  var warnedNoPersistence = false;
+  var inMemorySlots = {};
+  function initAppState(options) {
+    appName = options.app;
+    setPicksProvider(() => getState().picks);
+    if (!LOCALSTORAGE_ENABLED) {
+      activeBackend = new UrlBackend();
+      return;
+    }
+    if (readUrlState().embed) {
+      activeBackend = new UrlBackend();
+      return;
+    }
+    if (!storageWorks()) {
+      if (window.location.protocol === "file:") {
+        activeBackend = new UrlBackend();
+        showUrlModeBadge();
+      } else {
+        activeBackend = new InMemoryBackend(readUrlState());
+        warnNoPersistence();
+      }
+      return;
+    }
+    const ls = new LocalStorageBackend(appName);
+    if (!hasShareableParamsInUrl()) {
+      activeBackend = ls;
+      maybeShowParadigmNotice();
+      return;
+    }
+    if (shareableUrlEqualsStored(ls)) {
+      clearShareableParamsFromUrl();
+      activeBackend = ls;
+      maybeShowParadigmNotice();
+      return;
+    }
+    activeBackend = new UrlBackend();
+    void promptIncomingSettings(ls);
+  }
+  async function promptIncomingSettings(ls) {
+    const choice = await showIncomingSettingsDialog({ mode: "incoming" });
+    if (choice === "save") {
+      adoptCurrentStateAsDefault(ls);
+    } else {
+      sessionRePromptArmed = true;
+    }
+  }
+  function adoptCurrentStateAsDefault(ls) {
+    const overrides = urlScalarOverrides();
+    const slots = urlSlotMap();
+    activeBackend = ls;
+    ls.write(overrides);
+    if (Object.keys(slots).length > 0) setSlotOverrides(slots);
+    clearShareableParamsFromUrl();
+    sessionRePromptArmed = false;
+  }
+  function warnNoPersistence() {
+    if (warnedNoPersistence) return;
+    warnedNoPersistence = true;
+    showStorageWarning("Your settings can't be saved in this browser and won't persist after you reload.");
+  }
+  function maybeShowParadigmNotice() {
+    let meta = {};
+    try {
+      meta = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + "meta") || "{}");
+    } catch {
+    }
+    if (meta.noticeSeen) return;
+    try {
+      localStorage.setItem(STORAGE_KEY_PREFIX + "meta", JSON.stringify({ ...meta, noticeSeen: true, v: SCHEMA_VERSION }));
+    } catch {
+    }
+    showParadigmNotice();
+  }
+  function downgradeToInMemory() {
+    if (activeBackend instanceof InMemoryBackend) return;
+    const seed = activeBackend ? activeBackend.read() : void 0;
+    inMemorySlots = getSlotOverrides();
+    activeBackend = new InMemoryBackend(seed);
+    warnNoPersistence();
+  }
+  function backend() {
+    if (!activeBackend) activeBackend = new UrlBackend();
+    return activeBackend;
+  }
+  function hasNonTimePersistableChange(changes) {
+    return Object.keys(changes).some(
+      (k) => !TIME_FIELDS.has(k) && namespaceOf(k, appName) !== null
+    );
+  }
+  function getState() {
+    return backend().read();
+  }
+  function setState(changes) {
+    try {
+      backend().write(changes);
+    } catch {
+      downgradeToInMemory();
+      backend().write(changes);
+    }
+    if (sessionRePromptArmed && hasNonTimePersistableChange(changes)) {
+      sessionRePromptArmed = false;
+      void promptSessionReprompt();
+    }
+  }
+  function getSlotOverrides() {
+    const b = backend();
+    if (b instanceof LocalStorageBackend) return storedSlotMap();
+    if (b instanceof InMemoryBackend) return { ...inMemorySlots };
+    return urlSlotMap();
+  }
+  function setSlotOverrides(changes) {
+    const b = backend();
+    if (b instanceof InMemoryBackend) {
+      for (const [k, v] of Object.entries(changes)) {
+        if (v == null) delete inMemorySlots[k];
+        else inMemorySlots[k] = v;
+      }
+      return;
+    }
+    if (b instanceof LocalStorageBackend) {
+      const cur = storedSlotMap();
+      for (const [k, v] of Object.entries(changes)) {
+        if (v == null) delete cur[k];
+        else cur[k] = v;
+      }
+      delete cur.v;
+      try {
+        if (Object.keys(cur).length === 0) {
+          localStorage.removeItem(SLOT_STORAGE_KEY);
+        } else {
+          cur.v = SCHEMA_VERSION;
+          localStorage.setItem(SLOT_STORAGE_KEY, JSON.stringify(cur));
+        }
+      } catch {
+        downgradeToInMemory();
+        setSlotOverrides(changes);
+      }
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    for (const [k, v] of Object.entries(changes)) {
+      if (v == null) params.delete(k);
+      else params.set(k, v);
+    }
+    const qs = params.toString();
+    history.replaceState(null, "", window.location.pathname + (qs ? "?" + qs : ""));
+  }
+  async function promptSessionReprompt() {
+    const choice = await showIncomingSettingsDialog({ mode: "reprompt" });
+    if (choice === "save") {
+      adoptCurrentStateAsDefault(new LocalStorageBackend(appName));
+    }
+  }
+  function onSharedChange(callback) {
+    const handler = (e) => {
+      if (!(activeBackend instanceof LocalStorageBackend)) return;
+      if (e.key !== null && !e.key.startsWith(STORAGE_KEY_PREFIX)) return;
+      callback(getState());
+    };
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
+  }
+
   // src/watch/watch-env.ts
   var DEFAULT_LAT_DEG = 37.205;
   var DEFAULT_LON_DEG = -121.954;
@@ -14736,8 +15629,8 @@
     }
     env.kyHandMode = 0;
     if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      const bodyParam = params.get("body");
+      const persisted = getState();
+      const bodyParam = persisted.body;
       if (bodyParam) {
         const bodyMap = {
           sun: 0 /* Sun */,
@@ -14759,18 +15652,14 @@
           env.variables.set("bodySlot", bodySlot);
         }
       }
-      const vnoonParam = params.get("vnoon");
-      if (vnoonParam === "1" || vnoonParam === "0") {
-        const noonOnTop = parseInt(vnoonParam, 10);
-        env.variables.set("noonOnTop", noonOnTop);
-        env.variables.set("dialFlip", noonOnTop ? Math.PI : 0);
+      if (persisted.vnoon) {
+        env.variables.set("noonOnTop", 1);
+        env.variables.set("dialFlip", Math.PI);
       }
-      const kmodeParam = params.get("kmode");
-      if (kmodeParam === "1" || kmodeParam === "0") {
-        env.variables.set("kyMode", parseInt(kmodeParam, 10));
+      if (persisted.kmode === "1" || persisted.kmode === "0") {
+        env.variables.set("kyMode", parseInt(persisted.kmode, 10));
       }
-      const kyhandParam = params.get("kyhand");
-      if (kyhandParam === "1") {
+      if (persisted.kyhand === "1") {
         env.kyHandMode = 1;
       }
     }
@@ -18483,774 +19372,6 @@
     }
   };
 
-  // src/shared/url-state.ts
-  function readUrlState() {
-    const params = new URLSearchParams(window.location.search);
-    const latStr = params.get("lat");
-    const lonStr = params.get("lon") || params.get("long");
-    const lat = latStr !== null ? parseFloat(latStr) : NaN;
-    const lon = lonStr !== null ? parseFloat(lonStr) : NaN;
-    const city = params.get("city");
-    const blocStr = params.get("bloc");
-    const tcStr = params.get("tc");
-    const tStr = params.get("t");
-    const offStr = params.get("off");
-    const dirStr = params.get("dir");
-    let dir = 1;
-    if (dirStr === "-1") dir = -1;
-    else if (dirStr === "0") dir = 0;
-    return {
-      lat: !isNaN(lat) ? lat : null,
-      lon: !isNaN(lon) ? lon : null,
-      city: city || null,
-      bloc: blocStr === "1",
-      tc: tcStr === "1",
-      t: tStr !== null ? parseInt(tStr, 10) : null,
-      off: offStr !== null ? parseInt(offStr, 10) : null,
-      dir,
-      tz: params.get("tz") || null,
-      picks: params.get("picks") || null,
-      tp: params.get("tp") === "a" ? "a" : "d",
-      embed: params.get("embed") === "1",
-      fps: params.has("fps"),
-      kyhand: params.get("kyhand"),
-      kmode: params.get("kmode"),
-      op: (() => {
-        const s = params.get("op");
-        const n = s !== null ? parseInt(s, 10) : NaN;
-        return Number.isFinite(n) ? n : null;
-      })(),
-      onoon: params.get("onoon") === "1"
-    };
-  }
-  function writeUrlState(changes) {
-    const params = new URLSearchParams(window.location.search);
-    if ("lat" in changes) {
-      if (changes.lat !== null && changes.lat !== void 0) {
-        params.set("lat", changes.lat.toFixed(3));
-      } else {
-        params.delete("lat");
-      }
-    }
-    if ("lon" in changes) {
-      if (changes.lon !== null && changes.lon !== void 0) {
-        params.set("lon", changes.lon.toFixed(3));
-      } else {
-        params.delete("lon");
-      }
-    }
-    if ("picks" in changes) {
-      if (changes.picks) params.set("picks", changes.picks);
-      else params.delete("picks");
-    }
-    if ("kyhand" in changes) {
-      if (changes.kyhand) params.set("kyhand", changes.kyhand);
-      else params.delete("kyhand");
-    }
-    if ("kmode" in changes) {
-      if (changes.kmode) params.set("kmode", changes.kmode);
-      else params.delete("kmode");
-    }
-    if ("city" in changes) {
-      if (changes.city) {
-        params.set("city", changes.city);
-      } else {
-        params.delete("city");
-      }
-    }
-    if ("bloc" in changes) {
-      if (changes.bloc) {
-        params.set("bloc", "1");
-      } else {
-        params.delete("bloc");
-      }
-    }
-    if ("tc" in changes) {
-      if (changes.tc) {
-        params.set("tc", "1");
-      } else {
-        params.delete("tc");
-      }
-    }
-    if ("t" in changes) {
-      if (changes.t !== null && changes.t !== void 0) {
-        params.set("t", changes.t.toString());
-      } else {
-        params.delete("t");
-      }
-    }
-    if ("off" in changes) {
-      if (changes.off !== null && changes.off !== void 0) {
-        params.set("off", changes.off.toString());
-      } else {
-        params.delete("off");
-      }
-    }
-    if ("dir" in changes) {
-      if (changes.dir !== void 0 && changes.dir !== 1) {
-        params.set("dir", changes.dir.toString());
-      } else {
-        params.delete("dir");
-      }
-    }
-    if ("tz" in changes) {
-      if (changes.tz) {
-        params.set("tz", changes.tz);
-      } else {
-        params.delete("tz");
-      }
-    }
-    if ("tp" in changes) {
-      if (changes.tp === "a") {
-        params.set("tp", "a");
-      } else {
-        params.delete("tp");
-      }
-    }
-    if ("op" in changes) {
-      if (changes.op !== null && changes.op !== void 0 && changes.op !== 0) {
-        params.set("op", changes.op.toString());
-      } else {
-        params.delete("op");
-      }
-    }
-    if ("onoon" in changes) {
-      if (changes.onoon) {
-        params.set("onoon", "1");
-      } else {
-        params.delete("onoon");
-      }
-    }
-    params.delete("long");
-    params.delete("loc");
-    const qs = params.toString();
-    const newUrl = window.location.pathname + (qs ? "?" + qs : "");
-    history.replaceState(null, "", newUrl);
-    updateNavigationLinks();
-  }
-  function buildShareUrl(state, baseUrl) {
-    const url = new URL(baseUrl ?? window.location.origin + window.location.pathname);
-    const p = url.searchParams;
-    if (state.lat !== null && state.lat !== void 0) p.set("lat", state.lat.toFixed(3));
-    if (state.lon !== null && state.lon !== void 0) p.set("lon", state.lon.toFixed(3));
-    if (state.city) p.set("city", state.city);
-    if (state.tz) p.set("tz", state.tz);
-    if (state.bloc) p.set("bloc", "1");
-    if (state.off !== null && state.off !== void 0) p.set("off", state.off.toString());
-    if (state.t !== null && state.t !== void 0) p.set("t", state.t.toString());
-    if (state.dir !== 1) p.set("dir", state.dir.toString());
-    if (state.picks) p.set("picks", state.picks);
-    if (state.kyhand) p.set("kyhand", state.kyhand);
-    if (state.kmode) p.set("kmode", state.kmode);
-    if (state.op !== null && state.op !== void 0 && state.op !== 0) p.set("op", state.op.toString());
-    if (state.onoon) p.set("onoon", "1");
-    if (state.tp === "a") p.set("tp", "a");
-    return url.toString();
-  }
-  var picksProvider = () => new URLSearchParams(window.location.search).get("picks");
-  function setPicksProvider(fn) {
-    picksProvider = fn;
-  }
-  function updateNavigationLinks() {
-    const search = window.location.search;
-    const backLink = document.getElementById("back-link");
-    if (backLink) {
-      const url = new URL(backLink.getAttribute("data-base-href") || "index.html", window.location.href);
-      url.search = search;
-      backLink.href = url.toString();
-    }
-    const allFacesLink = document.getElementById("all-faces-link");
-    if (allFacesLink) {
-      const url = new URL(allFacesLink.getAttribute("data-base-href") || "all.html", window.location.href);
-      url.search = search;
-      allFacesLink.href = url.toString();
-    }
-    const selectedLink = document.getElementById("selected-faces-link");
-    if (selectedLink) {
-      const hasPicks = !!picksProvider();
-      const baseHref = hasPicks ? "selected.html" : "pick.html";
-      const url = new URL(baseHref, window.location.href);
-      url.search = search;
-      selectedLink.href = url.toString();
-      selectedLink.title = hasPicks ? "Selected Faces" : "Pick Faces";
-    }
-    const editPicksLink = document.getElementById("edit-picks-link");
-    if (editPicksLink) {
-      const url = new URL("pick.html", window.location.href);
-      url.search = search;
-      editPicksLink.href = url.toString();
-    }
-    document.querySelectorAll("a.face-card").forEach((a) => {
-      const anchor = a;
-      const url = new URL(anchor.getAttribute("data-base-href") || anchor.getAttribute("href"), window.location.href);
-      url.search = search;
-      anchor.href = url.toString();
-    });
-  }
-  function initNavigationLinks() {
-    const backLink = document.getElementById("back-link");
-    if (backLink && !backLink.hasAttribute("data-base-href")) {
-      backLink.setAttribute("data-base-href", backLink.getAttribute("href") || "index.html");
-    }
-    const allFacesLink = document.getElementById("all-faces-link");
-    if (allFacesLink && !allFacesLink.hasAttribute("data-base-href")) {
-      allFacesLink.setAttribute("data-base-href", allFacesLink.getAttribute("href") || "all.html");
-    }
-    document.querySelectorAll("a.face-card").forEach((a) => {
-      const anchor = a;
-      if (!anchor.hasAttribute("data-base-href")) {
-        anchor.setAttribute("data-base-href", anchor.getAttribute("href"));
-      }
-    });
-    updateNavigationLinks();
-  }
-
-  // src/shared/incoming-settings-dialog.ts
-  var STYLE_ID = "ec-settings-dialog-style";
-  var CSS = `
-.ec-modal-backdrop {
-    position: fixed; inset: 0; z-index: 1000;
-    display: flex; align-items: center; justify-content: center;
-    padding: 24px 16px;
-    background: rgba(0, 0, 0, 0.5);
-}
-.ec-modal {
-    position: relative;
-    background: rgba(26, 26, 46, 0.98);
-    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-    border: 1px solid #3a3a5e; border-radius: 14px;
-    padding: 26px 30px; min-width: 300px; max-width: 400px; width: 100%;
-    box-shadow: 0 8px 48px rgba(0, 0, 0, 0.6);
-    text-align: center;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-.ec-modal-title {
-    font-size: 16px; color: #e0d8c8; margin: 0 0 10px; font-weight: 400;
-}
-.ec-modal-text {
-    font-size: 13px; color: #aab; line-height: 1.5; margin: 0 0 20px;
-}
-.ec-modal-buttons { display: flex; flex-direction: column; gap: 8px; }
-.ec-modal-btn {
-    border-radius: 6px; font-size: 13px; padding: 9px 16px;
-    cursor: pointer; transition: background 0.15s, color 0.15s;
-    background: #2a2a4e; border: 1px solid #3a3a5e; color: #aac;
-}
-.ec-modal-btn:hover { background: #3a3a6e; color: #ddf; }
-.ec-modal-btn.ec-primary {
-    background: #34507a; border-color: #4a6fa5; color: #dde9ff;
-}
-.ec-modal-btn.ec-primary:hover { background: #3f5f92; color: #fff; }
-
-.ec-toast {
-    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
-    z-index: 1001; max-width: 340px;
-    background: rgba(26, 26, 46, 0.98); border: 1px solid #3a3a5e;
-    border-radius: 10px; padding: 12px 16px;
-    box-shadow: 0 6px 32px rgba(0, 0, 0, 0.5);
-    color: #ccd; font-size: 12.5px; line-height: 1.45;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    display: flex; align-items: center; gap: 12px;
-}
-.ec-toast-close {
-    background: none; border: none; color: #889; font-size: 18px;
-    cursor: pointer; padding: 0 2px; line-height: 1;
-}
-.ec-toast-close:hover { color: #ccd; }
-
-.ec-modal-input {
-    width: 100%; box-sizing: border-box;
-    background: #1d1d30; border: 1px solid #3a3a5e; border-radius: 6px;
-    color: #cdd; font-size: 12px; font-family: monospace;
-    padding: 8px 10px; margin: 0 0 14px;
-    text-align: left;
-}
-
-.ec-url-badge {
-    position: fixed; left: 10px; bottom: 8px; z-index: 999;
-    font-size: 11px; color: #99a; opacity: 0.7;
-    background: rgba(0, 0, 0, 0.3); padding: 2px 8px; border-radius: 6px;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    pointer-events: none; user-select: none;
-}
-`;
-  function ensureModalStyles() {
-    if (document.getElementById(STYLE_ID)) return;
-    const style = document.createElement("style");
-    style.id = STYLE_ID;
-    style.textContent = CSS;
-    document.head.appendChild(style);
-  }
-  var COPY = {
-    incoming: {
-      title: "Use these shared settings?",
-      text: "This link includes a saved time, location, or configuration. Save them as your default on this device, or use them just for this visit?",
-      save: "Save as my default",
-      session: "Use for this visit only"
-    },
-    reprompt: {
-      title: "Save your changes?",
-      text: "You changed a setting while viewing shared settings. Save your current settings as the default on this device, or keep them only for this visit?",
-      save: "Save as my default",
-      session: "Keep for this visit only"
-    }
-  };
-  function showIncomingSettingsDialog(options) {
-    ensureModalStyles();
-    const copy = COPY[options.mode];
-    return new Promise((resolve) => {
-      const backdrop = document.createElement("div");
-      backdrop.className = "ec-modal-backdrop";
-      const modal = document.createElement("div");
-      modal.className = "ec-modal";
-      modal.setAttribute("role", "dialog");
-      modal.setAttribute("aria-modal", "true");
-      const title = document.createElement("h2");
-      title.className = "ec-modal-title";
-      title.textContent = copy.title;
-      const text = document.createElement("p");
-      text.className = "ec-modal-text";
-      text.textContent = copy.text;
-      const buttons = document.createElement("div");
-      buttons.className = "ec-modal-buttons";
-      const saveBtn = document.createElement("button");
-      saveBtn.className = "ec-modal-btn ec-primary";
-      saveBtn.textContent = copy.save;
-      const sessionBtn = document.createElement("button");
-      sessionBtn.className = "ec-modal-btn";
-      sessionBtn.textContent = copy.session;
-      buttons.append(saveBtn, sessionBtn);
-      modal.append(title, text, buttons);
-      backdrop.append(modal);
-      document.body.appendChild(backdrop);
-      let done = false;
-      const finish = (choice) => {
-        if (done) return;
-        done = true;
-        document.removeEventListener("keydown", onKey);
-        backdrop.remove();
-        resolve(choice);
-      };
-      const onKey = (e) => {
-        if (e.key === "Escape") finish("session");
-      };
-      saveBtn.addEventListener("click", () => finish("save"));
-      sessionBtn.addEventListener("click", () => finish("session"));
-      backdrop.addEventListener("click", (e) => {
-        if (e.target === backdrop) finish("session");
-      });
-      document.addEventListener("keydown", onKey);
-      saveBtn.focus();
-    });
-  }
-  function showStorageWarning(message) {
-    ensureModalStyles();
-    const toast = document.createElement("div");
-    toast.className = "ec-toast";
-    const span = document.createElement("span");
-    span.textContent = message;
-    const close = document.createElement("button");
-    close.className = "ec-toast-close";
-    close.setAttribute("aria-label", "Dismiss");
-    close.textContent = "\xD7";
-    close.addEventListener("click", () => toast.remove());
-    toast.append(span, close);
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 12e3);
-  }
-  function showParadigmNotice() {
-    ensureModalStyles();
-    const toast = document.createElement("div");
-    toast.className = "ec-toast";
-    const span = document.createElement("span");
-    span.textContent = "Your settings now save in this browser instead of the URL. Use the Share button to copy a link to a view; local storage can be cleared along with your browser history.";
-    const close = document.createElement("button");
-    close.className = "ec-toast-close";
-    close.setAttribute("aria-label", "Dismiss");
-    close.textContent = "\xD7";
-    close.addEventListener("click", () => toast.remove());
-    toast.append(span, close);
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 16e3);
-  }
-  function showUrlModeBadge() {
-    ensureModalStyles();
-    if (document.getElementById("ec-url-badge")) return;
-    const badge = document.createElement("div");
-    badge.id = "ec-url-badge";
-    badge.className = "ec-url-badge";
-    badge.textContent = "(URL)";
-    badge.title = "Local storage is unavailable here, so settings are kept in the URL.";
-    document.body.appendChild(badge);
-  }
-
-  // src/shared/app-state.ts
-  var LOCALSTORAGE_ENABLED = true;
-  var SCHEMA_VERSION = 1;
-  var STORAGE_KEY_PREFIX = "ec:";
-  var SHARED_FIELDS = /* @__PURE__ */ new Set([
-    "lat",
-    "lon",
-    "city",
-    "tz",
-    "bloc",
-    "t",
-    "off",
-    "dir"
-  ]);
-  var URL_ONLY_FIELDS = /* @__PURE__ */ new Set([
-    "embed",
-    "fps",
-    "tc"
-  ]);
-  function namespaceOf(field, app) {
-    if (URL_ONLY_FIELDS.has(field)) return null;
-    if (SHARED_FIELDS.has(field)) return "shared";
-    switch (field) {
-      case "picks":
-      case "kyhand":
-      case "kmode":
-        return "chronometer";
-      case "op":
-      case "onoon":
-        return "observatory";
-      case "tp":
-        return app === "index" || app === "pick" ? null : app;
-      default:
-        return null;
-    }
-  }
-  function defaultState() {
-    return {
-      lat: null,
-      lon: null,
-      city: null,
-      bloc: false,
-      tc: false,
-      t: null,
-      off: null,
-      dir: 1,
-      tz: null,
-      picks: null,
-      tp: "d",
-      embed: false,
-      fps: false,
-      kyhand: null,
-      kmode: null,
-      op: null,
-      onoon: false
-    };
-  }
-  function isDefaultValue(field, value) {
-    if (value === null || value === void 0) return true;
-    switch (field) {
-      case "dir":
-        return value === 1;
-      case "tp":
-        return value === "d";
-      case "bloc":
-      case "tc":
-      case "embed":
-      case "fps":
-      case "onoon":
-        return value === false;
-      case "op":
-        return value === 0;
-      default:
-        return false;
-    }
-  }
-  var UrlBackend = class {
-    read() {
-      return readUrlState();
-    }
-    write(changes) {
-      writeUrlState(changes);
-    }
-  };
-  var LocalStorageBackend = class {
-    constructor(app) {
-      this.app = app;
-    }
-    read() {
-      const state = defaultState();
-      Object.assign(state, readNamespace("shared"));
-      const appNs = appNamespace(this.app);
-      if (appNs) Object.assign(state, readNamespace(appNs));
-      const url = readUrlState();
-      for (const field of URL_ONLY_FIELDS) {
-        state[field] = url[field];
-      }
-      return state;
-    }
-    write(changes) {
-      const buckets = /* @__PURE__ */ new Map();
-      for (const key of Object.keys(changes)) {
-        const ns = namespaceOf(key, this.app);
-        if (!ns) continue;
-        let bucket = buckets.get(ns);
-        if (!bucket) {
-          bucket = {};
-          buckets.set(ns, bucket);
-        }
-        bucket[key] = changes[key];
-      }
-      for (const [ns, bucket] of buckets) {
-        mergeNamespace(ns, bucket);
-      }
-    }
-  };
-  function appNamespace(app) {
-    switch (app) {
-      case "chronometer":
-        return "chronometer";
-      case "observatory":
-        return "observatory";
-      case "inspector":
-        return "inspector";
-      // The home and pick pages both surface the chronometer face set (the
-      // pick-card / selected-faces routing reads `picks`), so they read the
-      // chronometer namespace too.
-      case "pick":
-        return "chronometer";
-      case "index":
-        return "chronometer";
-    }
-  }
-  function readNamespace(ns) {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY_PREFIX + ns);
-      if (!raw) return {};
-      const obj = JSON.parse(raw);
-      delete obj.v;
-      return obj;
-    } catch {
-      return {};
-    }
-  }
-  function mergeNamespace(ns, changes) {
-    const key = STORAGE_KEY_PREFIX + ns;
-    let current;
-    try {
-      current = JSON.parse(localStorage.getItem(key) || "{}");
-    } catch {
-      current = {};
-    }
-    for (const field of Object.keys(changes)) {
-      const value = changes[field];
-      if (isDefaultValue(field, value)) {
-        delete current[field];
-      } else {
-        current[field] = value;
-      }
-    }
-    delete current.v;
-    if (Object.keys(current).length === 0) {
-      localStorage.removeItem(key);
-    } else {
-      current.v = SCHEMA_VERSION;
-      localStorage.setItem(key, JSON.stringify(current));
-    }
-  }
-  var InMemoryBackend = class {
-    constructor(seed) {
-      this.state = { ...defaultState(), ...seed || {} };
-    }
-    read() {
-      const url = readUrlState();
-      const state = { ...this.state };
-      for (const field of URL_ONLY_FIELDS) {
-        state[field] = url[field];
-      }
-      return state;
-    }
-    write(changes) {
-      for (const key of Object.keys(changes)) {
-        if (URL_ONLY_FIELDS.has(key)) continue;
-        this.state[key] = changes[key];
-      }
-    }
-  };
-  function storageWorks() {
-    try {
-      const k = STORAGE_KEY_PREFIX + "__probe__";
-      localStorage.setItem(k, "1");
-      const ok = localStorage.getItem(k) === "1";
-      localStorage.removeItem(k);
-      return ok;
-    } catch {
-      return false;
-    }
-  }
-  var TIME_FIELDS = /* @__PURE__ */ new Set(["t", "off", "dir"]);
-  var SHAREABLE_FIELDS = [
-    "lat",
-    "lon",
-    "city",
-    "tz",
-    "bloc",
-    "t",
-    "off",
-    "dir",
-    "picks",
-    "kyhand",
-    "kmode",
-    "op",
-    "onoon",
-    "tp"
-  ];
-  var SHAREABLE_URL_KEYS = [
-    "lat",
-    "lon",
-    "long",
-    "city",
-    "loc",
-    "tz",
-    "bloc",
-    "t",
-    "off",
-    "dir",
-    "picks",
-    "kyhand",
-    "kmode",
-    "op",
-    "onoon",
-    "tp"
-  ];
-  var CLEARED_URL_KEYS = [...SHAREABLE_URL_KEYS, "tc"];
-  function hasShareableParamsInUrl() {
-    const params = new URLSearchParams(window.location.search);
-    return SHAREABLE_URL_KEYS.some((k) => params.has(k));
-  }
-  function shareableUrlEqualsStored(ls) {
-    const url = readUrlState();
-    const stored = ls.read();
-    return SHAREABLE_FIELDS.every((f) => url[f] === stored[f]);
-  }
-  function clearShareableParamsFromUrl() {
-    const params = new URLSearchParams(window.location.search);
-    for (const k of CLEARED_URL_KEYS) params.delete(k);
-    const qs = params.toString();
-    history.replaceState(null, "", window.location.pathname + (qs ? "?" + qs : ""));
-  }
-  var activeBackend = null;
-  var appName = "index";
-  var sessionRePromptArmed = false;
-  var warnedNoPersistence = false;
-  function initAppState(options) {
-    appName = options.app;
-    setPicksProvider(() => getState().picks);
-    if (!LOCALSTORAGE_ENABLED) {
-      activeBackend = new UrlBackend();
-      return;
-    }
-    if (readUrlState().embed) {
-      activeBackend = new UrlBackend();
-      return;
-    }
-    if (!storageWorks()) {
-      if (window.location.protocol === "file:") {
-        activeBackend = new UrlBackend();
-        showUrlModeBadge();
-      } else {
-        activeBackend = new InMemoryBackend(readUrlState());
-        warnNoPersistence();
-      }
-      return;
-    }
-    const ls = new LocalStorageBackend(appName);
-    if (!hasShareableParamsInUrl()) {
-      activeBackend = ls;
-      maybeShowParadigmNotice();
-      return;
-    }
-    if (shareableUrlEqualsStored(ls)) {
-      clearShareableParamsFromUrl();
-      activeBackend = ls;
-      maybeShowParadigmNotice();
-      return;
-    }
-    activeBackend = new UrlBackend();
-    void promptIncomingSettings(ls);
-  }
-  async function promptIncomingSettings(ls) {
-    const choice = await showIncomingSettingsDialog({ mode: "incoming" });
-    if (choice === "save") {
-      adoptCurrentStateAsDefault(ls);
-    } else {
-      sessionRePromptArmed = true;
-    }
-  }
-  function adoptCurrentStateAsDefault(ls) {
-    ls.write(getState());
-    clearShareableParamsFromUrl();
-    activeBackend = ls;
-    sessionRePromptArmed = false;
-  }
-  function warnNoPersistence() {
-    if (warnedNoPersistence) return;
-    warnedNoPersistence = true;
-    showStorageWarning("Your settings can't be saved in this browser and won't persist after you reload.");
-  }
-  function maybeShowParadigmNotice() {
-    let meta = {};
-    try {
-      meta = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + "meta") || "{}");
-    } catch {
-    }
-    if (meta.noticeSeen) return;
-    try {
-      localStorage.setItem(STORAGE_KEY_PREFIX + "meta", JSON.stringify({ ...meta, noticeSeen: true, v: SCHEMA_VERSION }));
-    } catch {
-    }
-    showParadigmNotice();
-  }
-  function downgradeToInMemory() {
-    if (activeBackend instanceof InMemoryBackend) return;
-    const seed = activeBackend ? activeBackend.read() : void 0;
-    activeBackend = new InMemoryBackend(seed);
-    warnNoPersistence();
-  }
-  function backend() {
-    if (!activeBackend) activeBackend = new UrlBackend();
-    return activeBackend;
-  }
-  function hasNonTimePersistableChange(changes) {
-    return Object.keys(changes).some(
-      (k) => !TIME_FIELDS.has(k) && namespaceOf(k, appName) !== null
-    );
-  }
-  function getState() {
-    return backend().read();
-  }
-  function setState(changes) {
-    try {
-      backend().write(changes);
-    } catch {
-      downgradeToInMemory();
-      backend().write(changes);
-    }
-    if (sessionRePromptArmed && hasNonTimePersistableChange(changes)) {
-      sessionRePromptArmed = false;
-      void promptSessionReprompt();
-    }
-  }
-  async function promptSessionReprompt() {
-    const choice = await showIncomingSettingsDialog({ mode: "reprompt" });
-    if (choice === "save") {
-      adoptCurrentStateAsDefault(new LocalStorageBackend(appName));
-    }
-  }
-  function onSharedChange(callback) {
-    const handler = (e) => {
-      if (!(activeBackend instanceof LocalStorageBackend)) return;
-      if (e.key !== null && !e.key.startsWith(STORAGE_KEY_PREFIX)) return;
-      callback(getState());
-    };
-    window.addEventListener("storage", handler);
-    return () => window.removeEventListener("storage", handler);
-  }
-
   // src/shared/fps-indicator.ts
   var FPS_WATCHDOG_MS = 1e3;
   function createFpsIndicator(enabled) {
@@ -19398,7 +19519,7 @@
     const shareBtn = document.getElementById("share-btn");
     if (!shareBtn) return;
     shareBtn.addEventListener("click", () => {
-      showShareDialog(buildShareUrl(options.getState()));
+      showShareDialog(buildShareUrl(options.getState(), { slots: getSlotOverrides() }));
     });
   }
   function showShareDialog(url) {
@@ -21167,14 +21288,14 @@
       };
     }
     function buildSlotOverrides(watch) {
-      const params = new URLSearchParams(window.location.search);
+      const slotParams = getSlotOverrides();
       if (watch.worldTimeRing) {
         const userOverrides = {};
         for (let slot = 1; slot <= 24; slot++) {
-          const name = params.get(`r${slot}`);
-          const tz = params.get(`r${slot}tz`);
-          const latStr = params.get(`r${slot}lat`);
-          const lonStr = params.get(`r${slot}lon`);
+          const name = slotParams[`r${slot}`] ?? null;
+          const tz = slotParams[`r${slot}tz`] ?? null;
+          const latStr = slotParams[`r${slot}lat`] ?? null;
+          const lonStr = slotParams[`r${slot}lon`] ?? null;
           if (name && tz) {
             userOverrides[slot] = {
               cityName: name,
@@ -21251,10 +21372,10 @@
           lon
         };
         for (let slot = 2; slot <= nSubdials; slot++) {
-          const name = params.get(`d${slot}`);
-          const tz = params.get(`d${slot}tz`);
-          const latStr = params.get(`d${slot}lat`);
-          const lonStr = params.get(`d${slot}lon`);
+          const name = slotParams[`d${slot}`] ?? null;
+          const tz = slotParams[`d${slot}tz`] ?? null;
+          const latStr = slotParams[`d${slot}lat`] ?? null;
+          const lonStr = slotParams[`d${slot}lon`] ?? null;
           if (name && tz) {
             overrides[slot] = {
               cityName: name,
@@ -22642,9 +22763,7 @@
           iconBtns.forEach((b, i) => b.classList.toggle("selected", i === idx));
           nameLabel.textContent = p.name;
           updateBodyLabels2(p.name, planetNumberForIdx[idx]);
-          const url = new URL(window.location.href);
-          url.searchParams.set("body", p.param);
-          window.history.replaceState({}, "", url.toString());
+          setState({ body: p.param });
           updateNavigationLinks();
           for (const face of faces) {
             if (!face.enabled) continue;
@@ -22678,8 +22797,7 @@
           { key: "uranus", name: "Uranus", param: "uranus" },
           { key: "neptune", name: "Neptune", param: "neptune" }
         ];
-        const params = new URLSearchParams(window.location.search);
-        const currentBody = (params.get("body") || "jupiter").toLowerCase();
+        const currentBody = (getState().body || "jupiter").toLowerCase();
         let selectedIdx = planetOrder.findIndex((p) => p.param === currentBody);
         if (selectedIdx < 0) selectedIdx = 5;
         const iconBtns = [];
@@ -22773,14 +22891,7 @@
           }
           stopScheduler();
           startScheduler();
-          const params = new URLSearchParams(window.location.search);
-          if (noonOnTop) {
-            params.set("vnoon", "1");
-          } else {
-            params.delete("vnoon");
-          }
-          const qs = params.toString();
-          history.replaceState(null, "", window.location.pathname + (qs ? "?" + qs : ""));
+          setState({ vnoon: noonOnTop });
           updateNavigationLinks();
           updatePillHighlight2();
         };
@@ -22927,26 +23038,22 @@
           }
           return slots;
         }, writeTerraOverridesToUrl2 = function() {
-          const params = new URLSearchParams(window.location.search);
+          const changes = {};
           for (let slot = 1; slot <= 24; slot++) {
-            params.delete(`r${slot}`);
-            params.delete(`r${slot}tz`);
-            params.delete(`r${slot}lat`);
-            params.delete(`r${slot}lon`);
+            changes[`r${slot}`] = null;
+            changes[`r${slot}tz`] = null;
+            changes[`r${slot}lat`] = null;
+            changes[`r${slot}lon`] = null;
           }
           if (terraFace.terraSlotOverrides) {
             for (const [slotStr, data] of Object.entries(terraFace.terraSlotOverrides)) {
-              params.set(`r${slotStr}`, data.cityName);
-              params.set(`r${slotStr}tz`, data.olsonId);
-              params.set(`r${slotStr}lat`, data.lat.toFixed(3));
-              params.set(`r${slotStr}lon`, data.lon.toFixed(3));
+              changes[`r${slotStr}`] = data.cityName;
+              changes[`r${slotStr}tz`] = data.olsonId;
+              changes[`r${slotStr}lat`] = data.lat.toFixed(3);
+              changes[`r${slotStr}lon`] = data.lon.toFixed(3);
             }
           }
-          params.delete("long");
-          params.delete("loc");
-          const qs = params.toString();
-          const newUrl = window.location.pathname + (qs ? "?" + qs : "");
-          history.replaceState(null, "", newUrl);
+          setSlotOverrides(changes);
           updateNavigationLinks();
         }, rebuildTerraForSlotChange2 = function() {
           const slotResult = buildSlotOverrides(terraFace.watch);
@@ -23188,29 +23295,25 @@
       const tcTitle = tcDialog?.querySelector(".tc-title");
       if (tcDialog && tcCityInput && tcCityResults && tcSlotPicker && tcSlotChoices && tcMessage && tcDoneBtn && tcResetBtn) {
         let writeGaiaOverridesToUrl2 = function() {
-          const params = new URLSearchParams(window.location.search);
           const nSubdials = gaiaFace.watch.maxSeparateLoc || 4;
+          const changes = {};
           for (let slot = 2; slot <= nSubdials; slot++) {
-            params.delete(`d${slot}`);
-            params.delete(`d${slot}tz`);
-            params.delete(`d${slot}lat`);
-            params.delete(`d${slot}lon`);
+            changes[`d${slot}`] = null;
+            changes[`d${slot}tz`] = null;
+            changes[`d${slot}lat`] = null;
+            changes[`d${slot}lon`] = null;
           }
           if (gaiaFace.terraSlotOverrides) {
             for (const [slotStr, data] of Object.entries(gaiaFace.terraSlotOverrides)) {
               const s = Number(slotStr);
               if (s < 2) continue;
-              params.set(`d${slotStr}`, data.cityName);
-              params.set(`d${slotStr}tz`, data.olsonId);
-              params.set(`d${slotStr}lat`, data.lat.toFixed(3));
-              params.set(`d${slotStr}lon`, data.lon.toFixed(3));
+              changes[`d${slotStr}`] = data.cityName;
+              changes[`d${slotStr}tz`] = data.olsonId;
+              changes[`d${slotStr}lat`] = data.lat.toFixed(3);
+              changes[`d${slotStr}lon`] = data.lon.toFixed(3);
             }
           }
-          params.delete("long");
-          params.delete("loc");
-          const qs = params.toString();
-          const newUrl = window.location.pathname + (qs ? "?" + qs : "");
-          history.replaceState(null, "", newUrl);
+          setSlotOverrides(changes);
           updateNavigationLinks();
         }, rebuildGaiaForSlotChange2 = function() {
           for (const face of faces) {

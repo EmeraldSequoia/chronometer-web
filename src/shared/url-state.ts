@@ -48,6 +48,10 @@ export interface UrlState {
     op: number | null;
     /** Observatory noon-on-top toggle: true = noon at top of the 24h dial (default midnight). */
     onoon: boolean;
+    /** Venezia body selector: planet name (e.g. "jupiter"), or null for the default. */
+    body: string | null;
+    /** Vienna noon-on-top toggle: true = noon at top of the 24h dial (default midnight). */
+    vnoon: boolean;
 }
 
 /** Parse URL query parameters into a typed state object. */
@@ -88,6 +92,8 @@ export function readUrlState(): UrlState {
         kmode: params.get('kmode'),
         op: (() => { const s = params.get('op'); const n = s !== null ? parseInt(s, 10) : NaN; return Number.isFinite(n) ? n : null; })(),
         onoon: params.get('onoon') === '1',
+        body: params.get('body') || null,
+        vnoon: params.get('vnoon') === '1',
     };
 }
 
@@ -205,6 +211,17 @@ export function writeUrlState(changes: Partial<UrlState>): void {
         }
     }
 
+    if ('body' in changes) {
+        if (changes.body) params.set('body', changes.body);
+        else params.delete('body');
+    }
+
+    if ('vnoon' in changes) {
+        // Midnight-on-top is the default — omit it from the URL.
+        if (changes.vnoon) params.set('vnoon', '1');
+        else params.delete('vnoon');
+    }
+
     // Also clean up legacy param
     params.delete('long');
     params.delete('loc');
@@ -234,10 +251,14 @@ export function getQueryString(): string {
  *   - `bloc` is included (the recipient's session/save choice resolves intent).
  *
  * @param state   The state to serialize (typically app-state's getState()).
- * @param baseUrl Optional base; defaults to the current origin + pathname.
+ * @param options `slots` — Terra/Gaia per-slot overrides (flat key→value map)
+ *                to append; `baseUrl` — base, defaulting to origin + pathname.
  */
-export function buildShareUrl(state: UrlState, baseUrl?: string): string {
-    const url = new URL(baseUrl ?? (window.location.origin + window.location.pathname));
+export function buildShareUrl(
+    state: UrlState,
+    options: { slots?: Record<string, string>; baseUrl?: string } = {},
+): string {
+    const url = new URL(options.baseUrl ?? (window.location.origin + window.location.pathname));
     const p = url.searchParams;
 
     // --- Location ---
@@ -258,7 +279,14 @@ export function buildShareUrl(state: UrlState, baseUrl?: string): string {
     if (state.kmode) p.set('kmode', state.kmode);
     if (state.op !== null && state.op !== undefined && state.op !== 0) p.set('op', state.op.toString());
     if (state.onoon) p.set('onoon', '1');
+    if (state.body) p.set('body', state.body);
+    if (state.vnoon) p.set('vnoon', '1');
     if (state.tp === 'a') p.set('tp', 'a');
+
+    // --- Terra/Gaia per-slot city overrides ---
+    if (options.slots) {
+        for (const [k, v] of Object.entries(options.slots)) p.set(k, v);
+    }
 
     return url.toString();
 }

@@ -654,9 +654,9 @@ Because `radial` positions text tops at `radius × 0.92`, the radius is set to `
 
 No text swapping is needed: when `dialFlip=π`, the 180° rotation moves "12" from the bottom (where it's unreadable in radial) to the top (where it's readable).
 
-### URL persistence
+### Persistence
 
-The `vnoon=1` URL parameter overrides `noonOnTop` after init block evaluation (in `watch-env.ts`), following the same pattern as `body=` for Venezia. Absent or `vnoon=0` = midnight on top.
+The `vnoon` setting (persisted via `app-state`, in the `chronometer` namespace) overrides `noonOnTop` after init block evaluation in `watch-env.ts` (read via `getState()`), following the same pattern as `body` for Venezia. Unset = midnight on top.
 
 ### UI
 
@@ -696,12 +696,12 @@ The face background image (`face.png`) is a `<hand>` element (not in `<static>`)
 
 `kyMode` is set in the XML via `<init expr='kyMode=0' />` and overridden at runtime.
 
-### URL persistence
+### Persistence
 
-- `kyhand=1` → fixed hand mode (absent or 0 → moving hand)
-- `kmode=1` → constant hand rate (absent or 0 → variable hand rate)
+- `kyhand=1` → fixed hand mode (unset → moving hand)
+- `kmode=1` → constant hand rate (unset → variable hand rate)
 
-These are applied after init block evaluation in `watch-env.ts` (same pattern as `body=` and `vnoon=`).
+These persist via `app-state` (chronometer namespace) and are applied after init block evaluation in `watch-env.ts` / `restoreKyotoState()` (same pattern as `body` and `vnoon`).
 
 ### State restoration across environment rebuilds
 

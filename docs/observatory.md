@@ -58,8 +58,9 @@ the `Updater`, the entry hands it to `initTimeControls({ updater, … })` (so ev
 transport transition auto-re-arms the schedules), and `timeController.onTick →
 rebuildEnv()` keeps the astro `env` fresh across both continuous advance and
 discrete jumps. Observatory therefore passes **no** transition callbacks. The
-default `writeTimeState` persists `t`/`off`/`dir` to the URL, so Observatory
-deep-links now round-trip the time as well as the location.
+default `writeTimeState` persists `t`/`off`/`dir` via `app-state` (LocalStorage,
+shared with the other apps), so Observatory shares the time as well as the
+location — and shared links round-trip both.
 
 ### Render loop idling
 
@@ -528,8 +529,8 @@ Matching iOS (`EOClock.mm:739-762`), the two dials cycle in **opposite
 directions** (via `cycleSelectablePlanet(current, dir)`): clicking the
 **altitude** dial advances (Sun→Moon→…→Saturn→Sun) and clicking the **azimuth**
 dial reverses (Sun→Saturn→…→Moon→Sun) — so you "go back" by clicking the other
-dial. The choice persists in the URL `op` param (0 = Sun is the default, omitted
-from the URL).
+dial. The choice persists as the `op` setting via `app-state` (observatory
+namespace; 0 = Sun is the default and is omitted).
 
 The hands track **one** value per axis — `dialAlt` / `dialAz` — whose expression
 reads the selected body from the `dialPlanet` **env variable** (set alongside
@@ -563,8 +564,8 @@ A Vienna-style pill control ("Midnight on top" / "Noon on top") sits centered in
 the bottom chrome row, sharing it with the time-bar button (left) and the
 location controls (right). The pill markup/CSS mirrors Chronometer's Vienna
 toggle (`face-template.html`); the wiring lives in `setupNoonToggle()` in
-`observatory-entry.ts`. The choice persists in the URL `onoon` param
-(midnight-on-top is the default, omitted from the URL).
+`observatory-entry.ts`. The choice persists as the `onoon` setting via
+`app-state` (observatory namespace; midnight-on-top is the default and is omitted).
 
 Toggling sets the `noonOnTop` env variable (0/1) and calls `updater.reset()`:
 every expression carrying a `+ pi * noonOnTop` term (24h hand, sun-event hands,
@@ -587,7 +588,7 @@ when their sizes change at runtime.
 
 The "ℹ" button (top right) opens the same info popover the Chronometer face
 pages use: header + links (GitHub / Credits / Privacy / Support / Disclaimer),
-the URL-state note, a lazy-loaded "General Help Topics" iframe, the
+the local-storage/sharing note, a lazy-loaded "General Help Topics" iframe, the
 app-specific help body, and the version number — with the sliding sub-view
 and animated popup height for the Privacy/Support/Disclaimer pages.
 

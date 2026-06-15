@@ -90,11 +90,19 @@ Adding new functions to `src/shared/astro-env.ts` requires a full `bash build.sh
 
 ### Planet/body selector
 
-Faces like Venezia that allow switching between celestial bodies use a URL parameter (`?body=...`) for state persistence. The selector UI is injected into `#planet-selector` in `face-template.html`, hidden by default and shown only for applicable faces.
+Faces like Venezia that allow switching between celestial bodies persist the
+selection through `app-state.ts` (the `body` field, in the `chronometer`
+namespace — LocalStorage by default, URL only for sharing/fallback). The
+selector UI is injected into `#planet-selector` in `face-template.html`, hidden
+by default and shown only for applicable faces. The toggle calls
+`setState({ body })`; `watch-env.ts` reads `getState().body` when building the
+environment.
 
-### URL parameter vs init blocks
+### Persisted overrides vs init blocks
 
-When the URL specifies a body parameter, it must be applied **after** XML init block evaluation in `watch-env.ts`, as init blocks may set default values that would overwrite the URL parameter.
+Persisted overrides like `body` and `vnoon` must be applied **after** XML init
+block evaluation in `watch-env.ts` (which reads them via `getState()`), as init
+blocks may set default values that would otherwise overwrite them.
 
 ### Animation-preserving body switch
 
@@ -102,14 +110,14 @@ When switching bodies, preserve existing `HandState` objects rather than recreat
 
 ### Vienna noon/midnight toggle
 
-Vienna's 24-hour dial supports switching between midnight-on-top (default) and noon-on-top via a `vnoon=1` URL parameter and a pill toggle in `#vienna-noon-toggle`. The toggle:
+Vienna's 24-hour dial supports switching between midnight-on-top (default) and noon-on-top via the persisted `vnoon` setting (stored through `app-state.ts`, in the `chronometer` namespace) and a pill toggle in `#vienna-noon-toggle`. The toggle:
 1. Sets `noonOnTop` and `dialFlip` env variables (the XML uses `dialFlip` in hand angles, day/night ring `masterOffset`, and the 24-hour number dial `angle`)
 2. Rebuilds the static cache and resets hand/dial schedules
 3. The 24-hour number dial animates automatically via its `HandState` (driven by `angle='dialFlip'` + `animSpeed='1'`)
 
 The 24-hour number dial uses `orientation='radial'` so labels remain readable in both orientations — `radial` always points text tops outward. No text swapping is needed; the 180° rotation naturally moves the correct numbers to the top. The dial is outside the `<static>` block so the renderer can animate it per-frame.
 
-This follows the same post-init-override pattern as `body=` (applied after init blocks in `watch-env.ts`).
+This follows the same post-init-override pattern as `body` (applied after init blocks in `watch-env.ts`, sourced from `getState()`).
 
 ### Terra embed mode
 

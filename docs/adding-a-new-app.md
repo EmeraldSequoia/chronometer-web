@@ -34,7 +34,8 @@ The entry point is the TypeScript file that will be bundled into `<app-name>-eng
 **Allowed imports:**
 ```typescript
 import { ... } from '../shared/astro-env.js';       // ✅ Shared infrastructure
-import { ... } from '../shared/url-state.js';        // ✅
+import { ... } from '../shared/app-state.js';        // ✅ State (getState/setState/initAppState)
+import { ... } from '../shared/url-state.js';        // ✅ URL serializer (for sharing/fallback)
 import { ... } from '../shared/location-dialog.js';  // ✅
 import { ... } from '../shared/time-controller.js';  // ✅
 import { ... } from '../shared/city-search.js';      // ✅
@@ -85,12 +86,16 @@ The shared location dialog handles city search, geolocation, and the mini-map gl
 
 ```typescript
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
-import { readUrlState, writeUrlState } from '../shared/url-state.js';
+import { initAppState, getState, setState } from '../shared/app-state.js';
 import { resolveTimezone } from '../shared/tz-resolve.js';
 import { findClosestCity } from '../shared/city-search.js';
 
-// Read location from URL parameters
-const urlState = readUrlState();
+// Select the state backend (LocalStorage by default; URL/in-memory fallback).
+// Pass the app name so per-app settings get their own namespace.
+initAppState({ app: '<app-name>' });
+
+// Read location from the active backend (storage in the normal case)
+const urlState = getState();
 let lat = urlState.lat ?? 0;
 let lon = urlState.lon ?? 0;
 
@@ -98,14 +103,18 @@ let lon = urlState.lon ?? 0;
 initLocationDialog(document.body, (newLat, newLon, tz, cityName) => {
     lat = newLat;
     lon = newLon;
-    // Rebuild environment, update display, write to URL...
-    writeUrlState({ lat: newLat, lon: newLon, tz });
+    // Rebuild environment, update display, persist...
+    setState({ lat: newLat, lon: newLon, tz });
 });
 
-// If no location in URL, prompt for one:
+// If no location is stored, prompt for one:
 // - Use requestBrowserLocation() for geolocation API
 // - Or trigger the dialog to open
 ```
+
+> Add the new app's name to the `AppName` union in `shared/app-state.ts` (and,
+> if it has its own persisted settings, give it a namespace in `namespaceOf()` /
+> `appNamespace()`). Location and time live in the shared namespace automatically.
 
 ### 5. Create the HTML page
 
@@ -190,7 +199,8 @@ Key patterns from Inspector:
 | `shared/time-controller.ts` | Time scrubbing/stepping | `TimeController` class |
 | `shared/location-dialog.ts` | Location picker UI | `initLocationDialog()`, `requestBrowserLocation()` |
 | `shared/city-search.ts` | City name search | `findClosestCity()`, `searchCities()` |
-| `shared/url-state.ts` | URL parameter I/O | `readUrlState()`, `writeUrlState()` |
+| `shared/app-state.ts` | State persistence (LocalStorage/URL/in-memory) | `initAppState()`, `getState()`, `setState()`, `onSharedChange()` |
+| `shared/url-state.ts` | URL serializer (sharing + URL fallback) | `readUrlState()`, `writeUrlState()`, `buildShareUrl()` |
 | `shared/mini-map.ts` | Globe renderer | `MiniMap` class |
 | `shared/tz-resolve.ts` | Timezone resolution | `resolveTimezone()` |
 | `shared/dst-detect.ts` | DST detection | `findDSTTransitions()` |

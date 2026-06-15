@@ -29,6 +29,8 @@ describe('namespaceOf', () => {
         expect(namespaceOf('kyhand', 'inspector')).toBe('chronometer');
         expect(namespaceOf('kmode', 'chronometer')).toBe('chronometer');
         expect(namespaceOf('picks', 'observatory')).toBe('chronometer');
+        expect(namespaceOf('body', 'inspector')).toBe('chronometer');
+        expect(namespaceOf('vnoon', 'observatory')).toBe('chronometer');
         expect(namespaceOf('op', 'chronometer')).toBe('observatory');
         expect(namespaceOf('onoon', 'inspector')).toBe('observatory');
     });
@@ -162,6 +164,9 @@ describe('incoming-settings detection', () => {
         expect(hasShareableParamsInUrl()).toBe(true);
         window.history.replaceState(null, '', '/?picks=bbmk');
         expect(hasShareableParamsInUrl()).toBe(true);
+        // Terra/Gaia slot params are shareable too.
+        window.history.replaceState(null, '', '/?r5=Denver&r5tz=America/Denver');
+        expect(hasShareableParamsInUrl()).toBe(true);
     });
 
     test('shareableUrlEqualsStored is true only when URL matches storage', () => {
@@ -173,13 +178,16 @@ describe('incoming-settings detection', () => {
         expect(shareableUrlEqualsStored(ls)).toBe(false);
     });
 
-    test('clearShareableParamsFromUrl strips shareable params (incl. picks), keeps fps', () => {
-        window.history.replaceState(null, '', '/?lat=10&lon=20&op=3&fps&picks=bbmk');
+    test('clearShareableParamsFromUrl strips shareable params (incl. picks + slots), keeps fps', () => {
+        window.history.replaceState(null, '', '/?lat=10&lon=20&op=3&fps&picks=bbmk&r5=Denver&r5tz=America/Denver&d2=Tokyo');
         clearShareableParamsFromUrl();
         const p = new URLSearchParams(window.location.search);
         expect(p.has('lat')).toBe(false);
         expect(p.has('op')).toBe(false);
         expect(p.has('picks')).toBe(false);
+        expect(p.has('r5')).toBe(false);
+        expect(p.has('r5tz')).toBe(false);
+        expect(p.has('d2')).toBe(false);
         expect(p.has('fps')).toBe(true);
     });
 });
@@ -189,46 +197,58 @@ describe('buildShareUrl', () => {
     const defaults = __test__.defaultState();
 
     test('includes location and rounds lat/lon to 3 dp', () => {
-        const u = new URL(buildShareUrl({ ...defaults, lat: 48.8566, lon: 2.3522, city: 'Paris' }, base));
+        const u = new URL(buildShareUrl({ ...defaults, lat: 48.8566, lon: 2.3522, city: 'Paris' }, { baseUrl: base }));
         expect(u.searchParams.get('lat')).toBe('48.857');
         expect(u.searchParams.get('lon')).toBe('2.352');
         expect(u.searchParams.get('city')).toBe('Paris');
     });
 
     test('omits time for a live real-time clock', () => {
-        const u = new URL(buildShareUrl({ ...defaults, lat: 1, lon: 2 }, base));
+        const u = new URL(buildShareUrl({ ...defaults, lat: 1, lon: 2 }, { baseUrl: base }));
         expect(u.searchParams.has('t')).toBe(false);
         expect(u.searchParams.has('off')).toBe(false);
         expect(u.searchParams.has('dir')).toBe(false);
     });
 
     test('includes time when stopped/offset/reversed', () => {
-        const stopped = new URL(buildShareUrl({ ...defaults, t: 1700000000000, dir: 0 }, base));
+        const stopped = new URL(buildShareUrl({ ...defaults, t: 1700000000000, dir: 0 }, { baseUrl: base }));
         expect(stopped.searchParams.get('t')).toBe('1700000000000');
         expect(stopped.searchParams.get('dir')).toBe('0');
-        const offset = new URL(buildShareUrl({ ...defaults, off: 3600000 }, base));
+        const offset = new URL(buildShareUrl({ ...defaults, off: 3600000 }, { baseUrl: base }));
         expect(offset.searchParams.get('off')).toBe('3600000');
     });
 
     test('includes bloc and app config, excludes fps/embed/tc', () => {
         const u = new URL(buildShareUrl({
             ...defaults, bloc: true, op: 3, onoon: true, tp: 'a', picks: 'bbmk',
-            kyhand: '1', fps: true, embed: true, tc: true,
-        }, base));
+            kyhand: '1', body: 'jupiter', vnoon: true, fps: true, embed: true, tc: true,
+        }, { baseUrl: base }));
         expect(u.searchParams.get('bloc')).toBe('1');
         expect(u.searchParams.get('op')).toBe('3');
         expect(u.searchParams.get('onoon')).toBe('1');
         expect(u.searchParams.get('tp')).toBe('a');
         expect(u.searchParams.get('picks')).toBe('bbmk');
         expect(u.searchParams.get('kyhand')).toBe('1');
+        expect(u.searchParams.get('body')).toBe('jupiter');
+        expect(u.searchParams.get('vnoon')).toBe('1');
         expect(u.searchParams.has('fps')).toBe(false);
         expect(u.searchParams.has('embed')).toBe(false);
         expect(u.searchParams.has('tc')).toBe(false);
     });
 
     test('omits default op (Sun=0)', () => {
-        const u = new URL(buildShareUrl({ ...defaults, op: 0 }, base));
+        const u = new URL(buildShareUrl({ ...defaults, op: 0 }, { baseUrl: base }));
         expect(u.searchParams.has('op')).toBe(false);
+    });
+
+    test('appends Terra/Gaia slot overrides', () => {
+        const u = new URL(buildShareUrl({ ...defaults, lat: 1, lon: 2 }, {
+            baseUrl: base,
+            slots: { r5: 'Denver', r5tz: 'America/Denver', d2: 'Tokyo' },
+        }));
+        expect(u.searchParams.get('r5')).toBe('Denver');
+        expect(u.searchParams.get('r5tz')).toBe('America/Denver');
+        expect(u.searchParams.get('d2')).toBe('Tokyo');
     });
 });
 

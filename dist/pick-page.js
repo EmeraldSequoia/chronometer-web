@@ -362,7 +362,9 @@
         const n = s !== null ? parseInt(s, 10) : NaN;
         return Number.isFinite(n) ? n : null;
       })(),
-      onoon: params.get("onoon") === "1"
+      onoon: params.get("onoon") === "1",
+      body: params.get("body") || null,
+      vnoon: params.get("vnoon") === "1"
     };
   }
   function writeUrlState(changes) {
@@ -462,6 +464,14 @@
       } else {
         params.delete("onoon");
       }
+    }
+    if ("body" in changes) {
+      if (changes.body) params.set("body", changes.body);
+      else params.delete("body");
+    }
+    if ("vnoon" in changes) {
+      if (changes.vnoon) params.set("vnoon", "1");
+      else params.delete("vnoon");
     }
     params.delete("long");
     params.delete("loc");
@@ -716,6 +726,8 @@
       case "picks":
       case "kyhand":
       case "kmode":
+      case "body":
+      case "vnoon":
         return "chronometer";
       case "op":
       case "onoon":
@@ -744,7 +756,9 @@
       kyhand: null,
       kmode: null,
       op: null,
-      onoon: false
+      onoon: false,
+      body: null,
+      vnoon: false
     };
   }
   function isDefaultValue(field, value) {
@@ -759,6 +773,7 @@
       case "embed":
       case "fps":
       case "onoon":
+      case "vnoon":
         return value === false;
       case "op":
         return value === 0;
@@ -903,6 +918,8 @@
     "kmode",
     "op",
     "onoon",
+    "body",
+    "vnoon",
     "tp"
   ];
   var SHAREABLE_URL_KEYS = [
@@ -921,21 +938,76 @@
     "kmode",
     "op",
     "onoon",
+    "body",
+    "vnoon",
     "tp"
   ];
   var CLEARED_URL_KEYS = [...SHAREABLE_URL_KEYS, "tc"];
+  var SLOT_STORAGE_KEY = STORAGE_KEY_PREFIX + "slots";
+  var SLOT_KEY_RE = /^[rd]\d+(tz|lat|lon)?$/;
+  function urlSlotMap() {
+    const out = {};
+    for (const [k, v] of new URLSearchParams(window.location.search)) {
+      if (SLOT_KEY_RE.test(k)) out[k] = v;
+    }
+    return out;
+  }
+  function storedSlotMap() {
+    try {
+      const obj = JSON.parse(localStorage.getItem(SLOT_STORAGE_KEY) || "{}");
+      delete obj.v;
+      return obj;
+    } catch {
+      return {};
+    }
+  }
+  function urlHasSlotParams() {
+    for (const k of new URLSearchParams(window.location.search).keys()) {
+      if (SLOT_KEY_RE.test(k)) return true;
+    }
+    return false;
+  }
   function hasShareableParamsInUrl() {
     const params = new URLSearchParams(window.location.search);
-    return SHAREABLE_URL_KEYS.some((k) => params.has(k));
+    return SHAREABLE_URL_KEYS.some((k) => params.has(k)) || urlHasSlotParams();
   }
   function shareableUrlEqualsStored(ls) {
     const url = readUrlState();
     const stored = ls.read();
-    return SHAREABLE_FIELDS.every((f) => url[f] === stored[f]);
+    if (!SHAREABLE_FIELDS.every((f) => url[f] === stored[f])) return false;
+    const u = urlSlotMap();
+    const s = storedSlotMap();
+    const keys = /* @__PURE__ */ new Set([...Object.keys(u), ...Object.keys(s)]);
+    for (const k of keys) if (u[k] !== s[k]) return false;
+    return true;
+  }
+  function urlScalarOverrides() {
+    const params = new URLSearchParams(window.location.search);
+    const url = readUrlState();
+    const out = {};
+    const has = (...keys) => keys.some((k) => params.has(k));
+    if (has("lat")) out.lat = url.lat;
+    if (has("lon", "long")) out.lon = url.lon;
+    if (has("city")) out.city = url.city;
+    if (has("tz")) out.tz = url.tz;
+    if (has("bloc")) out.bloc = url.bloc;
+    if (has("t")) out.t = url.t;
+    if (has("off")) out.off = url.off;
+    if (has("dir")) out.dir = url.dir;
+    if (has("picks")) out.picks = url.picks;
+    if (has("kyhand")) out.kyhand = url.kyhand;
+    if (has("kmode")) out.kmode = url.kmode;
+    if (has("op")) out.op = url.op;
+    if (has("onoon")) out.onoon = url.onoon;
+    if (has("body")) out.body = url.body;
+    if (has("vnoon")) out.vnoon = url.vnoon;
+    if (has("tp")) out.tp = url.tp;
+    return out;
   }
   function clearShareableParamsFromUrl() {
     const params = new URLSearchParams(window.location.search);
     for (const k of CLEARED_URL_KEYS) params.delete(k);
+    for (const k of [...params.keys()]) if (SLOT_KEY_RE.test(k)) params.delete(k);
     const qs = params.toString();
     history.replaceState(null, "", window.location.pathname + (qs ? "?" + qs : ""));
   }
@@ -943,6 +1015,7 @@
   var appName = "index";
   var sessionRePromptArmed = false;
   var warnedNoPersistence = false;
+  var inMemorySlots = {};
   function initAppState(options) {
     appName = options.app;
     setPicksProvider(() => getState().picks);
@@ -988,9 +1061,12 @@
     }
   }
   function adoptCurrentStateAsDefault(ls) {
-    ls.write(getState());
-    clearShareableParamsFromUrl();
+    const overrides = urlScalarOverrides();
+    const slots = urlSlotMap();
     activeBackend = ls;
+    ls.write(overrides);
+    if (Object.keys(slots).length > 0) setSlotOverrides(slots);
+    clearShareableParamsFromUrl();
     sessionRePromptArmed = false;
   }
   function warnNoPersistence() {
@@ -1014,6 +1090,7 @@
   function downgradeToInMemory() {
     if (activeBackend instanceof InMemoryBackend) return;
     const seed = activeBackend ? activeBackend.read() : void 0;
+    inMemorySlots = getSlotOverrides();
     activeBackend = new InMemoryBackend(seed);
     warnNoPersistence();
   }
@@ -1040,6 +1117,49 @@
       sessionRePromptArmed = false;
       void promptSessionReprompt();
     }
+  }
+  function getSlotOverrides() {
+    const b = backend();
+    if (b instanceof LocalStorageBackend) return storedSlotMap();
+    if (b instanceof InMemoryBackend) return { ...inMemorySlots };
+    return urlSlotMap();
+  }
+  function setSlotOverrides(changes) {
+    const b = backend();
+    if (b instanceof InMemoryBackend) {
+      for (const [k, v] of Object.entries(changes)) {
+        if (v == null) delete inMemorySlots[k];
+        else inMemorySlots[k] = v;
+      }
+      return;
+    }
+    if (b instanceof LocalStorageBackend) {
+      const cur = storedSlotMap();
+      for (const [k, v] of Object.entries(changes)) {
+        if (v == null) delete cur[k];
+        else cur[k] = v;
+      }
+      delete cur.v;
+      try {
+        if (Object.keys(cur).length === 0) {
+          localStorage.removeItem(SLOT_STORAGE_KEY);
+        } else {
+          cur.v = SCHEMA_VERSION;
+          localStorage.setItem(SLOT_STORAGE_KEY, JSON.stringify(cur));
+        }
+      } catch {
+        downgradeToInMemory();
+        setSlotOverrides(changes);
+      }
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    for (const [k, v] of Object.entries(changes)) {
+      if (v == null) params.delete(k);
+      else params.set(k, v);
+    }
+    const qs = params.toString();
+    history.replaceState(null, "", window.location.pathname + (qs ? "?" + qs : ""));
   }
   async function promptSessionReprompt() {
     const choice = await showIncomingSettingsDialog({ mode: "reprompt" });

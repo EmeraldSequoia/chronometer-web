@@ -22,11 +22,14 @@ src/
 │   ├── obs-value.ts         # ObsValue: general expression-driven animated value (type + createObsValue)
 │   ├── updater.ts           # Shared updater: name-keyed Updater<K> + ObsValue update/animate passes + eval-ahead/TimingContext seam
 │   ├── time-controller.ts   # Time scrubbing, stepping, play/pause
-│   ├── time-controls-ui.ts  # Shared transport bar/popover; generic controller↔updater seam (auto reset + URL time-state)
+│   ├── time-controls-ui.ts  # Shared transport bar/popover; generic controller↔updater seam (auto reset + time-state persistence)
 │   ├── city-search.ts       # City name lookup against GeoNames database
 │   ├── location-dialog.ts   # Self-contained location picker (DOM, search, mini-map)
 │   ├── mini-map.ts          # Blue Marble globe renderer
-│   ├── url-state.ts         # Read/write lat/lon/tz/time URL parameters
+│   ├── app-state.ts         # State front door: LocalStorage by default, URL for sharing/fallback (getState/setState)
+│   ├── incoming-settings-dialog.ts # Shared-link prompt, storage warning, paradigm notice, (URL) badge
+│   ├── share-button.ts      # "Share this view" button → buildShareUrl + copy
+│   ├── url-state.ts         # URL serializer (UrlState, readUrlState/writeUrlState, buildShareUrl) used by sharing + the URL fallback
 │   ├── dst-detect.ts        # DST transition detection
 │   └── tz-resolve.ts        # Lat/lon → Olson timezone resolution
 ├── watch/               # Chronometer-only: XML parsing, rendering, watch-specific env

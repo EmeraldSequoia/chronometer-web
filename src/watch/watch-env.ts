@@ -33,6 +33,7 @@ import {
 } from '../shared/animation.js';
 import { releaseCachePool } from '../astronomy/astro-cache.js';
 import { ECPlanetNumber } from '../astronomy/astro-constants.js';
+import { getState } from '../shared/app-state.js';
 
 // Import the shared astro environment function registration
 import {
@@ -200,11 +201,13 @@ export function createWatchEnvironment(
     /** Kyoto hand mode: 0 = moving hand, 1 = fixed hand at top */
     env.kyHandMode = 0;
 
-    // URL param override for 'body' (Venezia planet selection via ?body=jupiter etc.)
-    // Must run AFTER init blocks so it overrides the XML's default body assignment.
+    // Persisted overrides for body/vnoon/kmode/kyhand (storage in storage mode,
+    // URL otherwise — sourced via app-state.getState()). Must run AFTER init
+    // blocks so they override the XML's default assignments. Guarded on `window`
+    // so headless test environments skip it.
     if (typeof window !== 'undefined') {
-        const params = new URLSearchParams(window.location.search);
-        const bodyParam = params.get('body');
+        const persisted = getState();
+        const bodyParam = persisted.body;
         if (bodyParam) {
             const bodyMap: Record<string, number> = {
                 sun: ECPlanetNumber.Sun, moon: ECPlanetNumber.Moon,
@@ -232,23 +235,20 @@ export function createWatchEnvironment(
             }
         }
 
-        // URL param override for 'noonOnTop' (Vienna noon-on-top toggle via ?vnoon=1)
-        const vnoonParam = params.get('vnoon');
-        if (vnoonParam === '1' || vnoonParam === '0') {
-            const noonOnTop = parseInt(vnoonParam, 10);
-            env.variables.set('noonOnTop', noonOnTop);
-            env.variables.set('dialFlip', noonOnTop ? Math.PI : 0);
+        // Vienna noon-on-top toggle. Only the non-default (noon) case is applied;
+        // false leaves the XML init's default (midnight) in place.
+        if (persisted.vnoon) {
+            env.variables.set('noonOnTop', 1);
+            env.variables.set('dialFlip', Math.PI);
         }
 
-        // URL param override for 'kyMode' (Kyoto constant/variable hand rate toggle)
-        const kmodeParam = params.get('kmode');
-        if (kmodeParam === '1' || kmodeParam === '0') {
-            env.variables.set('kyMode', parseInt(kmodeParam, 10));
+        // Kyoto constant/variable hand rate toggle ('kyMode').
+        if (persisted.kmode === '1' || persisted.kmode === '0') {
+            env.variables.set('kyMode', parseInt(persisted.kmode, 10));
         }
 
-        // URL param override for 'kyHandMode' (Kyoto fixed-hand toggle)
-        const kyhandParam = params.get('kyhand');
-        if (kyhandParam === '1') {
+        // Kyoto fixed-hand toggle ('kyHandMode').
+        if (persisted.kyhand === '1') {
             env.kyHandMode = 1;
         }
     }

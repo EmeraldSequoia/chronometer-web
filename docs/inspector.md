@@ -227,10 +227,12 @@ panel. Categories not in this list appear at the end.
 
 ## Location
 
-The Inspector uses the same location system as Chronometer — URL parameters
-(`lat`, `lon`, `tz`, `city`, `bloc`) and the shared location dialog
+The Inspector uses the same location system as Chronometer — shared state
+(`lat`, `lon`, `tz`, `city`, `bloc`) via `app-state.ts` (LocalStorage by
+default, URL for sharing/fallback) and the shared location dialog
 (`src/shared/location-dialog.ts`). Location changes rebuild the astronomy
-environment and refresh all displays.
+environment and refresh all displays, and live-sync across tabs via
+`onSharedChange`.
 
 ## Key Source Files
 

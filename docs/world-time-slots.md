@@ -40,27 +40,33 @@ The XML `firstRingSlot` variable is set to `1`, `UTRingSlot` to `12`. All 24 QWe
 
 Slot 1 is automatically populated from the device/browser location. Its city name is resolved from `locationSource` or `findClosestCity()`. Slots 2–4 default to `GAIA_SUBDIAL_DEFAULTS` (New York, London, Sydney). Count is driven by `watch.maxSeparateLoc` (from XML, default 4).
 
-## URL Parameter Encoding
+## Slot Override Encoding
 
-Each feature uses a distinct prefix to avoid collisions:
+Slot overrides persist through `app-state.ts` (the dedicated `ec:slots` blob in
+LocalStorage; the URL only in shared links / the `file://` fallback) as a flat
+key→value map. Each feature uses a distinct key prefix to avoid collisions:
 
-| Feature | Prefix | Example |
+| Feature | Prefix | Example keys |
 |---------|--------|---------|
-| `worldTimeRing` | `r` | `r5=Denver&r5tz=America/Denver&r5lat=39.74&r5lon=-104.98` |
-| `worldTimeSubdials` | `d` | `d2=Tokyo&d2tz=Asia/Tokyo&d2lat=35.68&d2lon=139.69` |
+| `worldTimeRing` | `r` | `r5=Denver`, `r5tz=America/Denver`, `r5lat=39.74`, `r5lon=-104.98` |
+| `worldTimeSubdials` | `d` | `d2=Tokyo`, `d2tz=Asia/Tokyo`, `d2lat=35.68`, `d2lon=139.69` |
 
-Each slot stores four URL parameters:
+Each slot stores four keys:
 - `{prefix}{slot}` — city display name
 - `{prefix}{slot}tz` — Olson timezone ID
 - `{prefix}{slot}lat` — latitude
 - `{prefix}{slot}lon` — longitude
 
+`engine-entry.ts` reads them via `getSlotOverrides()` and writes via
+`setSlotOverrides()`; `buildShareUrl()` includes them in Share links, and an
+incoming link with slot keys triggers the shared-settings prompt.
+
 ## Slot Override Flow
 
 ```
-URL params ──→ buildSlotOverrides(watch)
+getSlotOverrides() ──→ buildSlotOverrides(watch)
                   │
-                  │  1. Read user URL overrides (r1..r24 or d2..dN)
+                  │  1. Read user slot overrides (r1..r24 or d2..dN)
                   │  2. For worldTimeRing: inject global location into
                   │     best matching slot (overrides user choice there)
                   │
@@ -108,7 +114,7 @@ Both Terra and Gaia reuse `terra-city-dialog.html`, wired differently per featur
 
 **Gaia**: Search → pick subdial (Upper / Right / Lower) → assign. No timezone validation needed.
 
-Both write overrides to the URL and rebuild the face environment.
+Both persist overrides via `setSlotOverrides()` (storage by default) and rebuild the face environment.
 
 ## Key Source Files
 
@@ -116,7 +122,8 @@ Both write overrides to the URL and rebuild the face environment.
 |------|---------|
 | `src/watch/watch-env.ts` | `TERRA_RING_DEFAULTS`, `GAIA_SUBDIAL_DEFAULTS`, environment creation with slot data |
 | `src/watch/terra-slots.ts` | Slot↔offset conversion, timezone validation, `getStandardOffsetMinutes()` |
-| `src/engine-entry.ts` | `buildSlotOverrides()`, city dialog wiring, URL param I/O |
+| `src/engine-entry.ts` | `buildSlotOverrides()`, city dialog wiring, slot persistence via app-state |
+| `src/shared/app-state.ts` | `getSlotOverrides()` / `setSlotOverrides()` (the `ec:slots` blob) |
 | `src/watch/renderer.ts` | Reads `_terraSlots` for city labels, channel lines, dots |
 | `src/watch/types.ts` | `Watch` interface with feature flag fields |
 
