@@ -1,15 +1,17 @@
 # Port Chronometer to the ObsValue System
 
 **Date:** 2026-06-15
-**Status:** Draft — awaiting review (revision 2).
+**Status:** Draft — awaiting review (revision 3).
 
 > **Scope.** Replace Chronometer's per-part `HandState` / `tickAnimations`
-> animation system with `ObsValue`s driven by the shared `Updater`. After this
-> work, all three apps (Observatory, Inspector, Chronometer) share a single
-> animation-value mechanism, and the Chronometer-specific `HandState` system can
-> be retired. The port is *behavioral* — the rendered output should be visually
-> identical — and must follow the development rules (§2 never simplify, §4
-> rendering order is sacred, §3 never rebuild parts at runtime).
+> animation system with `ObsValue`s driven by the shared `Updater`, including
+> the **terminator leaves** and **analemma** subsystems. After this work, all
+> three apps (Observatory, Inspector, Chronometer) share a single animation-value
+> mechanism, and the Chronometer-specific `HandState` system, `TerminatorLeafState`
+> animation loop, and `AnalemmaState` scheduling can be retired. The port is
+> *behavioral* — the rendered output should be visually identical — and must
+> follow the development rules (§2 never simplify, §4 rendering order is sacred,
+> §3 never rebuild parts at runtime).
 
 ## Background — current state
 
@@ -86,6 +88,34 @@ snap-to-target and scrub-compression branches.
 > second so that it arrives at the new position exactly when the second ticks.
 > This is a deliberate behavioral change that better preserves the mechanical
 > model: the hand is always where it should be at the moment of the beat.
+
+### Astro cache impact of eval-ahead
+
+Eval-ahead temporarily shifts `getNow()` to a future time via `withDisplayTime`.
+The question is whether this reduces cache hits in the astronomy cache pool
+(`AstroCachePool`), which uses a 0.5-second slop tolerance (`ASTRO_SLOP_RAW`).
+
+**Analysis:** The impact is **minimal** for these reasons:
+
+1. **Staggered timers.** Only ObsValues whose `nextUpdateTime` has arrived are
+   re-evaluated in a given frame. Typically only 1–3 values fire per frame (the
+   fast hands), and fast hands don't call astronomy functions.
+2. **Sequential override.** When an astro-dependent value (e.g., a day-night ring
+   at 300s interval) does fire, `withDisplayTime` shifts `getNow` to ~300s in
+   the future for just that one evaluation. The cache rebuilds for that future
+   time — but **it would have rebuilt anyway** when that time actually arrived.
+3. **Scoped override.** The `withDisplayTime` override is scoped to the single
+   `evalAttr` callback. After return, `getNow` reverts to the real time, so the
+   cache returns to its normal state. No lingering invalidation.
+4. **Already happens today.** When multiple parts with different update intervals
+   fire in the same frame, the current system evaluates them sequentially at the
+   *same* time. Eval-ahead changes the *which* time, but not the pattern of
+   sequential evaluations.
+
+The only scenario where eval-ahead adds extra invalidations is if two
+astro-dependent values fire on the same frame with different future targets —
+but this is rare (update intervals are typically identical for astro parts on
+the same face), and a single extra cache rebuild per 60–300s is negligible.
 
 ### One `Updater` per face
 
@@ -440,7 +470,7 @@ Remove or deprecate (these are no longer used by any consumer):
 - The private `startAnimation`, `snapToTarget`, `snapToTargetRaw` helpers
 - `finishDayNightSlides`, `resetDayNightSlides`
 
-Keep (still used by ObsValue/Updater + terminator + other animations):
+Keep (still used by ObsValue/Updater):
 - `AnimatingValue`, `makeAnimatingValue`
 - `startAnimationRaw`, `interpolateValue`, `startValueAnimation`,
   `startLinearAnimation`
@@ -450,13 +480,163 @@ Keep (still used by ObsValue/Updater + terminator + other animations):
 
 ---
 
-### Deferred (out of scope)
+### Phase 7: Terminator leaves → ObsValues
 
-- **Terminator leaves** (`terminator.ts`): Their own `TerminatorLeafState` +
-  `tickLeafAnimations` + `updateLeafAngles`. Complex multi-leaf geometry with
-  cache-rebuild triggers. Defer to a future plan.
-- **Analemma** (`analemma.ts`): Own scheduling (`tickAnalemma`,
-  `resetAnalemmaSchedule`). Simple but low priority. Defer.
+The terminator subsystem (`terminator.ts`) has its own animation loop
+(`TerminatorLeafState` + `tickLeafAnimations` + `resetLeafSchedules`) that
+duplicates the eval→animate→interpolate pattern. Port it to ObsValues.
+
+#### Architecture
+
+A single `<terminator>` XML element expands into `4 × leavesPerQuadrant` leaves.
+Each leaf has:
+- **`angleAnim`** — rotation angle, computed by `terminatorAngle(phase, quad, idx, lpq, incr)`.
+  All leaves share the same `phase` input (from the part's `phaseAngle` expression).
+- **`rotationAnim`** — system rotation (from `rotation` expression, typically
+  `moonRelativePositionAngle`). Shared across all leaves.
+
+Key property: **all leaves evaluate the same two env expressions** (`phaseAngle`
+and `rotation`), then each leaf applies `terminatorAngle()` with its own
+quadrant/index to compute its individual angle target.
+
+#### Approach
+
+1. **Register `terminatorLeafAngle(phase, quad, idx, lpq, incr)` as an env
+   function** in `createWatchEnvironment`. This wraps the existing pure
+   `terminatorAngle()` function. For lower quadrants, adds π to the result.
+
+2. **Per-leaf ObsValues in `buildHandValues`:** For each expanded leaf, create:
+   - `angle` ObsValue: expression string calls
+     `terminatorLeafAngle(phaseAngle(), quad, idx, lpq, incr)`. This composes the
+     shared phase expression with the per-leaf `terminatorAngle` math.
+   - `rotation` ObsValue: expression is the same `rotation` AST from the
+     `TerminatorPart`. Shared AST reference across all leaves — the Updater
+     evaluates it once per frame tick (only when the timer fires).
+
+3. **Store ObsValue refs on `TerminatorLeafState`:**
+   ```ts
+   _obsAngle?: ObsValue;
+   _obsRotation?: ObsValue;
+   ```
+   The renderer reads `leaf._obsAngle.currentValue` and
+   `leaf._obsRotation.currentValue` instead of `leaf.currentAngle` /
+   `leaf.currentRotation`.
+
+4. **Remove from `engine-entry.ts`:** The `tickLeafAnimations`,
+   `finishLeafAnimations`, `resetLeafSchedules`, `anyLeafAnimating` calls are
+   replaced by the face's `updater.tick()` / `updater.finish()` /
+   `updater.reset()` / `updater.anyAnimating()`.
+
+5. **`updateLeafAngles` stays** (used for static cache building at init time,
+   before the Updater exists). It sets `currentAngle`/`currentRotation` directly.
+
+#### [MODIFY] `src/watch/watch-env.ts`
+
+Register `terminatorLeafAngle(phase, quad, idx, lpq, incr)` — wraps
+`terminatorAngle` + the lower-quadrant π offset.
+
+#### [MODIFY] `src/watch/hand-values.ts`
+
+In `buildHandValues`, after walking the part tree for QHand/Wheel/etc., iterate
+over `face.terminatorLeaves` and create per-leaf `angle` and `rotation` ObsValues.
+
+#### [MODIFY] `src/watch/terminator.ts`
+
+Add optional `_obsAngle` / `_obsRotation` fields to `TerminatorLeafState`.
+Mark `tickLeafAnimations`, `finishLeafAnimations`, `resetLeafSchedules`,
+`anyLeafAnimating` as deprecated (still present for the static cache path).
+
+#### [MODIFY] `src/watch/renderer.ts`
+
+In `drawTerminator`, read leaf angles from ObsValue refs:
+```diff
+-leaf.currentAngle = interpolateRaw(leaf.angleAnim, now);
+-leaf.currentRotation = interpolateRaw(leaf.rotationAnim, now);
++// Updater already interpolated these; renderer just reads currentValue.
++const angle = leaf._obsAngle?.anim.currentValue ?? leaf.currentAngle;
++const rotation = leaf._obsRotation?.anim.currentValue ?? leaf.currentRotation;
+```
+
+#### [MODIFY] `src/engine-entry.ts`
+
+Remove per-frame `tickLeafAnimations` calls (covered by `updater.tick`).
+Remove `finishLeafAnimations` / `resetLeafSchedules` / `anyLeafAnimating` calls
+(covered by `updater.finish` / `updater.reset` / `updater.anyAnimating`).
+
+---
+
+### Phase 8: Analemma → ObsValues
+
+> [!IMPORTANT]
+> **Prerequisite.** Before this phase, the analemma renderer will be refactored
+> (in a separate task) to accept a **parametric path parameter** instead of
+> pre-computed (x, y) coordinates. This plan only describes the env functions
+> and ObsValues; the renderer refactoring is out of scope.
+
+The current analemma computes three values per update: `currentSunX`,
+`currentSunY` (Sun's position on the figure-eight path in XML coords), and
+`currentRotation` (sky orientation angle). These snap directly (no animation).
+
+#### Parametric approach
+
+Instead of three coordinate-level ObsValues, we use **two parametric ObsValues**:
+
+1. **`pathParameter`** — a fractional day-of-year relative to the vernal equinox
+   (0.0–364.999…). The analemma's 365-point path is indexed by this value;
+   the renderer interpolates between adjacent path points to get (x, y).
+2. **`rotation`** — the sky orientation angle (`sunSkyOrientationAngle` at the
+   observer's location).
+
+Benefits:
+- **Scale-independent.** The env function returns pure astronomy ("how far
+  through the solar year"), with no knowledge of path geometry or scaling.
+- **Animatable along the track.** Because the parametric value maps to path
+  points, animating between two values moves the Sun marker smoothly *along*
+  the figure-eight, not in a straight line between (x₁, y₁) and (x₂, y₂).
+  This means the ObsValue can use `evalAhead: true` (not `discrete: true`)
+  for smooth animation during scrubbing.
+
+#### Env functions
+
+1. **`analemmaPathParameter()`** — Returns fractional days since the vernal
+   equinox reference date (March 20 at 12:00 UT), modulo 365. This is computed
+   from the current display time (`getNow()`). During eval-ahead,
+   `withDisplayTime` naturally shifts to the future time.
+
+2. **`analemmaRotation()`** — Returns `sunSkyOrientationAngle(di, obsLat, obsLon)`
+   for the current display time at the observer's location.
+
+#### ObsValues
+
+- `<face>.analemma.pathParam` — `evalAhead: true`, expression
+  `"analemmaPathParameter()"`. Continuous, animatable.
+- `<face>.analemma.rotation` — `evalAhead: true`, expression
+  `"analemmaRotation()"`. Continuous, animatable.
+
+#### Renderer (after prerequisite refactoring)
+
+The renderer receives the `pathParameter` value, looks up the two adjacent
+path points in the pre-computed 365-point array, interpolates to get (x, y)
+in XML coords, and draws the Sun marker there. The `rotation` value is
+applied as the disc rotation angle. No knowledge of astronomy is needed in
+the renderer.
+
+#### File changes (this plan)
+
+##### [MODIFY] `src/shared/astro-env.ts` (or `src/watch/watch-env.ts`)
+
+Register `analemmaPathParameter()` and `analemmaRotation()` as env functions.
+`analemmaPathParameter` computes `(noonDI - REF_EPOCH_SECONDS) / 86400 mod 365`
+where `noonDI` is 12:00 UT on the current date. `analemmaRotation` wraps
+`sunSkyOrientationAngle`.
+
+##### [MODIFY] `src/watch/hand-values.ts`
+
+Create two ObsValues for the analemma (pathParam + rotation).
+
+##### [MODIFY] `src/engine-entry.ts`
+
+Remove `tickAnalemma` / `resetAnalemmaSchedule` calls (covered by Updater).
 
 ---
 
@@ -486,6 +666,8 @@ All design questions have been resolved — see the Design Decisions section abo
 - Bundle isolation: `grep -c 'observatory/' dist/chronometer-engine.js` → 0.
 - TypeScript strict compilation — no `dynamicState` references remain in
   renderer or engine.
+- No remaining `tickLeafAnimations`, `tickAnalemma`, `resetLeafSchedules`,
+  `resetAnalemmaSchedule` calls in `engine-entry.ts`.
 
 ### Manual Verification
 
@@ -507,5 +689,10 @@ All design questions have been resolved — see the Design Decisions section abo
 - Terra/Gaia world-time displays update correctly.
 - Calendar covers (Milano, Hana) slide correctly during month transitions.
 - DST transitions are handled correctly (environment rebuild, schedule reset).
-- Moon terminator phases render correctly (terminator subsystem unchanged).
+- **Moon terminator** phases render correctly on all faces with terminators
+  (Haleakalā, Mauna Kea). Leaf animation is smooth during scrubbing.
+  Static block caches rebuild correctly after env changes.
+- **Analemma** (Mauna Kea): Sun marker position and sky rotation update at the
+  correct interval. Sun tracks smoothly along the figure-eight during scrubbing
+  (prerequisite: analemma parametric refactoring completed before this phase).
 - FPS indicator (`?fps`) shows expected render/idle behavior.
