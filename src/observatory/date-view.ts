@@ -101,6 +101,13 @@ const SEG_GAP_EM = 0.35;
 const LINE_SPACING = 1.18;   // line height in units of the line's tallest rel
 const LINE_PAD = 0.10;       // extra padding between lines, in block units
 
+// Ink-tight inter-line gap (in block units) used by the landscape split date
+// block. Placed between one line's ink bottom and the next line's ink top, so
+// it scales with the font. Tuned to the iOS landscape spacing, where the year
+// centre sits ~0.72× the big font above the month/day centre (EOClock.mm
+// landscape `bdY3 = bdY + 34.5`, big font 48). See `drawBlock({ tight })`.
+const TIGHT_LINE_GAP = 0.2;
+
 function fontFor(px: number): string {
     return `${px}px Arial, sans-serif`;
 }
@@ -164,6 +171,7 @@ function drawBlock(
     ctx: CanvasRenderingContext2D,
     lines: Line[],
     cx: number, cy: number, boxW: number, boxH: number,
+    opts: { tight?: boolean } = {},
 ): void {
     const live = lines.filter((l) => l.some((s) => s.text));
     if (live.length === 0 || boxW <= 0 || boxH <= 0) return;
@@ -184,11 +192,29 @@ function drawBlock(
     });
     const u = Math.min(UNIT_MAX, REF * Math.min(boxW / maxW, boxH / totH));
 
-    // Lay the baselines out with the em-box advance (gives consistent line
-    // spacing), collecting them first so we can re-center on real ink below.
-    const blockH = (totH / REF) * u;
+    // Lay the baselines out, collecting them first so we can re-center on real
+    // ink below. Two spacing models:
     const baselines: number[] = [];
-    {
+    if (opts.tight) {
+        // Ink-tight: place each line just below the previous on real ink
+        // (actualBoundingBox) plus a proportional pad. The em-box advance below
+        // reserves the *big* line's full ascent above its baseline, which shoves
+        // a small line sitting above it far away — visible in the landscape
+        // split block as "2026 PDT" floating high over "Jun 18". This matches
+        // the tight iOS spacing and scales with the font (∝ u). The absolute
+        // origin doesn't matter; the re-center pass below pins it to `cy`.
+        let cursor = 0;
+        for (let li = 0; li < live.length; li++) {
+            const m = lineInk(ctx, live[li], u);
+            cursor += m.asc;
+            baselines.push(cursor);
+            cursor += m.desc;
+            if (li < live.length - 1) cursor += TIGHT_LINE_GAP * u;
+        }
+    } else {
+        // Em-box advance (gives consistent line spacing for the multi-line
+        // stack/row modes).
+        const blockH = (totH / REF) * u;
         let y = cy - blockH / 2;
         for (let li = 0; li < live.length; li++) {
             const lineH = (refDims[li].h / REF) * u;
@@ -280,9 +306,10 @@ export function drawDateView(
             // Year + tz on top, month-day on the bottom line so the prominent
             // month-day sits at the same height as the weekday on the left
             // (iteration 3: landscape bottom date). Element rendering is
-            // unchanged — only the two lines' vertical order is swapped.
+            // unchanged — only the two lines' vertical order is swapped. `tight`
+            // pulls the year/tz line close to the month-day (iOS spacing).
             drawBlock(ctx, [[yr, tz, leap], [md]],
-                L.date2CX, L.date2CY, L.date2W, L.date2H);
+                L.date2CX, L.date2CY, L.date2W, L.date2H, { tight: true });
             break;
     }
 }
