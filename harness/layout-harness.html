@@ -110,12 +110,12 @@
 
   <div class="chk"><input type="checkbox" id="oA5Row" checked><label for="oA5Row" style="flex:1">A5: four outer dials on one row (two per side)</label></div>
   <div class="row"><label>A5 ext ×R</label>
-    <input type="number" id="a5DialK" value="0.20" min="0.08" max="0.40" step="0.005">
-    <input type="range" id="a5DialKr" value="0.20" min="0.08" max="0.40" step="0.005"></div>
-  <div class="row"><label>A5 gap ×R</label>
-    <input type="number" id="a5DialGap" value="0.06" min="0" max="0.20" step="0.005">
-    <input type="range" id="a5DialGapr" value="0.06" min="0" max="0.20" step="0.005"></div>
-  <div class="small">A5 iPhone landscape: all four dials share the main dial's centre height (one row); inner pair sits just off the main rim, outer pair one (2r+gap) further out. Radius/gap ∝ mainR (tunable).</div>
+    <input type="number" id="a5DialK" value="0.13" min="0.06" max="0.40" step="0.005">
+    <input type="range" id="a5DialKr" value="0.13" min="0.06" max="0.40" step="0.005"></div>
+  <div class="row"><label>A5 row ×H</label>
+    <input type="number" id="a5RowH" value="0.22" min="0.10" max="0.45" step="0.005">
+    <input type="range" id="a5RowHr" value="0.22" min="0.10" max="0.45" step="0.005"></div>
+  <div class="small">A5 iPhone landscape: main dial fills 0.95·H (overlaps header+footer, proportional padding). Moon+map sit in the top corners at <b>row ×H</b> tall; the four outer dials share one row centred between the moon's bottom and the weekday's top, outer dials' edges aligned to moon-left / map-right, inner dials splitting the rest into equal gaps. Trade <b>row ×H</b> against <b>ext ×R</b>.</div>
 
   <h2>Overlays</h2>
   <div class="chk"><input type="checkbox" id="oLabels" checked><label for="oLabels" style="flex:1">Labels</label></div>
@@ -258,7 +258,7 @@ function draw() {
   const bounds = { left:0, right:contentW, top:0, bottom:contentH - footerH };
   if (activeAnchor.id === 'A2') a2DateBox(L, contentW);   // decouple date from map
   if ($('oDateCenter').checked) cachedJ = measureJ(L, contentW, contentH) || cachedJ;
-  applyRules(L, activeAnchor.id, bounds, footerH);
+  applyRules(L, activeAnchor.id, bounds, footerH, headerH);
   const o = { labels:$('oLabels').checked, boxes:$('oBoxes').checked,
               centers:$('oCenters').checked, gaps:$('oGaps').checked };
 
@@ -277,10 +277,12 @@ function draw() {
     ctx.fillStyle = '#5b626d'; ctx.font = '11px ui-monospace, monospace';
     ctx.fillText('FOOTER', 6, fy + footerH/2 + 4);
 
-    // Noon toggle is now a center icon in this single footer row; tapping it
-    // raises the Midnight/Noon pill as an on-demand overlay (rare) that may
-    // overlap the dial — so it costs the layout nothing.
-    drawNoonIcon(W/2, fy + footerH/2, footerH);
+    // Noon toggle is a footer icon; tapping it raises the Midnight/Noon pill as
+    // an on-demand overlay (rare) that may overlap the dial — so it costs the
+    // layout nothing. Normally centred, but in A5 the big main dial overlaps the
+    // footer centre, so the icon moves left (near the time-controller button).
+    const noonX = activeAnchor.id === 'A5' ? Math.min(0.12 * W, 90) : W / 2;
+    drawNoonIcon(noonX, fy + footerH/2, footerH);
   }
 
   // All layout-space drawing is shifted into the safe content area.
@@ -519,31 +521,72 @@ function applyA4Dials(L) {
   L.eotCY     = L.azCY;
 }
 
-// A5 (iPhone landscape): put all four outer dials on one horizontal row at the
-// main dial's centre height — two flanking each side. Sharing one y is the
-// aesthetic goal; the inner pair sits just off the main rim, the outer pair one
-// (2r + gap) further out. Radius/gap ∝ mainR (this anchor's dial size is being
-// tuned by eye). Left = alt (outer) + az (inner); right = ecl (inner) + eot
-// (outer). ECL draws at L.altR, so all four share radius r.
-function applyA5Dials(L) {
-  const cx = L.mainCX, cy = L.mainCY, R = L.mainR;
-  const r = (+$('a5DialK').value || 0.20) * R;
-  const g = (+$('a5DialGap').value || 0.06) * R;
-  const innerL = cx - R - g - r, outerL = innerL - 2 * r - g;
-  const innerR = cx + R + g + r, outerR = innerR + 2 * r + g;
-  L.altCX = outerL;  L.altCY = cy;  L.altR = r;
-  L.azCX  = innerL;  L.azCY  = cy;  L.azR  = r;
-  L.eclipseCX = innerR;  L.eclipseCY = cy;            // ECL draws at L.altR = r
-  L.eotCX = outerR;  L.eotCY = cy;  L.eotR = r;
+// Rescale + move the whole main-dial cluster (main + the three inner subdials),
+// preserving the internal geometry (everything inside is ∝ mainR about the
+// centre). Used by A5 to enlarge the main dial and re-centre it in the full
+// safe rect.
+function rescaleMain(L, cx, cy, r) {
+  const f = r / L.mainR, ox = L.mainCX, oy = L.mainCY;
+  for (const [kx, ky] of [['utcCX','utcCY'],['solarCX','solarCY'],['sidCX','sidCY']]) {
+    L[kx] = cx + f * (L[kx] - ox);
+    L[ky] = cy + f * (L[ky] - oy);
+  }
+  L.subR *= f;
+  if (L.subOffset != null) L.subOffset *= f;
+  L.mainCX = cx; L.mainCY = cy; L.mainR = r;
 }
 
-function applyRules(L, anchorId, bounds, footerH) {
+// A5 (iPhone landscape): the four outer dials share one row, centred vertically
+// in the gap between the moon's bottom and the weekday's top (the left side
+// picks the y for all four). Horizontally each outer dial's *outer edge* aligns
+// with the element above it (alt ↔ moon's left, eot ↔ map's right); the inner
+// dial on each side splits the remaining span to its main rim into two equal
+// gaps. Radius ∝ mainR (tunable). ECL draws at L.altR, so all four share r.
+function applyA5Dials(L) {
+  const r = (+$('a5DialK').value || 0.13) * L.mainR;
+  const cy = ((L.moonCY + L.moonR) + (L.dateCY - L.dateH / 2)) / 2;   // left-side gap centre
+  const moonLeft = L.moonCX - L.moonR, mapRight = L.earthCX + L.earthW / 2;
+  const rimL = L.mainCX - L.mainR, rimR = L.mainCX + L.mainR;
+  const altCX = moonLeft + r;                  // alt outer edge ↔ moon left edge
+  const eotCX = mapRight - r;                  // eot outer edge ↔ map right edge
+  const azCX = (altCX + rimL + r) / 2;         // equal gaps: alt–az and az–rim
+  const eclCX = (eotCX - r + rimR) / 2;        // equal gaps: eot–ecl and ecl–rim
+  L.altR = L.azR = L.eotR = r;
+  L.altCX = altCX;  L.altCY = cy;
+  L.azCX  = azCX;   L.azCY  = cy;
+  L.eclipseCX = eclCX;  L.eclipseCY = cy;       // ECL draws at L.altR = r
+  L.eotCX = eotCX;  L.eotCY = cy;
+}
+
+// A5 full rule: main dial overlaps header+footer; moon/map sized by the row
+// slider; outer dials on one row (gated by oA5Row).
+function applyA5(L, bounds, headerH, footerH) {
+  const W = bounds.right;
+  const H = bounds.bottom + headerH + footerH;   // full safe-rect height
+  // Main dial D = 0.95·H, centred in the full safe rect → overlaps header &
+  // footer with 2.5%·H padding top/bottom (matches portrait's 2.5%·W sides).
+  rescaleMain(L, W / 2, H / 2 - headerH, 0.475 * H);
+  // Moon (top-left) + map (top-right), sized by the row-height slider; the map
+  // keeps its ~2:1 aspect. Sit below the header so they clear its text.
+  const rowH = (+$('a5RowH').value || 0.22) * H;
+  const mAspect = (L.earthW / L.earthH) || 2;
+  const topPad = headerH + 0.02 * H, sidePad = 0.025 * W;
+  L.moonR = rowH / 2;
+  L.moonCX = sidePad + L.moonR;
+  L.moonCY = topPad + L.moonR;
+  L.earthH = rowH; L.earthW = rowH * mAspect;
+  L.earthCX = W - sidePad - L.earthW / 2;
+  L.earthCY = topPad + L.earthH / 2;
+  if ($('oA5Row').checked) applyA5Dials(L);
+}
+
+function applyRules(L, anchorId, bounds, footerH, headerH) {
   if (anchorId === 'A3')  { applyA3Common(L, bounds); return; }
   if (anchorId === 'A3m') { applyA3Mini(L, bounds); return; }
   if (anchorId === 'A4')  { if ($('oA4Sym').checked) applyA4Dials(L); return; }
   if (anchorId === 'A5')  {
     L.dateCondensed = true;                 // right box: one A2-style line "md · year · tz"
-    if ($('oA5Row').checked) applyA5Dials(L);
+    applyA5(L, bounds, headerH, footerH);
     return;
   }
   if (anchorId !== 'A2') return;
@@ -676,7 +719,7 @@ bindPair('mapScale','mapScaler',draw);
 bindPair('a3DialK','a3DialKr',draw);
 bindPair('a3DialGap','a3DialGapr',draw);
 bindPair('a5DialK','a5DialKr',draw);
-bindPair('a5DialGap','a5DialGapr',draw);
+bindPair('a5RowH','a5RowHr',draw);
 
 // anchor buttons
 const ab=$('anchorBtns');
