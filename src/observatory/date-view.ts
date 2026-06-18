@@ -277,7 +277,11 @@ export function drawDateView(
         }
         case 'split':
             drawBlock(ctx, [[wk]], L.dateCX, L.dateCY, L.dateW, L.dateH);
-            drawBlock(ctx, [[md], [yr, tz, leap]],
+            // Year + tz on top, month-day on the bottom line so the prominent
+            // month-day sits at the same height as the weekday on the left
+            // (iteration 3: landscape bottom date). Element rendering is
+            // unchanged — only the two lines' vertical order is swapped.
+            drawBlock(ctx, [[yr, tz, leap], [md]],
                 L.date2CX, L.date2CY, L.date2W, L.date2H);
             break;
     }
