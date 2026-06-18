@@ -108,6 +108,15 @@
   <div class="chk"><input type="checkbox" id="oA4Sym" checked><label for="oA4Sym" style="flex:1">A4: symmetric outer dials (space alt/az; mirror y to ecl/eot)</label></div>
   <div class="small">A4 landscape: distribute alt &amp; az evenly (equal gaps) in the left column between the moon's bottom and the weekday's top, then give ecl/eot the same y's. Trades a larger ecl↔map gap for top/bottom symmetry.</div>
 
+  <div class="chk"><input type="checkbox" id="oA5Row" checked><label for="oA5Row" style="flex:1">A5: four outer dials on one row (two per side)</label></div>
+  <div class="row"><label>A5 ext ×R</label>
+    <input type="number" id="a5DialK" value="0.20" min="0.08" max="0.40" step="0.005">
+    <input type="range" id="a5DialKr" value="0.20" min="0.08" max="0.40" step="0.005"></div>
+  <div class="row"><label>A5 gap ×R</label>
+    <input type="number" id="a5DialGap" value="0.06" min="0" max="0.20" step="0.005">
+    <input type="range" id="a5DialGapr" value="0.06" min="0" max="0.20" step="0.005"></div>
+  <div class="small">A5 iPhone landscape: all four dials share the main dial's centre height (one row); inner pair sits just off the main rim, outer pair one (2r+gap) further out. Radius/gap ∝ mainR (tunable).</div>
+
   <h2>Overlays</h2>
   <div class="chk"><input type="checkbox" id="oLabels" checked><label for="oLabels" style="flex:1">Labels</label></div>
   <div class="chk"><input type="checkbox" id="oBoxes" checked><label for="oBoxes" style="flex:1">Bounding boxes</label></div>
@@ -142,8 +151,8 @@ const ANCHORS = [
     samples:[ [600,878,'small'], [744,1089,'canon'], [900,1318,'large'] ] },
   { id:'A4', name:'iPad landscape',   aspect:1.45, w:1710, h:1180,
     samples:[[1190,820],[1710,1180],[2174,1500]] },
-  { id:'A5', name:'iPhone landscape', aspect:2.168, w:932, h:430,
-    samples:[[780,360],[932,430],[1300,600]] },
+  { id:'A5', name:'iPhone landscape', aspect:1.99, w:814, h:409,
+    samples:[[700,352,'small'],[814,409,'canon'],[1000,503,'large']] },   // safe rect (932×430 − insets 0/59/21/59), ≈ recip. of A2
   { id:'A6', name:'Extreme landscape',aspect:10.0, w:1200, h:120 },
 ];
 const $ = id => document.getElementById(id);
@@ -510,10 +519,29 @@ function applyA4Dials(L) {
   L.eotCY     = L.azCY;
 }
 
+// A5 (iPhone landscape): put all four outer dials on one horizontal row at the
+// main dial's centre height — two flanking each side. Sharing one y is the
+// aesthetic goal; the inner pair sits just off the main rim, the outer pair one
+// (2r + gap) further out. Radius/gap ∝ mainR (this anchor's dial size is being
+// tuned by eye). Left = alt (outer) + az (inner); right = ecl (inner) + eot
+// (outer). ECL draws at L.altR, so all four share radius r.
+function applyA5Dials(L) {
+  const cx = L.mainCX, cy = L.mainCY, R = L.mainR;
+  const r = (+$('a5DialK').value || 0.20) * R;
+  const g = (+$('a5DialGap').value || 0.06) * R;
+  const innerL = cx - R - g - r, outerL = innerL - 2 * r - g;
+  const innerR = cx + R + g + r, outerR = innerR + 2 * r + g;
+  L.altCX = outerL;  L.altCY = cy;  L.altR = r;
+  L.azCX  = innerL;  L.azCY  = cy;  L.azR  = r;
+  L.eclipseCX = innerR;  L.eclipseCY = cy;            // ECL draws at L.altR = r
+  L.eotCX = outerR;  L.eotCY = cy;  L.eotR = r;
+}
+
 function applyRules(L, anchorId, bounds, footerH) {
   if (anchorId === 'A3')  { applyA3Common(L, bounds); return; }
   if (anchorId === 'A3m') { applyA3Mini(L, bounds); return; }
   if (anchorId === 'A4')  { if ($('oA4Sym').checked) applyA4Dials(L); return; }
+  if (anchorId === 'A5')  { if ($('oA5Row').checked) applyA5Dials(L); return; }
   if (anchorId !== 'A2') return;
   const FOOTER_MARGIN = 6;
   // 1. Halve the (mostly empty) border between the header row and the moon/map.
@@ -643,6 +671,8 @@ bindPair('dateHFrac','dateHFracr',draw);
 bindPair('mapScale','mapScaler',draw);
 bindPair('a3DialK','a3DialKr',draw);
 bindPair('a3DialGap','a3DialGapr',draw);
+bindPair('a5DialK','a5DialKr',draw);
+bindPair('a5DialGap','a5DialGapr',draw);
 
 // anchor buttons
 const ab=$('anchorBtns');
@@ -666,7 +696,7 @@ function renderSampleButtons(){
   });
 }
 
-['oLabels','oBoxes','oCenters','oGaps','oInk','oHeader','oRules','oDateCenter','oCluster','oReclaim','oMoonCenter','oMapVCenter','oOuterAlign','oDisplayCenter','oA4Sym'].forEach(id=>$(id).addEventListener('change',draw));
+['oLabels','oBoxes','oCenters','oGaps','oInk','oHeader','oRules','oDateCenter','oCluster','oReclaim','oMoonCenter','oMapVCenter','oOuterAlign','oDisplayCenter','oA4Sym','oA5Row'].forEach(id=>$(id).addEventListener('change',draw));
 
 renderAnchorButtons(); renderSampleButtons();
 window.addEventListener('resize', draw);

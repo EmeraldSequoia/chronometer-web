@@ -107,7 +107,7 @@ see §0.)
 | A3 | **iPad portrait** | **0.725** | 834×1150 | iPad 11"/Air 11"/Pro 11" (834×1194) minus insets (24/20). 13" (1024×1322 = 0.775) is a wider sample. |
 | A3m | **iPad mini portrait** | **0.683** | 744×1089 | iPad mini (744×1133) minus insets — its own anchor (A3 + map ×1.10 + date −5%). |
 | A4 | **iPad landscape** | **1.45** | ~1700×1180 | Reciprocal of A3. Variations: **1.333** (13"), **1.523** (mini). |
-| A5 | **iPhone landscape** | **2.168** | 932×430 | Reciprocal of A2. |
+| A5 | **iPhone landscape** | **1.99** | 814×409 | **Safe rect** (932×430 − insets 0/59/21/59); ≈ reciprocal of A2 (1/0.512 = 1.95). *(Physical 932×430 = 2.168 — the edge-inclusive size — is **not** the anchor.)* |
 | A6 | **Extreme landscape** | **10.0** | — | Widest we support. Expectation: degrade to ~one element per column. |
 
 ### 2.1 Sample sizes per anchor (size axis)
@@ -122,7 +122,7 @@ For each anchor we tune at a **small / canonical / large** sample to test the
 | A3 iPad portrait | 720×993 (+ xs 360×497) | 834×1150 | 1100×1517 |
 | A3m iPad mini | 600×878 | 744×1089 | 900×1318 |
 | A4 iPad landscape | 1190×820 | 1710×1180 | 2174×1500 |
-| A5 iPhone landscape | 780×360 | 932×430 | 1300×600 |
+| A5 iPhone landscape | 700×352 | 814×409 | 1000×503 |
 | A6 extreme landscape | TBD | TBD | TBD |
 
 ### 2.2 Safe insets → safe-rect dimensions
