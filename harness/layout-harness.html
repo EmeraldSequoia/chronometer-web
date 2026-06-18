@@ -112,10 +112,14 @@
   <div class="row"><label>A5 ext ×R</label>
     <input type="number" id="a5DialK" value="0.13" min="0.06" max="0.40" step="0.005">
     <input type="range" id="a5DialKr" value="0.13" min="0.06" max="0.40" step="0.005"></div>
-  <div class="row"><label>A5 row ×H</label>
-    <input type="number" id="a5RowH" value="0.22" min="0.10" max="0.45" step="0.005">
-    <input type="range" id="a5RowHr" value="0.22" min="0.10" max="0.45" step="0.005"></div>
-  <div class="small">A5 iPhone landscape: main dial fills 0.95·H (overlaps header+footer, proportional padding). Moon+map sit in the top corners at <b>row ×H</b> tall; the four outer dials share one row centred between the moon's bottom and the weekday's top, outer dials' edges aligned to moon-left / map-right, inner dials splitting the rest into equal gaps. Trade <b>row ×H</b> against <b>ext ×R</b>.</div>
+  <div class="row"><label>A5 moon r×H</label>
+    <input type="number" id="a5MoonR" value="0.13" min="0.05" max="0.24" step="0.005">
+    <input type="range" id="a5MoonRr" value="0.13" min="0.05" max="0.24" step="0.005"></div>
+  <div class="row"><label>A5 map w×W</label>
+    <input type="number" id="a5MapW" value="0.24" min="0.12" max="0.45" step="0.005">
+    <input type="range" id="a5MapWr" value="0.24" min="0.12" max="0.45" step="0.005"></div>
+  <div class="chk"><input type="checkbox" id="oA5DateCenter"><label for="oA5DateCenter" style="flex:1">A5 date: centre-align segments (else baseline)</label></div>
+  <div class="small">A5 iPhone landscape: main dial fills 0.95·H (overlaps header+footer, proportional padding). Moon (r×H) sits centred over the alt/az pair; map (w×W) top-right. Outer dials on one row centred between moon-bottom and weekday-top; outer dials' margins (and the map's right margin) are halved. Date lower-right uses A4 font sizes, no dots.</div>
 
   <h2>Overlays</h2>
   <div class="chk"><input type="checkbox" id="oLabels" checked><label for="oLabels" style="flex:1">Labels</label></div>
@@ -131,8 +135,8 @@
 <div id="stage"><div id="frame"><canvas id="cv"></canvas></div></div>
 
 <script type="module">
-import { computeLayout, portraitTwoBand, portraitOneBand } from './layout.mjs?v=7';
-import { drawDateView } from './date-view.mjs?v=7';
+import { computeLayout, portraitTwoBand, portraitOneBand } from './layout.mjs?v=8';
+import { drawDateView } from './date-view.mjs?v=8';
 
 // Sample instant for the date block — uses "now" so it matches what a recent
 // build shows on the phone you're comparing against.
@@ -542,13 +546,14 @@ function rescaleMain(L, cx, cy, r) {
 // with the element above it (alt ↔ moon's left, eot ↔ map's right); the inner
 // dial on each side splits the remaining span to its main rim into two equal
 // gaps. Radius ∝ mainR (tunable). ECL draws at L.altR, so all four share r.
-function applyA5Dials(L) {
+function applyA5Dials(L, bounds) {
+  const W = bounds.right;
   const r = (+$('a5DialK').value || 0.13) * L.mainR;
   const cy = ((L.moonCY + L.moonR) + (L.dateCY - L.dateH / 2)) / 2;   // left-side gap centre
-  const moonLeft = L.moonCX - L.moonR, mapRight = L.earthCX + L.earthW / 2;
+  const halfPad = 0.0125 * W;                  // halved outer margin (was 0.025·W)
   const rimL = L.mainCX - L.mainR, rimR = L.mainCX + L.mainR;
-  const altCX = moonLeft + r;                  // alt outer edge ↔ moon left edge
-  const eotCX = mapRight - r;                  // eot outer edge ↔ map right edge
+  const altCX = halfPad + r;                   // alt left edge = halved left margin
+  const eotCX = W - halfPad - r;               // eot right edge = halved right margin
   const azCX = (altCX + rimL + r) / 2;         // equal gaps: alt–az and az–rim
   const eclCX = (eotCX - r + rimR) / 2;        // equal gaps: eot–ecl and ecl–rim
   L.altR = L.azR = L.eotR = r;
@@ -558,26 +563,31 @@ function applyA5Dials(L) {
   L.eotCX = eotCX;  L.eotCY = cy;
 }
 
-// A5 full rule: main dial overlaps header+footer; moon/map sized by the row
-// slider; outer dials on one row (gated by oA5Row).
+// A5 full rule: main dial overlaps header+footer; moon & map sized by their own
+// sliders; outer dials on one row (gated by oA5Row); moon centred over alt/az.
 function applyA5(L, bounds, headerH, footerH) {
   const W = bounds.right;
   const H = bounds.bottom + headerH + footerH;   // full safe-rect height
   // Main dial D = 0.95·H, centred in the full safe rect → overlaps header &
   // footer with 2.5%·H padding top/bottom (matches portrait's 2.5%·W sides).
   rescaleMain(L, W / 2, H / 2 - headerH, 0.475 * H);
-  // Moon (top-left) + map (top-right), sized by the row-height slider; the map
-  // keeps its ~2:1 aspect. Sit below the header so they clear its text.
-  const rowH = (+$('a5RowH').value || 0.22) * H;
+  // Moon (radius slider) + map (width slider; ~2:1, constrained by horizontal
+  // space). Map right margin halved to match the eot dial. Both sit below the
+  // header so they clear its text. Moon's x is set over the alt/az pair below.
+  const topPad = headerH + 0.02 * H, halfPad = 0.0125 * W;
   const mAspect = (L.earthW / L.earthH) || 2;
-  const topPad = headerH + 0.02 * H, sidePad = 0.025 * W;
-  L.moonR = rowH / 2;
-  L.moonCX = sidePad + L.moonR;
+  L.moonR = (+$('a5MoonR').value || 0.13) * H;
   L.moonCY = topPad + L.moonR;
-  L.earthH = rowH; L.earthW = rowH * mAspect;
-  L.earthCX = W - sidePad - L.earthW / 2;
+  L.earthW = (+$('a5MapW').value || 0.24) * W;
+  L.earthH = L.earthW / mAspect;
+  L.earthCX = W - halfPad - L.earthW / 2;        // halved right margin
   L.earthCY = topPad + L.earthH / 2;
-  if ($('oA5Row').checked) applyA5Dials(L);
+  if ($('oA5Row').checked) {
+    applyA5Dials(L, bounds);
+    L.moonCX = (L.altCX + L.azCX) / 2;           // moon centred over the alt/az pair
+  } else {
+    L.moonCX = halfPad + L.moonR;
+  }
 }
 
 function applyRules(L, anchorId, bounds, footerH, headerH) {
@@ -585,7 +595,8 @@ function applyRules(L, anchorId, bounds, footerH, headerH) {
   if (anchorId === 'A3m') { applyA3Mini(L, bounds); return; }
   if (anchorId === 'A4')  { if ($('oA4Sym').checked) applyA4Dials(L); return; }
   if (anchorId === 'A5')  {
-    L.dateCondensed = true;                 // right box: one A2-style line "md · year · tz"
+    L.dateCondensed = true;                 // right box: one line "md year tz" (A4 sizes, no dots)
+    L.dateSegCenter = $('oA5DateCenter').checked;
     applyA5(L, bounds, headerH, footerH);
     return;
   }
@@ -719,7 +730,8 @@ bindPair('mapScale','mapScaler',draw);
 bindPair('a3DialK','a3DialKr',draw);
 bindPair('a3DialGap','a3DialGapr',draw);
 bindPair('a5DialK','a5DialKr',draw);
-bindPair('a5RowH','a5RowHr',draw);
+bindPair('a5MoonR','a5MoonRr',draw);
+bindPair('a5MapW','a5MapWr',draw);
 
 // anchor buttons
 const ab=$('anchorBtns');
@@ -743,7 +755,7 @@ function renderSampleButtons(){
   });
 }
 
-['oLabels','oBoxes','oCenters','oGaps','oInk','oHeader','oRules','oDateCenter','oCluster','oReclaim','oMoonCenter','oMapVCenter','oOuterAlign','oDisplayCenter','oA4Sym','oA5Row'].forEach(id=>$(id).addEventListener('change',draw));
+['oLabels','oBoxes','oCenters','oGaps','oInk','oHeader','oRules','oDateCenter','oCluster','oReclaim','oMoonCenter','oMapVCenter','oOuterAlign','oDisplayCenter','oA4Sym','oA5Row','oA5DateCenter'].forEach(id=>$(id).addEventListener('change',draw));
 
 renderAnchorButtons(); renderSampleButtons();
 window.addEventListener('resize', draw);

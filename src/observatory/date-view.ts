@@ -171,7 +171,7 @@ function drawBlock(
     ctx: CanvasRenderingContext2D,
     lines: Line[],
     cx: number, cy: number, boxW: number, boxH: number,
-    opts: { tight?: boolean } = {},
+    opts: { tight?: boolean; segCenter?: boolean } = {},
 ): void {
     const live = lines.filter((l) => l.some((s) => s.text));
     if (live.length === 0 || boxW <= 0 || boxH <= 0) return;
@@ -246,6 +246,14 @@ function drawBlock(
         const line = live[li];
         const lineW = (refDims[li].w / REF) * u;
         const y = baselines[li];
+        // For mixed-size segments, `segCenter` vertically centers each segment's
+        // ink on the line's midline (instead of sharing the baseline). The
+        // midline is the line's overall ink centre at this baseline.
+        let midline = 0;
+        if (opts.segCenter) {
+            const m = lineInk(ctx, line, u);
+            midline = y - (m.asc - m.desc) / 2;
+        }
         let x = cx - lineW / 2;
         let drawn = 0;
         for (let si = 0; si < line.length; si++) {
@@ -256,7 +264,12 @@ function drawBlock(
             ctx.fillStyle = seg.color;
             if (drawn > 0) x += segGap(line, si, u);
             drawn++;
-            ctx.fillText(seg.text, x, y);
+            let drawY = y;
+            if (opts.segCenter) {
+                const mm = ctx.measureText(seg.text);
+                drawY = midline + (mm.actualBoundingBoxAscent - mm.actualBoundingBoxDescent) / 2;
+            }
+            ctx.fillText(seg.text, x, drawY);
             x += ctx.measureText(seg.text).width;
         }
     }
@@ -304,16 +317,16 @@ export function drawDateView(
         case 'split':
             drawBlock(ctx, [[wk]], L.dateCX, L.dateCY, L.dateW, L.dateH);
             if (L.dateCondensed) {
-                // A5 (iPhone landscape): block 2 is one condensed line in the A2
-                // `row` style — "month-day · year · tz" — instead of the stacked
-                // year-over-month-day used by the wider iPad landscape (A4). All
-                // segments share a size; the timezone (and "leap") read faint.
-                const c = (text: string, dim = false): Segment =>
-                    ({ text, rel: REL_BIG, color: dim ? COLOR_DIM : COLOR });
-                const info: Line = [c(f.monthDay), c('·', true), c(f.year)];
-                if (f.tzAbbrev) info.push(c('·', true), c(f.tzAbbrev, true));
-                if (f.leap) info.push(c('·', true), c('leap', true));
-                drawBlock(ctx, [info], L.date2CX, L.date2CY, L.date2W, L.date2H);
+                // A5 (iPhone landscape): block 2 is one line "month-day year tz"
+                // — same per-element font sizes as the stacked A4 (month-day
+                // big, year medium, tz/leap faint small), no separators. Segments
+                // share a baseline by default; `dateSegCenter` centres them
+                // vertically instead.
+                const info: Line = [md, yr];
+                if (f.tzAbbrev) info.push(tz);
+                if (f.leap) info.push(leap);
+                drawBlock(ctx, [info], L.date2CX, L.date2CY, L.date2W, L.date2H,
+                    { segCenter: L.dateSegCenter });
             } else {
                 // Year + tz on top, month-day on the bottom line so the prominent
                 // month-day sits at the same height as the weekday on the left

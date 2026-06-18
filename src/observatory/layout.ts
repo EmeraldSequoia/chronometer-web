@@ -200,6 +200,12 @@ export interface LayoutParams {
      * production sets it per-anchor (iteration 3), computeLayout leaves it unset.
      */
     dateCondensed?: boolean;
+    /**
+     * With `dateCondensed`, vertically centre the differently-sized segments on
+     * a common midline instead of sharing a baseline. Optional (default
+     * baseline-aligned).
+     */
+    dateSegCenter?: boolean;
 
     // --- Peripheral font sizes ---
     extFontSize: number;
