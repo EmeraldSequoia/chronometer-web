@@ -464,7 +464,10 @@ function portraitCornerDials(p: PortraitCommon) {
 }
 
 // --- One-band portrait (iPad / squarish): moon | map | date across the top --
-function portraitOneBand(W: number, H: number, lowerBand: LowerBand | null): LayoutParams {
+// Exported (alongside portraitTwoBand) so the iteration-3 harness can pin A3
+// (iPad portrait) to the one-band arrangement across all sizes. Not used by
+// production code.
+export function portraitOneBand(W: number, H: number, lowerBand: LowerBand | null): LayoutParams {
     // Solve D with header coupling: headerH = mapH + 2g = 0.205·D + 2g,
     // contentH = headerH + g + D + g = 1.205·D + 4g ≤ H (trailing g keeps the
     // dial rim off the footer line).
@@ -541,7 +544,10 @@ function portraitOneBand(W: number, H: number, lowerBand: LowerBand | null): Lay
 }
 
 // --- Two-band portrait (phones): moon+map band, date row, then the dial -----
-function portraitTwoBand(W: number, H: number, lowerBand: LowerBand | null): LayoutParams {
+// Exported so the iteration-3 layout harness can pin A2 (iPhone portrait) to the
+// two-band phone arrangement across all sizes, bypassing the width-triggered
+// one-band flip in computePortrait. Not used by production code.
+export function portraitTwoBand(W: number, H: number, lowerBand: LowerBand | null): LayoutParams {
     // Dial first (width-bound on phones), then bands above it.
     const mapHMin = 60, dateHMin = 30;
     let extR = clamp(0.165 * (0.95 * W) / 2, 22, 0.20 * (0.95 * W) / 2);

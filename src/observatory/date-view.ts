@@ -111,6 +111,34 @@ function segGap(line: Line, i: number, u: number): number {
     return SEG_GAP_EM * Math.max(line[i - 1].rel, line[i].rel) * u;
 }
 
+/**
+ * Real glyph-ink ascent/descent of a line at unit size `u`, from the canvas's
+ * `actualBoundingBox*` metrics (not the nominal em-box). Used to center the
+ * block on visible ink — e.g. an all-caps weekday with no descenders should not
+ * sit low in its box just because the em-box reserves descender space.
+ * (Observatory layout iteration 3, §6.0 cross-cutting renderer rule.)
+ */
+function lineInk(
+    ctx: CanvasRenderingContext2D, line: Line, u: number, prominentOnly = false,
+): { asc: number; desc: number; has: boolean } {
+    let asc = 0;
+    let desc = 0;
+    let has = false;
+    for (const seg of line) {
+        if (!seg.text) continue;
+        // For vertical centering, skip the faint *and* small secondary fields
+        // (timezone, "leap"): they don't read as part of the date's visual mass,
+        // so counting them makes the prominent content look shifted up.
+        if (prominentOnly && seg.color === COLOR_DIM && seg.rel <= REL_SMALL) continue;
+        ctx.font = fontFor(seg.rel * u);
+        const m = ctx.measureText(seg.text);
+        if (m.actualBoundingBoxAscent > asc) asc = m.actualBoundingBoxAscent;
+        if (m.actualBoundingBoxDescent > desc) desc = m.actualBoundingBoxDescent;
+        has = true;
+    }
+    return { asc, desc, has };
+}
+
 /** Measure a line's width and height at unit size u. */
 function measureLine(ctx: CanvasRenderingContext2D, line: Line, u: number): { w: number; h: number } {
     let w = 0;
@@ -156,14 +184,42 @@ function drawBlock(
     });
     const u = Math.min(UNIT_MAX, REF * Math.min(boxW / maxW, boxH / totH));
 
-    // Lay the lines out, vertically centered.
+    // Lay the baselines out with the em-box advance (gives consistent line
+    // spacing), collecting them first so we can re-center on real ink below.
     const blockH = (totH / REF) * u;
-    let y = cy - blockH / 2;
+    const baselines: number[] = [];
+    {
+        let y = cy - blockH / 2;
+        for (let li = 0; li < live.length; li++) {
+            const lineH = (refDims[li].h / REF) * u;
+            y += lineH * (LINE_SPACING + 1) / 2;   // advance to this line's baseline
+            baselines.push(y);
+            y += lineH * (LINE_SPACING - 1) / 2 + LINE_PAD * u;
+        }
+    }
+
+    // Re-center on the real glyph ink rather than the em-box: shift every
+    // baseline so the visible ink's midpoint lands on `cy`. This makes the
+    // layout's date box a faithful proxy for the rendered ink in every mode
+    // (§6.0). Spacing is still expressed in em-box units above (stable).
+    let inkTop = Infinity;
+    let inkBot = -Infinity;
+    for (let li = 0; li < live.length; li++) {
+        const m = lineInk(ctx, live[li], u, /* prominentOnly */ true);
+        if (!m.has) continue;   // a faint-only line (lone tz) doesn't anchor the center
+        inkTop = Math.min(inkTop, baselines[li] - m.asc);
+        inkBot = Math.max(inkBot, baselines[li] + m.desc);
+    }
+    if (inkTop <= inkBot) {
+        const shift = cy - (inkTop + inkBot) / 2;
+        for (let li = 0; li < baselines.length; li++) baselines[li] += shift;
+    }
+
+    // Draw.
     for (let li = 0; li < live.length; li++) {
         const line = live[li];
-        const lineH = (refDims[li].h / REF) * u;
         const lineW = (refDims[li].w / REF) * u;
-        y += lineH * (LINE_SPACING + 1) / 2;   // advance to this line's baseline
+        const y = baselines[li];
         let x = cx - lineW / 2;
         let drawn = 0;
         for (let si = 0; si < line.length; si++) {
@@ -177,7 +233,6 @@ function drawBlock(
             ctx.fillText(seg.text, x, y);
             x += ctx.measureText(seg.text).width;
         }
-        y += lineH * (LINE_SPACING - 1) / 2 + LINE_PAD * u;
     }
 
     ctx.restore();
