@@ -227,7 +227,7 @@ eclipse drawn at `extR`, all four rim gaps match (A2 19/19/19/19, A3 16/16/16/16
 
 | # | Element | Detail |
 |---|---|---|
-| C1 | Header row | `Observatory` left · `ℹ` + `share` right; one row, ~48 px. |
+| C1 | Header row | `Observatory` left · `ℹ` + `share` right; one row, **~32 px — same height as the footer (C2)**. |
 | C2 | Footer | **single row** (~32 px: location + time-controller button + red offset) with a **centered noon-toggle icon**. Tapping it raises the Midnight/Noon pill as an **on-demand overlay** (may overlap the dial; rare), so the pill costs the static layout nothing. |
 
 **Implementation notes (production changes for the build-out plan):**
