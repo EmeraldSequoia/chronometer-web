@@ -1,7 +1,7 @@
 # Observatory Layout — Iteration 3 (Design Points & Transitions)
 
 **Date:** 2026-06-15
-**Status:** 🟡 In progress — A2 (iPhone portrait), A3 (iPad portrait), A3m (iPad mini) ✅ complete; A4 (iPad landscape) next.
+**Status:** 🟡 In progress — A2 (iPhone portrait), A3 (iPad portrait), A3m (iPad mini), A4 (iPad landscape) ✅ complete; A5 (iPhone landscape) next.
 **Parents:**
 - [2026-06-06-observatory-phase-8-layout.md](2026-06-06-observatory-phase-8-layout.md) — adaptive two-template engine
 - [2026-06-10-observatory-phase-8b-layout-refinement.md](2026-06-10-observatory-phase-8b-layout-refinement.md) — refinements R1–R6
@@ -121,7 +121,7 @@ For each anchor we tune at a **small / canonical / large** sample to test the
 | A2 iPhone portrait | 360×702 | 430×839 | 560×1093 |
 | A3 iPad portrait | 720×993 (+ xs 360×497) | 834×1150 | 1100×1517 |
 | A3m iPad mini | 600×878 | 744×1089 | 900×1318 |
-| A4 iPad landscape | TBD | ~1700×1180 | TBD |
+| A4 iPad landscape | 1190×820 | 1710×1180 | 2174×1500 |
 | A5 iPhone landscape | 780×360 | 932×430 | 1300×600 |
 | A6 extreme landscape | TBD | TBD | TBD |
 
@@ -273,8 +273,18 @@ The mini's narrower aspect gets its **own anchor**. It **inherits all of A3's ru
 
 The **A3 ↔ A3m** map-expansion and date-shrink interpolate across aspect (≈0.725 → 0.683) — a transition (§7).
 
-### A4 — iPad landscape (aspect 1.45)
-*Not started.*
+### A4 — iPad landscape (aspect 1.45) ✅
+*Safe rect = reciprocal of A3; canonical ~1710×1180. Variations: 1.333 (13"), 1.523 (mini).*
+
+A4 is the **landscape arrangement** and the committed `computeLayout` is **already close**: moon top-left, map top-right, the large main dial centered, the date in `split` mode (weekday bottom-left, month-day/year+tz bottom-right), and the four outer dials in the left & right columns flanking the main dial. We keep all of that and add a single explicit rule for the outer dials.
+
+| # | Rule | Value / detail | Driver | Transition |
+|---|---|---|---|---|
+| L1 | **Symmetric outer dials** | Make the four outer dials read as a symmetric frame. In the **left column**, space **alt** (upper) and **az** (lower) **evenly — equal gaps around the two dials** — in the vertical span between the **moon's bottom** and the **weekday's top**. Then give **ecl** = alt's y and **eot** = az's y (x already mirrored left/right by the committed solver, radius unchanged for all four). Replaces the committed corner-solver's per-column clamping, which left the left pair (clamped under the moon) and the right pair (clamped under the map) at different heights. | aspect | interpolate |
+
+**Note:** because the map (top-right) sits higher/smaller than the moon (top-left), mirroring the y's leaves a **larger ecl↔map gap** than the alt↔moon gap. That asymmetry of *gaps* is accepted in exchange for the dials themselves being top/bottom symmetric — the eye reads the four-dial frame, not the background gaps.
+
+**Chrome:** same as A2/A3 (C1 header, C2 single-row footer + center noon icon).
 
 ### A5 — iPhone landscape (aspect 2.168)
 *Not started.*

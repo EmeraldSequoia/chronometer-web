@@ -105,6 +105,9 @@
     <input type="range" id="mapScaler" value="1.1" min="0.8" max="1.5" step="0.01"></div>
   <div class="small">Outer dials keep their distance to the main dial <i>and</i> their side margin, repositioning angularly. Main Δy nudges the main dial vertically (− = up). Date sits midway between the map's bottom and the dial's top.</div>
 
+  <div class="chk"><input type="checkbox" id="oA4Sym" checked><label for="oA4Sym" style="flex:1">A4: symmetric outer dials (space alt/az; mirror y to ecl/eot)</label></div>
+  <div class="small">A4 landscape: distribute alt &amp; az evenly (equal gaps) in the left column between the moon's bottom and the weekday's top, then give ecl/eot the same y's. Trades a larger ecl↔map gap for top/bottom symmetry.</div>
+
   <h2>Overlays</h2>
   <div class="chk"><input type="checkbox" id="oLabels" checked><label for="oLabels" style="flex:1">Labels</label></div>
   <div class="chk"><input type="checkbox" id="oBoxes" checked><label for="oBoxes" style="flex:1">Bounding boxes</label></div>
@@ -489,9 +492,28 @@ function applyA3Mini(L, bounds) {
   applyA3Common(L, bounds);                // then moon-center (uses expanded map) + map-vcenter
 }
 
+// A4 (iPad landscape): make the four outer dials vertically symmetric. The
+// committed corner-solver leaves alt/az (left) and ecl/eot (right) at different
+// y's because each column is clamped against a different neighbour (moon vs
+// map). Instead, space alt & az evenly — equal gaps around two dials — in the
+// left column between the moon's bottom and the weekday's top, then copy those
+// y's to ecl/eot on the right (x already mirrored). The ecl↔map gap grows, but
+// the cluster reads as a clean symmetric frame around the main dial.
+function applyA4Dials(L) {
+  const r = L.altR;                          // all four share this radius
+  const top = L.moonCY + L.moonR;            // moon bottom
+  const bot = L.dateCY - L.dateH / 2;        // weekday ("Thursday") top
+  const gap = (bot - top - 4 * r) / 3;       // 3 equal gaps around 2 dials
+  L.altCY = top + gap + r;                    // upper-left
+  L.azCY  = top + 2 * gap + 3 * r;            // lower-left
+  L.eclipseCY = L.altCY;                      // right column mirrors the y's
+  L.eotCY     = L.azCY;
+}
+
 function applyRules(L, anchorId, bounds, footerH) {
   if (anchorId === 'A3')  { applyA3Common(L, bounds); return; }
   if (anchorId === 'A3m') { applyA3Mini(L, bounds); return; }
+  if (anchorId === 'A4')  { if ($('oA4Sym').checked) applyA4Dials(L); return; }
   if (anchorId !== 'A2') return;
   const FOOTER_MARGIN = 6;
   // 1. Halve the (mostly empty) border between the header row and the moon/map.
@@ -644,7 +666,7 @@ function renderSampleButtons(){
   });
 }
 
-['oLabels','oBoxes','oCenters','oGaps','oInk','oHeader','oRules','oDateCenter','oCluster','oReclaim','oMoonCenter','oMapVCenter','oOuterAlign','oDisplayCenter'].forEach(id=>$(id).addEventListener('change',draw));
+['oLabels','oBoxes','oCenters','oGaps','oInk','oHeader','oRules','oDateCenter','oCluster','oReclaim','oMoonCenter','oMapVCenter','oOuterAlign','oDisplayCenter','oA4Sym'].forEach(id=>$(id).addEventListener('change',draw));
 
 renderAnchorButtons(); renderSampleButtons();
 window.addEventListener('resize', draw);
