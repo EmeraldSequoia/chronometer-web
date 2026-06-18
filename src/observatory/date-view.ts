@@ -303,13 +303,26 @@ export function drawDateView(
         }
         case 'split':
             drawBlock(ctx, [[wk]], L.dateCX, L.dateCY, L.dateW, L.dateH);
-            // Year + tz on top, month-day on the bottom line so the prominent
-            // month-day sits at the same height as the weekday on the left
-            // (iteration 3: landscape bottom date). Element rendering is
-            // unchanged — only the two lines' vertical order is swapped. `tight`
-            // pulls the year/tz line close to the month-day (iOS spacing).
-            drawBlock(ctx, [[yr, tz, leap], [md]],
-                L.date2CX, L.date2CY, L.date2W, L.date2H, { tight: true });
+            if (L.dateCondensed) {
+                // A5 (iPhone landscape): block 2 is one condensed line in the A2
+                // `row` style — "month-day · year · tz" — instead of the stacked
+                // year-over-month-day used by the wider iPad landscape (A4). All
+                // segments share a size; the timezone (and "leap") read faint.
+                const c = (text: string, dim = false): Segment =>
+                    ({ text, rel: REL_BIG, color: dim ? COLOR_DIM : COLOR });
+                const info: Line = [c(f.monthDay), c('·', true), c(f.year)];
+                if (f.tzAbbrev) info.push(c('·', true), c(f.tzAbbrev, true));
+                if (f.leap) info.push(c('·', true), c('leap', true));
+                drawBlock(ctx, [info], L.date2CX, L.date2CY, L.date2W, L.date2H);
+            } else {
+                // Year + tz on top, month-day on the bottom line so the prominent
+                // month-day sits at the same height as the weekday on the left
+                // (iteration 3: landscape bottom date). Element rendering is
+                // unchanged — only the two lines' vertical order is swapped.
+                // `tight` pulls the year/tz line close to the month-day (iOS).
+                drawBlock(ctx, [[yr, tz, leap], [md]],
+                    L.date2CX, L.date2CY, L.date2W, L.date2H, { tight: true });
+            }
             break;
     }
 }

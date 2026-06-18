@@ -192,6 +192,14 @@ export interface LayoutParams {
     date2CY: number;
     date2W: number;
     date2H: number;
+    /**
+     * Split mode: render block 2 as a single condensed "month-day · year · tz"
+     * line (A2 `row` info-line style) instead of the stacked year-over-month-day.
+     * Used by the most extreme landscape (A5, iPhone) where the bottom strip is
+     * short; the wider iPad landscape (A4) leaves this unset and stacks. Optional;
+     * production sets it per-anchor (iteration 3), computeLayout leaves it unset.
+     */
+    dateCondensed?: boolean;
 
     // --- Peripheral font sizes ---
     extFontSize: number;

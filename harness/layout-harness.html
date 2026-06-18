@@ -131,8 +131,8 @@
 <div id="stage"><div id="frame"><canvas id="cv"></canvas></div></div>
 
 <script type="module">
-import { computeLayout, portraitTwoBand, portraitOneBand } from './layout.mjs?v=6';
-import { drawDateView } from './date-view.mjs?v=6';
+import { computeLayout, portraitTwoBand, portraitOneBand } from './layout.mjs?v=7';
+import { drawDateView } from './date-view.mjs?v=7';
 
 // Sample instant for the date block — uses "now" so it matches what a recent
 // build shows on the phone you're comparing against.
@@ -541,7 +541,11 @@ function applyRules(L, anchorId, bounds, footerH) {
   if (anchorId === 'A3')  { applyA3Common(L, bounds); return; }
   if (anchorId === 'A3m') { applyA3Mini(L, bounds); return; }
   if (anchorId === 'A4')  { if ($('oA4Sym').checked) applyA4Dials(L); return; }
-  if (anchorId === 'A5')  { if ($('oA5Row').checked) applyA5Dials(L); return; }
+  if (anchorId === 'A5')  {
+    L.dateCondensed = true;                 // right box: one A2-style line "md · year · tz"
+    if ($('oA5Row').checked) applyA5Dials(L);
+    return;
+  }
   if (anchorId !== 'A2') return;
   const FOOTER_MARGIN = 6;
   // 1. Halve the (mostly empty) border between the header row and the moon/map.
