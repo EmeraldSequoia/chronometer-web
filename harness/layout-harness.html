@@ -702,28 +702,27 @@ function applyA1(L, bounds, headerH, footerH) {
   const sumEl = heights.reduce((a, b) => a + b, 0);
   const N = heights.length, inner = N - 1;    // 7 inter-element gaps, 2 outer margins
 
-  // Gap distribution: A6's rule in Y, with one carve-out — the date block keeps
-  // EXACTLY halfPad above and below ("leave halfPad margin around the date
-  // block"); the surplus spreads over the OTHER inner gaps. The two gaps adjacent
-  // to the date (eot↔date = gap 5, date↔map = gap 6) are pinned to halfPad.
+  // Gap distribution: A6's rule, in Y. The date block floats vertically with
+  // every other element — its only special treatment is the horizontal halfPad
+  // margin each side (dateBoxW above). Surplus (the usual case at aspect 0.10)
+  // expands all 7 inner gaps evenly, outer margins held at halfPad; deficit
+  // (won't occur here) consumes the outer margins to 0 first, then shrinks the
+  // inner gaps evenly.
   const need = sumEl + (inner + 2) * halfPad;
-  let outerMargin, flexGap;
-  const flexN = inner - 2;                     // 5 gaps absorb surplus
+  let outerMargin, innerGap;
   if (H >= need) {
-    outerMargin = halfPad;  flexGap = halfPad + (H - need) / flexN;
+    outerMargin = halfPad;  innerGap = halfPad + (H - need) / inner;
   } else {
-    // Deficit (won't occur at aspect ~0.10; mirror A6's fallback): consume the
-    // outer margins to 0 first, then shrink ALL inner gaps evenly.
     const deficit = need - H;
-    if (deficit <= 2 * halfPad) { outerMargin = halfPad - deficit / 2;  flexGap = halfPad; }
-    else { outerMargin = 0;  flexGap = halfPad - (deficit - 2 * halfPad) / inner; }
+    if (deficit <= 2 * halfPad) { outerMargin = halfPad - deficit / 2;  innerGap = halfPad; }
+    else { outerMargin = 0;  innerGap = halfPad - (deficit - 2 * halfPad) / inner; }
   }
 
-  // Walk down the column, gap (i−1) precedes element i; gaps 5 & 6 are pinned.
+  // Walk down the column: every inter-element gap is innerGap.
   let y = outerMargin;
   const cyc = [];
   for (let i = 0; i < N; i++) {
-    if (i > 0) y += (i === 6 || i === 7) ? halfPad : flexGap;
+    if (i > 0) y += innerGap;
     cyc.push(y + heights[i] / 2);
     y += heights[i];
   }
