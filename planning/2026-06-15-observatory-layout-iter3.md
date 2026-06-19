@@ -279,13 +279,21 @@ The **A3 ↔ A3m** map-expansion and date-shrink interpolate across aspect (≈0
 ### Asq — Square (aspect 1.0) 🟡
 *Samples: 820×820 · 1024×1024 · 1280×1280 (aspect 1.0).*
 
-**New anchor**, added between the portrait iPad points (A3/A3m, ~0.7) and the landscape iPad point (A4, 1.45). At a square aspect neither the portrait stack nor the landscape spread fits well, so the rules are expected to differ significantly from both neighbours — hence a dedicated anchor rather than an A3↔A4 interpolation.
+**New anchor**, added between the portrait iPad points (A3/A3m, ~0.7) and the landscape iPad point (A4, 1.45). At a square aspect neither the portrait stack nor the landscape spread fits well, so the rules differ significantly from both neighbours — hence a dedicated anchor rather than an A3↔A4 interpolation. The idea is to **pick a relative size for the two primary elements (map + main dial) and arrange everything else around them.** A *full gap* here = **`2·halfPad`** (`halfPad = 0.0125·W`).
 
 | # | Rule | Value / detail | Driver | Transition |
 |---|---|---|---|---|
-| — | *TBD* | To be tuned in the harness. | — | — |
+| Q1 | **Map sized by slider** | Map **width = `asqMapK · W`** (harness slider, default **0.45**), 2:1 so `mapH = ½·mapW`. The map is one of the two primary elements; everything else is sized around it. | tunable | — |
+| Q2 | **Main dial maximised under the gap budget** | Vertical tiling, top→bottom: **header · gap · MAP · gap · DIAL · gap · footer**, each *gap* a full `2·halfPad`. The main dial is as big as that leaves: **`dialD = availV − mapH − 3·(2·halfPad)`** (`availV = H − headerH − footerH`); `mainR = dialD/2`. So there's a full gap between the footer top and the dial bottom, a full gap between the dial and the map, and a full gap between the map and the header bottom. | size | — |
+| Q3 | **Map & dial centred horizontally** | Both on **`W/2`**. | — | — |
+| Q4 | **Moon & date flank the map** | Their **vertical centres = the map's vertical centre**; each is **centred horizontally in its side space** — moon in the gap left of the map (`cx = mapLeft/2`), date in the gap right of the map (`cx = (mapRight + W)/2`). *(Sizes unchanged for now — position only.)* | — | — |
+| Q5 | **Outer dials → 45° corners, inner-dial size** | alt/ecl/az/eot move to **exact 45° diagonals** around the main centre (`|dx| = |dy|`), **tangent to the rim** (centre distance = `mainR + subR`), then **expand to the inner sub-dial radius `subR = 0.2·mainR`**. Corners: **alt = upper-left, ecl = upper-right, az = lower-left, eot = lower-right**. | size | — |
 
-**Implementation:** `applyAsq` stub in the harness (currently a no-op — leaves the default `computeLayout` result so the anchor renders a sane starting layout); dispatched from `applyRules`. Sample sizes wired (820/1024/1280 square).
+**Implementation:** `applyAsq` in the harness; new `asqMapK` slider ("Asq map ÷ W"); reuses `rescaleMain` (main dial + proportional inner sub-dials). Dispatched from `applyRules`. Sample sizes wired (820/1024/1280 square).
+
+*Verified (harness, canon 1024×1024, `asqMapK = 0.45`): map 460.8×230.4 centred on 512; the three full gaps each = `2·halfPad` = 25.6 exactly (header→map, map→dial, dial→footer); main dial `mainR = 326.4`, centred on 512. Moon & date centres on the map's centre (cy = 140.8), at cx = 140.8 / 883.2. Outer dials at exact 45° (`|dx| = |dy| = 277`), tangent to the rim (centre dist 391.68 = mainR + subR), radius 65.3 = 0.2·mainR. No console errors.*
+
+**Open / not yet specified:** moon & date **sizes** (kept at the computeLayout defaults — position only, per the instruction); the **date mode** for this anchor; sample-size robustness (only canon checked by eye so far).
 
 ### A4 — iPad landscape (aspect 1.45) ✅
 *Safe rect = reciprocal of A3; canonical ~1710×1180. Variations: 1.333 (13"), 1.523 (mini).*

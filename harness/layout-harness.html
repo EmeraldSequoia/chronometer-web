@@ -120,6 +120,10 @@
     <input type="number" id="a6FontK" value="0.35" min="0.1" max="0.8" step="0.01">
     <input type="range" id="a6FontKr" value="0.35" min="0.1" max="0.8" step="0.01"></div>
   <div class="small">A6 primary font ("Friday", "Jun 19") as a fraction of the <b>outer-dial diameter</b> (so it tracks the outer-dial size at every sample). 2026/PDT stay proportional to it.</div>
+  <div class="row"><label>Asq map ÷ W</label>
+    <input type="number" id="asqMapK" value="0.45" min="0.1" max="0.9" step="0.01">
+    <input type="range" id="asqMapKr" value="0.45" min="0.1" max="0.9" step="0.01"></div>
+  <div class="small">Asq (square) map <b>width</b> as a fraction of the window width (map is 2:1, so mapH = ½·mapW). The main dial then fills the remaining height with a full gap (2·halfPad) above (to the map), below (to the footer top), and the map keeps the same gap to the header bottom.</div>
 
   <h2>Overlays</h2>
   <div class="chk"><input type="checkbox" id="oLabels" checked><label for="oLabels" style="flex:1">Labels</label></div>
@@ -658,14 +662,54 @@ function applyA5(L, bounds, headerH, footerH) {
 }
 
 // Asq (Square, aspect ~1.0): NEW anchor between A3/A3m (~0.7 portrait) and A4
-// (1.45 landscape). The rules here are expected to differ significantly from
-// both neighbours — TODO, to be tuned. For now this is a stub: it leaves the
-// default computeLayout result untouched so the anchor is selectable and renders
-// a sane starting layout. Fill in the square-specific geometry here.
+// (1.45 landscape). Driven by two primary elements — the map (sized by a slider)
+// and the main dial (maximised in the leftover height) — with everything else
+// arranged around them.
+//
+//   Vertical tiling (full "gaps" = 2·halfPad):  header · gap · MAP · gap · DIAL · gap · footer
+//   • map size = slider (width ÷ W), 2:1; map & dial both centred on W/2.
+//   • main dial as big as the leftover height allows, keeping a full gap above
+//     (to the map), below (to the footer top), and the map a full gap to the
+//     header bottom.
+//   • moon (left of map) & date (right of map): vertical centres on the map's
+//     centre, each centred horizontally in the space beside the map.
+//   • alt/ecl/az/eot: exact 45° corners around the main centre, tangent to the
+//     rim, sized to the inner sub-dials (subR).
 function applyAsq(L, bounds, headerH, footerH) {
-  // TODO(square): define the square design-point rules. `bounds` is the content
-  // rect (0,0 → contentW, contentH−footerH); `headerH`/`footerH` are the chrome
-  // bands. Reuse helpers as needed (rescaleMain, a2OuterDials, etc.).
+  const W = bounds.right;
+  const availV = bounds.bottom;              // header-bottom (0) → footer-top
+  const halfPad = 0.0125 * W;
+  const gap = 2 * halfPad;                    // a "full gap"
+  const cx = W / 2;
+
+  // Map: width from the slider, 2:1.
+  const mapW = (+$('asqMapK').value) * W;
+  const mapH = mapW / 2;
+
+  // Main dial: fill the leftover height after the map and the three full gaps.
+  const dialD = Math.max(2, availV - mapH - 3 * gap);
+  const mainR = dialD / 2;
+
+  const mapCY  = gap + mapH / 2;                       // header · gap · MAP
+  const dialCY = gap + mapH + gap + mainR;             // … gap · DIAL (centre)
+
+  L.earthW = mapW;  L.earthH = mapH;  L.earthCX = cx;  L.earthCY = mapCY;
+  rescaleMain(L, cx, dialCY, mainR);                   // main dial + inner sub-dials
+
+  // Outer dials → exact 45° around the main centre, tangent to the rim, expanded
+  // to the inner sub-dial size. ECL draws at L.altR; EOT at eotR; AZ at azR.
+  const subR = L.subR;                                 // = 0.2·mainR after rescaleMain
+  const d = (mainR + subR) / Math.SQRT2;               // equal x/y offset for a 45° tangent
+  L.altR = subR;  L.altCX = cx - d;  L.altCY = dialCY - d;   // upper-left
+                  L.eclipseCX = cx + d;  L.eclipseCY = dialCY - d;   // upper-right
+  L.azR  = subR;  L.azCX  = cx - d;  L.azCY  = dialCY + d;   // lower-left
+  L.eotR = subR;  L.eotCX  = cx + d;  L.eotCY  = dialCY + d;   // lower-right
+
+  // Moon (left of map) & date (right of map): centres on the map's vertical
+  // centre, each centred horizontally in its side space.
+  const mapLeft = cx - mapW / 2, mapRight = cx + mapW / 2;
+  L.moonCX = mapLeft / 2;             L.moonCY = mapCY;
+  L.dateCX = (mapRight + W) / 2;      L.dateCY = mapCY;
 }
 
 // A1 (extreme portrait, aspect ~0.10): the vertical mirror of A6. One COLUMN,
@@ -999,6 +1043,7 @@ bindPair('a3DialK','a3DialKr',draw);
 bindPair('a3DialGap','a3DialGapr',draw);
 bindPair('a6DialK','a6DialKr',draw);
 bindPair('a6FontK','a6FontKr',draw);
+bindPair('asqMapK','asqMapKr',draw);
 
 // anchor buttons
 const ab=$('anchorBtns');
