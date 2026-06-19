@@ -244,7 +244,7 @@ function draw() {
   // narrow for its min width, or reserving header+footer would leave too little
   // content height — drop BOTH header and footer to give the elements room.
   // Only bites at extreme aspects on manual resize (A6 by height, A1 by width).
-  const TC_MIN_W = 240, MIN_CONTENT_H = 96;
+  const TC_MIN_W = 240, MIN_CONTENT_H = 110;
   const dropChrome = (W < TC_MIN_W) || (H - headerH - footerH < MIN_CONTENT_H);
   if (dropChrome) { headerH = 0; footerH = 0; }
 
