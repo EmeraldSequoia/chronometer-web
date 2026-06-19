@@ -206,6 +206,13 @@ export interface LayoutParams {
      * baseline-aligned).
      */
     dateSegCenter?: boolean;
+    /**
+     * With `dateCondensed`, the content-space y at which the weekday's deepest
+     * descender (max over Sun–Sat) should land — the weekday and the condensed
+     * date2 line drop to a shared baseline derived from it. Set per-anchor (A5);
+     * unset → the date sits in its box as usual.
+     */
+    dateBaselineBottom?: number;
 
     // --- Peripheral font sizes ---
     extFontSize: number;

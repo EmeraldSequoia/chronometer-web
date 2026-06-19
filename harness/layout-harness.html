@@ -108,12 +108,9 @@
   <div class="chk"><input type="checkbox" id="oA4Sym" checked><label for="oA4Sym" style="flex:1">A4: symmetric outer dials (space alt/az; mirror y to ecl/eot)</label></div>
   <div class="small">A4 landscape: distribute alt &amp; az evenly (equal gaps) in the left column between the moon's bottom and the weekday's top, then give ecl/eot the same y's. Trades a larger ecl↔map gap for top/bottom symmetry.</div>
 
-  <div class="chk"><input type="checkbox" id="oA5Row" checked><label for="oA5Row" style="flex:1">A5: computed outer dials + map (two per side)</label></div>
-  <div class="row"><label>A5 moon r×H</label>
-    <input type="number" id="a5MoonR" value="0.13" min="0.05" max="0.24" step="0.005">
-    <input type="range" id="a5MoonRr" value="0.13" min="0.05" max="0.24" step="0.005"></div>
+  <div class="chk"><input type="checkbox" id="oA5Row" checked><label for="oA5Row" style="flex:1">A5: computed dials + moon + map (two per side)</label></div>
   <div class="chk"><input type="checkbox" id="oA5DateCenter"><label for="oA5DateCenter" style="flex:1">A5 date: centre-align segments (else baseline)</label></div>
-  <div class="small">A5 iPhone landscape: main dial fills 0.95·H (overlaps header+footer). Margins (outer dials + map right) halved; moon/map sit that same gap below the header. <b>Map</b> auto-grows until its lower-left corner's radial gap = the margin. <b>Outer-dial radius</b> is solved so eot's margin, the eot↔ecl gap and the ecl↔main radial gap all equal the margin; alt/az reuse it. Left/right pairs centre in moon↔date / map↔date independently. Moon (<b>r×H</b>, only knob) centres over alt/az. Date lower-right: A4 sizes, no dots, baseline-matched to the weekday.</div>
+  <div class="small">A5 iPhone landscape (fully computed). Main dial fills 0.95·H (overlaps header+footer). Margins (outer dials + map right) halved; moon/map sit that same gap below the header. <b>Map</b> grows until its lower-left corner's radial gap = the margin. <b>Outer-dial radius</b> solved so eot's margin, eot↔ecl, and ecl↔main (radial) all equal the margin; alt/az reuse it. Left/right pairs centre in moon↔date / map↔date independently. <b>Date</b> drops so the deepest weekday descender (Sun–Sat) sits the margin above the footer; weekday & date2 share that baseline, A4 sizes, no dots. <b>Moon</b> grows until its radial gap to alt/az, or the alt/az-bottom↔weekday-top gap, hits the margin; centred over alt/az.</div>
 
   <h2>Overlays</h2>
   <div class="chk"><input type="checkbox" id="oLabels" checked><label for="oLabels" style="flex:1">Labels</label></div>
@@ -129,8 +126,8 @@
 <div id="stage"><div id="frame"><canvas id="cv"></canvas></div></div>
 
 <script type="module">
-import { computeLayout, portraitTwoBand, portraitOneBand } from './layout.mjs?v=9';
-import { drawDateView } from './date-view.mjs?v=9';
+import { computeLayout, portraitTwoBand, portraitOneBand } from './layout.mjs?v=10';
+import { drawDateView, condensedDateLayout } from './date-view.mjs?v=10';
 
 // Sample instant for the date block — uses "now" so it matches what a recent
 // build shows on the phone you're comparing against.
@@ -563,11 +560,6 @@ function applyA5(L, bounds, headerH, footerH) {
   const topRow = halfPad;
   const mAspect = (L.earthW / L.earthH) || 2;
 
-  // Moon: radius from the slider; top margin = halfPad below the header. cx is
-  // set over the alt/az pair once they're placed.
-  L.moonR = (+$('a5MoonR').value || 0.13) * H;
-  L.moonCY = topRow + L.moonR;
-
   // Map: right margin = halfPad, top = topRow, ~2:1. Grow until the lower-left
   // corner's radial gap to the main rim = halfPad.
   const cornerGap = eW => {
@@ -580,34 +572,54 @@ function applyA5(L, bounds, headerH, footerH) {
   L.earthCX = W - halfPad - L.earthW / 2;
   L.earthCY = topRow + L.earthH / 2;
 
-  if (!$('oA5Row').checked) { L.moonCX = halfPad + L.moonR; return; }
+  // Date drop: the weekday & date2 share a baseline placed so the deepest
+  // weekday descender sits halfPad above the footer top. condensedDateLayout
+  // (the same fn date-view renders with) gives the unit / baseline / ink-top.
+  const descBottom = bounds.bottom - halfPad;          // footer top (content) − halfPad
+  L.dateBaselineBottom = descBottom;
+  const wkText = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(SAMPLE_DATE);
+  const dateTop = condensedDateLayout(ctx, wkText, L.dateW, L.dateH, descBottom).top;
 
-  // Date block top — both the weekday and the date2 line are baseline-aligned
-  // here when rendered, so one top serves both sides.
-  const dateTop = L.dateCY - L.dateH / 2;
-  const cyR = ((L.earthCY + L.earthH / 2) + dateTop) / 2;     // ecl/eot: map↔date
-  const cyL = ((L.moonCY + L.moonR) + dateTop) / 2;           // alt/az: moon↔date
+  if (!$('oA5Row').checked) {
+    L.moonR = 0.13 * H; L.moonCY = topRow + L.moonR; L.moonCX = halfPad + L.moonR; return;
+  }
 
-  // Solve the ecl/eot radius: all three right-side gaps = halfPad. With
-  // eot at the halfPad right margin and ecl one (2r+halfPad) inward,
+  // ecl/eot radius: all three right-side gaps = halfPad. cyR = map↔date centre.
+  // With eot at the halfPad right margin and ecl one (2r+halfPad) inward,
   //   eclCX = W - 2·halfPad - 3r,  and the ecl↔main radial gap = halfPad gives
   //   hypot(eclCX-mainCX, cyR-mainCY) = mainR + r + halfPad.
+  const cyR = ((L.earthCY + L.earthH / 2) + dateTop) / 2;
   const dyR = cyR - mainCY;
   const gapR = r => Math.hypot((W - 2 * halfPad - 3 * r) - mainCX, dyR) - mainR - r - halfPad;
   let rlo = 1, rhi = mainR;
   for (let i = 0; i < 50; i++) { const m = (rlo + rhi) / 2; if (gapR(m) > 0) rlo = m; else rhi = m; }
   const r = rlo;
 
-  L.altR = L.azR = L.eotR = r;                   // alt/az reuse the ecl/eot radius
-  // Right pair.
-  L.eotCX = W - halfPad - r;       L.eotCY = cyR;
-  L.eclipseCX = W - 2 * halfPad - 3 * r; L.eclipseCY = cyR;   // ECL draws at L.altR = r
-  // Left pair: alt at the halfPad margin, az splits the rest into equal gaps.
+  // Left dial x's (independent of the moon): alt at the halfPad margin, az
+  // splits the rest to the main rim into two equal gaps.
   const rimL = mainCX - mainR;
-  L.altCX = halfPad + r;           L.altCY = cyL;
-  L.azCX  = (L.altCX + rimL + r) / 2; L.azCY = cyL;
-  // Moon centred over the alt/az pair.
-  L.moonCX = (L.altCX + L.azCX) / 2;
+  const altCX = halfPad + r;
+  const azCX = (altCX + rimL + r) / 2;
+
+  // Moon auto-size: grow until min of two gaps = halfPad — (1) the radial moon↔
+  // alt/az gap, (2) the alt/az-bottom ↔ weekday-top gap. Both shrink as the moon
+  // grows; the moon-centre↔alt-centre vertical offset is the constant
+  // V = (dateTop − topRow)/2, so each gap gives a closed form for the radius.
+  const V = (dateTop - topRow) / 2;                  // moon-centre → alt-centre vertical offset
+  const dxMoonAlt = (azCX - altCX) / 2;              // moon centred over alt/az → horizontal offset
+  const moonR1 = Math.hypot(dxMoonAlt, V) - r - halfPad;   // radial moon↔alt/az gap = halfPad
+  const moonR2 = V - r - halfPad;                          // alt/az bottom ↔ weekday top = halfPad
+  const moonR = Math.max(20, Math.min(moonR1, moonR2));
+  L.moonR = moonR;
+  L.moonCY = topRow + moonR;
+  const cyL = ((L.moonCY + moonR) + dateTop) / 2;    // alt/az: moon↔date centre
+
+  L.altR = L.azR = L.eotR = r;                       // alt/az reuse the ecl/eot radius
+  L.eotCX = W - halfPad - r;             L.eotCY = cyR;
+  L.eclipseCX = W - 2 * halfPad - 3 * r; L.eclipseCY = cyR;   // ECL draws at L.altR = r
+  L.altCX = altCX;  L.altCY = cyL;
+  L.azCX  = azCX;   L.azCY  = cyL;
+  L.moonCX = (altCX + azCX) / 2;                     // moon centred over the alt/az pair
 }
 
 function applyRules(L, anchorId, bounds, footerH, headerH) {
@@ -749,7 +761,6 @@ bindPair('dateHFrac','dateHFracr',draw);
 bindPair('mapScale','mapScaler',draw);
 bindPair('a3DialK','a3DialKr',draw);
 bindPair('a3DialGap','a3DialGapr',draw);
-bindPair('a5MoonR','a5MoonRr',draw);
 
 // anchor buttons
 const ab=$('anchorBtns');
