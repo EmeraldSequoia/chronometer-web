@@ -180,16 +180,6 @@ function fitUnit(ctx: CanvasRenderingContext2D, live: Line[], boxW: number, boxH
 const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 /**
- * The unit at which a single text line exactly fills a box of height `boxH`.
- * For the A6 one-row layout, where every element (text included) is sized to the
- * row height — so the text expands proportionally with the circles/dial and is
- * deliberately NOT capped at UNIT_MAX.
- */
-export function heightConstrainedUnit(boxH: number): number {
-    return boxH / LINE_SPACING;
-}
-
-/**
  * Widths (at unit `u`) of the A6 row's two text elements: the weekday alone, and
  * the condensed "month-day  year  tz [leap]" line — same segment sizes/gaps the
  * renderer uses, so the harness can lay the row out before drawing.

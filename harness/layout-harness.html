@@ -126,8 +126,8 @@
 <div id="stage"><div id="frame"><canvas id="cv"></canvas></div></div>
 
 <script type="module">
-import { computeLayout, portraitTwoBand, portraitOneBand } from './layout.mjs?v=12';
-import { drawDateView, condensedDateLayout, heightConstrainedUnit, measureRowTexts } from './date-view.mjs?v=12';
+import { computeLayout, portraitTwoBand, portraitOneBand } from './layout.mjs?v=13';
+import { drawDateView, condensedDateLayout, measureRowTexts } from './date-view.mjs?v=13';
 
 // Sample instant for the date block — uses "now" so it matches what a recent
 // build shows on the phone you're comparing against.
@@ -612,16 +612,27 @@ function applyA5(L, bounds, headerH, footerH) {
   const rimL = mainCX - mainR;
   const altCX = halfPad + r;
   const azCX = (altCX + rimL + r) / 2;
+  const moonCX = (altCX + azCX) / 2;                 // moon centred over the alt/az pair
 
-  // Moon auto-size: grow until min of two gaps = halfPad — (1) the radial moon↔
-  // alt/az gap, (2) the alt/az-bottom ↔ weekday-top gap. Both shrink as the moon
-  // grows; the moon-centre↔alt-centre vertical offset is the constant
-  // V = (dateTop − topRow)/2, so each gap gives a closed form for the radius.
+  // Moon auto-size: grow until the smallest of four gaps = halfPad —
+  //   (1) the radial moon↔alt/az gap, (2) the alt/az-bottom ↔ weekday-top gap,
+  //   (3) the left margin (moon's left edge ≥ halfPad), (4) the radial gap to the
+  //       main dial's rim. (1)/(2) bind in the normal (chromed) case; (3)/(4) are
+  //   guards that bite when the chrome is dropped (A5-small) and the vertical
+  //   space balloons, otherwise the moon would spill past the edge or into the dial.
+  // (1)/(2): the moon-centre↔alt-centre vertical offset is the constant
+  // V = (dateTop − topRow)/2, giving each a closed form. The moon grows downward
+  // (moonCY = topRow + r), so (4) is monotonic in r and solved by search.
   const V = (dateTop - topRow) / 2;                  // moon-centre → alt-centre vertical offset
   const dxMoonAlt = (azCX - altCX) / 2;              // moon centred over alt/az → horizontal offset
   const moonR1 = Math.hypot(dxMoonAlt, V) - r - halfPad;   // radial moon↔alt/az gap = halfPad
   const moonR2 = V - r - halfPad;                          // alt/az bottom ↔ weekday top = halfPad
-  const moonR = Math.max(20, Math.min(moonR1, moonR2));
+  const moonR3 = moonCX - halfPad;                         // left edge at the halfPad margin
+  const dialGap = mr => Math.hypot(moonCX - mainCX, (topRow + mr) - mainCY) - mainR - mr;
+  let glo = 20, ghi = Math.max(20, moonR3);
+  for (let i = 0; i < 40; i++) { const m = (glo + ghi) / 2; if (dialGap(m) > halfPad) glo = m; else ghi = m; }
+  const moonR4 = glo;                                      // radial moon↔main-dial gap = halfPad
+  const moonR = Math.max(20, Math.min(moonR1, moonR2, moonR3, moonR4));
   L.moonR = moonR;
   L.moonCY = topRow + moonR;
   const cyL = ((L.moonCY + moonR) + dateTop) / 2;    // alt/az: moon↔date centre
@@ -631,7 +642,7 @@ function applyA5(L, bounds, headerH, footerH) {
   L.eclipseCX = W - 2 * halfPad - 3 * r; L.eclipseCY = cyR;   // ECL draws at L.altR = r
   L.altCX = altCX;  L.altCY = cyL;
   L.azCX  = azCX;   L.azCY  = cyL;
-  L.moonCX = (altCX + azCX) / 2;                     // moon centred over the alt/az pair
+  L.moonCX = moonCX;
 }
 
 // A6 (extreme landscape): one row of every element, left→right —
@@ -647,10 +658,12 @@ function applyA6(L, bounds, headerH, footerH) {
   const cy = hr / 2;                         // content-space row centre
   const halfPad = 0.0125 * W;
   const R = hr / 2;                           // every circle is row-height tall
-  const u = heightConstrainedUnit(hr);        // text unit at the row height (uncapped)
+  const u = R;                                // text unit = circle radius (½ row height):
+                                              // proportional & uncapped, but subordinate to
+                                              // the circle ⌀ (filling the full height looked huge).
 
-  // Every element is sized to the row height — circles at 2R=hr, the map at 2hr,
-  // the dial at hr, and the text at unit `u` (expands proportionally, no cap).
+  // Circles at 2R=hr, the map at 2hr, the dial at hr. Text scales with the row
+  // (unit `u` = R) — proportional, no cap, but ~half the circle diameter.
   const f = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
   const parts = f.formatToParts(SAMPLE_DATE);
   const get = t => (parts.find(p => p.type === t) || {}).value || '';
