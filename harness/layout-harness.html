@@ -143,7 +143,8 @@ import { drawDateView, condensedDateLayout, measureRowTexts } from './date-view.
 const SAMPLE_DATE = new Date();
 
 const ANCHORS = [
-  { id:'A1', name:'Extreme portrait', aspect:0.10, w:120,  h:1200 },
+  { id:'A1', name:'Extreme portrait', aspect:0.10, w:120,  h:1200,
+    samples:[[100,1000,'small'],[120,1200,'canon'],[160,1600,'large']] },
   { id:'A2', name:'iPhone portrait',  aspect:0.512, w:430, h:839,
     samples:[[360,702],[430,839],[560,1093]] },
   { id:'A3', name:'iPad portrait',    aspect:0.725, w:834, h:1150,
@@ -654,6 +655,91 @@ function applyA5(L, bounds, headerH, footerH) {
   L.moonCX = moonCX;
 }
 
+// A1 (extreme portrait, aspect ~0.10): the vertical mirror of A6. One COLUMN,
+// the same order top→bottom as A6's left→right row, with the weekday folded into
+// a full date STACK (Friday / Jun 19 / year / PDT):
+//   moon · alt · az · DIAL · ecl · eot · date · map
+// Sizing (the SMALL dimension is now the width W): main dial ⌀ = W; the five
+// outer circles ⌀ = a6DialK·main-⌀; the map is full-width (margins 0) at 2:1, so
+// mapH = W/2; the date stack is sized to fit W with a halfPad margin each side
+// (internal hierarchy = A6: 1 / 0.42 / 0.21). Chrome is already dropped (CC2:
+// W<200), so the column uses the full height H and centres on W/2.
+function applyA1(L, bounds, headerH, footerH) {
+  const W = bounds.right;
+  const H = bounds.bottom;                    // content height (full; chrome dropped)
+  const cx = W / 2;                            // column centre (horizontal)
+  const halfPad = 0.0125 * W;                  // same spacing unit as A6 (∝ the small dim)
+  const R = W / 2;                             // main-dial radius (fills the column WIDTH)
+  const outerR = (+$('a6DialK').value) * R;    // outer circles: same ratio as A6
+  const oc = 2 * outerR;                       // outer-circle diameter
+
+  // Full date STACK, sized to fit the width with a halfPad margin each side. The
+  // internal relative hierarchy matches A6 (1 / 0.42 / 0.21); we measure the
+  // stack at a reference unit to learn its natural height, then let drawDateView
+  // auto-fit the box (mode 'stack').
+  const REL_BIG = 1.0, REL_YEAR = 0.42, REL_SMALL = 0.21;
+  const LINE_SPACING = 1.18, LINE_PAD = 0.10, UNIT_MAX = 72, REF = 100;
+  const f = new Intl.DateTimeFormat('en-US', { weekday:'long', month:'short', day:'numeric', year:'numeric' });
+  const parts = f.formatToParts(SAMPLE_DATE);
+  const get = t => (parts.find(p => p.type === t) || {}).value || '';
+  const wkText = get('weekday'), md = `${get('month')} ${get('day')}`, yr = get('year');
+  const tzAbbr = (new Intl.DateTimeFormat('en-US', { timeZoneName:'short' }).formatToParts(SAMPLE_DATE).find(p => p.type==='timeZoneName')||{}).value || '';
+  const w100 = (text, rel) => { ctx.font = `${rel*REF}px Arial, sans-serif`; return ctx.measureText(text).width; };
+  const stackLines = [[wkText, REL_BIG], [md, REL_BIG], [yr, REL_YEAR], [tzAbbr, REL_SMALL]].filter(l => l[0]);
+  let maxW = 0, totH = (stackLines.length - 1) * LINE_PAD * REF;
+  for (const [text, rel] of stackLines) {
+    const segW = w100(text, rel);  if (segW > maxW) maxW = segW;
+    totH += rel * REF * LINE_SPACING;
+  }
+  const dateBoxW = W - 2 * halfPad;
+  const uDate = Math.min(UNIT_MAX, REF * dateBoxW / maxW);
+  const dateH = totH / REF * uDate;
+
+  // Element extents down the column (top→bottom). DIAL = 2R = W; the outer
+  // circles + moon = oc; the date = dateH; the map = W/2 tall.
+  const mapH = W / 2;
+  const heights = [oc, oc, oc, 2 * R, oc, oc, dateH, mapH];  // moon alt az DIAL ecl eot date map
+  const sumEl = heights.reduce((a, b) => a + b, 0);
+  const N = heights.length, inner = N - 1;    // 7 inter-element gaps, 2 outer margins
+
+  // Gap distribution: A6's rule in Y, with one carve-out — the date block keeps
+  // EXACTLY halfPad above and below ("leave halfPad margin around the date
+  // block"); the surplus spreads over the OTHER inner gaps. The two gaps adjacent
+  // to the date (eot↔date = gap 5, date↔map = gap 6) are pinned to halfPad.
+  const need = sumEl + (inner + 2) * halfPad;
+  let outerMargin, flexGap;
+  const flexN = inner - 2;                     // 5 gaps absorb surplus
+  if (H >= need) {
+    outerMargin = halfPad;  flexGap = halfPad + (H - need) / flexN;
+  } else {
+    // Deficit (won't occur at aspect ~0.10; mirror A6's fallback): consume the
+    // outer margins to 0 first, then shrink ALL inner gaps evenly.
+    const deficit = need - H;
+    if (deficit <= 2 * halfPad) { outerMargin = halfPad - deficit / 2;  flexGap = halfPad; }
+    else { outerMargin = 0;  flexGap = halfPad - (deficit - 2 * halfPad) / inner; }
+  }
+
+  // Walk down the column, gap (i−1) precedes element i; gaps 5 & 6 are pinned.
+  let y = outerMargin;
+  const cyc = [];
+  for (let i = 0; i < N; i++) {
+    if (i > 0) y += (i === 6 || i === 7) ? halfPad : flexGap;
+    cyc.push(y + heights[i] / 2);
+    y += heights[i];
+  }
+
+  L.moonR = outerR;  L.moonCX = cx;  L.moonCY = cyc[0];
+  L.altR  = outerR;  L.altCX  = cx;  L.altCY  = cyc[1];   // ECL also draws at altR
+  L.azR   = outerR;  L.azCX   = cx;  L.azCY   = cyc[2];
+  rescaleMain(L, cx, cyc[3], R);                          // central dial (full width)
+  L.eclipseCX = cx;  L.eclipseCY = cyc[4];
+  L.eotR  = outerR;  L.eotCX  = cx;  L.eotCY  = cyc[5];
+  L.dateCX = cx;  L.dateCY = cyc[6];  L.dateW = dateBoxW;  L.dateH = dateH;
+  L.earthW = W;   L.earthH = mapH;    L.earthCX = cx;  L.earthCY = cyc[7];
+
+  L.dateMode = 'stack';  L.dateCondensed = false;
+}
+
 // A6 (extreme landscape): one row of every element, left→right —
 //   moon · weekday · alt · az · DIAL · ecl · eot · date · map
 // Each is sized to the row height (circles ⌀ = row height; map ~2:1; text fit
@@ -722,6 +808,7 @@ function applyA6(L, bounds, headerH, footerH) {
 }
 
 function applyRules(L, anchorId, bounds, footerH, headerH) {
+  if (anchorId === 'A1')  { applyA1(L, bounds, headerH, footerH); return; }
   if (anchorId === 'A3')  { applyA3Common(L, bounds); return; }
   if (anchorId === 'A3m') { applyA3Mini(L, bounds); return; }
   if (anchorId === 'A4')  { if ($('oA4Sym').checked) applyA4Dials(L); return; }

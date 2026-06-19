@@ -1,7 +1,7 @@
 # Observatory Layout — Iteration 3 (Design Points & Transitions)
 
 **Date:** 2026-06-15
-**Status:** 🟡 In progress — A2 (iPhone portrait), A3 (iPad portrait), A3m (iPad mini), A4 (iPad landscape), A5 (iPhone landscape), **A6 (extreme landscape) ✅ complete**; A1 (extreme portrait) not started; transitions §7 pending.
+**Status:** 🟡 In progress — A2 (iPhone portrait), A3 (iPad portrait), A3m (iPad mini), A4 (iPad landscape), A5 (iPhone landscape), A6 (extreme landscape), **A1 (extreme portrait) ✅ complete** — all 7 anchors done; transitions §7 pending.
 **Parents:**
 - [2026-06-06-observatory-phase-8-layout.md](2026-06-06-observatory-phase-8-layout.md) — adaptive two-template engine
 - [2026-06-10-observatory-phase-8b-layout-refinement.md](2026-06-10-observatory-phase-8b-layout-refinement.md) — refinements R1–R6
@@ -117,13 +117,13 @@ For each anchor we tune at a **small / canonical / large** sample to test the
 
 | Anchor | Small | Canonical | Large |
 |---|---|---|---|
-| A1 extreme portrait | TBD | TBD | TBD |
+| A1 extreme portrait | 100×1000 | 120×1200 | 160×1600 |
 | A2 iPhone portrait | 360×702 | 430×839 | 560×1093 |
 | A3 iPad portrait | 720×993 (+ xs 360×497) | 834×1150 | 1100×1517 |
 | A3m iPad mini | 600×878 | 744×1089 | 900×1318 |
 | A4 iPad landscape | 1190×820 | 1710×1180 | 2174×1500 |
 | A5 iPhone landscape | 700×352 | 814×409 | 1000×503 |
-| A6 extreme landscape | TBD | TBD | TBD |
+| A6 extreme landscape | 1000×100 | 1200×120 | 1600×160 |
 
 ### 2.2 Safe insets → safe-rect dimensions
 
@@ -329,8 +329,25 @@ A6 is the **degenerate landscape**: a tall-and-thin sliver of content where the 
 
 *Verified (harness, `?v=14`): A6 canon 1200×120 with defaults (dialK=0.65, fontK=0.35) → chrome dropped, main dial ⌀=120, outer circles ⌀=78, font `u`≈27 — row **fits with real gaps** (surplus: outer margins=halfPad, inner gaps expand evenly), matching the earlier look (main dial larger than the equal, smaller outer dials). Inner sub-dials `subR/mainR = 0.20` and `subOffset/mainR = 0.408` **exactly** across all three samples (small 1000×100 → mainR=50, subR=10, where the old floor forced subR=20 / 0.4) — the floor is now removed at source, no override. Gap-rule regimes (when forced into deficit by larger dials/font) still verified: outer margins consume to 0 first, then inner gaps shrink into overlap. Chrome-drop boundary: 700×352 drops, 814×409 & 1000×503 keep, 150-wide drops.*
 
-### A1 — Extreme portrait (aspect 0.10)
-*Not started.*
+### A1 — Extreme portrait (aspect 0.10) ✅
+*Samples: 100×1000 · 120×1200 · 160×1600 (aspect 0.10).*
+
+A1 is the **vertical mirror of A6**: the degenerate *portrait* sliver. Chrome is dropped (CC2, by **width** `W < 200`) and all elements lay out in **one column**, top→bottom, in the same order A6 uses left→right — with the **weekday folded into a full date stack** (there's plenty of vertical room, so no split). The **small dimension is now the width `W`**, so every "fills the constrained dimension" rule that used the row *height* in A6 uses `W` here. `halfPad = 0.0125·W` (still scaled by the small dimension).
+
+| # | Rule | Value / detail | Drives |
+|---|---|---|---|
+| CC2 | **Chrome-drop** | Same cross-cutting rule as A6, biting by **width** here: `W < 200` ⇒ drop header + footer, column uses the full height `H`. | viewport W·H |
+| L1 | **One column, all elements** | Top→bottom: **moon · alt · az · DIAL · ecl · eot · date · map**, horizontally centred on `W/2`. Same sequence as A6's row; the A6 "weekday" element is **subsumed into the date stack** (its first line), so there are **8** elements, not 9. | — |
+| L2 | **Element sizing (reuses A6's ratios)** | **Main dial** ⌀ = **`W`** (fills the width). **Five outer circles** (moon = alt = az = ecl = eot) ⌀ = **`a6DialK · main-⌀`** (same slider/default **0.65** as A6). **Map** is full-width with **0 horizontal margin** and 2:1, so **mapW = `W`, mapH = `W/2`** — as big as the width allows. | size |
+| L3 | **Date = full stack, fit to width** | The date is **`stack` mode** — `Friday / Jun 19 / year / PDT`, four centred lines — with the **internal hierarchy = A6** (`1 / 0.42 / 0.21`). It's sized to **fit the width with a `halfPad` margin each side** (box width = `W − 2·halfPad`); the unit auto-fits that width (capped at `UNIT_MAX = 72`). *(Unlike A6, the date font is set by the width-fit, not `a6FontK` — A6's font formula would overflow this narrow column.)* | size |
+| L4 | **Gap distribution (Y), date pinned to halfPad** | A6's gap rule in **Y**, with one carve-out: the **date block keeps exactly `halfPad` above and below** ("halfPad margin around the date block"). Outer (top/bottom) margins = `halfPad`. **Surplus** (the usual case — aspect 0.10 is very tall): the **two gaps adjacent to the date stay `halfPad`**; the surplus spreads **evenly over the other 5 inner gaps** (moon↔alt … ecl↔eot). **Deficit** (won't occur at this aspect; A6 fallback retained): consume the two outer margins to 0 first, then shrink **all** inner gaps evenly. **No element is scaled** by the gap rule. | size |
+| L5 | **Inner sub-dials** | Same global rule as A6-L4: purely proportional, `subR = 0.2·mainR`, no floor. | size (global) |
+
+**Implementation:** `applyA1` in the harness; `dateMode = 'stack'` (existing path in `date-view.ts`, unchanged). Reuses the `a6DialK` slider and `rescaleMain`. CC2 lives in the harness `draw()`.
+
+*Verified (harness, `?v=14`): all three samples — main dial ⌀ = `W` (mainR = 50/60/80), outer circles ⌀ = 0.65·main (outerR = 32.5/39/52), inner sub-dials `subR/mainR = 0.20` exactly. Map = full width × W/2 (100×50, 120×60, 160×80), 0 horizontal margin. Date `stack`, box width `W − 2·halfPad` (97.5/117/156). Top & bottom margins = `halfPad`; eot↔date and date↔map gaps = `halfPad` exactly; the 5 dial gaps absorb the surplus evenly (e.g. canon: 98.3 px each). No console errors.*
+
+**Open (by-eye, for Steve):** two interpretation calls baked into the above — (1) the **weekday folds into the date stack** rather than staying a separate top element; (2) the date is **pinned to `halfPad`** while the surplus pools in the dial gaps (so the dials spread across the top and the date+map sit snug at the bottom), rather than the date sharing the even gap expansion. Both are easy to flip if the eye disagrees.
 
 ---
 
