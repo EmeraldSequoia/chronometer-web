@@ -126,8 +126,8 @@
 <div id="stage"><div id="frame"><canvas id="cv"></canvas></div></div>
 
 <script type="module">
-import { computeLayout, portraitTwoBand, portraitOneBand } from './layout.mjs?v=10';
-import { drawDateView, condensedDateLayout } from './date-view.mjs?v=10';
+import { computeLayout, portraitTwoBand, portraitOneBand } from './layout.mjs?v=11';
+import { drawDateView, condensedDateLayout, heightConstrainedUnit, measureRowTexts } from './date-view.mjs?v=11';
 
 // Sample instant for the date block — uses "now" so it matches what a recent
 // build shows on the phone you're comparing against.
@@ -148,7 +148,8 @@ const ANCHORS = [
     samples:[[1190,820],[1710,1180],[2174,1500]] },
   { id:'A5', name:'iPhone landscape', aspect:1.99, w:814, h:409,
     samples:[[700,352,'small'],[814,409,'canon'],[1000,503,'large']] },   // safe rect (932×430 − insets 0/59/21/59), ≈ recip. of A2
-  { id:'A6', name:'Extreme landscape',aspect:10.0, w:1200, h:120 },
+  { id:'A6', name:'Extreme landscape',aspect:10.0, w:1200, h:120,
+    samples:[[1000,100,'small'],[1200,120,'canon'],[1600,160,'large']] },
 ];
 const $ = id => document.getElementById(id);
 const cv = $('cv'), ctx = cv.getContext('2d');
@@ -229,7 +230,6 @@ function measureJ(L, W, H) {
 
 function draw() {
   const W = +$('w').value, H = +$('h').value;
-  const footerH = +$('footer').value;            // chrome is fixed-size
   cv.width = W; cv.height = H;
   // scale to fit the stage
   const stage = $('stage').getBoundingClientRect();
@@ -237,7 +237,16 @@ function draw() {
   cv.style.width = (W * scale) + 'px';
   cv.style.height = (H * scale) + 'px';
 
-  const headerH = $('oHeader').checked ? +$('headerH').value : 0;
+  // Requested chrome.
+  let headerH = $('oHeader').checked ? +$('headerH').value : 0;
+  let footerH = +$('footer').value;
+  // CC2 (cross-cutting): if the time controller can't fit — the window is too
+  // narrow for its min width, or reserving header+footer would leave too little
+  // content height — drop BOTH header and footer to give the elements room.
+  // Only bites at extreme aspects on manual resize (A6 by height, A1 by width).
+  const TC_MIN_W = 240, MIN_CONTENT_H = 96;
+  const dropChrome = (W < TC_MIN_W) || (H - headerH - footerH < MIN_CONTENT_H);
+  if (dropChrome) { headerH = 0; footerH = 0; }
 
   // The viewport IS the safe/design rect (no insets): header at the top, the
   // layout content below it, the footer at the bottom — all within W×H.
@@ -622,6 +631,55 @@ function applyA5(L, bounds, headerH, footerH) {
   L.moonCX = (altCX + azCX) / 2;                     // moon centred over the alt/az pair
 }
 
+// A6 (extreme landscape): one row of every element, left→right —
+//   moon · weekday · alt · az · DIAL · ecl · eot · date · map
+// Each is sized to the row height (circles ⌀ = row height; map ~2:1; text fit
+// to the height). If the natural row overflows W, everything *except the central
+// dial* shrinks by one factor s until it fits, keeping ≥ halfPad between
+// elements. Chrome is already dropped (CC2) at this aspect, so the row uses the
+// full height and centres at H/2.
+function applyA6(L, bounds, headerH, footerH) {
+  const W = bounds.right;
+  const hr = bounds.bottom;                 // row height = content height
+  const cy = hr / 2;                         // content-space row centre
+  const halfPad = 0.0125 * W;
+  const R = hr / 2;                           // height-constrained circle radius
+  const u = heightConstrainedUnit(hr);        // text unit at the row height
+
+  // Natural widths (scale 1).
+  const f = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
+  const parts = f.formatToParts(SAMPLE_DATE);
+  const get = t => (parts.find(p => p.type === t) || {}).value || '';
+  const wkText = get('weekday'), md = `${get('month')} ${get('day')}`, yr = get('year');
+  const tzAbbr = (new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' }).formatToParts(SAMPLE_DATE).find(p => p.type === 'timeZoneName') || {}).value || '';
+  const { weekdayW, dateW } = measureRowTexts(ctx, wkText, md, yr, tzAbbr, '', u);
+  const mapW = 2 * hr;
+
+  // Row order with natural widths; only the dial is exempt from shrink.
+  const dialW = hr;
+  const othersW = 2 * R + weekdayW + 2 * R + 2 * R + 2 * R + 2 * R + dateW + mapW;  // moon,wk,alt,az,ecl,eot,date,map
+  const gaps = 8 * halfPad;                   // 8 gaps between 9 elements
+  let s = 1;
+  if (dialW + othersW + gaps > W) s = Math.max(0.05, (W - dialW - gaps) / othersW);
+
+  // Lay out left→right, vertically centred; centre the whole row in W.
+  const rowW = dialW + s * othersW + gaps;
+  let cx = (W - rowW) / 2;
+  const place = w => { const c = cx + w / 2; cx += w + halfPad; return c; };
+
+  L.moonR = s * R;  L.moonCX = place(s * 2 * R);  L.moonCY = cy;
+  L.dateCX = place(s * weekdayW);  L.dateCY = cy;  L.dateW = s * weekdayW + 4;  L.dateH = hr;
+  L.altR = s * R;  L.altCX = place(s * 2 * R);  L.altCY = cy;
+  L.azR  = s * R;  L.azCX  = place(s * 2 * R);  L.azCY  = cy;
+  rescaleMain(L, place(dialW), cy, R);          // central dial: not scaled
+  L.eclipseCX = place(s * 2 * R);  L.eclipseCY = cy;   // ECL draws at L.altR = s·R
+  L.eotR = s * R;  L.eotCX = place(s * 2 * R);  L.eotCY = cy;
+  L.date2CX = place(s * dateW);  L.date2CY = cy;  L.date2W = s * dateW + 4;  L.date2H = hr;
+  L.earthW = s * mapW;  L.earthH = s * hr;  L.earthCX = place(s * mapW);  L.earthCY = cy;
+
+  L.dateCondensed = true;  L.dateBaselineBottom = undefined;  L.dateForceU = s * u;
+}
+
 function applyRules(L, anchorId, bounds, footerH, headerH) {
   if (anchorId === 'A3')  { applyA3Common(L, bounds); return; }
   if (anchorId === 'A3m') { applyA3Mini(L, bounds); return; }
@@ -632,6 +690,7 @@ function applyRules(L, anchorId, bounds, footerH, headerH) {
     applyA5(L, bounds, headerH, footerH);
     return;
   }
+  if (anchorId === 'A6')  { applyA6(L, bounds, headerH, footerH); return; }
   if (anchorId !== 'A2') return;
   const FOOTER_MARGIN = 6;
   // 1. Halve the (mostly empty) border between the header row and the moon/map.

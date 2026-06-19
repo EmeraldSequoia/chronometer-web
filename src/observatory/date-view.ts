@@ -180,6 +180,35 @@ function fitUnit(ctx: CanvasRenderingContext2D, live: Line[], boxW: number, boxH
 const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 /**
+ * The unit at which a single text line exactly fills a box of height `boxH`
+ * (capped at UNIT_MAX). For the A6 one-row layout, where each element is sized
+ * to the row height.
+ */
+export function heightConstrainedUnit(boxH: number): number {
+    return Math.min(UNIT_MAX, boxH / LINE_SPACING);
+}
+
+/**
+ * Widths (at unit `u`) of the A6 row's two text elements: the weekday alone, and
+ * the condensed "month-day  year  tz [leap]" line — same segment sizes/gaps the
+ * renderer uses, so the harness can lay the row out before drawing.
+ */
+export function measureRowTexts(
+    ctx: CanvasRenderingContext2D,
+    weekday: string, monthDay: string, year: string, tzAbbrev: string, leapText: string,
+    u: number,
+): { weekdayW: number; dateW: number } {
+    const wkLine: Line = [{ text: weekday, rel: REL_BIG, color: COLOR }];
+    const dateLine: Line = [
+        { text: monthDay, rel: REL_BIG, color: COLOR },
+        { text: year, rel: REL_YEAR, color: COLOR },
+    ];
+    if (tzAbbrev) dateLine.push({ text: tzAbbrev, rel: REL_SMALL, color: COLOR_DIM });
+    if (leapText) dateLine.push({ text: leapText, rel: REL_SMALL, color: COLOR_DIM });
+    return { weekdayW: measureLine(ctx, wkLine, u).w, dateW: measureLine(ctx, dateLine, u).w };
+}
+
+/**
  * Geometry of the A5 condensed date's weekday, shared by the renderer and the
  * layout harness so dial placement and rendering agree. The weekday is sized to
  * fit its box (`boxW`×`boxH`); its baseline is then placed so the *deepest*
@@ -371,23 +400,30 @@ export function drawDateView(
         }
         case 'split': {
             if (L.dateCondensed) {
-                // A5 (iPhone landscape): weekday left, and block 2 a single line
-                // "month-day year tz" — same per-element font sizes as the
-                // stacked A4 (month-day big, year medium, tz/leap faint small),
-                // no separators. Both are rendered at the weekday's unit so
-                // "month-day" matches "Thursday", and both drop to a shared
-                // baseline placed so the deepest weekday descender sits a fixed
-                // gap (`dateBaselineBottom`) above the footer — stable across
-                // days. Segments share a baseline unless `dateSegCenter`.
-                const descBottom = L.dateBaselineBottom ?? L.dateCY;
-                const dl = condensedDateLayout(ctx, f.weekday, L.dateW, L.dateH, descBottom);
-                drawBlock(ctx, [[wk]], L.dateCX, L.dateCY, L.dateW, L.dateH,
-                    { forceU: dl.u, baselineY: dl.baselineY });
+                // Weekday (block 1) + a single condensed "month-day year tz" line
+                // (block 2) — same per-element sizes as the stacked A4 (month-day
+                // big, year medium, tz/leap faint small), no separators. Two
+                // placements:
                 const info: Line = [md, yr];
                 if (f.tzAbbrev) info.push(tz);
                 if (f.leap) info.push(leap);
-                drawBlock(ctx, [info], L.date2CX, L.date2CY, L.date2W, L.date2H,
-                    { forceU: dl.u, baselineY: dl.baselineY, segCenter: L.dateSegCenter });
+                if (L.dateBaselineBottom != null) {
+                    // A5: both at the weekday's unit, dropped to a shared baseline
+                    // so the deepest weekday descender sits a fixed gap above the
+                    // footer (stable across days).
+                    const dl = condensedDateLayout(ctx, f.weekday, L.dateW, L.dateH, L.dateBaselineBottom);
+                    drawBlock(ctx, [[wk]], L.dateCX, L.dateCY, L.dateW, L.dateH,
+                        { forceU: dl.u, baselineY: dl.baselineY });
+                    drawBlock(ctx, [info], L.date2CX, L.date2CY, L.date2W, L.date2H,
+                        { forceU: dl.u, baselineY: dl.baselineY, segCenter: L.dateSegCenter });
+                } else {
+                    // A6 one-row: weekday and date are separate row elements, each
+                    // ink-centred in its own box at a shared forced unit.
+                    drawBlock(ctx, [[wk]], L.dateCX, L.dateCY, L.dateW, L.dateH,
+                        { forceU: L.dateForceU });
+                    drawBlock(ctx, [info], L.date2CX, L.date2CY, L.date2W, L.date2H,
+                        { forceU: L.dateForceU, segCenter: L.dateSegCenter });
+                }
             } else {
                 drawBlock(ctx, [[wk]], L.dateCX, L.dateCY, L.dateW, L.dateH);
                 // Year + tz on top, month-day on the bottom line so the prominent

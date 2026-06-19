@@ -213,6 +213,12 @@ export interface LayoutParams {
      * unset → the date sits in its box as usual.
      */
     dateBaselineBottom?: number;
+    /**
+     * With `dateCondensed` and no `dateBaselineBottom` (A6 one-row): force this
+     * unit for both the weekday and the condensed date line, each ink-centred in
+     * its own box. Optional.
+     */
+    dateForceU?: number;
 
     // --- Peripheral font sizes ---
     extFontSize: number;
