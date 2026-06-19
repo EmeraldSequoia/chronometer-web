@@ -166,15 +166,21 @@ function measureLine(ctx: CanvasRenderingContext2D, line: Line, u: number): { w:
 /**
  * Draw a block of lines centered in the box, choosing the largest unit size
  * that fits (≤ UNIT_MAX). Segments within a line share a baseline.
+ *
+ * Returns the chosen unit size and the bottom line's baseline (content coords),
+ * so a caller can render a second block at the *same* scale and baseline (e.g.
+ * the A5 split date matches "Jun 18 …" to the weekday's size and baseline).
+ * `opts.forceU` overrides the fitted unit; `opts.baselineY` pins the bottom
+ * line's baseline (bypassing the ink re-centering).
  */
 function drawBlock(
     ctx: CanvasRenderingContext2D,
     lines: Line[],
     cx: number, cy: number, boxW: number, boxH: number,
-    opts: { tight?: boolean; segCenter?: boolean } = {},
-): void {
+    opts: { tight?: boolean; segCenter?: boolean; forceU?: number; baselineY?: number } = {},
+): { u: number; baselineY: number } {
     const live = lines.filter((l) => l.some((s) => s.text));
-    if (live.length === 0 || boxW <= 0 || boxH <= 0) return;
+    if (live.length === 0 || boxW <= 0 || boxH <= 0) return { u: 0, baselineY: cy };
 
     ctx.save();
     ctx.textAlign = 'left';
@@ -190,7 +196,9 @@ function drawBlock(
         totH += d.h * LINE_SPACING;
         return d;
     });
-    const u = Math.min(UNIT_MAX, REF * Math.min(boxW / maxW, boxH / totH));
+    const u = opts.forceU != null
+        ? opts.forceU
+        : Math.min(UNIT_MAX, REF * Math.min(boxW / maxW, boxH / totH));
 
     // Lay the baselines out, collecting them first so we can re-center on real
     // ink below. Two spacing models:
@@ -224,21 +232,28 @@ function drawBlock(
         }
     }
 
-    // Re-center on the real glyph ink rather than the em-box: shift every
-    // baseline so the visible ink's midpoint lands on `cy`. This makes the
-    // layout's date box a faithful proxy for the rendered ink in every mode
-    // (§6.0). Spacing is still expressed in em-box units above (stable).
-    let inkTop = Infinity;
-    let inkBot = -Infinity;
-    for (let li = 0; li < live.length; li++) {
-        const m = lineInk(ctx, live[li], u, /* prominentOnly */ true);
-        if (!m.has) continue;   // a faint-only line (lone tz) doesn't anchor the center
-        inkTop = Math.min(inkTop, baselines[li] - m.asc);
-        inkBot = Math.max(inkBot, baselines[li] + m.desc);
-    }
-    if (inkTop <= inkBot) {
-        const shift = cy - (inkTop + inkBot) / 2;
+    if (opts.baselineY != null) {
+        // Pin the bottom line's baseline to a caller-supplied y (e.g. align the
+        // A5 date with the weekday's baseline). Skip the ink re-centering.
+        const shift = opts.baselineY - baselines[baselines.length - 1];
         for (let li = 0; li < baselines.length; li++) baselines[li] += shift;
+    } else {
+        // Re-center on the real glyph ink rather than the em-box: shift every
+        // baseline so the visible ink's midpoint lands on `cy`. This makes the
+        // layout's date box a faithful proxy for the rendered ink in every mode
+        // (§6.0). Spacing is still expressed in em-box units above (stable).
+        let inkTop = Infinity;
+        let inkBot = -Infinity;
+        for (let li = 0; li < live.length; li++) {
+            const m = lineInk(ctx, live[li], u, /* prominentOnly */ true);
+            if (!m.has) continue;   // a faint-only line (lone tz) doesn't anchor the center
+            inkTop = Math.min(inkTop, baselines[li] - m.asc);
+            inkBot = Math.max(inkBot, baselines[li] + m.desc);
+        }
+        if (inkTop <= inkBot) {
+            const shift = cy - (inkTop + inkBot) / 2;
+            for (let li = 0; li < baselines.length; li++) baselines[li] += shift;
+        }
     }
 
     // Draw.
@@ -275,6 +290,7 @@ function drawBlock(
     }
 
     ctx.restore();
+    return { u, baselineY: baselines[baselines.length - 1] };
 }
 
 // ---------------------------------------------------------------------------
@@ -314,19 +330,21 @@ export function drawDateView(
             drawBlock(ctx, [[wk], info], L.dateCX, L.dateCY, L.dateW, L.dateH);
             break;
         }
-        case 'split':
-            drawBlock(ctx, [[wk]], L.dateCX, L.dateCY, L.dateW, L.dateH);
+        case 'split': {
+            const wkM = drawBlock(ctx, [[wk]], L.dateCX, L.dateCY, L.dateW, L.dateH);
             if (L.dateCondensed) {
                 // A5 (iPhone landscape): block 2 is one line "month-day year tz"
                 // — same per-element font sizes as the stacked A4 (month-day
-                // big, year medium, tz/leap faint small), no separators. Segments
-                // share a baseline by default; `dateSegCenter` centres them
-                // vertically instead.
+                // big, year medium, tz/leap faint small), no separators. It is
+                // rendered at the *weekday's* unit and baseline so "month-day"
+                // matches "Thursday" on the left and they sit on a common
+                // baseline. Segments share a baseline by default; `dateSegCenter`
+                // centres them vertically instead.
                 const info: Line = [md, yr];
                 if (f.tzAbbrev) info.push(tz);
                 if (f.leap) info.push(leap);
                 drawBlock(ctx, [info], L.date2CX, L.date2CY, L.date2W, L.date2H,
-                    { segCenter: L.dateSegCenter });
+                    { forceU: wkM.u, baselineY: wkM.baselineY, segCenter: L.dateSegCenter });
             } else {
                 // Year + tz on top, month-day on the bottom line so the prominent
                 // month-day sits at the same height as the weekday on the left
@@ -337,5 +355,6 @@ export function drawDateView(
                     L.date2CX, L.date2CY, L.date2W, L.date2H, { tight: true });
             }
             break;
+        }
     }
 }
