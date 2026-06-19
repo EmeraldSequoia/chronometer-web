@@ -556,7 +556,11 @@ function applyA5(L, bounds, headerH, footerH) {
   const mainCX = W / 2, mainCY = H / 2 - headerH, mainR = 0.475 * H;
   rescaleMain(L, mainCX, mainCY, mainR);
 
-  const topRow = headerH + halfPad;              // top edge of moon & map (below header)
+  // Top edge of moon & map, in content coords. Layout space is drawn translated
+  // down by headerH, so content-y `halfPad` renders at canvas headerH+halfPad —
+  // i.e. a halfPad gap below the header's bottom edge (matching the map's right
+  // margin). (Do NOT add headerH here, or the gap double-counts the header.)
+  const topRow = halfPad;
   const mAspect = (L.earthW / L.earthH) || 2;
 
   // Moon: radius from the slider; top margin = halfPad below the header. cx is
