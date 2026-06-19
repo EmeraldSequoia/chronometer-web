@@ -1,7 +1,7 @@
 # Observatory Layout — Iteration 3 (Design Points & Transitions)
 
 **Date:** 2026-06-15
-**Status:** 🟡 In progress — A2 (iPhone portrait), A3 (iPad portrait), A3m (iPad mini), A4 (iPad landscape) ✅ complete; A5 (iPhone landscape) next.
+**Status:** 🟡 In progress — A2 (iPhone portrait), A3 (iPad portrait), A3m (iPad mini), A4 (iPad landscape), A5 (iPhone landscape) ✅ complete; A6 (extreme landscape) next.
 **Parents:**
 - [2026-06-06-observatory-phase-8-layout.md](2026-06-06-observatory-phase-8-layout.md) — adaptive two-template engine
 - [2026-06-10-observatory-phase-8b-layout-refinement.md](2026-06-10-observatory-phase-8b-layout-refinement.md) — refinements R1–R6
@@ -287,7 +287,30 @@ A4 is the **landscape arrangement** and the committed `computeLayout` is **alrea
 
 **Chrome:** same as A2/A3 (C1 header, C2 single-row footer + center noon icon).
 
-### A5 — iPhone landscape (aspect 2.168)
+### A5 — iPhone landscape (aspect 1.99) ✅
+*Safe rect 814×409 (iPhone 932×430 − insets 0/59/21/59); ≈ reciprocal of A2. Samples (same aspect): 700×352 · 814×409 · 1000×503.*
+
+A5 is the **short-and-wide landscape**. The committed corner layout doesn't suit it, so A5 is **almost entirely computed from a single spacing unit** — `halfPad = 0.0125·W` (half the portrait side-margin) — leaving **no tuning knobs**. The arrangement, left→right: **moon · {alt, az} · main dial · {ecl, eot} · map** across the top, with **weekday** bottom-left and a **condensed single-line date** bottom-right.
+
+Everything below is in the **content rect** but the **main dial is centred in the full safe rect** (it overlaps the chrome).
+
+| # | Rule | Value / detail | Driver | Transition |
+|---|---|---|---|---|
+| L1 | **Main dial overlaps chrome** | `D = 0.95·H` (H = full safe height), centred vertically in the **full safe rect**, so it overlaps both the header and footer bands with **`0.025·H` padding** top & bottom — numerically the same fraction as portrait's `0.025·W` horizontal padding. The inner sub-dial cluster scales/moves with it. | aspect | interpolate (the 0.95 fraction is shared with portrait L2) |
+| L2 | **Noon icon off-centre** | The footer's centred noon-toggle icon moves **left** (near the time-controller button), since the dial now covers the footer centre. | aspect | snap |
+| L3 | **Halved margins** | The outer dials' outer margins **and the map's right margin** are **`halfPad`** (half the normal side margin). The moon & map tops sit **`halfPad` below the header's bottom edge** (same gap as the map's right margin). | aspect | interpolate |
+| L4 | **Map auto-sized** | Map (top-right, ~2:1) **grows until its lower-left corner's radial gap** (along the line to the main centre) **to the main rim = `halfPad`**. | size | computed |
+| L5 | **Outer-dial radius (solved)** | One radius `r` for all four, the **largest** for which the three right-side gaps all equal `halfPad`: **eot's outer margin**, the **eot↔ecl gap**, and the **ecl↔main gap measured radially** (centre-to-centre line, ecl→main). alt/az **reuse** `r`. | size | computed |
+| L6 | **Dials on one row per side, independent Y** | All four share their side's row. **alt/az** centre vertically in **moon-bottom ↔ date-top**; **ecl/eot** centre in **map-bottom ↔ date-top** — *separate* y's, so a bigger moon drops only the left pair (the right would look unbalanced against the space under the smaller map). Horizontally: **alt**'s outer edge at the `halfPad` margin, **az** splits the span to the main rim into two equal gaps (mirror on the right: **eot** at the margin, **ecl** splits). | size | computed |
+| L7 | **Moon auto-sized** | Moon **grows until the smaller** of two gaps reaches `halfPad`: (1) its **radial gap to alt/az** (equal for both, since it's centred over the pair), or (2) the **alt/az-bottom ↔ weekday-top** gap. Centred horizontally over the alt/az pair. *(With the moon centred over the pair, (2) always binds first; (1) is kept as a guard.)* | size | computed |
+| L8 | **Date dropped to the footer** | Weekday (bottom-left) + the condensed date line (bottom-right) drop to a **shared baseline** placed so the **deepest weekday descender** sits `halfPad` above the footer top. The descender depth is the **max over all of Sun–Sat** (every name ends in "-day" → the `y` descender, but the max is taken so it never shifts with the day). | aspect | interpolate |
+| L9 | **Condensed date, weekday-matched** | Block 2 is one line **"month-day  year  tz"** — **same per-element font sizes as the stacked A4** (month-day big, year medium, tz/leap faint small), **no `·` separators** — rendered at the **weekday's unit and baseline** so "Jun 18" matches "Thursday" in size and sits on the same baseline. Segments are **baseline-aligned** (a `dateSegCenter` option can centre them instead; baseline preferred). | aspect | interpolate |
+
+**Chrome:** same as A2/A3/A4 (C1 header, C2 single-row footer), except the noon icon is left-shifted (L2).
+
+**Implementation notes:** the shared `condensedDateLayout(ctx, weekday, boxW, boxH, descenderBottomY)` (in `date-view.ts`) returns `{u, baselineY, top}` and is the **single source** used by both the renderer (to draw) and the layout (to place the dials), so dial geometry and rendered text agree. `drawBlock` gained `forceU`/`baselineY`/`segCenter` and returns `{u, baselineY}`. New `LayoutParams`: `dateCondensed`, `dateSegCenter`, `dateBaselineBottom`.
+
+### A6 — Extreme landscape (aspect 10.0)
 *Not started.*
 
 ### A6 — Extreme landscape (aspect 10.0)
@@ -306,8 +329,8 @@ A4 is the **landscape arrangement** and the committed `computeLayout` is **alrea
 | T2 | A2 ↔ A3m | TBD | governs iPhone SE (0.562); the two-band↔one-band change is a **snap** decision, not a size threshold |
 | Tm | A3m ↔ A3 | map ×1.10→1.0, date −5%→0% across aspect 0.683→0.725 | iPad mini → 11"; interpolate the A3m deltas (M1/M2) |
 | T3 | A3 ↔ A4 | TBD | portrait/landscape flip near square |
-| T4 | A4 ↔ A5 | TBD | |
-| T5 | A5 ↔ A6 | TBD | |
+| T4 | A4 ↔ A5 | TBD | iPad→iPhone landscape: A4's two-column split + two-line date condenses to A5's one-row-per-side + single-line date as the rect shortens |
+| T5 | A5 ↔ A6 | TBD | landscape gets so wide everything collapses to a single row (A6) |
 
 ---
 
