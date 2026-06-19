@@ -110,7 +110,12 @@
 
   <div class="chk"><input type="checkbox" id="oA5Row" checked><label for="oA5Row" style="flex:1">A5: computed dials + moon + map (two per side)</label></div>
   <div class="chk"><input type="checkbox" id="oA5DateCenter"><label for="oA5DateCenter" style="flex:1">A5 date: centre-align segments (else baseline)</label></div>
-  <div class="small">A5 iPhone landscape (fully computed). Main dial fills 0.95·H (overlaps header+footer). Margins (outer dials + map right) halved; moon/map sit that same gap below the header. <b>Map</b> grows until its lower-left corner's radial gap = the margin. <b>Outer-dial radius</b> solved so eot's margin, eot↔ecl, and ecl↔main (radial) all equal the margin; alt/az reuse it. Left/right pairs centre in moon↔date / map↔date independently. <b>Date</b> drops so the deepest weekday descender (Sun–Sat) sits the margin above the footer; weekday & date2 share that baseline, A4 sizes, no dots. <b>Moon</b> grows until its radial gap to alt/az, or the alt/az-bottom↔weekday-top gap, hits the margin; centred over alt/az.</div>
+  <div class="small">A5 iPhone landscape (fully computed). Main dial fills 0.95·H (overlaps header+footer). Margins (outer dials + map right) halved; moon/map sit that same gap below the header. <b>Map</b> grows until its lower-left corner's radial gap = the margin. <b>Outer-dial radius</b> solved so eot's margin, eot↔ecl, and ecl↔main (radial) all equal the margin; alt/az reuse it. Left/right pairs centre in moon↔date / map↔date independently. <b>Date</b> drops so the deepest weekday descender (Sun–Sat) sits the margin above the footer; weekday & date2 share that baseline, A4 sizes, no dots. <b>Moon</b> grows until its radial gap to alt/az, or the alt/az-bottom↔weekday-top gap, hits the margin (also clamped to the left margin / main-dial rim); centred over alt/az.</div>
+
+  <div class="row"><label>A6 font ÷ dial⌀</label>
+    <input type="number" id="a6FontK" value="0.35" min="0.1" max="0.8" step="0.01">
+    <input type="range" id="a6FontKr" value="0.35" min="0.1" max="0.8" step="0.01"></div>
+  <div class="small">A6 primary font ("Friday", "Jun 19") as a fraction of the <b>outer-dial diameter</b> (so it tracks the dial size at every sample). 2026/PDT stay proportional to it.</div>
 
   <h2>Overlays</h2>
   <div class="chk"><input type="checkbox" id="oLabels" checked><label for="oLabels" style="flex:1">Labels</label></div>
@@ -658,12 +663,12 @@ function applyA6(L, bounds, headerH, footerH) {
   const cy = hr / 2;                         // content-space row centre
   const halfPad = 0.0125 * W;
   const R = hr / 2;                           // every circle is row-height tall
-  const u = R;                                // text unit = circle radius (½ row height):
-                                              // proportional & uncapped, but subordinate to
-                                              // the circle ⌀ (filling the full height looked huge).
+  const u = (+$('a6FontK').value) * (2 * R);  // primary font = ratio · outer-dial ⌀ (tunable):
+                                              // proportional & uncapped, tracks the dial size at
+                                              // every sample. 2026/PDT stay relative to `u`.
 
   // Circles at 2R=hr, the map at 2hr, the dial at hr. Text scales with the row
-  // (unit `u` = R) — proportional, no cap, but ~half the circle diameter.
+  // via `u` (ratio of the outer-dial diameter) — proportional, no cap.
   const f = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
   const parts = f.formatToParts(SAMPLE_DATE);
   const get = t => (parts.find(p => p.type === t) || {}).value || '';
@@ -847,6 +852,7 @@ bindPair('dateHFrac','dateHFracr',draw);
 bindPair('mapScale','mapScaler',draw);
 bindPair('a3DialK','a3DialKr',draw);
 bindPair('a3DialGap','a3DialGapr',draw);
+bindPair('a6FontK','a6FontKr',draw);
 
 // anchor buttons
 const ab=$('anchorBtns');
