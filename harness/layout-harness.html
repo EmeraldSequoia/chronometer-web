@@ -154,6 +154,8 @@ const ANCHORS = [
     ] },
   { id:'A3m', name:'iPad mini portrait', aspect:0.683, w:744, h:1089,
     samples:[ [600,878,'small'], [744,1089,'canon'], [900,1318,'large'] ] },
+  { id:'Asq', name:'Square',          aspect:1.0,  w:1024, h:1024,
+    samples:[[820,820,'small'],[1024,1024,'canon'],[1280,1280,'large']] },   // NEW: square point between A3/A3m (~0.7) and A4 (1.45) — rules TBD
   { id:'A4', name:'iPad landscape',   aspect:1.45, w:1710, h:1180,
     samples:[[1190,820],[1710,1180],[2174,1500]] },
   { id:'A5', name:'iPhone landscape', aspect:1.99, w:814, h:409,
@@ -655,6 +657,17 @@ function applyA5(L, bounds, headerH, footerH) {
   L.moonCX = moonCX;
 }
 
+// Asq (Square, aspect ~1.0): NEW anchor between A3/A3m (~0.7 portrait) and A4
+// (1.45 landscape). The rules here are expected to differ significantly from
+// both neighbours — TODO, to be tuned. For now this is a stub: it leaves the
+// default computeLayout result untouched so the anchor is selectable and renders
+// a sane starting layout. Fill in the square-specific geometry here.
+function applyAsq(L, bounds, headerH, footerH) {
+  // TODO(square): define the square design-point rules. `bounds` is the content
+  // rect (0,0 → contentW, contentH−footerH); `headerH`/`footerH` are the chrome
+  // bands. Reuse helpers as needed (rescaleMain, a2OuterDials, etc.).
+}
+
 // A1 (extreme portrait, aspect ~0.10): the vertical mirror of A6. One COLUMN,
 // the same order top→bottom as A6's left→right row, with the weekday folded into
 // a full date STACK (Friday / Jun 19 / year / PDT):
@@ -844,6 +857,7 @@ function applyA6(L, bounds, headerH, footerH) {
 
 function applyRules(L, anchorId, bounds, footerH, headerH) {
   if (anchorId === 'A1')  { applyA1(L, bounds, headerH, footerH); return; }
+  if (anchorId === 'Asq') { applyAsq(L, bounds, headerH, footerH); return; }
   if (anchorId === 'A3')  { applyA3Common(L, bounds); return; }
   if (anchorId === 'A3m') { applyA3Mini(L, bounds); return; }
   if (anchorId === 'A4')  { if ($('oA4Sym').checked) applyA4Dials(L); return; }

@@ -1,7 +1,7 @@
 # Observatory Layout — Iteration 3 (Design Points & Transitions)
 
 **Date:** 2026-06-15
-**Status:** 🟡 In progress — A2 (iPhone portrait), A3 (iPad portrait), A3m (iPad mini), A4 (iPad landscape), A5 (iPhone landscape), A6 (extreme landscape), **A1 (extreme portrait) ✅ complete** — all 7 anchors done; transitions §7 pending.
+**Status:** 🟡 In progress — A1, A2, A3, A3m, A4, A5, A6 ✅ complete; **Asq (square, aspect 1.0) added — rules TBD** (new anchor between A3/A3m and A4); transitions §7 pending.
 **Parents:**
 - [2026-06-06-observatory-phase-8-layout.md](2026-06-06-observatory-phase-8-layout.md) — adaptive two-template engine
 - [2026-06-10-observatory-phase-8b-layout-refinement.md](2026-06-10-observatory-phase-8b-layout-refinement.md) — refinements R1–R6
@@ -106,6 +106,7 @@ see §0.)
 | A2 | **iPhone portrait** | **0.512** | 430×839 | 19.5:9 iPhone (430×932) minus safe insets (top 59 + bottom 34). *(SE governed by the A2↔A3 transition.)* |
 | A3 | **iPad portrait** | **0.725** | 834×1150 | iPad 11"/Air 11"/Pro 11" (834×1194) minus insets (24/20). 13" (1024×1322 = 0.775) is a wider sample. |
 | A3m | **iPad mini portrait** | **0.683** | 744×1089 | iPad mini (744×1133) minus insets — its own anchor (A3 + map ×1.10 + date −5%). |
+| Asq | **Square** | **1.0** | 1024×1024 | **NEW** — neither-portrait-nor-landscape. Sits between A3/A3m (~0.7) and A4 (1.45); the rules are expected to differ significantly from both, so it's its own anchor rather than an A3↔A4 interpolation. *Rules TBD.* |
 | A4 | **iPad landscape** | **1.45** | ~1700×1180 | Reciprocal of A3. Variations: **1.333** (13"), **1.523** (mini). |
 | A5 | **iPhone landscape** | **1.99** | 814×409 | **Safe rect** (932×430 − insets 0/59/21/59); ≈ reciprocal of A2 (1/0.512 = 1.95). *(Physical 932×430 = 2.168 — the edge-inclusive size — is **not** the anchor.)* |
 | A6 | **Extreme landscape** | **10.0** | — | Widest we support. Expectation: degrade to ~one element per column. |
@@ -121,6 +122,7 @@ For each anchor we tune at a **small / canonical / large** sample to test the
 | A2 iPhone portrait | 360×702 | 430×839 | 560×1093 |
 | A3 iPad portrait | 720×993 (+ xs 360×497) | 834×1150 | 1100×1517 |
 | A3m iPad mini | 600×878 | 744×1089 | 900×1318 |
+| Asq square | 820×820 | 1024×1024 | 1280×1280 |
 | A4 iPad landscape | 1190×820 | 1710×1180 | 2174×1500 |
 | A5 iPhone landscape | 700×352 | 814×409 | 1000×503 |
 | A6 extreme landscape | 1000×100 | 1200×120 | 1600×160 |
@@ -162,7 +164,7 @@ safe rect, so nothing bleeds. Nothing is placed in unsafe areas.)*
 
 ## 4. The per-anchor tuning loop
 
-For each anchor, in order A2 → A3 → A4 → A5 → A6 → A1 (start with the known-good
+For each anchor, in order A2 → A3 → A4 → A5 → A6 → A1 → Asq (start with the known-good
 iPhone portrait, end with the extremes):
 
 1. **Harness** renders the *committed* layout at the anchor's aspect, with live
@@ -274,6 +276,17 @@ The mini's narrower aspect gets its **own anchor**. It **inherits all of A3's ru
 
 The **A3 ↔ A3m** map-expansion and date-shrink interpolate across aspect (≈0.725 → 0.683) — a transition (§7).
 
+### Asq — Square (aspect 1.0) 🟡
+*Samples: 820×820 · 1024×1024 · 1280×1280 (aspect 1.0).*
+
+**New anchor**, added between the portrait iPad points (A3/A3m, ~0.7) and the landscape iPad point (A4, 1.45). At a square aspect neither the portrait stack nor the landscape spread fits well, so the rules are expected to differ significantly from both neighbours — hence a dedicated anchor rather than an A3↔A4 interpolation.
+
+| # | Rule | Value / detail | Driver | Transition |
+|---|---|---|---|---|
+| — | *TBD* | To be tuned in the harness. | — | — |
+
+**Implementation:** `applyAsq` stub in the harness (currently a no-op — leaves the default `computeLayout` result so the anchor renders a sane starting layout); dispatched from `applyRules`. Sample sizes wired (820/1024/1280 square).
+
 ### A4 — iPad landscape (aspect 1.45) ✅
 *Safe rect = reciprocal of A3; canonical ~1710×1180. Variations: 1.333 (13"), 1.523 (mini).*
 
@@ -358,7 +371,8 @@ A1 is the **vertical mirror of A6**: the degenerate *portrait* sliver. Chrome is
 | T1 | A1 ↔ A2 | TBD | monthDay-cap date raise fades in here (A2-L7) |
 | T2 | A2 ↔ A3m | TBD | governs iPhone SE (0.562); the two-band↔one-band change is a **snap** decision, not a size threshold |
 | Tm | A3m ↔ A3 | map ×1.10→1.0, date −5%→0% across aspect 0.683→0.725 | iPad mini → 11"; interpolate the A3m deltas (M1/M2) |
-| T3 | A3 ↔ A4 | TBD | portrait/landscape flip near square |
+| T3a | A3 ↔ Asq | TBD | portrait → square (≈0.725 → 1.0) |
+| T3b | Asq ↔ A4 | TBD | square → landscape (1.0 → 1.45); the portrait/landscape flip now resolves at the **Asq** anchor rather than mid-transition |
 | T4 | A4 ↔ A5 | TBD | iPad→iPhone landscape: A4's two-column split + two-line date condenses to A5's one-row-per-side + single-line date as the rect shortens |
 | T5 | A5 ↔ A6 | TBD | landscape gets so wide everything collapses to a single row (A6) |
 
