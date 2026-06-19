@@ -126,8 +126,8 @@
 <div id="stage"><div id="frame"><canvas id="cv"></canvas></div></div>
 
 <script type="module">
-import { computeLayout, portraitTwoBand, portraitOneBand } from './layout.mjs?v=11';
-import { drawDateView, condensedDateLayout, heightConstrainedUnit, measureRowTexts } from './date-view.mjs?v=11';
+import { computeLayout, portraitTwoBand, portraitOneBand } from './layout.mjs?v=12';
+import { drawDateView, condensedDateLayout, heightConstrainedUnit, measureRowTexts } from './date-view.mjs?v=12';
 
 // Sample instant for the date block — uses "now" so it matches what a recent
 // build shows on the phone you're comparing against.
@@ -240,12 +240,15 @@ function draw() {
   // Requested chrome.
   let headerH = $('oHeader').checked ? +$('headerH').value : 0;
   let footerH = +$('footer').value;
-  // CC2 (cross-cutting): if the time controller can't fit — the window is too
-  // narrow for its min width, or reserving header+footer would leave too little
-  // content height — drop BOTH header and footer to give the elements room.
-  // Only bites at extreme aspects on manual resize (A6 by height, A1 by width).
-  const TC_MIN_W = 240, MIN_CONTENT_H = 110;
-  const dropChrome = (W < TC_MIN_W) || (H - headerH - footerH < MIN_CONTENT_H);
+  // CC2 (cross-cutting): the time controller is unusable if its default-config
+  // popover (Date tab, astro tab collapsed) can't fit on screen. Measured
+  // footprint = 200×368 (tp-lower min-width drives W; tp-upper+tp-lower stack
+  // drives H). If the viewport is narrower OR shorter than that, drop BOTH
+  // header and footer and give the canvas the full surface. Bites at extreme
+  // aspects: A6 by height (H<368), A1 by width (W<200). NOTE: this also drops
+  // chrome on A5's short sample (700×352 < 368) — accepted reclassification.
+  const TC_POPOVER_W = 200, TC_POPOVER_H = 368;
+  const dropChrome = (W < TC_POPOVER_W) || (H < TC_POPOVER_H);
   if (dropChrome) { headerH = 0; footerH = 0; }
 
   // The viewport IS the safe/design rect (no insets): header at the top, the
@@ -643,41 +646,52 @@ function applyA6(L, bounds, headerH, footerH) {
   const hr = bounds.bottom;                 // row height = content height
   const cy = hr / 2;                         // content-space row centre
   const halfPad = 0.0125 * W;
-  const R = hr / 2;                           // height-constrained circle radius
-  const u = heightConstrainedUnit(hr);        // text unit at the row height
+  const R = hr / 2;                           // every circle is row-height tall
+  const u = heightConstrainedUnit(hr);        // text unit at the row height (uncapped)
 
-  // Natural widths (scale 1).
+  // Every element is sized to the row height — circles at 2R=hr, the map at 2hr,
+  // the dial at hr, and the text at unit `u` (expands proportionally, no cap).
   const f = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
   const parts = f.formatToParts(SAMPLE_DATE);
   const get = t => (parts.find(p => p.type === t) || {}).value || '';
   const wkText = get('weekday'), md = `${get('month')} ${get('day')}`, yr = get('year');
   const tzAbbr = (new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' }).formatToParts(SAMPLE_DATE).find(p => p.type === 'timeZoneName') || {}).value || '';
   const { weekdayW, dateW } = measureRowTexts(ctx, wkText, md, yr, tzAbbr, '', u);
-  const mapW = 2 * hr;
+  const dialW = hr, mapW = 2 * hr;
 
-  // Row order with natural widths; only the dial is exempt from shrink.
-  const dialW = hr;
-  const othersW = 2 * R + weekdayW + 2 * R + 2 * R + 2 * R + 2 * R + dateW + mapW;  // moon,wk,alt,az,ecl,eot,date,map
-  const gaps = 8 * halfPad;                   // 8 gaps between 9 elements
-  let s = 1;
-  if (dialW + othersW + gaps > W) s = Math.max(0.05, (W - dialW - gaps) / othersW);
+  // Nine elements, fixed (height-constrained) widths, laid out left→right:
+  //   moon · weekday · alt · az · DIAL · ecl · eot · date · map
+  const sumEl = 2 * R + weekdayW + 2 * R + 2 * R + dialW + 2 * R + 2 * R + dateW + mapW;
+  const N = 9, inner = N - 1;                 // 8 inter-element gaps, 2 outer margins
 
-  // Lay out left→right, vertically centred; centre the whole row in W.
-  const rowW = dialW + s * othersW + gaps;
-  let cx = (W - rowW) / 2;
-  const place = w => { const c = cx + w / 2; cx += w + halfPad; return c; };
+  // Gap distribution: aim for halfPad everywhere. Surplus expands the inner gaps
+  // evenly (outer stays halfPad). Deficit consumes the two outer margins down to
+  // 0 FIRST, then shrinks the inner gaps evenly (going below halfPad — and into
+  // overlap — when there's nothing left to give).
+  const need = sumEl + (inner + 2) * halfPad;
+  let outerGap, innerGap;
+  if (W >= need) {
+    outerGap = halfPad;  innerGap = halfPad + (W - need) / inner;
+  } else {
+    const deficit = need - W;
+    if (deficit <= 2 * halfPad) { outerGap = halfPad - deficit / 2;  innerGap = halfPad; }
+    else { outerGap = 0;  innerGap = halfPad - (deficit - 2 * halfPad) / inner; }
+  }
 
-  L.moonR = s * R;  L.moonCX = place(s * 2 * R);  L.moonCY = cy;
-  L.dateCX = place(s * weekdayW);  L.dateCY = cy;  L.dateW = s * weekdayW + 4;  L.dateH = hr;
-  L.altR = s * R;  L.altCX = place(s * 2 * R);  L.altCY = cy;
-  L.azR  = s * R;  L.azCX  = place(s * 2 * R);  L.azCY  = cy;
-  rescaleMain(L, place(dialW), cy, R);          // central dial: not scaled
-  L.eclipseCX = place(s * 2 * R);  L.eclipseCY = cy;   // ECL draws at L.altR = s·R
-  L.eotR = s * R;  L.eotCX = place(s * 2 * R);  L.eotCY = cy;
-  L.date2CX = place(s * dateW);  L.date2CY = cy;  L.date2W = s * dateW + 4;  L.date2H = hr;
-  L.earthW = s * mapW;  L.earthH = s * hr;  L.earthCX = place(s * mapW);  L.earthCY = cy;
+  let cx = outerGap;
+  const place = w => { const c = cx + w / 2; cx += w + innerGap; return c; };
 
-  L.dateCondensed = true;  L.dateBaselineBottom = undefined;  L.dateForceU = s * u;
+  L.moonR = R;  L.moonCX = place(2 * R);  L.moonCY = cy;
+  L.dateCX = place(weekdayW);  L.dateCY = cy;  L.dateW = weekdayW + 4;  L.dateH = hr;
+  L.altR = R;  L.altCX = place(2 * R);  L.altCY = cy;
+  L.azR  = R;  L.azCX  = place(2 * R);  L.azCY  = cy;
+  rescaleMain(L, place(dialW), cy, R);          // central dial
+  L.eclipseCX = place(2 * R);  L.eclipseCY = cy;   // ECL draws at L.altR = R
+  L.eotR = R;  L.eotCX = place(2 * R);  L.eotCY = cy;
+  L.date2CX = place(dateW);  L.date2CY = cy;  L.date2W = dateW + 4;  L.date2H = hr;
+  L.earthW = mapW;  L.earthH = hr;  L.earthCX = place(mapW);  L.earthCY = cy;
+
+  L.dateCondensed = true;  L.dateBaselineBottom = undefined;  L.dateForceU = u;
 }
 
 function applyRules(L, anchorId, bounds, footerH, headerH) {

@@ -180,12 +180,13 @@ function fitUnit(ctx: CanvasRenderingContext2D, live: Line[], boxW: number, boxH
 const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 /**
- * The unit at which a single text line exactly fills a box of height `boxH`
- * (capped at UNIT_MAX). For the A6 one-row layout, where each element is sized
- * to the row height.
+ * The unit at which a single text line exactly fills a box of height `boxH`.
+ * For the A6 one-row layout, where every element (text included) is sized to the
+ * row height — so the text expands proportionally with the circles/dial and is
+ * deliberately NOT capped at UNIT_MAX.
  */
 export function heightConstrainedUnit(boxH: number): number {
-    return Math.min(UNIT_MAX, boxH / LINE_SPACING);
+    return boxH / LINE_SPACING;
 }
 
 /**

@@ -1,7 +1,7 @@
 # Observatory Layout — Iteration 3 (Design Points & Transitions)
 
 **Date:** 2026-06-15
-**Status:** 🟡 In progress — A2 (iPhone portrait), A3 (iPad portrait), A3m (iPad mini), A4 (iPad landscape), A5 (iPhone landscape) ✅ complete; **A6 (extreme landscape) 🟡 draft** (one-row layout + chrome-drop implemented in harness; thresholds/sizing being tuned, prose section pending); A1 (extreme portrait) not started; transitions §7 pending.
+**Status:** 🟡 In progress — A2 (iPhone portrait), A3 (iPad portrait), A3m (iPad mini), A4 (iPad landscape), A5 (iPhone landscape), **A6 (extreme landscape) ✅ complete**; A1 (extreme portrait) not started; transitions §7 pending.
 **Parents:**
 - [2026-06-06-observatory-phase-8-layout.md](2026-06-06-observatory-phase-8-layout.md) — adaptive two-template engine
 - [2026-06-10-observatory-phase-8b-layout-refinement.md](2026-06-10-observatory-phase-8b-layout-refinement.md) — refinements R1–R6
@@ -310,27 +310,23 @@ Everything below is in the **content rect** but the **main dial is centred in th
 
 **Implementation notes:** the shared `condensedDateLayout(ctx, weekday, boxW, boxH, descenderBottomY)` (in `date-view.ts`) returns `{u, baselineY, top}` and is the **single source** used by both the renderer (to draw) and the layout (to place the dials), so dial geometry and rendered text agree. `drawBlock` gained `forceU`/`baselineY`/`segCenter` and returns `{u, baselineY}`. New `LayoutParams`: `dateCondensed`, `dateSegCenter`, `dateBaselineBottom`.
 
-### A6 — Extreme landscape (aspect 10.0) 🟡 draft (implemented in harness; rules being tuned)
+### A6 — Extreme landscape (aspect 10.0) ✅
 *Samples: 1000×100 · 1200×120 · 1600×160 (aspect 10).*
 
-Implemented in the harness (`applyA6`) + `date-view.ts`; **not yet finalized**.
+A6 is the **degenerate landscape**: a tall-and-thin sliver of content where the time controller can't usefully open. So the chrome is dropped (CC2) and **all elements** lay out in **one full-height row**, each sized to the row height. At aspect 10 the elements can't all fit even touching, so the row **collapses its gaps and accepts overlap** — there is no clean solution at this extreme, and the rule's job is to degrade gracefully rather than to look uncluttered.
 
-| # | Rule | Value / detail | Status |
+| # | Rule | Value / detail | Drives |
 |---|---|---|---|
-| CC2 | **Chrome-drop (cross-cutting)** | If the **time controller can't fit** — window narrower than its min width **or** header+footer would leave too little content height — drop **both** header and footer. Bites only at extreme aspects on manual resize (A6 by height, A1 by width). Implemented as: `dropChrome = W < TC_MIN_W (240) || H − headerH − footerH < MIN_CONTENT_H (110)`. **Thresholds invented — tune.** | 🟡 |
-| L1 | **One row, all elements** | Left→right: **moon · weekday · alt · az · DIAL · ecl · eot · date · map**, vertically centred in the (full, chrome-dropped) height. | 🟡 |
-| L2 | **Height-constrained sizing** | Each element sized to the row height: circles ⌀ = row height; map ~2:1; weekday & condensed date fit to the height (capped at `UNIT_MAX=72`). | 🟡 |
-| L3 | **Proportional shrink (dial exempt)** | If the natural row overflows W, scale **everything except the central dial** by one factor `s` until it fits, keeping **≥ `halfPad`** between elements. (At canonical, s≈0.65; dial stays ⌀ = full height and is the largest.) | 🟡 |
+| CC2 | **Chrome-drop (cross-cutting)** | Drop **both** header and footer when the **time controller's default-config popover can't fit on screen**. "Default config" = the popover open on the **Date** tab, astro tab collapsed; its measured footprint is **200 × 368** (`tp-lower` min-width drives W; `tp-upper`+`tp-lower` stacked drive H — see `src/partials/time-controller.{css,html}`). Rule: `dropChrome = (W < 200) ‖ (H < 368)`. Bites at extreme aspects: A6 by height (H ≤ 160 < 368, always drops), A1 by width (W < 200). **Note:** this also drops chrome on A5's short sample (700×352, H<368) — an accepted reclassification (that sample becomes A6-like). | viewport W·H |
+| L1 | **One row, all elements** | Left→right: **moon · weekday · alt · az · DIAL · ecl · eot · date · map**, vertically centred in the (full, chrome-dropped) height. | — |
+| L2 | **Height-constrained sizing (text uncapped)** | Every element is sized to the row height: each circle ⌀ = row height (moon = alt = az = ecl = eot = main dial — all equal); map ≈ 2:1 (2·height wide); weekday and condensed date at unit `u = rowHeight / LINE_SPACING`, **not capped** (`UNIT_MAX` does **not** apply here) — the text expands proportionally with the circles/dial. | size |
+| L3 | **Gap distribution (no element shrink)** | The element widths are fixed (L2); only the horizontal spacing flexes. Target: a **`halfPad`** margin on each outside edge and **`halfPad`** between every adjacent pair (8 inner gaps). **Surplus** (elements + gaps narrower than W): keep the outer margins at `halfPad` and **expand the 8 inner gaps evenly** to fill. **Deficit:** **first shrink the two outer margins to 0**, then **shrink the 8 inner gaps evenly** (below `halfPad`, into **overlap** when nothing's left). Continuous across the transition. **No element is scaled** — the dial is not special; overlap is accepted. | size |
 
-**Date:** reuses `dateCondensed` (single-line "month-day year tz", A4 sizes, no dots) via the A6 path in `date-view.ts` (each of weekday/date ink-centred in its own box at `dateForceU`, **not** dropped to a footer — there is none).
+**Date:** reuses `dateCondensed` (single-line "month-day · year · tz", A4 segment sizes, dots dropped) via the A6 path in `date-view.ts` — weekday and date are each ink-centred in their own box at `dateForceU = u` (uncapped), **not** dropped to a footer (there is none).
 
-**Open tuning decisions (flagged to Steve, not yet resolved):**
-1. **Chrome-drop thresholds** (`TC_MIN_W=240`, content `<110`) are guesses — the "time controller doesn't fit" trigger was underspecified.
-2. **All non-dial circles share one size** (moon = alt = az = ecl = eot, shrink together). Hierarchy (e.g. outer dials smaller than moon) TBD.
-3. **Text capped at `UNIT_MAX=72`**, so on tall A6 windows text can be shorter than the circles.
-4. **Row centred in W** when it fits with room; fills edge-to-edge when it overflows.
+**Implementation:** `applyA6` in the harness; `heightConstrainedUnit` (uncapped) + the split/`dateCondensed` path in `date-view.ts`. CC2 lives in the harness `draw()` and is **cross-cutting** (also governs A1).
 
-*Plan prose section to be written once the above are settled.*
+*Verified (harness, `?v=12`): A6 canon 1200×120 → chrome dropped, `u ≈ 101.7` (uncapped), all circles ⌀=120, deficit ⇒ outer margins 0 and inner gaps ≈ −67 (overlap). Surplus 2400×120 → outer = halfPad = 30, inner gaps expand evenly. Partial 1960×120 → outer = 13.95 (< halfPad), inner = halfPad. Chrome-drop boundary: 700×352 drops, 814×409 & 1000×503 keep, 150-wide drops.*
 
 ### A1 — Extreme portrait (aspect 0.10)
 *Not started.*
