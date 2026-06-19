@@ -302,8 +302,8 @@ function innerDialGeometry(mainR: number): InnerDial {
     const plR = Math.max(100, 332 * s);
     const sunRingWidth = Math.max(16, 64 * s);
     const orbitInc = Math.max(10, 40 * s);
-    const subR = Math.max(20, 73 * s);
-    const subOffset = Math.max(40, 149 * s);
+    const subR = 73 * s;
+    const subOffset = 149 * s;
     const sunD = Math.max(24, 100 * s);
     const zD = Math.max(100, 526 * s);
     const zR = Math.max(80, 272 * s);

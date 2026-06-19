@@ -135,8 +135,8 @@
 <div id="stage"><div id="frame"><canvas id="cv"></canvas></div></div>
 
 <script type="module">
-import { computeLayout, portraitTwoBand, portraitOneBand } from './layout.mjs?v=13';
-import { drawDateView, condensedDateLayout, measureRowTexts } from './date-view.mjs?v=13';
+import { computeLayout, portraitTwoBand, portraitOneBand } from './layout.mjs?v=14';
+import { drawDateView, condensedDateLayout, measureRowTexts } from './date-view.mjs?v=14';
 
 // Sample instant for the date block — uses "now" so it matches what a recent
 // build shows on the phone you're comparing against.
@@ -710,17 +710,9 @@ function applyA6(L, bounds, headerH, footerH) {
   L.altR = outerR;  L.altCX = place(2 * outerR);  L.altCY = cy;
   L.azR  = outerR;  L.azCX  = place(2 * outerR);  L.azCY  = cy;
   rescaleMain(L, place(dialW), cy, R);          // central dial (full row height)
-  // Restore proportional inner sub-dials. computeLayout floors subR at 20px and
-  // subOffset at 40px (a legibility concession for small-but-normal dials); A6's
-  // dial is small in absolute px (R<100), so the floor sticks and rescaleMain
-  // then carries the inflated ratio (≈0.35) up. Re-derive the canonical
-  // proportions (subR = 73/365·R = 0.2·R, subOffset = 149/365·R), unfloored.
-  L.subR = (73 / 365) * R;
-  L.subOffset = (149 / 365) * R;
-  { const cos30 = Math.cos(Math.PI / 6), mcx = L.mainCX, mcy = L.mainCY, so = L.subOffset;
-    L.utcCX = mcx;              L.utcCY = mcy - so;
-    L.solarCX = mcx - so * cos30; L.solarCY = mcy + so * 0.5;
-    L.sidCX = mcx + so * cos30;   L.sidCY = mcy + so * 0.5; }
+  // Inner sub-dials are now purely proportional everywhere (computeLayout's
+  // 20px/40px floor on subR/subOffset removed), so rescaleMain already carries
+  // the canonical 0.2·R / 0.408·R ratios up — no A6 override needed.
   L.eclipseCX = place(2 * outerR);  L.eclipseCY = cy;   // ECL draws at L.altR = outerR
   L.eotR = outerR;  L.eotCX = place(2 * outerR);  L.eotCY = cy;
   L.date2CX = place(dateW);  L.date2CY = cy;  L.date2W = dateW + 4;  L.date2H = hr;
