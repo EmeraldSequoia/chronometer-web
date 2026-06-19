@@ -377,8 +377,11 @@ export function drawDateView(
 
     switch (L.dateMode) {
         case 'stack':
+            // `forceU` (when set) pins the unit so the layout can size the slot
+            // from the block's real ink rather than the em-box (A1 extreme
+            // portrait). Unset → auto-fit, as before.
             drawBlock(ctx, [[wk], [md], [yr, leap], [tz]],
-                L.dateCX, L.dateCY, L.dateW, L.dateH);
+                L.dateCX, L.dateCY, L.dateW, L.dateH, { forceU: L.dateForceU });
             break;
         case 'row': {
             // Condensed info line under the weekday (phone portrait band).

@@ -135,8 +135,8 @@
 <div id="stage"><div id="frame"><canvas id="cv"></canvas></div></div>
 
 <script type="module">
-import { computeLayout, portraitTwoBand, portraitOneBand } from './layout.mjs?v=14';
-import { drawDateView, condensedDateLayout, measureRowTexts } from './date-view.mjs?v=14';
+import { computeLayout, portraitTwoBand, portraitOneBand } from './layout.mjs?v=15';
+import { drawDateView, condensedDateLayout, measureRowTexts } from './date-view.mjs?v=15';
 
 // Sample instant for the date block — uses "now" so it matches what a recent
 // build shows on the phone you're comparing against.
@@ -685,18 +685,52 @@ function applyA1(L, bounds, headerH, footerH) {
   const wkText = get('weekday'), md = `${get('month')} ${get('day')}`, yr = get('year');
   const tzAbbr = (new Intl.DateTimeFormat('en-US', { timeZoneName:'short' }).formatToParts(SAMPLE_DATE).find(p => p.type==='timeZoneName')||{}).value || '';
   const w100 = (text, rel) => { ctx.font = `${rel*REF}px Arial, sans-serif`; return ctx.measureText(text).width; };
-  const stackLines = [[wkText, REL_BIG], [md, REL_BIG], [yr, REL_YEAR], [tzAbbr, REL_SMALL]].filter(l => l[0]);
-  let maxW = 0, totH = (stackLines.length - 1) * LINE_PAD * REF;
-  for (const [text, rel] of stackLines) {
-    const segW = w100(text, rel);  if (segW > maxW) maxW = segW;
-    totH += rel * REF * LINE_SPACING;
-  }
+  const lines = [
+    { text: wkText, rel: REL_BIG,  prom: true  },   // Friday
+    { text: md,     rel: REL_BIG,  prom: true  },   // Jun 19
+    { text: yr,     rel: REL_YEAR, prom: true  },   // 2026
+  ];
+  if (tzAbbr) lines.push({ text: tzAbbr, rel: REL_SMALL, prom: false });  // PDT (faint+small)
+
+  // Width fit: the widest line sets the unit so the stack fits W − 2·halfPad.
   const dateBoxW = W - 2 * halfPad;
+  let maxW = 0;
+  for (const l of lines) { const lw = w100(l.text, l.rel); if (lw > maxW) maxW = lw; }
   const uDate = Math.min(UNIT_MAX, REF * dateBoxW / maxW);
-  const dateH = totH / REF * uDate;
+
+  // The date's vertical extent = its real INK bounds, not the em-box. Replicate
+  // drawBlock's stack baselines (em-box advance) + prominent-ink re-centering, so
+  // the slot we reserve matches what's drawn: the gap above is measured to
+  // Friday's ink top, the gap below to PDT's ink bottom (PDT IS included, so the
+  // map can't ride up over it). The block is asymmetric about its prominent
+  // centre (PDT hangs below), so we keep the two offsets separately.
+  let blockH = (lines.length - 1) * LINE_PAD * uDate;
+  for (const l of lines) blockH += l.rel * LINE_SPACING * uDate;
+  let yb = -blockH / 2;
+  const base = [];
+  for (const l of lines) {
+    const lineH = l.rel * uDate;
+    yb += lineH * (LINE_SPACING + 1) / 2;  base.push(yb);
+    yb += lineH * (LINE_SPACING - 1) / 2 + LINE_PAD * uDate;
+  }
+  const asc = [], desc = [];
+  for (const l of lines) {
+    ctx.font = `${l.rel * uDate}px Arial, sans-serif`;
+    const m = ctx.measureText(l.text);  asc.push(m.actualBoundingBoxAscent);  desc.push(m.actualBoundingBoxDescent);
+  }
+  let tp = Infinity, bp = -Infinity;               // prominent ink only (tz excluded)
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].prom) continue;
+    tp = Math.min(tp, base[i] - asc[i]);  bp = Math.max(bp, base[i] + desc[i]);
+  }
+  const shift = -(tp + bp) / 2;                     // prominent centre → 0
+  const last = lines.length - 1;
+  const dateTopOffset = -(base[0] + shift - asc[0]);              // centre → Friday ink top
+  const dateBotOffset = base[last] + shift + desc[last];          // centre → PDT ink bottom
+  const dateH = dateTopOffset + dateBotOffset;                    // true ink height (incl. PDT)
 
   // Element extents down the column (top→bottom). DIAL = 2R = W; the outer
-  // circles + moon = oc; the date = dateH; the map = W/2 tall.
+  // circles + moon = oc; the date = dateH (ink); the map = W/2 tall.
   const mapH = W / 2;
   const heights = [oc, oc, oc, 2 * R, oc, oc, dateH, mapH];  // moon alt az DIAL ecl eot date map
   const sumEl = heights.reduce((a, b) => a + b, 0);
@@ -718,12 +752,14 @@ function applyA1(L, bounds, headerH, footerH) {
     else { outerMargin = 0;  innerGap = halfPad - (deficit - 2 * halfPad) / inner; }
   }
 
-  // Walk down the column: every inter-element gap is innerGap.
+  // Walk down the column: every inter-element gap is innerGap. The date (index 6)
+  // is the one asymmetric element — its rendered prominent centre sits
+  // dateTopOffset below its slot top (not slot centre), so place it explicitly.
   let y = outerMargin;
   const cyc = [];
   for (let i = 0; i < N; i++) {
     if (i > 0) y += innerGap;
-    cyc.push(y + heights[i] / 2);
+    cyc.push(i === 6 ? y + dateTopOffset : y + heights[i] / 2);
     y += heights[i];
   }
 
@@ -736,7 +772,7 @@ function applyA1(L, bounds, headerH, footerH) {
   L.dateCX = cx;  L.dateCY = cyc[6];  L.dateW = dateBoxW;  L.dateH = dateH;
   L.earthW = W;   L.earthH = mapH;    L.earthCX = cx;  L.earthCY = cyc[7];
 
-  L.dateMode = 'stack';  L.dateCondensed = false;
+  L.dateMode = 'stack';  L.dateCondensed = false;  L.dateForceU = uDate;
 }
 
 // A6 (extreme landscape): one row of every element, left→right —
