@@ -714,24 +714,27 @@ function applyAwide(L, bounds, headerH, footerH) {
   const leftWall  = (cx - Dx) - er;                      // left column's left edge
   const rightWall = (cx + Dx) + er;                      // right column's right edge
 
-  // DATE: a single stack centred in the lower-left region (under the moon), bottom
-  // a full gap above the footer. Width fits the left region; height capped at 30%
-  // of the content height so it stays secondary (placeholder sizing — TBD).
+  // DATE: SPLIT onto one row at the bottom of the left region — weekday on the
+  // left, condensed month-day/year/tz on the right (A6-style split). One line is
+  // far shorter than a 4-line stack, so the moon clears much more room. The row
+  // is sized to fit the left region width.
   const leftRight = leftWall - gap, leftRegW = leftRight - hp, leftCX = (hp + leftRight) / 2;
-  const REL_BIG=1, REL_YEAR=0.42, REL_SMALL=0.21, LS=1.18, LP=0.10, UNIT_MAX=72, REF=100;
+  const UNIT_MAX=72, REF=100, innerGap=hp;
   const fmt=new Intl.DateTimeFormat('en-US',{weekday:'long',month:'short',day:'numeric',year:'numeric'});
   const parts=fmt.formatToParts(SAMPLE_DATE), get=t=>(parts.find(p=>p.type===t)||{}).value||'';
+  const wkText=get('weekday'), md=`${get('month')} ${get('day')}`, yr=get('year');
   const tz=(new Intl.DateTimeFormat('en-US',{timeZoneName:'short'}).formatToParts(SAMPLE_DATE).find(p=>p.type==='timeZoneName')||{}).value||'';
-  const dlines=[[get('weekday'),REL_BIG],[`${get('month')} ${get('day')}`,REL_BIG],[get('year'),REL_YEAR],[tz,REL_SMALL]].filter(l=>l[0]);
-  let maxLW=0, totH=(dlines.length-1)*LP*REF;
-  for(const [t,r] of dlines){ ctx.font=`${r*REF}px Arial, sans-serif`; const lw=ctx.measureText(t).width; if(lw>maxLW)maxLW=lw; totH+=r*LS*REF; }
-  const uDate=Math.min(UNIT_MAX, REF*leftRegW/maxLW, (0.30*availV)*REF/totH);
-  const dateH=totH/REF*uDate, dateBottom=availV-gap, dateTop=dateBottom-dateH;
-  L.dateMode='stack'; L.dateForceU=undefined; L.dateCondensed=false;
-  L.dateCX=leftCX; L.dateW=leftRegW; L.dateH=dateH; L.dateCY=dateBottom-dateH/2;
+  const r100=measureRowTexts(ctx, wkText, md, yr, tz, '', REF);
+  const u=Math.min(UNIT_MAX, (leftRegW - innerGap) * REF / (r100.weekdayW + r100.dateW));
+  const rm=measureRowTexts(ctx, wkText, md, yr, tz, '', u);
+  const rowW=rm.weekdayW + innerGap + rm.dateW, rowH=u, rowLeft=leftCX - rowW/2;
+  const dateRowCY=availV - gap - rowH/2, dateTop=dateRowCY - rowH/2;
+  L.dateMode='split'; L.dateCondensed=true; L.dateSegCenter=true; L.dateBaselineBottom=undefined; L.dateForceU=u;
+  L.dateCX=rowLeft + rm.weekdayW/2;                        L.dateCY=dateRowCY;  L.dateW=rm.weekdayW+4;  L.dateH=rowH;
+  L.date2CX=rowLeft + rm.weekdayW + innerGap + rm.dateW/2; L.date2CY=dateRowCY;  L.date2W=rm.dateW+4;    L.date2H=rowH;
 
-  // MOON: largest circle (×slider) in the upper-left — clears the left edge (hp),
-  // the header top (full gap), the date below (full gap), and the column wall
+  // MOON: largest circle (×slider) above the date row — clears the left edge (hp),
+  // the header top (full gap), the date row below (full gap), and the column wall
   // (full gap), centred in that box.
   const moonTop=gap, moonBot=dateTop-gap;
   const moonRmax=Math.max(2, Math.min(leftRegW, moonBot-moonTop)/2);
