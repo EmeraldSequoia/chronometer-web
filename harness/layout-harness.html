@@ -133,6 +133,14 @@
     <input type="number" id="asqOuterT" value="0.42" min="0" max="1" step="0.01">
     <input type="range" id="asqOuterTr" value="0.42" min="0" max="1" step="0.01"></div>
   <div class="small">Asq outer-dial position: fraction along the radial from the main-dial rim to the footer's top-left corner where the <b>az</b> dial sits (0 = on the rim, 1 = at the corner, <b>0.5</b> = midway). eot mirrors az across the vertical centreline; alt/ecl mirror az/eot across the dial's horizontal centreline. All at the inner sub-dial size.</div>
+  <div class="row"><label>Awide moon ×max</label>
+    <input type="number" id="awMoonK" value="1" min="0.2" max="1" step="0.01">
+    <input type="range" id="awMoonKr" value="1" min="0.2" max="1" step="0.01"></div>
+  <div class="small">Awide moon size as a fraction of its computed <b>maximum</b> (largest circle clearing the left edge, the alt/az column with a full gap, and the date block below with a full gap). <b>1</b> = the max rule.</div>
+  <div class="row"><label>Awide map ×max</label>
+    <input type="number" id="awMapK" value="1" min="0.2" max="1" step="0.01">
+    <input type="range" id="awMapKr" value="1" min="0.2" max="1" step="0.01"></div>
+  <div class="small">Awide map size as a fraction of its computed <b>maximum</b> (largest 2:1 rect clearing the right edge, header/footer, and the ecl/eot column with a full gap). <b>1</b> = the max rule.</div>
 
   <h2>Overlays</h2>
   <div class="chk"><input type="checkbox" id="oLabels" checked><label for="oLabels" style="flex:1">Labels</label></div>
@@ -678,13 +686,63 @@ function applyA5(L, bounds, headerH, footerH) {
   L.moonCX = moonCX;
 }
 
-// Awide (Ultrawide landscape, aspect ~3.56 / 32:9): NEW anchor between A5 (1.99,
-// iPhone landscape) and A6 (10.0, extreme). A5 stops looking good above ~2.6 but
-// A6's single-row collapse is too aggressive there — this anchor fills the gap.
-// Stub for now (renders the default computeLayout result); rules TBD.
+// Awide (Ultrawide landscape, aspect ~3.56 / 32:9): NEW anchor between A5 (1.99)
+// and A6 (10.0). Strategy: alt/az and ecl/eot in parallel symmetric COLUMNS
+// flanking a centred main dial; the moon (upper-left, with a date below it) and
+// the map (right) grow as large as they can without hitting the columns (full
+// gap) — the date floor applies to the moon only. Two sliders scale moon & map
+// down from their computed maxima.
 function applyAwide(L, bounds, headerH, footerH) {
-  // TODO(ultrawide): define the wide-landscape rules. `bounds` is the content
-  // rect (0,0 → contentW, contentH−footerH). Reuse helpers as needed.
+  const W = bounds.right, availV = bounds.bottom;        // content rect (header/footer dropped)
+  const hp = 0.0125 * W, gap = 2 * hp;                   // halfPad and a "full gap"
+  const cx = W / 2, cy = availV / 2;
+
+  // Main dial: centred, fills the height with a full gap top & bottom.
+  const mainR = Math.max(2, (availV - 2 * gap) / 2);
+  rescaleMain(L, cx, cy, mainR);
+
+  // Outer dials: keep current size; two symmetric columns hugging the dial, each
+  // a vertical pair with a full gap between the two. alt/az left, ecl/eot right.
+  const er = L.altR;                                     // current outer-dial radius (kept)
+  const Dx = mainR + er, Dy = er + hp;                   // column offset; half the pair separation
+  L.azR = er;  L.eotR = er;                              // altR unchanged (ECL draws at altR)
+  L.altCX = cx - Dx;  L.altCY = cy - Dy;                 // upper-left
+  L.azCX  = cx - Dx;  L.azCY  = cy + Dy;                 // lower-left
+  L.eclipseCX = cx + Dx;  L.eclipseCY = cy - Dy;         // upper-right
+  L.eotCX = cx + Dx;  L.eotCY = cy + Dy;                 // lower-right
+
+  const leftWall  = (cx - Dx) - er;                      // left column's left edge
+  const rightWall = (cx + Dx) + er;                      // right column's right edge
+
+  // DATE: a single stack centred in the lower-left region (under the moon), bottom
+  // a full gap above the footer. Width fits the left region; height capped at 30%
+  // of the content height so it stays secondary (placeholder sizing — TBD).
+  const leftRight = leftWall - gap, leftRegW = leftRight - hp, leftCX = (hp + leftRight) / 2;
+  const REL_BIG=1, REL_YEAR=0.42, REL_SMALL=0.21, LS=1.18, LP=0.10, UNIT_MAX=72, REF=100;
+  const fmt=new Intl.DateTimeFormat('en-US',{weekday:'long',month:'short',day:'numeric',year:'numeric'});
+  const parts=fmt.formatToParts(SAMPLE_DATE), get=t=>(parts.find(p=>p.type===t)||{}).value||'';
+  const tz=(new Intl.DateTimeFormat('en-US',{timeZoneName:'short'}).formatToParts(SAMPLE_DATE).find(p=>p.type==='timeZoneName')||{}).value||'';
+  const dlines=[[get('weekday'),REL_BIG],[`${get('month')} ${get('day')}`,REL_BIG],[get('year'),REL_YEAR],[tz,REL_SMALL]].filter(l=>l[0]);
+  let maxLW=0, totH=(dlines.length-1)*LP*REF;
+  for(const [t,r] of dlines){ ctx.font=`${r*REF}px Arial, sans-serif`; const lw=ctx.measureText(t).width; if(lw>maxLW)maxLW=lw; totH+=r*LS*REF; }
+  const uDate=Math.min(UNIT_MAX, REF*leftRegW/maxLW, (0.30*availV)*REF/totH);
+  const dateH=totH/REF*uDate, dateBottom=availV-gap, dateTop=dateBottom-dateH;
+  L.dateMode='stack'; L.dateForceU=undefined; L.dateCondensed=false;
+  L.dateCX=leftCX; L.dateW=leftRegW; L.dateH=dateH; L.dateCY=dateBottom-dateH/2;
+
+  // MOON: largest circle (×slider) in the upper-left — clears the left edge (hp),
+  // the header top (full gap), the date below (full gap), and the column wall
+  // (full gap), centred in that box.
+  const moonTop=gap, moonBot=dateTop-gap;
+  const moonRmax=Math.max(2, Math.min(leftRegW, moonBot-moonTop)/2);
+  L.moonR=(+$('awMoonK').value)*moonRmax;  L.moonCX=leftCX;  L.moonCY=(moonTop+moonBot)/2;
+
+  // MAP: largest 2:1 rect (×slider) on the right — clears the right edge (hp),
+  // header/footer (full gap), and the column wall (full gap), centred.
+  const mapLeft=rightWall+gap, mapRight=W-hp;
+  const mapHmax=Math.max(1, Math.min(availV-2*gap, (mapRight-mapLeft)/2));
+  const mapH=(+$('awMapK').value)*mapHmax;
+  L.earthH=mapH;  L.earthW=2*mapH;  L.earthCX=(mapLeft+mapRight)/2;  L.earthCY=cy;
 }
 
 // Asq (Square, aspect ~1.0): NEW anchor between A3/A3m (~0.7 portrait) and A4
@@ -1087,6 +1145,8 @@ bindPair('a6DialK','a6DialKr',draw);
 bindPair('a6FontK','a6FontKr',draw);
 bindPair('asqMapK','asqMapKr',draw);
 bindPair('asqOuterT','asqOuterTr',draw);
+bindPair('awMoonK','awMoonKr',draw);
+bindPair('awMapK','awMapKr',draw);
 
 // anchor buttons
 const ab=$('anchorBtns');
@@ -1106,7 +1166,7 @@ const ASPECT_SORTED = [...ANCHORS].sort((a,b)=>a.aspect-b.aspect);
 const geoMid = i => Math.sqrt(ASPECT_SORTED[i].aspect * ASPECT_SORTED[i+1].aspect);
 // Chosen thresholds that differ from the log-midpoint default (by `id↔id`). The
 // unlisted transitions keep their geoMid default (which matched Steve's picks).
-const CHOSEN_THRESH = { 'A1↔A2': 0.177, 'A5↔Awide': 2.595 };
+const CHOSEN_THRESH = { 'A1↔A2': 0.177, 'A5↔Awide': 2.595, 'Awide↔A6': 8.687 };
 function anchorForAspect(a){
   for (let i=0;i<ASPECT_SORTED.length-1;i++){ if (a < +$('trans'+i).value) return ASPECT_SORTED[i]; }
   return ASPECT_SORTED[ASPECT_SORTED.length-1];

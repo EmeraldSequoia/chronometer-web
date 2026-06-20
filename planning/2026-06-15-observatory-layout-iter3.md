@@ -336,13 +336,21 @@ Everything below is in the **content rect** but the **main dial is centred in th
 ### Awide — Ultrawide landscape (aspect 3.556, 32:9) 🟡
 *Samples: 1280×360 · 1920×540 · 2560×720 (aspect 3.556).*
 
-**New anchor**, added between A5 (iPhone landscape, 1.99) and A6 (extreme, 10.0). In tuning the A5↔A6 transition, A5's layout stops reading well above **≈2.6** (the `A5↔Awide` threshold is set to **2.595**), but A6's single-row collapse is too aggressive at that aspect — so a dedicated wide-landscape anchor fills the gap. Basis: 32:9 super-ultrawide.
+**New anchor**, added between A5 (iPhone landscape, 1.99) and A6 (extreme, 10.0). In tuning the A5↔A6 transition, A5's layout stops reading well above **≈2.6** (the `A5↔Awide` threshold is set to **2.595**), but A6's single-row collapse is too aggressive until **≈8.687** (the chosen `Awide↔A6` threshold) — so a dedicated wide-landscape anchor fills the gap. Basis: 32:9 super-ultrawide. **Strategy:** alt/az and ecl/eot in **parallel symmetric columns** flanking the main dial at every aspect in range; the moon & map then grow as large as they can around them. First simple cut:
 
 | # | Rule | Value / detail | Driver | Transition |
 |---|---|---|---|---|
-| — | *TBD* | To be tuned in the harness. | — | — |
+| W1 | **Main dial centred, fills height** | Centred (`W/2`, `availV/2`); `mainR = (availV − 2·gap)/2` — a full gap (`2·halfPad`) to the header top and footer bottom. | size | — |
+| W2 | **Outer dials → two symmetric columns** | alt/az on the **left**, ecl/eot on the **right**, **keeping their current (computeLayout) size** `er`. Columns at `x = cx ± (mainR + er)`; each pair stacked symmetrically about `cy` with a **full gap** between the two (`Δy = er + halfPad`). alt = UL, az = LL, ecl = UR, eot = LR. | position | — |
+| W3 | **Moon — largest, around the dials & date** | Largest circle (× **`awMoonK`** slider, default **1** = max) in the **upper-left**, clearing: the left edge (`halfPad`), the alt/az column (**full gap**, treated as a wall), and the **date block below** (full gap). Centred in that box. *(The date floor is what actually binds at canon — moon ends up height-limited.)* | size + tunable | — |
+| W4 | **Map — largest, around the dials** | Largest **2:1** rect (× **`awMapK`** slider, default **1** = max) on the **right**, clearing the right edge (`halfPad`), header/footer (full gap), and the ecl/eot column (**full gap**). Centred vertically on `cy`. The date never constrains it. | size + tunable | — |
+| W5 | **Date — single stack, lower-left** *(placeholder)* | A `stack` block (Friday / Jun 19 / year / PDT) centred in the left region under the moon, bottom a full gap above the footer; width fits the left region, **height capped at 30% of `availV`** so it stays secondary. *Sizing is a placeholder pending a real date rule.* | size | — |
 
-**Implementation:** `applyAwide` stub in the harness (no-op — renders the default `computeLayout` result as a starting point); dispatched from `applyRules`. Sample sizes wired (1280×360 / 1920×540 / 2560×720). The `A5↔Awide` (2.595) and `Awide↔A6` (log-mid 5.963) thresholds are live in the Transitions panel.
+**Implementation:** `applyAwide` in the harness; sliders **`awMoonK`** / **`awMapK`** (moon/map ÷ max). Dispatched from `applyRules`; reuses `rescaleMain`. Thresholds `A5↔Awide` = **2.595** and `Awide↔A6` = **8.687** (both chosen overrides) live in the Transitions panel.
+
+*Verified (harness, canon 1920×540, defaults): main dial centred (960,238) r=190 with a full gap (48) top & bottom; outer dials kept at er=101 in symmetric columns (x=669/1251, Δ to centre 291 each side), full gap (48) between each pair. Moon r=94.6 — height-limited by the date below, clearing it by exactly a full gap (48). Map 496×248 clears the right column by a full gap (48), centred on cy. No console errors.*
+
+**Open:** the moon comes out smaller than the outer dials (the date floor binds) with lots of slack horizontally — by-eye review pending; the **date sizing is a placeholder** (30%-height cap); only canon checked so far.
 
 ### A6 — Extreme landscape (aspect 10.0) ✅
 *Samples: 1000×100 · 1200×120 · 1600×160 (aspect 10).*
@@ -387,7 +395,7 @@ A1 is the **vertical mirror of A6**: the degenerate *portrait* sliver. Chrome is
 
 ## 7. Transitions (filled in after all anchors)
 
-**Anchor selection by aspect (harness "Transitions" panel).** With **Auto-anchor by viewport aspect** on, the active anchor is chosen from the live viewport aspect `W/H`: the eight anchors are sorted by aspect and a **threshold** sits between each adjacent pair; the aspect lands in exactly one band. Each threshold **defaults to the log midpoint** `√(Aₙ·Aₙ₊₁)` (= `exp((ln Aₙ + ln Aₙ₊₁)/2)`) and has a **slider** (range `[Aₙ, Aₙ₊₁]`) to move where the switch happens. Two thresholds are **chosen overrides** of that default (`CHOSEN_THRESH` in the harness): **A1↔A2 = 0.177** and **A5↔Awide = 2.595**; the rest stay at their log midpoints (which matched Steve's picks). Current thresholds (aspect-sorted A1·A2·A3m·A3·Asq·A4·A5·Awide·A6): **0.177 · 0.591 · 0.704 · 0.851 · 1.204 · 1.699 · 2.595 · 5.963**. This is the scrubbing mechanism for tuning the blend rules below; for now the switch is a hard snap at the threshold (blends TBD).
+**Anchor selection by aspect (harness "Transitions" panel).** With **Auto-anchor by viewport aspect** on, the active anchor is chosen from the live viewport aspect `W/H`: the eight anchors are sorted by aspect and a **threshold** sits between each adjacent pair; the aspect lands in exactly one band. Each threshold **defaults to the log midpoint** `√(Aₙ·Aₙ₊₁)` (= `exp((ln Aₙ + ln Aₙ₊₁)/2)`) and has a **slider** (range `[Aₙ, Aₙ₊₁]`) to move where the switch happens. Three thresholds are **chosen overrides** of that default (`CHOSEN_THRESH` in the harness): **A1↔A2 = 0.177**, **A5↔Awide = 2.595**, and **Awide↔A6 = 8.687** (below 8.687 A6's single-row collapse is too aggressive); the rest stay at their log midpoints (which matched Steve's picks). Current thresholds (aspect-sorted A1·A2·A3m·A3·Asq·A4·A5·Awide·A6): **0.177 · 0.591 · 0.704 · 0.851 · 1.204 · 1.699 · 2.595 · 8.687**. This is the scrubbing mechanism for tuning the blend rules below; for now the switch is a hard snap at the threshold (blends TBD).
 
 | Transition | From → To | Blend rule | Notes |
 |---|---|---|---|
@@ -398,7 +406,7 @@ A1 is the **vertical mirror of A6**: the degenerate *portrait* sliver. Chrome is
 | T3b | Asq ↔ A4 | TBD | square → landscape (1.0 → 1.45); the portrait/landscape flip now resolves at the **Asq** anchor rather than mid-transition |
 | T4 | A4 ↔ A5 | TBD | iPad→iPhone landscape: A4's two-column split + two-line date condenses to A5's one-row-per-side + single-line date as the rect shortens |
 | T5a | A5 ↔ Awide | TBD | threshold **2.595** (chosen): A5 stops reading well above ≈2.6 |
-| T5b | Awide ↔ A6 | TBD | threshold log-mid **5.963**: ultrawide finally collapses to A6's single row |
+| T5b | Awide ↔ A6 | TBD | threshold **8.687** (chosen): below it A6's single-row collapse is too aggressive |
 
 ---
 
