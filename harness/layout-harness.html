@@ -700,7 +700,6 @@ function applyAwide(L, bounds, headerH, footerH) {
   const cy = availV / 2;
   const mainR = Math.max(2, availV / 2);                 // FULL height
   const er = L.altR;                                     // outer-dial radius (kept)
-  const Dy = er + hp;                                    // half the vertical pair separation
 
   // DATE sizing (split, shared baseline) — unchanged. The unit comes from the
   // condensed date fitting a *nominal* side region (so the date size is stable as
@@ -722,49 +721,105 @@ function applyAwide(L, bounds, headerH, footerH) {
   const wkInkTop  = baselineY - ctx.measureText(wkText).actualBoundingBoxAscent;   // floors the moon
   const dateInkTop= baselineY - ctx.measureText(md).actualBoundingBoxAscent;       // floors the map
 
-  // MOON & MAP vertical sizes: each centred in its area between the header bottom
-  // (y=0) and the top of its date piece, sized to clear that date by a full gap
-  // (and the header by a full gap). Sliders scale down from that maximum.
-  const moonRmax = Math.max(2, (wkInkTop   - 2*gap) / 2);
-  const moonR    = (+$('awMoonK').value) * moonRmax;
-  const moonCY   = wkInkTop / 2;
-  const mapHmax  = Math.max(1, dateInkTop - 2*gap);
-  const mapH     = (+$('awMapK').value) * mapHmax;
-  const mapW     = 2 * mapH, mapCY = dateInkTop / 2;
+  // MOON & MAP vertical maxima: each centred in its area between the header bottom
+  // (y=0) and the top of its date piece, clearing that date and the header by a
+  // full gap. Sliders scale down. (moonR may be reduced below this if the moon is
+  // horizontally constrained — C1 below.)
+  const moonR_v = Math.max(2, (wkInkTop - 2*gap) / 2) * (+$('awMoonK').value);
+  const moonCY  = wkInkTop / 2;
+  const mapH    = Math.max(1, dateInkTop - 2*gap) * (+$('awMapK').value);
+  const mapW    = 2 * mapH, mapCY = dateInkTop / 2;
 
-  // Horizontal layout: 5 columns with EVEN gaps (2 outer margins + 4 inner). The
-  // two gaps adjacent to the central dial are measured RADIALLY (centre-to-rim
-  // along the connecting line) rather than column-edge-to-edge, so the dial tucks
-  // closer to alt/az & ecl/eot — looks better and frees a little width. With the
-  // pairs at cy±Dy and the dial at cy, the alt/az→dial radial gap is g when the
-  // horizontal centre offset is hOff(g) = √((mainR+er+g)² − Dy²). Solve:
-  //   4g + 2·moonR + 2·er + 2·mapH + 2·hOff(g) = W.
-  const hOff = gg => Math.sqrt(Math.max(0, (mainR + er + gg) ** 2 - Dy ** 2));
-  const span = gg => 4 * gg + 2 * moonR + 2 * er + 2 * mapH + 2 * hOff(gg);
-  let lo = -mainR, hi = W;                                // span increases with g
-  for (let i = 0; i < 64; i++) { const m = (lo + hi) / 2; if (span(m) < W) lo = m; else hi = m; }
-  const g = (lo + hi) / 2, hO = hOff(g);
+  // Horizontal centre offset that yields a radial gap `gg` between a radius-`R`
+  // element and an outer dial (radius er) sitting `vo` px off the connecting axis.
+  const radH = (R, vo, gg) => Math.sqrt(Math.max(0, (R + er + gg) ** 2 - vo ** 2));
+  const solveSpan = fn => { let lo=-mainR, hi=W; for (let i=0;i<70;i++){const m=(lo+hi)/2; if (fn(m)<W) lo=m; else hi=m;} return (lo+hi)/2; };
 
-  // Place left→right. Rule 2: the moon must not cross the window's left edge.
-  const moonCX = Math.max(moonR, g + moonR);
-  const altazX = moonCX + moonR + g + er;                // moon → alt/az : horizontal gap g
-  const dialCX = altazX + hO;                            // alt/az → dial : radial gap g
-  const ecletX = dialCX + hO;                            // dial → ecl/eot : radial gap g
-  const mapCX  = ecletX + er + g + mapH;                 // ecl/eot → map : horizontal gap g
+  // Rule 1 + C1: distribute 5 columns with EVEN gaps; the two gaps adjacent to the
+  // central dial are RADIAL (centre-to-rim). Regime A: alt/az centred on the dial
+  // (cy), moon→alt/az gap horizontal. If that overflows (g<0) the moon is
+  // horizontally constrained → Regime B (C1): shift alt/az UP onto the moon's
+  // centre and make moon↔alt/az radial too; the az dial (nearer cy) binds the
+  // alt/az→dial gap. If even that can't fit the vertical-max moon, pack with g=0
+  // and solve the moon radius.
+  let regimeB = false, moonR = moonR_v, Dy = er + hp;     // Dy = half the pair separation (full gap)
+  const vAz = D => Math.abs(cy - moonCY - D);
+  // In regime B BOTH pairs shift up onto the upper centre (alt/az→moon, ecl/eot→
+  // map, ≈ same height), so the dial↔outer gaps both use the az/eot offset and the
+  // layout stays left-right symmetric.
+  const spanA = (mR, D) => gg => 4*gg + 2*mR + 2*er + 2*mapH + 2*radH(mainR, D, gg);
+  const spanB = (mR, D) => gg => 3*gg + mR + radH(mR, D, gg) + 2*radH(mainR, vAz(D), gg) + er + 2*mapH;
+  let g = solveSpan(spanA(moonR_v, Dy));
+  if (g < 0) {
+    regimeB = true;
+    const gB = solveSpan(spanB(moonR_v, Dy));
+    if (gB >= 0) { g = gB; }
+    else {
+      g = 0;
+      const target = W - er - 2*mapH - 2*radH(mainR, vAz(Dy), 0);
+      let lo=2, hi=W; for (let i=0;i<70;i++){const m=(lo+hi)/2; if (m + radH(m, Dy, 0) < target) lo=m; else hi=m;}
+      moonR = (lo+hi)/2;
+    }
+  }
 
-  // Commit. Dial off-centre at dialCX, full height; pairs centre on cy.
-  rescaleMain(L, dialCX, cy, mainR);
+  // Placement for a given (moonR, Dy, regimeB): solves g, returns column centres.
+  const layout = (moonR, Dy, regimeB) => {
+    const g = Math.max(0, solveSpan(regimeB ? spanB(moonR, Dy) : spanA(moonR, Dy)));
+    const aCY = regimeB ? moonCY : cy;                           // outer-pair centre
+    const dialVo = regimeB ? vAz(Dy) : Dy;                       // binding vertical offset to the dial
+    const moonCX = g + moonR;
+    const altazX = regimeB ? moonCX + radH(moonR, Dy, g)         // radial moon→alt/az
+                           : moonCX + moonR + g + er;            // horizontal moon→alt/az
+    const dialCX = altazX + radH(mainR, dialVo, g);              // radial alt/az→dial
+    const ecletX = dialCX + radH(mainR, dialVo, g);              // radial dial→ecl/eot (symmetric)
+    const mapCX  = ecletX + er + g + mapH;
+    return { g, aCY, moonCX, altazX, dialCX, ecletX, mapCX };
+  };
+
+  // C2/C3: make room for the LONGEST weekday (Wednesday) at the bottom-left.
+  ctx.font = `${u}px Arial, sans-serif`;
+  const wedW = ctx.measureText('Wednesday').width, wkAsc = ctx.measureText('Wednesday').actualBoundingBoxAscent;
+  const fits = (pos, Dy, baseY) => {                            // weekday clears the az dial?
+    const azCY = pos.aCY + Dy, azBottom = azCY + er, azLeft = pos.altazX - er;
+    const vOverlap = (baseY - wkAsc) < azBottom && baseY > azCY - er;
+    const hOverlap = (pos.moonCX + wedW/2) > azLeft;       // weekday ink reaches the az dial
+    return !(vOverlap && hOverlap);
+  };
+  let pos = layout(moonR, Dy, regimeB), baseY = baselineY;
+  // The weekday cascade only applies once the moon is horizontally constrained
+  // (regime B / C1) — that's the context in which alt/az are aligned to the moon.
+  // In the roomy regime A the outer dials flank the dial centre and a marginal
+  // worst-case (Wednesday) overlap is accepted.
+  if (regimeB && !fits(pos, Dy, baseY)) {
+    // C2: reduce the pair gap to the inter-element gap (Dy = er + g/2), which
+    // raises az off the weekday's row.
+    Dy = er + pos.g / 2;
+    pos = layout(moonR, Dy, regimeB);
+    if (!fits(pos, Dy, baseY)) {
+      // C3: move the weekday (and the symmetric date) DOWN until it clears the az
+      // dial, bounded by the bottom guard (availV = footer top, or window bottom
+      // when chrome is dropped). Prefer ≥ halfGap (hp) below the lowest descender.
+      const azBottom = pos.aCY + Dy + er;
+      const hardMax = availV - maxDesc;                         // descender at the very edge
+      baseY = Math.max(baselineY, Math.min(azBottom + wkAsc, hardMax));
+    }
+  }
+
+  // Commit. Dial off-centre at dialCX, full height. Both outer pairs centre at
+  // pos.aCY (cy in regime A; the upper centre in regime B) with the same Dy.
+  rescaleMain(L, pos.dialCX, cy, mainR);
   L.azR = er;  L.eotR = er;                               // altR unchanged (ECL draws at altR)
-  L.altCX = altazX;  L.altCY = cy - Dy;   L.azCX  = altazX;  L.azCY  = cy + Dy;
-  L.eclipseCX = ecletX;  L.eclipseCY = cy - Dy;   L.eotCX = ecletX;  L.eotCY = cy + Dy;
-  L.moonR = moonR;  L.moonCX = moonCX;  L.moonCY = moonCY;
-  L.earthW = mapW;  L.earthH = mapH;  L.earthCX = mapCX;  L.earthCY = mapCY;
+  L.altCX = pos.altazX;  L.altCY = pos.aCY - Dy;   L.azCX = pos.altazX;  L.azCY = pos.aCY + Dy;
+  L.eclipseCX = pos.ecletX;  L.eclipseCY = pos.aCY - Dy;   L.eotCX = pos.ecletX;  L.eotCY = pos.aCY + Dy;
+  L.moonR = moonR;  L.moonCX = pos.moonCX;  L.moonCY = moonCY;
+  L.earthW = mapW;  L.earthH = mapH;  L.earthCX = pos.mapCX;  L.earthCY = mapCY;
 
-  // Date: weekday under the moon, condensed date under the map, shared baseline.
+  // Date: weekday under the moon, condensed date under the map, shared baseline at
+  // baseY (moved down by C3 if needed; date2 mirrors it).
   L.dateMode='split'; L.dateCondensed=true; L.dateSegCenter=false; L.dateForceU=undefined;
-  L.dateBaselineBottom=descBottom;
-  L.dateW=rm.weekdayW; L.dateH=4*u;  L.dateCX=moonCX;  L.dateCY=baselineY;
-  L.date2CX=mapCX; L.date2CY=baselineY;  L.date2W=rm.dateW+4;  L.date2H=4*u;
+  L.dateBaselineBottom = baseY + maxDesc;
+  L.dateW=rm.weekdayW; L.dateH=4*u;  L.dateCX=pos.moonCX;  L.dateCY=baseY;
+  L.date2CX=pos.mapCX; L.date2CY=baseY;  L.date2W=rm.dateW+4;  L.date2H=4*u;
 }
 
 // Asq (Square, aspect ~1.0): NEW anchor between A3/A3m (~0.7 portrait) and A4

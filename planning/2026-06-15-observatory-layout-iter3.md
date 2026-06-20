@@ -352,14 +352,21 @@ Everything below is in the **content rect** but the **main dial is centred in th
 
 *Verified (harness, canon 1920×540, defaults): five columns with **all six gaps = 47.8 px** (even), the two **dial-adjacent gaps radial** (alt→dial = dial→ecl = 47.8, equal to the horizontal gaps) — slightly roomier than the 40.9 from edge-to-edge gaps. Dial **off-centre −133 px**, full height (D = 476 = availV). Moon r=132 centred at cy≈180; map 530×265 centred at cy≈181, bottom clears the date ink top by a full gap. Moon left edge = 47.8 ≥ 0. Date `split`, weekday under the moon & condensed date under the map, shared baseline. No console errors.*
 
-**Pending — tight-aspect cascade (rules to add, near aspect ≈2.6–3.9):**
-- **C1** — when the moon is **constrained by the horizontal gap to alt/az** (not the weekday floor), shift alt/az **up** so their vertical centre aligns with the moon's, and measure the moon↔alt and moon↔az gaps **radially**.
-- **C2** — if the longest weekday (**Wednesday**) doesn't fit in the space to the left of the **bottom of the az dial**, reduce the alt/az **pair gap** (keeping their centre aligned with the moon) until it equals the inter-element gap.
-- **C3** — if Wednesday still doesn't fit, move the **weekday *and* the symmetric date** down as needed; the left and bottom margins may reach the edge, but prefer ≥ `halfGap` to the weekday ink and below the lowest descender.
+**Tight-aspect cascade (regime B, ~aspect < 3.0 — the moon is horizontally constrained):**
+| # | Rule | Value / detail |
+|---|---|---|
+| C1 | **Moon horizontally constrained → align the outer pairs to the upper centre + radial moon gaps** | If regime A (alt/az on `cy`) overflows (`g<0`), the moon is horizontally constrained. Shift **both** outer pairs up onto the upper centre (alt/az → moon, ecl/eot → map, ≈ same height, kept symmetric), and make moon↔alt and moon↔az **radial**. The lower dial (az/eot, nearer `cy`) binds the outer→dial radial gap. If the vertical-max moon still won't fit, **pack with `g=0` and solve the moon radius** (moon shrinks). |
+| C2 | **Wednesday doesn't fit → shrink the pair gap** | If the longest weekday (**Wednesday**) overlaps the az dial, reduce the alt/az **pair gap** (centre kept on the moon) to the inter-element gap (`Dy = er + g/2`), raising az off the weekday's row. *Only evaluated in regime B.* |
+| C3 | **Still doesn't fit → move the date down** | Move the **weekday *and* the symmetric date** down (shared baseline) until the weekday clears the az dial, bounded by the bottom guard (`availV` = footer top, or the **window bottom when chrome is dropped**). Prefer ≥ `halfGap` below the lowest descender; the edge may be reached. |
 
-*(C1–C3 are interdependent and only bind at the low end of Awide's range; to be implemented + verified at a tight aspect next.)*
+*The weekday cascade (C2/C3) is **gated to regime B** — in roomy regime A the outer dials flank the dial centre and a marginal worst-case (Wednesday) overlap is accepted, so canon stays clean.*
 
-**Open:** Steve may reassign aspects ≈3.887 to A6 — wants to see the reduced-map Awide first.
+*Verified (harness): canon 1920×540 → regime A, outer dials on `cy` (113/363), moon r=132, weekday baseline 413 — the clean look. 1728×540 (3.2) → still regime A. 1620×540 (3.0) & 1500×540 (2.78) → regime B: both pairs align to the upper centre (symmetric), moon shrinks (102, 52), weekday nudges down (435, 427).*
+
+**Open:**
+- At the extreme low edge (~aspect 2.6, the A5↔Awide threshold) the moon is packed so small that `moonR+er < Dy` and the radial placement degenerates (alt/az spill past the left edge). Acceptable only as the "this aspect should be A5" signal — Steve may raise the threshold, or this needs a moon-floor / map-shrink clamp.
+- Steve may reassign aspects ≈3.887 to A6 — wants to see the reduced-map Awide first.
+- C1 keeps **ecl/eot symmetric with alt/az** (both shift up) though the rules named only alt/az — by-eye confirm.
 
 ### A6 — Extreme landscape (aspect 10.0) ✅
 *Samples: 1000×100 · 1200×120 · 1600×160 (aspect 10).*
