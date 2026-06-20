@@ -60,6 +60,11 @@
   <div class="btns" id="sampleBtns"></div>
   <div class="small">Sizes for the active anchor (small / canonical / large).</div>
 
+  <h2>Transitions</h2>
+  <div class="chk"><input type="checkbox" id="autoAnchor"><label for="autoAnchor" style="flex:1">Auto-anchor by viewport aspect</label></div>
+  <div class="small">When on, the active anchor is chosen from the current viewport aspect (W/H) — drag Width/Height to scrub across the transition thresholds below. Each threshold defaults to the <b>log midpoint</b> √(Aₙ·Aₙ₊₁) between adjacent anchors; the slider moves where the switch happens.</div>
+  <div id="transRows"></div>
+
   <h2>Footer chrome</h2>
   <div class="row"><label>Footer h</label>
     <input type="number" id="footer" value="32" min="0" max="200" step="1">
@@ -250,6 +255,12 @@ function measureJ(L, W, H) {
 
 function draw() {
   const W = +$('w').value, H = +$('h').value;
+  // Transition mode: pick the active anchor from the viewport aspect (W/H) using
+  // the per-transition thresholds, so dragging the viewport scrubs across them.
+  if ($('autoAnchor') && $('autoAnchor').checked) {
+    const picked = anchorForAspect(W / H);
+    if (picked !== activeAnchor) { activeAnchor = picked; renderAnchorButtons(); renderSampleButtons(); }
+  }
   cv.width = W; cv.height = H;
   // scale to fit the stage
   const stage = $('stage').getBoundingClientRect();
@@ -723,7 +734,12 @@ function applyAsq(L, bounds, headerH, footerH) {
   // centre, each centred horizontally in its side space.
   const mapLeft = cx - mapW / 2, mapRight = cx + mapW / 2;
   L.moonCX = mapLeft / 2;             L.moonCY = mapCY;
-  L.dateCX = (mapRight + W) / 2;      L.dateCY = mapCY;
+  // Date: a single STACK block (computeLayout picks 'split' at this aspect, which
+  // would strand the month-day/year box at its default spot — over EOT). Force a
+  // stacked block centred in the right-of-map region, a halfPad inside each edge.
+  L.dateMode = 'stack';  L.dateForceU = undefined;  L.dateCondensed = false;
+  L.dateCX = (mapRight + W) / 2;     L.dateCY = mapCY;
+  L.dateW = Math.max(2, (W - mapRight) - 2 * halfPad);  L.dateH = mapH;
 }
 
 // A1 (extreme portrait, aspect ~0.10): the vertical mirror of A6. One COLUMN,
@@ -1069,6 +1085,29 @@ ANCHORS.forEach(a => {
   ab.appendChild(b);
 });
 function renderAnchorButtons(){ [...ab.children].forEach((b,i)=>b.classList.toggle('on',ANCHORS[i]===activeAnchor)); }
+
+// ---- transitions: auto-pick the anchor from viewport aspect ----------------
+// Anchors sorted by aspect; a threshold sits between each adjacent pair. Default
+// threshold = the LOG midpoint √(Aₙ·Aₙ₊₁) (= exp((ln Aₙ + ln Aₙ₊₁)/2)). A slider
+// per transition moves it.
+const ASPECT_SORTED = [...ANCHORS].sort((a,b)=>a.aspect-b.aspect);
+const geoMid = i => Math.sqrt(ASPECT_SORTED[i].aspect * ASPECT_SORTED[i+1].aspect);
+function anchorForAspect(a){
+  for (let i=0;i<ASPECT_SORTED.length-1;i++){ if (a < +$('trans'+i).value) return ASPECT_SORTED[i]; }
+  return ASPECT_SORTED[ASPECT_SORTED.length-1];
+}
+const tr=$('transRows');
+ASPECT_SORTED.slice(0,-1).forEach((a,i)=>{
+  const lo=a.aspect, hi=ASPECT_SORTED[i+1].aspect, mid=geoMid(i);
+  const step=Math.max(0.001, +((hi-lo)/300).toPrecision(2));
+  const row=document.createElement('div'); row.className='row';
+  row.innerHTML=`<label>${a.id}↔${ASPECT_SORTED[i+1].id}</label>`
+    +`<input type="number" id="trans${i}"  value="${mid.toFixed(3)}" min="${lo}" max="${hi}" step="${step}">`
+    +`<input type="range"  id="trans${i}r" value="${mid.toFixed(3)}" min="${lo}" max="${hi}" step="${step}">`;
+  tr.appendChild(row);
+  bindPair(`trans${i}`,`trans${i}r`,draw);
+});
+$('autoAnchor').addEventListener('change',draw);
 
 // sample buttons
 const sb=$('sampleBtns');

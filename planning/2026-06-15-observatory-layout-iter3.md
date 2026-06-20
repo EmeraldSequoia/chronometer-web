@@ -286,14 +286,14 @@ The **A3 ↔ A3m** map-expansion and date-shrink interpolate across aspect (≈0
 | Q1 | **Map sized by slider** | Map **width = `asqMapK · W`** (harness slider, **chosen 0.37**), 2:1 so `mapH = ½·mapW`. The map is one of the two primary elements; everything else is sized around it. | tunable | — |
 | Q2 | **Main dial maximised under the gap budget** | Vertical tiling, top→bottom: **header · gap · MAP · gap · DIAL · gap · footer**, each *gap* a full `2·halfPad`. The main dial is as big as that leaves: **`dialD = availV − mapH − 3·(2·halfPad)`** (`availV = H − headerH − footerH`); `mainR = dialD/2`. So there's a full gap between the footer top and the dial bottom, a full gap between the dial and the map, and a full gap between the map and the header bottom. | size | — |
 | Q3 | **Map & dial centred horizontally** | Both on **`W/2`**. | — | — |
-| Q4 | **Moon & date flank the map** | Their **vertical centres = the map's vertical centre**; each is **centred horizontally in its side space** — moon in the gap left of the map (`cx = mapLeft/2`), date in the gap right of the map (`cx = (mapRight + W)/2`). *(Sizes unchanged for now — position only.)* | — | — |
+| Q4 | **Moon & date flank the map** | Their **vertical centres = the map's vertical centre**; each is **centred horizontally in its side space** — moon in the gap left of the map (`cx = mapLeft/2`), date in the gap right of the map (`cx = (mapRight + W)/2`). The **date is a single `stack` block** (Friday / Jun 19 / year / PDT) sized to the right-of-map region (`dateW = (W − mapRight) − 2·halfPad`, `dateH = mapH`) — forced because computeLayout picks `split` at this aspect, which would strand the month-day/year box over EOT. Moon size unchanged (computeLayout default). | — | — |
 | Q5 | **Outer dials → "centred in their corner", inner-dial size** | **az** (lower-left) anchors the four. Draw the radial from the **main centre to the footer's top-left corner** `(0, availV)`; it crosses the rim at distance `mainR`. The az **centre sits a slider-fraction `asqOuterT` along the gap** between that rim crossing and the corner: `dist = mainR + asqOuterT·(|corner−centre| − mainR)` (**chosen 0.42**; 0 = on the rim, 1 = at the corner, 0.5 = midway). **eot** mirrors az across the vertical centreline (`x = cx`); **alt/ecl** mirror az/eot across the dial's horizontal centreline (`y = dialCY`). All at the inner sub-dial radius **`subR = 0.2·mainR`**. *(Supersedes the earlier 45°-tangent idea — that was the wrong constraint.)* | size + tunable | — |
 
 **Implementation:** `applyAsq` in the harness; sliders **`asqMapK`** ("Asq map ÷ W", **0.37**) and **`asqOuterT`** ("Asq outer %", **0.42**); reuses `rescaleMain` (main dial + proportional inner sub-dials). Dispatched from `applyRules`. Sample sizes wired (820/1024/1280 square). The two sliders are enough to nail the layout (chosen by eye).
 
 *Verified (harness, canon 1024×1024, chosen `asqMapK = 0.37`, `asqOuterT = 0.42`): map 378.9×189.4 centred on 512 (cy = 120.3); the three full gaps each = `2·halfPad` = 25.6 (header→map, map→dial, dial→footer); main dial `mainR = 346.9`, centred on 512 (cy = 587.5). Moon & date centres on the map's centre, at cx = 161.3 / 862.7. az = (134.3, 862.3) on the centre→corner radial at 0.42 of the rim→corner gap; eot/alt/ecl its exact mirrors; all radius 69.4 = 0.2·mainR. No console errors.*
 
-**Open / not yet specified:** moon & date **sizes** (kept at the computeLayout defaults — position only, per the instruction); the **date mode** for this anchor; sample-size robustness (only canon checked by eye so far).
+**Open / not yet specified:** moon **size** (kept at the computeLayout default — position only, per the instruction); sample-size robustness (only canon checked by eye so far). *(Date mode resolved — forced `stack`, see Q4.)*
 
 ### A4 — iPad landscape (aspect 1.45) ✅
 *Safe rect = reciprocal of A3; canonical ~1710×1180. Variations: 1.333 (13"), 1.523 (mini).*
@@ -373,6 +373,8 @@ A1 is the **vertical mirror of A6**: the degenerate *portrait* sliver. Chrome is
 ---
 
 ## 7. Transitions (filled in after all anchors)
+
+**Anchor selection by aspect (harness "Transitions" panel).** With **Auto-anchor by viewport aspect** on, the active anchor is chosen from the live viewport aspect `W/H`: the eight anchors are sorted by aspect and a **threshold** sits between each adjacent pair; the aspect lands in exactly one band. Each threshold **defaults to the log midpoint** `√(Aₙ·Aₙ₊₁)` (= `exp((ln Aₙ + ln Aₙ₊₁)/2)`) and has a **slider** (range `[Aₙ, Aₙ₊₁]`) to move where the switch happens. Default thresholds (aspect-sorted A1·A2·A3m·A3·Asq·A4·A5·A6): **0.226 · 0.591 · 0.704 · 0.851 · 1.204 · 1.699 · 4.461**. This is the scrubbing mechanism for tuning the blend rules below; for now the switch is a hard snap at the threshold (blends TBD).
 
 | Transition | From → To | Blend rule | Notes |
 |---|---|---|---|
