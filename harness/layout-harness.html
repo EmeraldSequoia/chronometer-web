@@ -121,9 +121,13 @@
     <input type="range" id="a6FontKr" value="0.35" min="0.1" max="0.8" step="0.01"></div>
   <div class="small">A6 primary font ("Friday", "Jun 19") as a fraction of the <b>outer-dial diameter</b> (so it tracks the outer-dial size at every sample). 2026/PDT stay proportional to it.</div>
   <div class="row"><label>Asq map ÷ W</label>
-    <input type="number" id="asqMapK" value="0.45" min="0.1" max="0.9" step="0.01">
-    <input type="range" id="asqMapKr" value="0.45" min="0.1" max="0.9" step="0.01"></div>
+    <input type="number" id="asqMapK" value="0.37" min="0.1" max="0.9" step="0.01">
+    <input type="range" id="asqMapKr" value="0.37" min="0.1" max="0.9" step="0.01"></div>
   <div class="small">Asq (square) map <b>width</b> as a fraction of the window width (map is 2:1, so mapH = ½·mapW). The main dial then fills the remaining height with a full gap (2·halfPad) above (to the map), below (to the footer top), and the map keeps the same gap to the header bottom.</div>
+  <div class="row"><label>Asq outer %</label>
+    <input type="number" id="asqOuterT" value="0.42" min="0" max="1" step="0.01">
+    <input type="range" id="asqOuterTr" value="0.42" min="0" max="1" step="0.01"></div>
+  <div class="small">Asq outer-dial position: fraction along the radial from the main-dial rim to the footer's top-left corner where the <b>az</b> dial sits (0 = on the rim, 1 = at the corner, <b>0.5</b> = midway). eot mirrors az across the vertical centreline; alt/ecl mirror az/eot across the dial's horizontal centreline. All at the inner sub-dial size.</div>
 
   <h2>Overlays</h2>
   <div class="chk"><input type="checkbox" id="oLabels" checked><label for="oLabels" style="flex:1">Labels</label></div>
@@ -673,8 +677,9 @@ function applyA5(L, bounds, headerH, footerH) {
 //     header bottom.
 //   • moon (left of map) & date (right of map): vertical centres on the map's
 //     centre, each centred horizontally in the space beside the map.
-//   • alt/ecl/az/eot: exact 45° corners around the main centre, tangent to the
-//     rim, sized to the inner sub-dials (subR).
+//   • alt/ecl/az/eot (inner-sub-dial size): az sits a slider-fraction along the
+//     radial from the rim to the footer's top-left corner; the other three are
+//     its mirror images (across x=cx and y=dialCY).
 function applyAsq(L, bounds, headerH, footerH) {
   const W = bounds.right;
   const availV = bounds.bottom;              // header-bottom (0) → footer-top
@@ -696,14 +701,23 @@ function applyAsq(L, bounds, headerH, footerH) {
   L.earthW = mapW;  L.earthH = mapH;  L.earthCX = cx;  L.earthCY = mapCY;
   rescaleMain(L, cx, dialCY, mainR);                   // main dial + inner sub-dials
 
-  // Outer dials → exact 45° around the main centre, tangent to the rim, expanded
-  // to the inner sub-dial size. ECL draws at L.altR; EOT at eotR; AZ at azR.
+  // Outer dials, sized to the inner sub-dials. az (lower-left) anchors the four:
+  // draw a radial from the main centre to the footer's top-left corner; az sits a
+  // slider-fraction `t` along the gap between where that radial crosses the rim
+  // and the corner (t=0 rim, t=1 corner, 0.5 midway). eot mirrors az across the
+  // vertical centreline (x=cx); alt/ecl mirror az/eot across the dial's horizontal
+  // centreline (y=dialCY). ECL draws at L.altR; EOT at eotR; AZ at azR.
   const subR = L.subR;                                 // = 0.2·mainR after rescaleMain
-  const d = (mainR + subR) / Math.SQRT2;               // equal x/y offset for a 45° tangent
-  L.altR = subR;  L.altCX = cx - d;  L.altCY = dialCY - d;   // upper-left
-                  L.eclipseCX = cx + d;  L.eclipseCY = dialCY - d;   // upper-right
-  L.azR  = subR;  L.azCX  = cx - d;  L.azCY  = dialCY + d;   // lower-left
-  L.eotR = subR;  L.eotCX  = cx + d;  L.eotCY  = dialCY + d;   // lower-right
+  const t = +$('asqOuterT').value;
+  const vx = bounds.left - cx, vy = bounds.bottom - dialCY;   // centre → footer top-left corner
+  const vlen = Math.hypot(vx, vy);
+  const dist = mainR + t * (vlen - mainR);             // rim → corner, t along the gap
+  const azCX = cx + dist * vx / vlen, azCY = dialCY + dist * vy / vlen;
+  L.altR = subR;  L.azR = subR;  L.eotR = subR;
+  L.azCX = azCX;            L.azCY = azCY;                       // lower-left (anchor)
+  L.eotCX = 2 * cx - azCX;  L.eotCY = azCY;                      // lower-right (mirror x)
+  L.altCX = azCX;           L.altCY = 2 * dialCY - azCY;         // upper-left (mirror y)
+  L.eclipseCX = 2 * cx - azCX;  L.eclipseCY = 2 * dialCY - azCY; // upper-right (mirror x+y)
 
   // Moon (left of map) & date (right of map): centres on the map's vertical
   // centre, each centred horizontally in its side space.
@@ -1044,6 +1058,7 @@ bindPair('a3DialGap','a3DialGapr',draw);
 bindPair('a6DialK','a6DialKr',draw);
 bindPair('a6FontK','a6FontKr',draw);
 bindPair('asqMapK','asqMapKr',draw);
+bindPair('asqOuterT','asqOuterTr',draw);
 
 // anchor buttons
 const ab=$('anchorBtns');
