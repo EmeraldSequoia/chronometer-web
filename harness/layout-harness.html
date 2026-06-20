@@ -732,16 +732,25 @@ function applyAwide(L, bounds, headerH, footerH) {
   const mapH     = (+$('awMapK').value) * mapHmax;
   const mapW     = 2 * mapH, mapCY = dateInkTop / 2;
 
-  // Horizontal layout: 5 columns with EVEN gaps (2 outer margins + 4 inner).
-  const widths = [2*moonR, 2*er, 2*mainR, 2*er, mapW];   // moon · alt/az · dial · ecl/eot · map
-  const g = (W - widths.reduce((a,b)=>a+b,0)) / 6;
-  let x = g;
-  const place = w => { const c = x + w/2; x += w + g; return c; };
-  const moonCX = place(widths[0]);
-  const altazX = place(widths[1]);
-  const dialCX = place(widths[2]);
-  const ecletX = place(widths[3]);
-  const mapCX  = place(widths[4]);
+  // Horizontal layout: 5 columns with EVEN gaps (2 outer margins + 4 inner). The
+  // two gaps adjacent to the central dial are measured RADIALLY (centre-to-rim
+  // along the connecting line) rather than column-edge-to-edge, so the dial tucks
+  // closer to alt/az & ecl/eot — looks better and frees a little width. With the
+  // pairs at cy±Dy and the dial at cy, the alt/az→dial radial gap is g when the
+  // horizontal centre offset is hOff(g) = √((mainR+er+g)² − Dy²). Solve:
+  //   4g + 2·moonR + 2·er + 2·mapH + 2·hOff(g) = W.
+  const hOff = gg => Math.sqrt(Math.max(0, (mainR + er + gg) ** 2 - Dy ** 2));
+  const span = gg => 4 * gg + 2 * moonR + 2 * er + 2 * mapH + 2 * hOff(gg);
+  let lo = -mainR, hi = W;                                // span increases with g
+  for (let i = 0; i < 64; i++) { const m = (lo + hi) / 2; if (span(m) < W) lo = m; else hi = m; }
+  const g = (lo + hi) / 2, hO = hOff(g);
+
+  // Place left→right. Rule 2: the moon must not cross the window's left edge.
+  const moonCX = Math.max(moonR, g + moonR);
+  const altazX = moonCX + moonR + g + er;                // moon → alt/az : horizontal gap g
+  const dialCX = altazX + hO;                            // alt/az → dial : radial gap g
+  const ecletX = dialCX + hO;                            // dial → ecl/eot : radial gap g
+  const mapCX  = ecletX + er + g + mapH;                 // ecl/eot → map : horizontal gap g
 
   // Commit. Dial off-centre at dialCX, full height; pairs centre on cy.
   rescaleMain(L, dialCX, cy, mainR);

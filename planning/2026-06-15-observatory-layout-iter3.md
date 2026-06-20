@@ -340,7 +340,8 @@ Everything below is in the **content rect** but the **main dial is centred in th
 
 | # | Rule | Value / detail | Driver | Transition |
 |---|---|---|---|---|
-| W1 | **Five columns, even gaps** | Left→right: **moon · alt/az · MAIN DIAL · ecl/eot · map**, laid out with **even gaps** — `g = (W − Σwidths)/6` applied as the two outer margins **and** the four inter-column gaps. Column widths: `2·moonR`, `2·er`, `2·mainR`, `2·er`, `mapW`. Because moon & map columns differ in width, **the dial sits off-centre** (≈ −133 px at canon) — accepted. | size | — |
+| W1 | **Five columns, even gaps (radial at the dial)** | Left→right: **moon · alt/az · MAIN DIAL · ecl/eot · map**, with **even gaps** as the two outer margins **and** the four inter-column gaps. The two gaps **adjacent to the central dial are measured radially** (centre-to-rim along the connecting line), so the dial tucks closer to alt/az & ecl/eot — looks better and frees a little width. With the pairs at `cy±Dy` and the dial at `cy`, the radial gap is `g` when the horizontal centre offset is `hOff(g) = √((mainR+er+g)² − Dy²)`; solve `4g + 2·moonR + 2·er + 2·mapH + 2·hOff(g) = W` (binary search). Because moon & map columns differ in width, **the dial sits off-centre** (≈ −133 px at canon) — accepted. | size | — |
+| W1b | **Moon clears the left edge** | The moon's left edge ≥ 0 (`moonCX = max(moonR, g+moonR)`) — it can't run off the window. | position | — |
 | W2 | **Main dial FULL height (always)** | **`mainR = availV/2`** — diameter = content height, touching the header bottom and footer top. Vertically centred (`cy = availV/2`); its X comes from the column layout (W1). **Stays full-height across the whole range** (a width constraint may be added later). | size | — |
 | W3 | **Outer dials → columns flanking the dial** | alt/az and ecl/eot **keep their current (computeLayout) size** `er`; each is a vertical pair centred on `cy` with a **full gap** between the two (`Δy = er + halfPad`). alt = UL, az = LL, ecl = UR, eot = LR. They're the 2nd and 4th columns (W1). | position | — |
 | W4 | **Moon — sized by the weekday floor** | Circle (× **`awMoonK`** slider, default **1** = max). **Centred vertically in its area** between the header bottom (`y = 0`) and the **weekday ink top**; max radius `(wkInkTop − 2·gap)/2` so it clears the weekday and header each by a full gap. Its column width (`2·moonR`) feeds W1. | size + tunable | — |
@@ -349,9 +350,16 @@ Everything below is in the **content rect** but the **main dial is centred in th
 
 **Implementation:** `applyAwide` in the harness; sliders **`awMoonK`** / **`awMapK`** (moon/map ÷ max). Dispatched from `applyRules`; reuses `rescaleMain`. Thresholds `A5↔Awide` = **2.595** and `Awide↔A6` = **8.687** (both chosen overrides) live in the Transitions panel.
 
-*Verified (harness, canon 1920×540, defaults): five columns with **all six gaps = 40.9 px** (even); dial **off-centre −133 px**, full height (D = 476 = availV). Moon r=132 centred at cy≈180; map 530×265 centred at cy≈181, **bottom 313 clears the date ink top (361) by a full gap (48)** — date-overlap constraint holds. Date `split`, weekday under the moon & condensed date under the map (both deltas = 0), shared baseline. No console errors.*
+*Verified (harness, canon 1920×540, defaults): five columns with **all six gaps = 47.8 px** (even), the two **dial-adjacent gaps radial** (alt→dial = dial→ecl = 47.8, equal to the horizontal gaps) — slightly roomier than the 40.9 from edge-to-edge gaps. Dial **off-centre −133 px**, full height (D = 476 = availV). Moon r=132 centred at cy≈180; map 530×265 centred at cy≈181, bottom clears the date ink top by a full gap. Moon left edge = 47.8 ≥ 0. Date `split`, weekday under the moon & condensed date under the map, shared baseline. No console errors.*
 
-**Open:** by-eye review pending; only canon checked so far. Steve may reassign aspects ≈3.887 to A6 — wants to see the reduced-map Awide first. The even-gap rule can go into overlap (negative `g`) if moon+map+dial+columns exceed `W`; not yet clamped.
+**Pending — tight-aspect cascade (rules to add, near aspect ≈2.6–3.9):**
+- **C1** — when the moon is **constrained by the horizontal gap to alt/az** (not the weekday floor), shift alt/az **up** so their vertical centre aligns with the moon's, and measure the moon↔alt and moon↔az gaps **radially**.
+- **C2** — if the longest weekday (**Wednesday**) doesn't fit in the space to the left of the **bottom of the az dial**, reduce the alt/az **pair gap** (keeping their centre aligned with the moon) until it equals the inter-element gap.
+- **C3** — if Wednesday still doesn't fit, move the **weekday *and* the symmetric date** down as needed; the left and bottom margins may reach the edge, but prefer ≥ `halfGap` to the weekday ink and below the lowest descender.
+
+*(C1–C3 are interdependent and only bind at the low end of Awide's range; to be implemented + verified at a tight aspect next.)*
+
+**Open:** Steve may reassign aspects ≈3.887 to A6 — wants to see the reduced-map Awide first.
 
 ### A6 — Extreme landscape (aspect 10.0) ✅
 *Samples: 1000×100 · 1200×120 · 1600×160 (aspect 10).*
