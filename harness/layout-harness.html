@@ -173,6 +173,8 @@ const ANCHORS = [
     samples:[[1190,820],[1710,1180],[2174,1500]] },
   { id:'A5', name:'iPhone landscape', aspect:1.99, w:814, h:409,
     samples:[[700,352,'small'],[814,409,'canon'],[1000,503,'large']] },   // safe rect (932×430 − insets 0/59/21/59), ≈ recip. of A2
+  { id:'Awide', name:'Ultrawide landscape (32:9)', aspect:3.556, w:1920, h:540,
+    samples:[[1280,360,'small'],[1920,540,'canon'],[2560,720,'large']] },   // NEW: between A5 (1.99) and A6 (10) — rules TBD
   { id:'A6', name:'Extreme landscape',aspect:10.0, w:1200, h:120,
     samples:[[1000,100,'small'],[1200,120,'canon'],[1600,160,'large']] },
 ];
@@ -676,6 +678,15 @@ function applyA5(L, bounds, headerH, footerH) {
   L.moonCX = moonCX;
 }
 
+// Awide (Ultrawide landscape, aspect ~3.56 / 32:9): NEW anchor between A5 (1.99,
+// iPhone landscape) and A6 (10.0, extreme). A5 stops looking good above ~2.6 but
+// A6's single-row collapse is too aggressive there — this anchor fills the gap.
+// Stub for now (renders the default computeLayout result); rules TBD.
+function applyAwide(L, bounds, headerH, footerH) {
+  // TODO(ultrawide): define the wide-landscape rules. `bounds` is the content
+  // rect (0,0 → contentW, contentH−footerH). Reuse helpers as needed.
+}
+
 // Asq (Square, aspect ~1.0): NEW anchor between A3/A3m (~0.7 portrait) and A4
 // (1.45 landscape). Driven by two primary elements — the map (sized by a slider)
 // and the main dial (maximised in the leftover height) — with everything else
@@ -932,6 +943,7 @@ function applyA6(L, bounds, headerH, footerH) {
 function applyRules(L, anchorId, bounds, footerH, headerH) {
   if (anchorId === 'A1')  { applyA1(L, bounds, headerH, footerH); return; }
   if (anchorId === 'Asq') { applyAsq(L, bounds, headerH, footerH); return; }
+  if (anchorId === 'Awide') { applyAwide(L, bounds, headerH, footerH); return; }
   if (anchorId === 'A3')  { applyA3Common(L, bounds); return; }
   if (anchorId === 'A3m') { applyA3Mini(L, bounds); return; }
   if (anchorId === 'A4')  { if ($('oA4Sym').checked) applyA4Dials(L); return; }
@@ -1092,13 +1104,17 @@ function renderAnchorButtons(){ [...ab.children].forEach((b,i)=>b.classList.togg
 // per transition moves it.
 const ASPECT_SORTED = [...ANCHORS].sort((a,b)=>a.aspect-b.aspect);
 const geoMid = i => Math.sqrt(ASPECT_SORTED[i].aspect * ASPECT_SORTED[i+1].aspect);
+// Chosen thresholds that differ from the log-midpoint default (by `id↔id`). The
+// unlisted transitions keep their geoMid default (which matched Steve's picks).
+const CHOSEN_THRESH = { 'A1↔A2': 0.177, 'A5↔Awide': 2.595 };
 function anchorForAspect(a){
   for (let i=0;i<ASPECT_SORTED.length-1;i++){ if (a < +$('trans'+i).value) return ASPECT_SORTED[i]; }
   return ASPECT_SORTED[ASPECT_SORTED.length-1];
 }
 const tr=$('transRows');
 ASPECT_SORTED.slice(0,-1).forEach((a,i)=>{
-  const lo=a.aspect, hi=ASPECT_SORTED[i+1].aspect, mid=geoMid(i);
+  const lo=a.aspect, hi=ASPECT_SORTED[i+1].aspect;
+  const mid=CHOSEN_THRESH[`${a.id}↔${ASPECT_SORTED[i+1].id}`] ?? geoMid(i);
   const step=Math.max(0.001, +((hi-lo)/300).toPrecision(2));
   const row=document.createElement('div'); row.className='row';
   row.innerHTML=`<label>${a.id}↔${ASPECT_SORTED[i+1].id}</label>`

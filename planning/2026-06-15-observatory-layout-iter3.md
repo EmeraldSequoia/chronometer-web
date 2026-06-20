@@ -1,7 +1,7 @@
 # Observatory Layout — Iteration 3 (Design Points & Transitions)
 
 **Date:** 2026-06-15
-**Status:** 🟡 In progress — A1, A2, A3, A3m, A4, A5, A6 ✅ complete; **Asq (square, aspect 1.0) added — rules TBD** (new anchor between A3/A3m and A4); transitions §7 pending.
+**Status:** 🟡 In progress — A1, A2, A3, A3m, A4, A5, A6 ✅ complete; **Asq (square, 1.0) tuned**; **Awide (ultrawide, 3.556) added — rules TBD** (new anchor between A5 and A6); transition **auto-switch + thresholds** wired (§7), per-transition blend rules pending.
 **Parents:**
 - [2026-06-06-observatory-phase-8-layout.md](2026-06-06-observatory-phase-8-layout.md) — adaptive two-template engine
 - [2026-06-10-observatory-phase-8b-layout-refinement.md](2026-06-10-observatory-phase-8b-layout-refinement.md) — refinements R1–R6
@@ -109,6 +109,7 @@ see §0.)
 | Asq | **Square** | **1.0** | 1024×1024 | **NEW** — neither-portrait-nor-landscape. Sits between A3/A3m (~0.7) and A4 (1.45); the rules are expected to differ significantly from both, so it's its own anchor rather than an A3↔A4 interpolation. *Rules TBD.* |
 | A4 | **iPad landscape** | **1.45** | ~1700×1180 | Reciprocal of A3. Variations: **1.333** (13"), **1.523** (mini). |
 | A5 | **iPhone landscape** | **1.99** | 814×409 | **Safe rect** (932×430 − insets 0/59/21/59); ≈ reciprocal of A2 (1/0.512 = 1.95). *(Physical 932×430 = 2.168 — the edge-inclusive size — is **not** the anchor.)* |
+| Awide | **Ultrawide landscape** | **3.556** | 1920×540 | **NEW** (32:9 super-ultrawide). A5 stops looking good above ≈2.6, but A6's single-row collapse is too aggressive there — Awide fills the gap. *Rules TBD.* |
 | A6 | **Extreme landscape** | **10.0** | — | Widest we support. Expectation: degrade to ~one element per column. |
 
 ### 2.1 Sample sizes per anchor (size axis)
@@ -125,6 +126,7 @@ For each anchor we tune at a **small / canonical / large** sample to test the
 | Asq square | 820×820 | 1024×1024 | 1280×1280 |
 | A4 iPad landscape | 1190×820 | 1710×1180 | 2174×1500 |
 | A5 iPhone landscape | 700×352 | 814×409 | 1000×503 |
+| Awide ultrawide (32:9) | 1280×360 | 1920×540 | 2560×720 |
 | A6 extreme landscape | 1000×100 | 1200×120 | 1600×160 |
 
 ### 2.2 Safe insets → safe-rect dimensions
@@ -164,7 +166,7 @@ safe rect, so nothing bleeds. Nothing is placed in unsafe areas.)*
 
 ## 4. The per-anchor tuning loop
 
-For each anchor, in order A2 → A3 → A4 → A5 → A6 → A1 → Asq (start with the known-good
+For each anchor, in order A2 → A3 → A4 → A5 → A6 → A1 → Asq → Awide (start with the known-good
 iPhone portrait, end with the extremes):
 
 1. **Harness** renders the *committed* layout at the anchor's aspect, with live
@@ -331,6 +333,17 @@ Everything below is in the **content rect** but the **main dial is centred in th
 
 **Implementation notes:** the shared `condensedDateLayout(ctx, weekday, boxW, boxH, descenderBottomY)` (in `date-view.ts`) returns `{u, baselineY, top}` and is the **single source** used by both the renderer (to draw) and the layout (to place the dials), so dial geometry and rendered text agree. `drawBlock` gained `forceU`/`baselineY`/`segCenter` and returns `{u, baselineY}`. New `LayoutParams`: `dateCondensed`, `dateSegCenter`, `dateBaselineBottom`.
 
+### Awide — Ultrawide landscape (aspect 3.556, 32:9) 🟡
+*Samples: 1280×360 · 1920×540 · 2560×720 (aspect 3.556).*
+
+**New anchor**, added between A5 (iPhone landscape, 1.99) and A6 (extreme, 10.0). In tuning the A5↔A6 transition, A5's layout stops reading well above **≈2.6** (the `A5↔Awide` threshold is set to **2.595**), but A6's single-row collapse is too aggressive at that aspect — so a dedicated wide-landscape anchor fills the gap. Basis: 32:9 super-ultrawide.
+
+| # | Rule | Value / detail | Driver | Transition |
+|---|---|---|---|---|
+| — | *TBD* | To be tuned in the harness. | — | — |
+
+**Implementation:** `applyAwide` stub in the harness (no-op — renders the default `computeLayout` result as a starting point); dispatched from `applyRules`. Sample sizes wired (1280×360 / 1920×540 / 2560×720). The `A5↔Awide` (2.595) and `Awide↔A6` (log-mid 5.963) thresholds are live in the Transitions panel.
+
 ### A6 — Extreme landscape (aspect 10.0) ✅
 *Samples: 1000×100 · 1200×120 · 1600×160 (aspect 10).*
 
@@ -374,7 +387,7 @@ A1 is the **vertical mirror of A6**: the degenerate *portrait* sliver. Chrome is
 
 ## 7. Transitions (filled in after all anchors)
 
-**Anchor selection by aspect (harness "Transitions" panel).** With **Auto-anchor by viewport aspect** on, the active anchor is chosen from the live viewport aspect `W/H`: the eight anchors are sorted by aspect and a **threshold** sits between each adjacent pair; the aspect lands in exactly one band. Each threshold **defaults to the log midpoint** `√(Aₙ·Aₙ₊₁)` (= `exp((ln Aₙ + ln Aₙ₊₁)/2)`) and has a **slider** (range `[Aₙ, Aₙ₊₁]`) to move where the switch happens. Default thresholds (aspect-sorted A1·A2·A3m·A3·Asq·A4·A5·A6): **0.226 · 0.591 · 0.704 · 0.851 · 1.204 · 1.699 · 4.461**. This is the scrubbing mechanism for tuning the blend rules below; for now the switch is a hard snap at the threshold (blends TBD).
+**Anchor selection by aspect (harness "Transitions" panel).** With **Auto-anchor by viewport aspect** on, the active anchor is chosen from the live viewport aspect `W/H`: the eight anchors are sorted by aspect and a **threshold** sits between each adjacent pair; the aspect lands in exactly one band. Each threshold **defaults to the log midpoint** `√(Aₙ·Aₙ₊₁)` (= `exp((ln Aₙ + ln Aₙ₊₁)/2)`) and has a **slider** (range `[Aₙ, Aₙ₊₁]`) to move where the switch happens. Two thresholds are **chosen overrides** of that default (`CHOSEN_THRESH` in the harness): **A1↔A2 = 0.177** and **A5↔Awide = 2.595**; the rest stay at their log midpoints (which matched Steve's picks). Current thresholds (aspect-sorted A1·A2·A3m·A3·Asq·A4·A5·Awide·A6): **0.177 · 0.591 · 0.704 · 0.851 · 1.204 · 1.699 · 2.595 · 5.963**. This is the scrubbing mechanism for tuning the blend rules below; for now the switch is a hard snap at the threshold (blends TBD).
 
 | Transition | From → To | Blend rule | Notes |
 |---|---|---|---|
@@ -384,7 +397,8 @@ A1 is the **vertical mirror of A6**: the degenerate *portrait* sliver. Chrome is
 | T3a | A3 ↔ Asq | TBD | portrait → square (≈0.725 → 1.0) |
 | T3b | Asq ↔ A4 | TBD | square → landscape (1.0 → 1.45); the portrait/landscape flip now resolves at the **Asq** anchor rather than mid-transition |
 | T4 | A4 ↔ A5 | TBD | iPad→iPhone landscape: A4's two-column split + two-line date condenses to A5's one-row-per-side + single-line date as the rect shortens |
-| T5 | A5 ↔ A6 | TBD | landscape gets so wide everything collapses to a single row (A6) |
+| T5a | A5 ↔ Awide | TBD | threshold **2.595** (chosen): A5 stops reading well above ≈2.6 |
+| T5b | Awide ↔ A6 | TBD | threshold log-mid **5.963**: ultrawide finally collapses to A6's single row |
 
 ---
 
