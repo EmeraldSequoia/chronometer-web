@@ -687,76 +687,75 @@ function applyA5(L, bounds, headerH, footerH) {
 }
 
 // Awide (Ultrawide landscape, aspect ~3.56 / 32:9): NEW anchor between A5 (1.99)
-// and A6 (10.0). Strategy: alt/az and ecl/eot in parallel symmetric COLUMNS
-// flanking a FULL-height centred main dial; the moon (upper-left) and the map
-// (right) grow as large as they can without hitting the columns (full gap). The
-// date is SPLIT across the display on one shared baseline — weekday under the
-// moon (so it floors the moon), condensed date under the map (which it never
-// floors, since the map is centred and the date sits below it). Two sliders
-// scale moon & map down from their computed maxima.
+// and A6 (10.0). FIVE columns laid out left→right with EVEN gaps (incl. outer
+// margins): moon · alt/az · MAIN DIAL · ecl/eot · map. Because the moon and map
+// columns differ in width, the dial sits OFF-centre. The dial is full height and
+// the alt/az·ecl/eot pairs centre on it; the moon & map sit in their upper areas
+// (between the header bottom and their own date piece), each sized so it does NOT
+// overlap that date piece. The date is SPLIT on one shared baseline — weekday
+// under the moon, condensed date under the map. Two sliders scale moon & map.
 function applyAwide(L, bounds, headerH, footerH) {
   const W = bounds.right, availV = bounds.bottom;        // content rect (header/footer dropped)
   const hp = 0.0125 * W, gap = 2 * hp;                   // halfPad and a "full gap"
-  const cx = W / 2, cy = availV / 2;
+  const cy = availV / 2;
+  const mainR = Math.max(2, availV / 2);                 // FULL height
+  const er = L.altR;                                     // outer-dial radius (kept)
+  const Dy = er + hp;                                    // half the vertical pair separation
 
-  // Main dial: centred, FULL height (diameter = content height, touching the
-  // header bottom and footer top). Stays full-height across the whole range.
-  const mainR = Math.max(2, availV / 2);
-  rescaleMain(L, cx, cy, mainR);
-
-  // Outer dials: keep current size; two symmetric columns hugging the dial, each
-  // a vertical pair with a full gap between the two. alt/az left, ecl/eot right.
-  const er = L.altR;                                     // current outer-dial radius (kept)
-  const Dx = mainR + er, Dy = er + hp;                   // column offset; half the pair separation
-  L.azR = er;  L.eotR = er;                              // altR unchanged (ECL draws at altR)
-  L.altCX = cx - Dx;  L.altCY = cy - Dy;                 // upper-left
-  L.azCX  = cx - Dx;  L.azCY  = cy + Dy;                 // lower-left
-  L.eclipseCX = cx + Dx;  L.eclipseCY = cy - Dy;         // upper-right
-  L.eotCX = cx + Dx;  L.eotCY = cy + Dy;                 // lower-right
-
-  // Left & right content regions, just outside the columns (symmetric).
-  const leftWall = (cx - Dx) - er, rightWall = (cx + Dx) + er;
-  const leftRegRight = leftWall - gap, leftRegW = leftRegRight - hp, leftCX = (hp + leftRegRight) / 2;
-  const rightRegLeft = rightWall + gap, rightRegW = (W - hp) - rightRegLeft, rightCX = (rightRegLeft + (W - hp)) / 2;
-
-  // DATE: SPLIT across the display — weekday under the MOON (bottom-left), the
-  // condensed month-day/year/tz under the MAP (bottom-right) — sharing ONE
-  // baseline (A5-style), the deepest weekday descender a full gap above the
-  // footer. The shared unit is set by the wider piece (the condensed date) fitting
-  // the right region; the weekday then fits the left region easily.
+  // DATE sizing (split, shared baseline) — unchanged. The unit comes from the
+  // condensed date fitting a *nominal* side region (so the date size is stable as
+  // the columns move); deepest weekday descender a full gap above the footer.
   const UNIT_MAX=72, REF=100;
   const fmt=new Intl.DateTimeFormat('en-US',{weekday:'long',month:'short',day:'numeric',year:'numeric'});
   const parts=fmt.formatToParts(SAMPLE_DATE), get=t=>(parts.find(p=>p.type===t)||{}).value||'';
   const wkText=get('weekday'), md=`${get('month')} ${get('day')}`, yr=get('year');
   const tz=(new Intl.DateTimeFormat('en-US',{timeZoneName:'short'}).formatToParts(SAMPLE_DATE).find(p=>p.type==='timeZoneName')||{}).value||'';
   const m100=measureRowTexts(ctx, wkText, md, yr, tz, '', REF);
-  const u=Math.min(UNIT_MAX, REF*rightRegW/m100.dateW);   // condensed date fits the right region
+  const nomRegW = W/2 - hp - mainR - 2*er - gap;          // ≈ the old right-region width
+  const u=Math.min(UNIT_MAX, REF*nomRegW/m100.dateW);
   const rm=measureRowTexts(ctx, wkText, md, yr, tz, '', u);
-  // shared baseline: deepest weekday descender (Sun–Sat, stable) a full gap above footer
   ctx.font=`${u}px Arial, sans-serif`;
   let maxDesc=0;
   for(const n of ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']){
     const dd=ctx.measureText(n).actualBoundingBoxDescent; if(dd>maxDesc)maxDesc=dd; }
   const descBottom=availV-gap, baselineY=descBottom-maxDesc;
-  const wkInkTop=baselineY-ctx.measureText(wkText).actualBoundingBoxAscent;
+  const wkInkTop  = baselineY - ctx.measureText(wkText).actualBoundingBoxAscent;   // floors the moon
+  const dateInkTop= baselineY - ctx.measureText(md).actualBoundingBoxAscent;       // floors the map
+
+  // MOON & MAP vertical sizes: each centred in its area between the header bottom
+  // (y=0) and the top of its date piece, sized to clear that date by a full gap
+  // (and the header by a full gap). Sliders scale down from that maximum.
+  const moonRmax = Math.max(2, (wkInkTop   - 2*gap) / 2);
+  const moonR    = (+$('awMoonK').value) * moonRmax;
+  const moonCY   = wkInkTop / 2;
+  const mapHmax  = Math.max(1, dateInkTop - 2*gap);
+  const mapH     = (+$('awMapK').value) * mapHmax;
+  const mapW     = 2 * mapH, mapCY = dateInkTop / 2;
+
+  // Horizontal layout: 5 columns with EVEN gaps (2 outer margins + 4 inner).
+  const widths = [2*moonR, 2*er, 2*mainR, 2*er, mapW];   // moon · alt/az · dial · ecl/eot · map
+  const g = (W - widths.reduce((a,b)=>a+b,0)) / 6;
+  let x = g;
+  const place = w => { const c = x + w/2; x += w + g; return c; };
+  const moonCX = place(widths[0]);
+  const altazX = place(widths[1]);
+  const dialCX = place(widths[2]);
+  const ecletX = place(widths[3]);
+  const mapCX  = place(widths[4]);
+
+  // Commit. Dial off-centre at dialCX, full height; pairs centre on cy.
+  rescaleMain(L, dialCX, cy, mainR);
+  L.azR = er;  L.eotR = er;                               // altR unchanged (ECL draws at altR)
+  L.altCX = altazX;  L.altCY = cy - Dy;   L.azCX  = altazX;  L.azCY  = cy + Dy;
+  L.eclipseCX = ecletX;  L.eclipseCY = cy - Dy;   L.eotCX = ecletX;  L.eotCY = cy + Dy;
+  L.moonR = moonR;  L.moonCX = moonCX;  L.moonCY = moonCY;
+  L.earthW = mapW;  L.earthH = mapH;  L.earthCX = mapCX;  L.earthCY = mapCY;
+
+  // Date: weekday under the moon, condensed date under the map, shared baseline.
   L.dateMode='split'; L.dateCondensed=true; L.dateSegCenter=false; L.dateForceU=undefined;
   L.dateBaselineBottom=descBottom;
-  L.dateW=rm.weekdayW; L.dateH=4*u;                       // weekday box → condensedDateLayout returns u
-  L.dateCX=leftCX;   L.dateCY=baselineY;                  // weekday under the moon (left)
-  L.date2CX=rightCX; L.date2CY=baselineY;  L.date2W=rm.dateW+4;  L.date2H=4*u;   // date under the map (right)
-
-  // MOON: largest circle (×slider) above the weekday — clears the left edge (hp),
-  // the header top (full gap), the weekday below (full gap), and the column wall
-  // (full gap), centred in that box. (Only the weekday is under the moon.)
-  const moonTop=gap, moonBot=wkInkTop-gap;
-  const moonRmax=Math.max(2, Math.min(leftRegW, moonBot-moonTop)/2);
-  L.moonR=(+$('awMoonK').value)*moonRmax;  L.moonCX=leftCX;  L.moonCY=(moonTop+moonBot)/2;
-
-  // MAP: largest 2:1 rect (×slider) in the right region, centred vertically on cy
-  // (full content height, never constrained by the date which sits below it).
-  const mapHmax=Math.max(1, Math.min(availV-2*gap, rightRegW/2));
-  const mapH=(+$('awMapK').value)*mapHmax;
-  L.earthH=mapH;  L.earthW=2*mapH;  L.earthCX=rightCX;  L.earthCY=cy;
+  L.dateW=rm.weekdayW; L.dateH=4*u;  L.dateCX=moonCX;  L.dateCY=baselineY;
+  L.date2CX=mapCX; L.date2CY=baselineY;  L.date2W=rm.dateW+4;  L.date2H=4*u;
 }
 
 // Asq (Square, aspect ~1.0): NEW anchor between A3/A3m (~0.7 portrait) and A4
