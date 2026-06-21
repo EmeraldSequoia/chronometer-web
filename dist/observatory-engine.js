@@ -16723,8 +16723,8 @@
     const plR = Math.max(100, 332 * s);
     const sunRingWidth = Math.max(16, 64 * s);
     const orbitInc = Math.max(10, 40 * s);
-    const subR = Math.max(20, 73 * s);
-    const subOffset = Math.max(40, 149 * s);
+    const subR = 73 * s;
+    const subOffset = 149 * s;
     const sunD = Math.max(24, 100 * s);
     const zD = Math.max(100, 526 * s);
     const zR = Math.max(80, 272 * s);
@@ -16791,15 +16791,20 @@
   }
   function extDerived(extR) {
     const es = extR / 60;
+    const rawR2 = extR + 3 * es;
+    const rawR1 = extR + 3 * es - 14 * es;
+    const fit = rawR2 > 0 ? extR / rawR2 : 1;
     return {
-      eclipseR2: extR + 3 * es,
-      eclipseR1: extR + 3 * es - 14 * es,
+      eclipseR2: rawR2 * fit,
+      // = extR (footprint matches the other dials)
+      eclipseR1: rawR1 * fit,
+      // disc, same proportion to the ring as before
       extFontSize: 10 * es,
       eclipseFontSize: 10 * es,
       eotFontSize: 8 * es
     };
   }
-  function computeLayout(viewW, viewH, chrome) {
+  function computeBaseLayout(viewW, viewH, chrome) {
     const dpr = typeof devicePixelRatio !== "undefined" ? devicePixelRatio : 1;
     const footerH = chrome?.footerH ?? 0;
     const H = viewH - footerH;
@@ -17270,6 +17275,1047 @@
       eclipseFontSize: a.ext.eclipseFontSize,
       eotFontSize: a.ext.eotFontSize
     };
+  }
+
+  // src/observatory/date-view.ts
+  var COLOR = "rgba(255,255,255,0.9)";
+  var COLOR_DIM = "rgba(255,255,255,0.55)";
+  var REL_BIG = 1;
+  var REL_YEAR = 0.42;
+  var REL_SMALL = 0.21;
+  var UNIT_MAX = 72;
+  function isLeapYear(year) {
+    return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  }
+  function extractDateFields(date, timezone) {
+    const tz = timezone || void 0;
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      weekday: "long",
+      month: "short",
+      // iOS bigDate uses "MMM dd"
+      day: "numeric",
+      year: "numeric"
+    }).formatToParts(date);
+    const get = (type) => parts.find((p) => p.type === type)?.value ?? "";
+    const weekday = get("weekday");
+    const month = get("month");
+    const day = get("day");
+    const year = get("year");
+    let tzAbbrev = "";
+    try {
+      const tzParts = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz,
+        timeZoneName: "short"
+      }).formatToParts(date);
+      tzAbbrev = tzParts.find((p) => p.type === "timeZoneName")?.value ?? "";
+    } catch {
+      tzAbbrev = "";
+    }
+    return {
+      weekday,
+      monthDay: `${month} ${day}`,
+      year,
+      leap: isLeapYear(parseInt(year, 10)),
+      tzAbbrev
+    };
+  }
+  var SEG_GAP_EM = 0.35;
+  var LINE_SPACING = 1.18;
+  var LINE_PAD = 0.1;
+  var TIGHT_LINE_GAP = 0.2;
+  function fontFor(px) {
+    return `${px}px Arial, sans-serif`;
+  }
+  function segGap(line, i, u) {
+    if (i === 0) return 0;
+    return SEG_GAP_EM * Math.max(line[i - 1].rel, line[i].rel) * u;
+  }
+  function lineInk(ctx2, line, u, prominentOnly = false) {
+    let asc = 0;
+    let desc = 0;
+    let has = false;
+    for (const seg of line) {
+      if (!seg.text) continue;
+      if (prominentOnly && seg.color === COLOR_DIM && seg.rel <= REL_SMALL) continue;
+      ctx2.font = fontFor(seg.rel * u);
+      const m = ctx2.measureText(seg.text);
+      if (m.actualBoundingBoxAscent > asc) asc = m.actualBoundingBoxAscent;
+      if (m.actualBoundingBoxDescent > desc) desc = m.actualBoundingBoxDescent;
+      has = true;
+    }
+    return { asc, desc, has };
+  }
+  function measureLine(ctx2, line, u) {
+    let w = 0;
+    let maxRel = 0;
+    let drawn = 0;
+    for (let i = 0; i < line.length; i++) {
+      const seg = line[i];
+      if (!seg.text) continue;
+      ctx2.font = fontFor(seg.rel * u);
+      w += ctx2.measureText(seg.text).width;
+      if (drawn > 0) w += segGap(line, i, u);
+      drawn++;
+      if (seg.rel > maxRel) maxRel = seg.rel;
+    }
+    return { w, h: maxRel * u };
+  }
+  function fitUnit(ctx2, live, boxW, boxH) {
+    const REF = 100;
+    let maxW = 0;
+    let totH = (live.length - 1) * LINE_PAD * REF;
+    for (const l of live) {
+      const d = measureLine(ctx2, l, REF);
+      if (d.w > maxW) maxW = d.w;
+      totH += d.h * LINE_SPACING;
+    }
+    return Math.min(UNIT_MAX, REF * Math.min(boxW / maxW, boxH / totH));
+  }
+  var WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  function measureRowTexts(ctx2, weekday, monthDay, year, tzAbbrev, leapText, u) {
+    const wkLine = [{ text: weekday, rel: REL_BIG, color: COLOR }];
+    const dateLine = [
+      { text: monthDay, rel: REL_BIG, color: COLOR },
+      { text: year, rel: REL_YEAR, color: COLOR }
+    ];
+    if (tzAbbrev) dateLine.push({ text: tzAbbrev, rel: REL_SMALL, color: COLOR_DIM });
+    if (leapText) dateLine.push({ text: leapText, rel: REL_SMALL, color: COLOR_DIM });
+    return { weekdayW: measureLine(ctx2, wkLine, u).w, dateW: measureLine(ctx2, dateLine, u).w };
+  }
+  function condensedDateLayout(ctx2, weekdayText, boxW, boxH, descenderBottomY) {
+    const u = fitUnit(ctx2, [[{ text: weekdayText, rel: REL_BIG, color: COLOR }]], boxW, boxH);
+    ctx2.font = fontFor(REL_BIG * u);
+    let desc = 0;
+    for (const n of WEEKDAY_NAMES) {
+      const d = ctx2.measureText(n).actualBoundingBoxDescent;
+      if (d > desc) desc = d;
+    }
+    const asc = ctx2.measureText(weekdayText).actualBoundingBoxAscent;
+    const baselineY = descenderBottomY - desc;
+    return { u, baselineY, top: baselineY - asc };
+  }
+  function drawBlock(ctx2, lines, cx, cy, boxW, boxH, opts = {}) {
+    const live = lines.filter((l) => l.some((s) => s.text));
+    if (live.length === 0 || boxW <= 0 || boxH <= 0) return { u: 0, baselineY: cy };
+    ctx2.save();
+    ctx2.textAlign = "left";
+    ctx2.textBaseline = "alphabetic";
+    const REF = 100;
+    let maxW = 0;
+    let totH = (live.length - 1) * LINE_PAD * REF;
+    const refDims = live.map((l) => {
+      const d = measureLine(ctx2, l, REF);
+      if (d.w > maxW) maxW = d.w;
+      totH += d.h * LINE_SPACING;
+      return d;
+    });
+    const u = opts.forceU != null ? opts.forceU : Math.min(UNIT_MAX, REF * Math.min(boxW / maxW, boxH / totH));
+    const baselines = [];
+    if (opts.tight) {
+      let cursor = 0;
+      for (let li = 0; li < live.length; li++) {
+        const m = lineInk(ctx2, live[li], u);
+        cursor += m.asc;
+        baselines.push(cursor);
+        cursor += m.desc;
+        if (li < live.length - 1) cursor += TIGHT_LINE_GAP * u;
+      }
+    } else {
+      const blockH = totH / REF * u;
+      let y = cy - blockH / 2;
+      for (let li = 0; li < live.length; li++) {
+        const lineH = refDims[li].h / REF * u;
+        y += lineH * (LINE_SPACING + 1) / 2;
+        baselines.push(y);
+        y += lineH * (LINE_SPACING - 1) / 2 + LINE_PAD * u;
+      }
+    }
+    if (opts.baselineY != null) {
+      const shift = opts.baselineY - baselines[baselines.length - 1];
+      for (let li = 0; li < baselines.length; li++) baselines[li] += shift;
+    } else {
+      let inkTop = Infinity;
+      let inkBot = -Infinity;
+      for (let li = 0; li < live.length; li++) {
+        const m = lineInk(
+          ctx2,
+          live[li],
+          u,
+          /* prominentOnly */
+          true
+        );
+        if (!m.has) continue;
+        inkTop = Math.min(inkTop, baselines[li] - m.asc);
+        inkBot = Math.max(inkBot, baselines[li] + m.desc);
+      }
+      if (inkTop <= inkBot) {
+        const shift = cy - (inkTop + inkBot) / 2;
+        for (let li = 0; li < baselines.length; li++) baselines[li] += shift;
+      }
+    }
+    for (let li = 0; li < live.length; li++) {
+      const line = live[li];
+      const lineW = refDims[li].w / REF * u;
+      const y = baselines[li];
+      let midline = 0;
+      if (opts.segCenter) {
+        const m = lineInk(ctx2, line, u);
+        midline = y - (m.asc - m.desc) / 2;
+      }
+      let x = cx - lineW / 2;
+      let drawn = 0;
+      for (let si = 0; si < line.length; si++) {
+        const seg = line[si];
+        if (!seg.text) continue;
+        const px = seg.rel * u;
+        ctx2.font = fontFor(px);
+        ctx2.fillStyle = seg.color;
+        if (drawn > 0) x += segGap(line, si, u);
+        drawn++;
+        let drawY = y;
+        if (opts.segCenter) {
+          const mm = ctx2.measureText(seg.text);
+          drawY = midline + (mm.actualBoundingBoxAscent - mm.actualBoundingBoxDescent) / 2;
+        }
+        ctx2.fillText(seg.text, x, drawY);
+        x += ctx2.measureText(seg.text).width;
+      }
+    }
+    ctx2.restore();
+    return { u, baselineY: baselines[baselines.length - 1] };
+  }
+  function drawDateView(ctx2, L, date, timezone) {
+    const f = extractDateFields(date, timezone);
+    const wk = { text: f.weekday, rel: REL_BIG, color: COLOR };
+    const md = { text: f.monthDay, rel: REL_BIG, color: COLOR };
+    const yr = { text: f.year, rel: REL_YEAR, color: COLOR };
+    const leap = { text: f.leap ? "leap" : "", rel: REL_SMALL, color: COLOR_DIM };
+    const tz = { text: f.tzAbbrev, rel: REL_SMALL, color: COLOR_DIM };
+    switch (L.dateMode) {
+      case "stack":
+        drawBlock(
+          ctx2,
+          [[wk], [md], [yr, leap], [tz]],
+          L.dateCX,
+          L.dateCY,
+          L.dateW,
+          L.dateH,
+          { forceU: L.dateForceU }
+        );
+        break;
+      case "row": {
+        const small = (text) => ({ text, rel: 0.45, color: COLOR });
+        const info = [small(f.monthDay), small("\xB7"), small(f.year)];
+        if (f.tzAbbrev) info.push(small("\xB7"), { text: f.tzAbbrev, rel: 0.45, color: COLOR_DIM });
+        if (f.leap) info.push(small("\xB7"), { text: "leap", rel: 0.45, color: COLOR_DIM });
+        drawBlock(ctx2, [[wk], info], L.dateCX, L.dateCY, L.dateW, L.dateH);
+        break;
+      }
+      case "split": {
+        if (L.dateCondensed) {
+          const info = [md, yr];
+          if (f.tzAbbrev) info.push(tz);
+          if (f.leap) info.push(leap);
+          if (L.dateBaselineBottom != null) {
+            const dl = condensedDateLayout(ctx2, f.weekday, L.dateW, L.dateH, L.dateBaselineBottom);
+            drawBlock(
+              ctx2,
+              [[wk]],
+              L.dateCX,
+              L.dateCY,
+              L.dateW,
+              L.dateH,
+              { forceU: dl.u, baselineY: dl.baselineY }
+            );
+            drawBlock(
+              ctx2,
+              [info],
+              L.date2CX,
+              L.date2CY,
+              L.date2W,
+              L.date2H,
+              { forceU: dl.u, baselineY: dl.baselineY, segCenter: L.dateSegCenter }
+            );
+          } else {
+            drawBlock(
+              ctx2,
+              [[wk]],
+              L.dateCX,
+              L.dateCY,
+              L.dateW,
+              L.dateH,
+              { forceU: L.dateForceU }
+            );
+            drawBlock(
+              ctx2,
+              [info],
+              L.date2CX,
+              L.date2CY,
+              L.date2W,
+              L.date2H,
+              { forceU: L.dateForceU, segCenter: L.dateSegCenter }
+            );
+          }
+        } else {
+          drawBlock(ctx2, [[wk]], L.dateCX, L.dateCY, L.dateW, L.dateH);
+          drawBlock(
+            ctx2,
+            [[yr, tz, leap], [md]],
+            L.date2CX,
+            L.date2CY,
+            L.date2W,
+            L.date2H,
+            { tight: true }
+          );
+        }
+        break;
+      }
+    }
+  }
+
+  // src/observatory/anchor-layout.ts
+  var ANCHORS_BY_ASPECT = [
+    "A1",
+    "A2",
+    "A3m",
+    "A3",
+    "Asq",
+    "A4",
+    "A5",
+    "Awide",
+    "A6"
+  ];
+  var SHIP_THRESHOLDS = [
+    0.177,
+    0.591,
+    0.704,
+    0.851,
+    1.204,
+    1.699,
+    2.595,
+    8.687
+  ];
+  function pickAnchor(aspect, thresholds = SHIP_THRESHOLDS) {
+    for (let i = 0; i < thresholds.length; i++) {
+      if (aspect < thresholds[i]) return ANCHORS_BY_ASPECT[i];
+    }
+    return ANCHORS_BY_ASPECT[ANCHORS_BY_ASPECT.length - 1];
+  }
+  var TC_POPOVER_W = 200;
+  var TC_POPOVER_H = 368;
+  function resolveOptions(o = {}) {
+    return {
+      a2Rules: o.a2Rules ?? true,
+      a2Reclaim: o.a2Reclaim ?? true,
+      a2Cluster: o.a2Cluster ?? true,
+      a2DateCenter: o.a2DateCenter ?? true,
+      dialK: o.dialK ?? 1.36,
+      dateHFrac: o.dateHFrac ?? 0.144,
+      mainDy: o.mainDy ?? 0,
+      dateDy: o.dateDy ?? 0,
+      a3MoonCenter: o.a3MoonCenter ?? true,
+      a3OuterAlign: o.a3OuterAlign ?? true,
+      a3MapVCenter: o.a3MapVCenter ?? true,
+      a3DisplayCenter: o.a3DisplayCenter ?? true,
+      a3DialK: o.a3DialK ?? 0.165,
+      a3DialGap: o.a3DialGap ?? 0.04,
+      mapScale: o.mapScale ?? 1.1,
+      a4Sym: o.a4Sym ?? true,
+      a5Row: o.a5Row ?? true,
+      a5DateCenter: o.a5DateCenter ?? false,
+      a6DialK: o.a6DialK ?? 0.65,
+      a6FontK: o.a6FontK ?? 0.35,
+      asqMapK: o.asqMapK ?? 0.37,
+      asqOuterT: o.asqOuterT ?? 0.42,
+      awMoonK: o.awMoonK ?? 1,
+      awMapK: o.awMapK ?? 1
+    };
+  }
+  function rescaleMain(L, cx, cy, r) {
+    const f = r / L.mainR;
+    const ox = L.mainCX, oy = L.mainCY;
+    const pairs = [
+      ["utcCX", "utcCY"],
+      ["solarCX", "solarCY"],
+      ["sidCX", "sidCY"]
+    ];
+    for (const [kx, ky] of pairs) {
+      L[kx] = cx + f * (L[kx] - ox);
+      L[ky] = cy + f * (L[ky] - oy);
+    }
+    L.subR *= f;
+    if (L.subOffset != null) L.subOffset *= f;
+    L.mainCX = cx;
+    L.mainCY = cy;
+    L.mainR = r;
+  }
+  function shiftMain(L, d) {
+    L.mainCY += d;
+    L.utcCY += d;
+    L.solarCY += d;
+    L.sidCY += d;
+  }
+  function shiftAll(L, d) {
+    shiftMain(L, d);
+    L.altCY += d;
+    L.azCY += d;
+    L.eotCY += d;
+    L.eclipseCY += d;
+  }
+  function a2DateBox(L, W, dateHFrac) {
+    L.dateMode = "row";
+    L.dateCX = W / 2;
+    L.dateW = W - 32;
+    L.dateH = dateHFrac * W;
+  }
+  function a2OuterDials(L, bounds, k, origMain) {
+    const R = L.mainR;
+    const { left, right } = bounds;
+    const extR0 = L.altR;
+    const place = (exC, eyC, er) => {
+      const onRight = exC >= origMain.x;
+      const onTop = eyC <= origMain.y;
+      const mS = onRight ? right - (exC + er) : exC - er - left;
+      const gap = Math.hypot(exC - origMain.x, eyC - origMain.y) - R - er;
+      const er2 = er * k, rho = R + gap + er2;
+      const cX = onRight ? right - mS - er2 : left + mS + er2;
+      const under = rho * rho - (cX - L.mainCX) * (cX - L.mainCX);
+      if (under >= 0) {
+        const off = Math.sqrt(under);
+        return { x: cX, y: onTop ? L.mainCY - off : L.mainCY + off, r: er2 };
+      }
+      const d = Math.hypot(exC - L.mainCX, eyC - L.mainCY) || 1;
+      return { x: L.mainCX + (exC - L.mainCX) * rho / d, y: L.mainCY + (eyC - L.mainCY) * rho / d, r: er2 };
+    };
+    let m = place(L.altCX, L.altCY, L.altR);
+    L.altCX = m.x;
+    L.altCY = m.y;
+    L.altR = m.r;
+    m = place(L.azCX, L.azCY, L.azR);
+    L.azCX = m.x;
+    L.azCY = m.y;
+    L.azR = m.r;
+    m = place(L.eotCX, L.eotCY, L.eotR);
+    L.eotCX = m.x;
+    L.eotCY = m.y;
+    L.eotR = m.r;
+    m = place(L.eclipseCX, L.eclipseCY, extR0);
+    L.eclipseCX = m.x;
+    L.eclipseCY = m.y;
+  }
+  function applyA2(L, bounds, o) {
+    a2DateBox(L, bounds.right, o.dateHFrac);
+    const FOOTER_MARGIN = 6;
+    if (o.a2Reclaim) {
+      const up = Math.min(L.moonCY - L.moonR, L.earthCY - L.earthH / 2) * 0.5;
+      L.moonCY -= up;
+      L.earthCY -= up;
+    }
+    const origMain = { x: L.mainCX, y: L.mainCY };
+    if (o.a2Rules) a2OuterDials(L, bounds, o.dialK, origMain);
+    if (o.a2Cluster) {
+      const maxBottom = Math.max(L.azCY + L.azR, L.eotCY + L.eotR);
+      const up = maxBottom - (bounds.bottom - FOOTER_MARGIN);
+      if (up > 0) shiftAll(L, -up);
+    }
+    if (o.mainDy) shiftAll(L, o.mainDy);
+    if (o.a2DateCenter) {
+      const mapBottom = L.earthCY + L.earthH / 2;
+      const mainTop = L.mainCY - L.mainR;
+      L.dateCY = (mapBottom + mainTop) / 2 + o.dateDy;
+    }
+  }
+  function applyA3Dials(L, bounds, o) {
+    const cx = L.mainCX, cy = L.mainCY, R = L.mainR;
+    const k = o.a3DialK, g = o.a3DialGap * R;
+    const bandBottom = Math.max(L.moonCY + L.moonR, L.earthCY + L.earthH / 2, L.dateCY + L.dateH / 2);
+    const dir = (exC, eyC) => {
+      const dx = exC - cx, dy = eyC - cy, d = Math.hypot(dx, dy) || 1;
+      return { ux: dx / d, uy: dy / d };
+    };
+    const dAz = dir(L.azCX, L.azCY), dEot = dir(L.eotCX, L.eotCY);
+    let er = k * R;
+    const place = (d, gap) => {
+      const D = R + gap + er;
+      let x = cx + d.ux * D, y = cy + d.uy * D;
+      x = Math.max(er, Math.min(bounds.right - er, x));
+      y = Math.min(y, 2 * cy - bandBottom - er);
+      y = Math.max(y, cy);
+      return { x, y };
+    };
+    for (let i = 0; i < 40; i++) {
+      const az2 = place(dAz, g), eot2 = place(dEot, g);
+      const rimOk = (p) => Math.hypot(p.x - cx, p.y - cy) >= R + er + g / 2;
+      if (rimOk(az2) && rimOk(eot2)) break;
+      er *= 0.94;
+      if (er < 8) {
+        er = 8;
+        break;
+      }
+    }
+    const altMoonGapAt = (gap) => {
+      const D = R + gap + er, ax = cx + dAz.ux * D, ay = cy - dAz.uy * D;
+      return Math.hypot(ax - L.moonCX, ay - L.moonCY) - er - L.moonR;
+    };
+    let gMain = g;
+    if (altMoonGapAt(g) < g) {
+      let lo = 0, hi = g;
+      for (let i = 0; i < 30; i++) {
+        const mid = (lo + hi) / 2;
+        if (altMoonGapAt(mid) - mid > 0) lo = mid;
+        else hi = mid;
+      }
+      gMain = lo;
+    }
+    const az = place(dAz, gMain), eot = place(dEot, gMain);
+    L.azCX = az.x;
+    L.azCY = az.y;
+    L.azR = er;
+    L.eotCX = eot.x;
+    L.eotCY = eot.y;
+    L.eotR = er;
+    L.altCX = az.x;
+    L.altCY = 2 * cy - az.y;
+    L.altR = er;
+    L.eclipseCX = eot.x;
+    L.eclipseCY = 2 * cy - eot.y;
+  }
+  function applyA3Common(L, bounds, o) {
+    if (o.a3MoonCenter) {
+      L.moonCX = (L.earthCX - L.earthW / 2) / 2;
+      L.dateCX = (L.earthCX + L.earthW / 2 + bounds.right) / 2;
+    }
+    if (o.a3MapVCenter) {
+      const dy = (bounds.top + (L.mainCY - L.mainR)) / 2 - L.earthCY;
+      L.moonCY += dy;
+      L.earthCY += dy;
+      L.dateCY += dy;
+    }
+    if (o.a3OuterAlign) applyA3Dials(L, bounds, o);
+    if (o.a3DisplayCenter) {
+      const top = Math.min(L.moonCY - L.moonR, L.earthCY - L.earthH / 2, L.mainCY - L.mainR, L.altCY - L.altR, L.eclipseCY - L.altR);
+      const bot = Math.max(L.azCY + L.azR, L.eotCY + L.eotR, L.mainCY + L.mainR);
+      const dy = (bounds.top + bounds.bottom) / 2 - (top + bot) / 2;
+      const keys = ["moonCY", "earthCY", "dateCY", "mainCY", "utcCY", "solarCY", "sidCY", "altCY", "azCY", "eclipseCY", "eotCY"];
+      for (const key of keys) L[key] += dy;
+    }
+  }
+  function applyA3Mini(L, bounds, o) {
+    const s = o.mapScale;
+    L.earthW *= s;
+    L.earthH *= s;
+    L.earthCX = bounds.right / 2;
+    L.dateW *= 0.95;
+    L.dateH *= 0.95;
+    applyA3Common(L, bounds, o);
+  }
+  function applyA4Dials(L) {
+    const r = L.altR;
+    const top = L.moonCY + L.moonR;
+    const bot = L.dateCY - L.dateH / 2;
+    const gap = (bot - top - 4 * r) / 3;
+    L.altCY = top + gap + r;
+    L.azCY = top + 2 * gap + 3 * r;
+    L.eclipseCY = L.altCY;
+    L.eotCY = L.azCY;
+  }
+  function applyA5(L, ctx2, fields, bounds, headerH, footerH, o) {
+    L.dateCondensed = true;
+    L.dateSegCenter = o.a5DateCenter;
+    const W = bounds.right;
+    const H = bounds.bottom + headerH + footerH;
+    const halfPad = 0.0125 * W;
+    const mainCX = W / 2, mainCY = H / 2 - headerH, mainR = 0.475 * H;
+    rescaleMain(L, mainCX, mainCY, mainR);
+    const topRow = halfPad;
+    const mAspect = L.earthW / L.earthH || 2;
+    const cornerGap = (eW) => {
+      const xc = W - halfPad - eW, yc = topRow + eW / mAspect;
+      return Math.hypot(xc - mainCX, yc - mainCY) - mainR;
+    };
+    let lo = 40, hi = W;
+    for (let i = 0; i < 40; i++) {
+      const m = (lo + hi) / 2;
+      if (cornerGap(m) > halfPad) lo = m;
+      else hi = m;
+    }
+    L.earthW = lo;
+    L.earthH = lo / mAspect;
+    L.earthCX = W - halfPad - L.earthW / 2;
+    L.earthCY = topRow + L.earthH / 2;
+    const descBottom = bounds.bottom - halfPad;
+    L.dateBaselineBottom = descBottom;
+    const dateTop = condensedDateLayout(ctx2, fields.weekday, L.dateW, L.dateH, descBottom).top;
+    if (!o.a5Row) {
+      L.moonR = 0.13 * H;
+      L.moonCY = topRow + L.moonR;
+      L.moonCX = halfPad + L.moonR;
+      return;
+    }
+    const cyR = (L.earthCY + L.earthH / 2 + dateTop) / 2;
+    const dyR = cyR - mainCY;
+    const gapR = (rr) => Math.hypot(W - 2 * halfPad - 3 * rr - mainCX, dyR) - mainR - rr - halfPad;
+    let rlo = 1, rhi = mainR;
+    for (let i = 0; i < 50; i++) {
+      const m = (rlo + rhi) / 2;
+      if (gapR(m) > 0) rlo = m;
+      else rhi = m;
+    }
+    const r = rlo;
+    const rimL = mainCX - mainR;
+    const altCX = halfPad + r;
+    const azCX = (altCX + rimL + r) / 2;
+    const moonCX = (altCX + azCX) / 2;
+    const V = (dateTop - topRow) / 2;
+    const dxMoonAlt = (azCX - altCX) / 2;
+    const moonR1 = Math.hypot(dxMoonAlt, V) - r - halfPad;
+    const moonR2 = V - r - halfPad;
+    const moonR3 = moonCX - halfPad;
+    const dialGap = (mr) => Math.hypot(moonCX - mainCX, topRow + mr - mainCY) - mainR - mr;
+    let glo = 20, ghi = Math.max(20, moonR3);
+    for (let i = 0; i < 40; i++) {
+      const m = (glo + ghi) / 2;
+      if (dialGap(m) > halfPad) glo = m;
+      else ghi = m;
+    }
+    const moonR4 = glo;
+    const moonR = Math.max(20, Math.min(moonR1, moonR2, moonR3, moonR4));
+    L.moonR = moonR;
+    L.moonCY = topRow + moonR;
+    const cyL = (L.moonCY + moonR + dateTop) / 2;
+    L.altR = L.azR = L.eotR = r;
+    L.eotCX = W - halfPad - r;
+    L.eotCY = cyR;
+    L.eclipseCX = W - 2 * halfPad - 3 * r;
+    L.eclipseCY = cyR;
+    L.altCX = altCX;
+    L.altCY = cyL;
+    L.azCX = azCX;
+    L.azCY = cyL;
+    L.moonCX = moonCX;
+  }
+  function applyAwide(L, ctx2, fields, bounds, _headerH, _footerH, o) {
+    const W = bounds.right, availV = bounds.bottom;
+    const hp = 0.0125 * W, gap = 2 * hp;
+    const cy = availV / 2;
+    const mainR = Math.max(2, availV / 2);
+    const er_v = L.altR;
+    const UNIT_MAX2 = 72, REF = 100;
+    const wkText = fields.weekday, md = fields.monthDay, yr = fields.year, tz = fields.tzAbbrev;
+    const m100 = measureRowTexts(ctx2, wkText, md, yr, tz, "", REF);
+    const nomRegW = W / 2 - hp - mainR - 2 * er_v - gap;
+    const u = Math.min(UNIT_MAX2, REF * nomRegW / m100.dateW);
+    const rm = measureRowTexts(ctx2, wkText, md, yr, tz, "", u);
+    ctx2.font = `${u}px Arial, sans-serif`;
+    let maxDesc = 0;
+    for (const n of ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]) {
+      const dd = ctx2.measureText(n).actualBoundingBoxDescent;
+      if (dd > maxDesc) maxDesc = dd;
+    }
+    const descBottom = availV - hp, baselineY = descBottom - maxDesc;
+    const wkInkTop = baselineY - ctx2.measureText(wkText).actualBoundingBoxAscent;
+    const dateInkTop = baselineY - ctx2.measureText(md).actualBoundingBoxAscent;
+    const moonR_v = Math.max(2, (wkInkTop - 2 * gap) / 2) * o.awMoonK;
+    const moonCY = wkInkTop / 2;
+    const mapH = Math.min(Math.max(1, dateInkTop - 2 * gap), 0.125 * W) * o.awMapK;
+    const mapW = 2 * mapH, mapCY = dateInkTop / 2;
+    const radH = (R, vo, gg, e) => Math.sqrt(Math.max(0, (R + e + gg) ** 2 - vo ** 2));
+    const solveSpan = (fn) => {
+      let lo = -mainR, hi = W;
+      for (let i = 0; i < 70; i++) {
+        const m = (lo + hi) / 2;
+        if (fn(m) < W) lo = m;
+        else hi = m;
+      }
+      return (lo + hi) / 2;
+    };
+    const vAz = (D) => Math.abs(cy - moonCY - D);
+    const spanA = (mR, D, e) => (gg) => 4 * gg + 2 * mR + 2 * e + 2 * mapH + 2 * radH(mainR, D, gg, e);
+    const spanB = (mR, D, e) => (gg) => 3 * gg + mR + radH(mR, D, gg, e) + radH(mainR, vAz(D), gg, e) + radH(mainR, D, gg, e) + e + 2 * mapH;
+    let regimeB = false, moonR = moonR_v, er = er_v, Dy = er_v + hp;
+    const g0 = solveSpan(spanA(moonR_v, Dy, er_v));
+    if (g0 < 0) {
+      regimeB = true;
+      const gB = solveSpan(spanB(moonR_v, er_v + hp, er_v));
+      if (gB >= hp && moonCY - 2 * er_v - hp >= 0) {
+        Dy = er_v + hp;
+      } else {
+        const fit = (mR) => {
+          const e = er_v * Math.min(1, mR / moonR_v), D = e + hp;
+          return 3 * hp + mR + radH(mR, D, hp, e) + radH(mainR, vAz(D), hp, e) + radH(mainR, D, hp, e) + e + 2 * mapH;
+        };
+        let lo = 2, hi = moonR_v;
+        for (let i = 0; i < 70; i++) {
+          const m = (lo + hi) / 2;
+          if (fit(m) < W) lo = m;
+          else hi = m;
+        }
+        moonR = (lo + hi) / 2;
+        const erTop = (moonCY - hp) / 2;
+        if (er_v * Math.min(1, moonR / moonR_v) > erTop) moonR = Math.max(2, erTop / er_v * moonR_v);
+        er = er_v * Math.min(1, moonR / moonR_v);
+        Dy = er + hp;
+      }
+    }
+    const aCY = regimeB ? moonCY : cy;
+    const layout2 = (mR, D, e, rb) => {
+      const g = Math.max(rb ? hp : 0, solveSpan(rb ? spanB(mR, D, e) : spanA(mR, D, e)));
+      const moonCX = g + mR;
+      const altazX = rb ? moonCX + radH(mR, D, g, e) : moonCX + mR + g + e;
+      const dialCX = altazX + radH(mainR, rb ? vAz(D) : D, g, e);
+      const ecletX = dialCX + radH(mainR, D, g, e);
+      const mapCX = ecletX + e + g + mapH;
+      return { g, moonCX, altazX, dialCX, ecletX, mapCX };
+    };
+    ctx2.font = `${u}px Arial, sans-serif`;
+    const wedW = ctx2.measureText("Wednesday").width, wkAsc = ctx2.measureText("Wednesday").actualBoundingBoxAscent;
+    const fitsWk = (pos2, D, baseY2) => {
+      const azCY = aCY + D, azBottom = azCY + er, azLeft = pos2.altazX - er;
+      const vOverlap = baseY2 - wkAsc < azBottom && baseY2 > azCY - er;
+      const hOverlap = pos2.moonCX + wedW / 2 > azLeft;
+      return !(vOverlap && hOverlap);
+    };
+    let pos = layout2(moonR, Dy, er, regimeB), baseY = baselineY;
+    if (regimeB && !fitsWk(pos, Dy, baseY)) {
+      Dy = er + pos.g / 2;
+      pos = layout2(moonR, Dy, er, regimeB);
+      if (!fitsWk(pos, Dy, baseY)) {
+        const azBottom = aCY + Dy + er;
+        baseY = Math.max(baselineY, Math.min(azBottom + wkAsc, availV - maxDesc));
+      }
+    }
+    rescaleMain(L, pos.dialCX, cy, mainR);
+    L.altR = er;
+    L.azR = er;
+    L.eotR = er;
+    L.altCX = pos.altazX;
+    L.altCY = aCY - Dy;
+    L.azCX = pos.altazX;
+    L.azCY = aCY + Dy;
+    L.eclipseCX = pos.ecletX;
+    L.eclipseCY = cy - Dy;
+    L.eotCX = pos.ecletX;
+    L.eotCY = cy + Dy;
+    L.moonR = moonR;
+    L.moonCX = pos.moonCX;
+    L.moonCY = moonCY;
+    L.earthW = mapW;
+    L.earthH = mapH;
+    L.earthCX = pos.mapCX;
+    L.earthCY = mapCY;
+    L.dateMode = "split";
+    L.dateCondensed = true;
+    L.dateSegCenter = false;
+    L.dateForceU = void 0;
+    L.dateBaselineBottom = baseY + maxDesc;
+    L.dateW = rm.weekdayW;
+    L.dateH = 4 * u;
+    L.dateCX = pos.moonCX;
+    L.dateCY = baseY;
+    L.date2CX = pos.mapCX;
+    L.date2CY = baseY;
+    L.date2W = rm.dateW + 4;
+    L.date2H = 4 * u;
+  }
+  function applyAsq(L, bounds, _headerH, _footerH, o) {
+    const W = bounds.right;
+    const availV = bounds.bottom;
+    const halfPad = 0.0125 * W;
+    const gap = 2 * halfPad;
+    const cx = W / 2;
+    const mapW = o.asqMapK * W;
+    const mapH = mapW / 2;
+    const dialD = Math.max(2, availV - mapH - 3 * gap);
+    const mainR = dialD / 2;
+    const mapCY = gap + mapH / 2;
+    const dialCY = gap + mapH + gap + mainR;
+    L.earthW = mapW;
+    L.earthH = mapH;
+    L.earthCX = cx;
+    L.earthCY = mapCY;
+    rescaleMain(L, cx, dialCY, mainR);
+    const subR = L.subR;
+    const t = o.asqOuterT;
+    const vx = bounds.left - cx, vy = bounds.bottom - dialCY;
+    const vlen = Math.hypot(vx, vy);
+    const dist = mainR + t * (vlen - mainR);
+    const azCX = cx + dist * vx / vlen, azCY = dialCY + dist * vy / vlen;
+    L.altR = subR;
+    L.azR = subR;
+    L.eotR = subR;
+    L.azCX = azCX;
+    L.azCY = azCY;
+    L.eotCX = 2 * cx - azCX;
+    L.eotCY = azCY;
+    L.altCX = azCX;
+    L.altCY = 2 * dialCY - azCY;
+    L.eclipseCX = 2 * cx - azCX;
+    L.eclipseCY = 2 * dialCY - azCY;
+    const mapLeft = cx - mapW / 2, mapRight = cx + mapW / 2;
+    L.moonCX = mapLeft / 2;
+    L.moonCY = mapCY;
+    L.dateMode = "stack";
+    L.dateForceU = void 0;
+    L.dateCondensed = false;
+    L.dateCX = (mapRight + W) / 2;
+    L.dateCY = mapCY;
+    L.dateW = Math.max(2, W - mapRight - 2 * halfPad);
+    L.dateH = mapH;
+  }
+  function applyA1(L, ctx2, fields, bounds, _headerH, _footerH, o) {
+    const W = bounds.right;
+    const H = bounds.bottom;
+    const cx = W / 2;
+    const halfPad = 0.0125 * W;
+    const R = W / 2;
+    const outerR = o.a6DialK * R;
+    const oc = 2 * outerR;
+    const REL_BIG2 = 1, REL_YEAR2 = 0.42, REL_SMALL2 = 0.21;
+    const LINE_SPACING2 = 1.18, LINE_PAD2 = 0.1, UNIT_MAX2 = 72, REF = 100;
+    const wkText = fields.weekday, md = fields.monthDay, yr = fields.year, tzAbbr = fields.tzAbbrev;
+    const w100 = (text, rel) => {
+      ctx2.font = `${rel * REF}px Arial, sans-serif`;
+      return ctx2.measureText(text).width;
+    };
+    const lines = [
+      { text: wkText, rel: REL_BIG2, prom: true },
+      { text: md, rel: REL_BIG2, prom: true },
+      { text: yr, rel: REL_YEAR2, prom: true }
+    ];
+    if (tzAbbr) lines.push({ text: tzAbbr, rel: REL_SMALL2, prom: false });
+    const dateBoxW = W - 2 * halfPad;
+    let maxW = 0;
+    for (const l of lines) {
+      const lw = w100(l.text, l.rel);
+      if (lw > maxW) maxW = lw;
+    }
+    const uDate = Math.min(UNIT_MAX2, REF * dateBoxW / maxW);
+    let blockH = (lines.length - 1) * LINE_PAD2 * uDate;
+    for (const l of lines) blockH += l.rel * LINE_SPACING2 * uDate;
+    let yb = -blockH / 2;
+    const base = [];
+    for (const l of lines) {
+      const lineH = l.rel * uDate;
+      yb += lineH * (LINE_SPACING2 + 1) / 2;
+      base.push(yb);
+      yb += lineH * (LINE_SPACING2 - 1) / 2 + LINE_PAD2 * uDate;
+    }
+    const asc = [], desc = [];
+    for (const l of lines) {
+      ctx2.font = `${l.rel * uDate}px Arial, sans-serif`;
+      const m = ctx2.measureText(l.text);
+      asc.push(m.actualBoundingBoxAscent);
+      desc.push(m.actualBoundingBoxDescent);
+    }
+    let tp = Infinity, bp = -Infinity;
+    for (let i = 0; i < lines.length; i++) {
+      if (!lines[i].prom) continue;
+      tp = Math.min(tp, base[i] - asc[i]);
+      bp = Math.max(bp, base[i] + desc[i]);
+    }
+    const shift = -(tp + bp) / 2;
+    const last = lines.length - 1;
+    const dateTopOffset = -(base[0] + shift - asc[0]);
+    const dateBotOffset = base[last] + shift + desc[last];
+    const dateH = dateTopOffset + dateBotOffset;
+    const mapH = W / 2;
+    const heights = [oc, oc, oc, 2 * R, oc, oc, dateH, mapH];
+    const sumEl = heights.reduce((a, b) => a + b, 0);
+    const N2 = heights.length, inner = N2 - 1;
+    const need = sumEl + (inner + 2) * halfPad;
+    let outerMargin, innerGap;
+    if (H >= need) {
+      outerMargin = halfPad;
+      innerGap = halfPad + (H - need) / inner;
+    } else {
+      const deficit = need - H;
+      if (deficit <= 2 * halfPad) {
+        outerMargin = halfPad - deficit / 2;
+        innerGap = halfPad;
+      } else {
+        outerMargin = 0;
+        innerGap = halfPad - (deficit - 2 * halfPad) / inner;
+      }
+    }
+    let y = outerMargin;
+    const cyc = [];
+    for (let i = 0; i < N2; i++) {
+      if (i > 0) y += innerGap;
+      cyc.push(i === 6 ? y + dateTopOffset : y + heights[i] / 2);
+      y += heights[i];
+    }
+    L.moonR = outerR;
+    L.moonCX = cx;
+    L.moonCY = cyc[0];
+    L.altR = outerR;
+    L.altCX = cx;
+    L.altCY = cyc[1];
+    L.azR = outerR;
+    L.azCX = cx;
+    L.azCY = cyc[2];
+    rescaleMain(L, cx, cyc[3], R);
+    L.eclipseCX = cx;
+    L.eclipseCY = cyc[4];
+    L.eotR = outerR;
+    L.eotCX = cx;
+    L.eotCY = cyc[5];
+    L.dateCX = cx;
+    L.dateCY = cyc[6];
+    L.dateW = dateBoxW;
+    L.dateH = dateH;
+    L.earthW = W;
+    L.earthH = mapH;
+    L.earthCX = cx;
+    L.earthCY = cyc[7];
+    L.dateMode = "stack";
+    L.dateCondensed = false;
+    L.dateForceU = uDate;
+  }
+  function applyA6(L, ctx2, fields, bounds, _headerH, _footerH, o) {
+    const W = bounds.right;
+    const hr = bounds.bottom;
+    const cy = hr / 2;
+    const halfPad = 0.0125 * W;
+    const R = hr / 2;
+    const outerR = o.a6DialK * R;
+    const u = o.a6FontK * (2 * outerR);
+    const wkText = fields.weekday, md = fields.monthDay, yr = fields.year, tzAbbr = fields.tzAbbrev;
+    const { weekdayW, dateW } = measureRowTexts(ctx2, wkText, md, yr, tzAbbr, "", u);
+    const dialW = hr, mapW = 2 * hr;
+    const sumEl = 2 * outerR + weekdayW + 2 * outerR + 2 * outerR + dialW + 2 * outerR + 2 * outerR + dateW + mapW;
+    const N2 = 9, inner = N2 - 1;
+    const need = sumEl + (inner + 2) * halfPad;
+    let outerGap, innerGap;
+    if (W >= need) {
+      outerGap = halfPad;
+      innerGap = halfPad + (W - need) / inner;
+    } else {
+      const deficit = need - W;
+      if (deficit <= 2 * halfPad) {
+        outerGap = halfPad - deficit / 2;
+        innerGap = halfPad;
+      } else {
+        outerGap = 0;
+        innerGap = halfPad - (deficit - 2 * halfPad) / inner;
+      }
+    }
+    let cx = outerGap;
+    const place = (w) => {
+      const c = cx + w / 2;
+      cx += w + innerGap;
+      return c;
+    };
+    L.moonR = outerR;
+    L.moonCX = place(2 * outerR);
+    L.moonCY = cy;
+    L.dateCX = place(weekdayW);
+    L.dateCY = cy;
+    L.dateW = weekdayW + 4;
+    L.dateH = hr;
+    L.altR = outerR;
+    L.altCX = place(2 * outerR);
+    L.altCY = cy;
+    L.azR = outerR;
+    L.azCX = place(2 * outerR);
+    L.azCY = cy;
+    rescaleMain(L, place(dialW), cy, R);
+    L.eclipseCX = place(2 * outerR);
+    L.eclipseCY = cy;
+    L.eotR = outerR;
+    L.eotCX = place(2 * outerR);
+    L.eotCY = cy;
+    L.date2CX = place(dateW);
+    L.date2CY = cy;
+    L.date2W = dateW + 4;
+    L.date2H = hr;
+    L.earthW = mapW;
+    L.earthH = hr;
+    L.earthCX = place(mapW);
+    L.earthCY = cy;
+    L.dateMode = "split";
+    L.dateCondensed = true;
+    L.dateBaselineBottom = void 0;
+    L.dateForceU = u;
+  }
+  function applyAnchor(L, anchorId, ctx2, fields, bounds, headerH, footerH, options = {}) {
+    const o = resolveOptions(options);
+    switch (anchorId) {
+      case "A1":
+        applyA1(L, ctx2, fields, bounds, headerH, footerH, o);
+        break;
+      case "A2":
+        applyA2(L, bounds, o);
+        break;
+      case "A3":
+        applyA3Common(L, bounds, o);
+        break;
+      case "A3m":
+        applyA3Mini(L, bounds, o);
+        break;
+      case "Asq":
+        applyAsq(L, bounds, headerH, footerH, o);
+        break;
+      case "A4":
+        if (o.a4Sym) applyA4Dials(L);
+        break;
+      case "A5":
+        applyA5(L, ctx2, fields, bounds, headerH, footerH, o);
+        break;
+      case "Awide":
+        applyAwide(L, ctx2, fields, bounds, headerH, footerH, o);
+        break;
+      case "A6":
+        applyA6(L, ctx2, fields, bounds, headerH, footerH, o);
+        break;
+    }
+    L.eclipseR2 = L.altR;
+    L.eclipseR1 = L.altR * ECLIPSE_R1_RATIO;
+  }
+  var ECLIPSE_R1_RATIO = 49 / 63;
+  function buildBaseLayout(anchorId, W, H, footerH) {
+    if (anchorId === "A2") return portraitTwoBand(W, H - footerH, null);
+    if (anchorId === "A3" || anchorId === "A3m") return portraitOneBand(W, H - footerH, null);
+    return computeBaseLayout(W, H, { footerH, popover: null });
+  }
+  var SHIFT_X = ["mainCX", "utcCX", "solarCX", "sidCX", "moonCX", "earthCX", "altCX", "azCX", "eclipseCX", "eotCX", "dateCX", "date2CX"];
+  var SHIFT_Y = ["mainCY", "utcCY", "solarCY", "sidCY", "moonCY", "earthCY", "altCY", "azCY", "eclipseCY", "eotCY", "dateCY", "date2CY"];
+  function shiftLayout(L, dx, dy) {
+    if (dx) for (const k of SHIFT_X) L[k] += dx;
+    if (dy) {
+      for (const k of SHIFT_Y) L[k] += dy;
+      if (L.dateBaselineBottom != null) L.dateBaselineBottom += dy;
+    }
+  }
+  function computeLayout(viewW, viewH, chrome, ctx2, date, timezone) {
+    const dpr = typeof devicePixelRatio !== "undefined" ? devicePixelRatio : 1;
+    const insetTop = chrome.insetTop ?? 0;
+    const insetRight = chrome.insetRight ?? 0;
+    const insetBottom = chrome.insetBottom ?? 0;
+    const insetLeft = chrome.insetLeft ?? 0;
+    const safeW = Math.max(1, viewW - insetLeft - insetRight);
+    const safeH = Math.max(1, viewH - insetTop - insetBottom);
+    let headerH = chrome.headerH;
+    let footerH = chrome.footerH;
+    if (safeW < TC_POPOVER_W || safeH < TC_POPOVER_H) {
+      headerH = 0;
+      footerH = 0;
+    }
+    const anchorId = pickAnchor(safeW / safeH);
+    const contentW = safeW;
+    const baseH = safeH - headerH;
+    const L = buildBaseLayout(anchorId, contentW, baseH, footerH);
+    const bounds = { left: 0, right: contentW, top: 0, bottom: baseH - footerH };
+    const fields = extractDateFields(date, timezone);
+    applyAnchor(L, anchorId, ctx2, fields, bounds, headerH, footerH);
+    shiftLayout(L, insetLeft, insetTop + headerH);
+    L.viewW = viewW;
+    L.viewH = viewH;
+    L.dpr = dpr;
+    L.anchor = anchorId;
+    L.headerBandH = headerH > 0 ? insetTop + headerH : 0;
+    L.footerBandH = footerH > 0 ? insetBottom + footerH : 0;
+    return L;
   }
 
   // .observatory-ref/Resources/background@2x.png
@@ -19657,154 +20703,6 @@
     return order[(base + dir + n) % n];
   }
 
-  // src/observatory/date-view.ts
-  var COLOR = "rgba(255,255,255,0.9)";
-  var COLOR_DIM = "rgba(255,255,255,0.55)";
-  var REL_BIG = 1;
-  var REL_YEAR = 0.42;
-  var REL_SMALL = 0.21;
-  var UNIT_MAX = 72;
-  function isLeapYear(year) {
-    return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-  }
-  function extractFields(date, timezone) {
-    const tz = timezone || void 0;
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: tz,
-      weekday: "long",
-      month: "short",
-      // iOS bigDate uses "MMM dd"
-      day: "numeric",
-      year: "numeric"
-    }).formatToParts(date);
-    const get = (type) => parts.find((p) => p.type === type)?.value ?? "";
-    const weekday = get("weekday");
-    const month = get("month");
-    const day = get("day");
-    const year = get("year");
-    let tzAbbrev = "";
-    try {
-      const tzParts = new Intl.DateTimeFormat("en-US", {
-        timeZone: tz,
-        timeZoneName: "short"
-      }).formatToParts(date);
-      tzAbbrev = tzParts.find((p) => p.type === "timeZoneName")?.value ?? "";
-    } catch {
-      tzAbbrev = "";
-    }
-    return {
-      weekday,
-      monthDay: `${month} ${day}`,
-      year,
-      leap: isLeapYear(parseInt(year, 10)),
-      tzAbbrev
-    };
-  }
-  var SEG_GAP_EM = 0.35;
-  var LINE_SPACING = 1.18;
-  var LINE_PAD = 0.1;
-  function fontFor(px) {
-    return `${px}px Arial, sans-serif`;
-  }
-  function segGap(line, i, u) {
-    if (i === 0) return 0;
-    return SEG_GAP_EM * Math.max(line[i - 1].rel, line[i].rel) * u;
-  }
-  function measureLine(ctx2, line, u) {
-    let w = 0;
-    let maxRel = 0;
-    let drawn = 0;
-    for (let i = 0; i < line.length; i++) {
-      const seg = line[i];
-      if (!seg.text) continue;
-      ctx2.font = fontFor(seg.rel * u);
-      w += ctx2.measureText(seg.text).width;
-      if (drawn > 0) w += segGap(line, i, u);
-      drawn++;
-      if (seg.rel > maxRel) maxRel = seg.rel;
-    }
-    return { w, h: maxRel * u };
-  }
-  function drawBlock(ctx2, lines, cx, cy, boxW, boxH) {
-    const live = lines.filter((l) => l.some((s) => s.text));
-    if (live.length === 0 || boxW <= 0 || boxH <= 0) return;
-    ctx2.save();
-    ctx2.textAlign = "left";
-    ctx2.textBaseline = "alphabetic";
-    const REF = 100;
-    let maxW = 0;
-    let totH = (live.length - 1) * LINE_PAD * REF;
-    const refDims = live.map((l) => {
-      const d = measureLine(ctx2, l, REF);
-      if (d.w > maxW) maxW = d.w;
-      totH += d.h * LINE_SPACING;
-      return d;
-    });
-    const u = Math.min(UNIT_MAX, REF * Math.min(boxW / maxW, boxH / totH));
-    const blockH = totH / REF * u;
-    let y = cy - blockH / 2;
-    for (let li = 0; li < live.length; li++) {
-      const line = live[li];
-      const lineH = refDims[li].h / REF * u;
-      const lineW = refDims[li].w / REF * u;
-      y += lineH * (LINE_SPACING + 1) / 2;
-      let x = cx - lineW / 2;
-      let drawn = 0;
-      for (let si = 0; si < line.length; si++) {
-        const seg = line[si];
-        if (!seg.text) continue;
-        const px = seg.rel * u;
-        ctx2.font = fontFor(px);
-        ctx2.fillStyle = seg.color;
-        if (drawn > 0) x += segGap(line, si, u);
-        drawn++;
-        ctx2.fillText(seg.text, x, y);
-        x += ctx2.measureText(seg.text).width;
-      }
-      y += lineH * (LINE_SPACING - 1) / 2 + LINE_PAD * u;
-    }
-    ctx2.restore();
-  }
-  function drawDateView(ctx2, L, date, timezone) {
-    const f = extractFields(date, timezone);
-    const wk = { text: f.weekday, rel: REL_BIG, color: COLOR };
-    const md = { text: f.monthDay, rel: REL_BIG, color: COLOR };
-    const yr = { text: f.year, rel: REL_YEAR, color: COLOR };
-    const leap = { text: f.leap ? "leap" : "", rel: REL_SMALL, color: COLOR_DIM };
-    const tz = { text: f.tzAbbrev, rel: REL_SMALL, color: COLOR_DIM };
-    switch (L.dateMode) {
-      case "stack":
-        drawBlock(
-          ctx2,
-          [[wk], [md], [yr, leap], [tz]],
-          L.dateCX,
-          L.dateCY,
-          L.dateW,
-          L.dateH
-        );
-        break;
-      case "row": {
-        const small = (text) => ({ text, rel: 0.45, color: COLOR });
-        const info = [small(f.monthDay), small("\xB7"), small(f.year)];
-        if (f.tzAbbrev) info.push(small("\xB7"), { text: f.tzAbbrev, rel: 0.45, color: COLOR_DIM });
-        if (f.leap) info.push(small("\xB7"), { text: "leap", rel: 0.45, color: COLOR_DIM });
-        drawBlock(ctx2, [[wk], info], L.dateCX, L.dateCY, L.dateW, L.dateH);
-        break;
-      }
-      case "split":
-        drawBlock(ctx2, [[wk]], L.dateCX, L.dateCY, L.dateW, L.dateH);
-        drawBlock(
-          ctx2,
-          [[md], [yr, tz, leap]],
-          L.date2CX,
-          L.date2CY,
-          L.date2W,
-          L.date2H
-        );
-        break;
-    }
-  }
-
   // src/shared/assets/sunEclipse.png
   var sunEclipse_default = "data:image/png;base64,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";
 
@@ -20110,6 +21008,8 @@
   var frameRequestedDuringTick = false;
   var fpsIndicator = null;
   var layout;
+  var lastLayoutTz;
+  var lastSizeSig = "";
   var canvas;
   var ctx;
   var timeController = new TimeController();
@@ -20177,42 +21077,24 @@
     }
   }
   var FOOTER_H = 32;
-  var noonToggleWrapped = false;
-  var NOON_TOGGLE_GAP = 16;
-  function updateNoonToggleWrap() {
-    const toggle = document.getElementById("noon-toggle");
-    if (!toggle) return false;
-    const w = window.innerWidth;
-    const toggleW = toggle.getBoundingClientRect().width;
-    let leftEdge = 0;
-    for (const id of ["time-bar-label", "time-bar-info", "time-bar-now"]) {
-      const r = document.getElementById(id)?.getBoundingClientRect();
-      if (r && r.width > 0) leftEdge = Math.max(leftEdge, r.right);
+  var HEADER_H = 32;
+  var insetProbe = null;
+  function readSafeInsets() {
+    if (!insetProbe) {
+      insetProbe = document.createElement("div");
+      insetProbe.style.cssText = "position:fixed;top:0;left:0;width:0;height:0;visibility:hidden;pointer-events:none;padding-top:env(safe-area-inset-top);padding-right:env(safe-area-inset-right);padding-bottom:env(safe-area-inset-bottom);padding-left:env(safe-area-inset-left);";
+      document.body.appendChild(insetProbe);
     }
-    const controls = document.getElementById("observatory-controls")?.getBoundingClientRect();
-    const rightEdge = controls && controls.width > 0 ? controls.left : w;
-    const fits = (w - toggleW) / 2 >= leftEdge + NOON_TOGGLE_GAP && (w + toggleW) / 2 <= rightEdge - NOON_TOGGLE_GAP;
-    const shouldWrap = !fits;
-    if (shouldWrap === noonToggleWrapped) return false;
-    noonToggleWrapped = shouldWrap;
-    toggle.classList.toggle("wrapped", noonToggleWrapped);
-    return true;
+    const cs = getComputedStyle(insetProbe);
+    return {
+      insetTop: parseFloat(cs.paddingTop) || 0,
+      insetRight: parseFloat(cs.paddingRight) || 0,
+      insetBottom: parseFloat(cs.paddingBottom) || 0,
+      insetLeft: parseFloat(cs.paddingLeft) || 0
+    };
   }
   function chromeParams() {
-    let popover = null;
-    if (timeUI?.isPopoverOpen()) {
-      const upper = document.getElementById("tp-upper")?.getBoundingClientRect();
-      const lower = document.getElementById("tp-lower")?.getBoundingClientRect();
-      if (upper && lower && upper.width > 0) {
-        popover = {
-          upperW: upper.width,
-          upperH: upper.height,
-          lowerW: lower.width,
-          lowerH: lower.height
-        };
-      }
-    }
-    return { footerH: FOOTER_H * (noonToggleWrapped ? 2 : 1), popover };
+    return { footerH: FOOTER_H, headerH: HEADER_H, ...readSafeInsets() };
   }
   function resizeCanvas() {
     const dpr = devicePixelRatio || 1;
@@ -20222,8 +21104,14 @@
     canvas.height = h * dpr;
     canvas.style.width = `${w}px`;
     canvas.style.height = `${h}px`;
-    updateNoonToggleWrap();
-    layout = computeLayout(w, h, chromeParams());
+    layout = computeLayout(w, h, chromeParams(), ctx, timeController.getDisplayTime(), locationTimezone);
+    lastLayoutTz = locationTimezone;
+    positionNoonIcon();
+    const sizeSig = `${w}\xD7${h} \xB7 mainR=${layout.mainR.toFixed(1)} \xB7 ${layout.anchor ?? "?"}`;
+    if (sizeSig !== lastSizeSig) {
+      console.log(`[Observatory] viewport ${sizeSig}`);
+      lastSizeSig = sizeSig;
+    }
     invalidateBackgroundCache();
     invalidateMainDialCache();
     invalidateRingCache();
@@ -20249,6 +21137,27 @@
     const bgCache = getBackgroundCache(L);
     if (bgCache) {
       ctx.drawImage(bgCache, 0, 0);
+    }
+    const headerBand = (L.headerBandH ?? 0) * dpr;
+    const footerBand = (L.footerBandH ?? 0) * dpr;
+    if (headerBand > 0 || footerBand > 0) {
+      ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+      ctx.lineWidth = 1;
+      if (headerBand > 0) {
+        ctx.fillRect(0, 0, w, headerBand);
+        ctx.beginPath();
+        ctx.moveTo(0, headerBand + 0.5);
+        ctx.lineTo(w, headerBand + 0.5);
+        ctx.stroke();
+      }
+      if (footerBand > 0) {
+        ctx.fillRect(0, h - footerBand, w, footerBand);
+        ctx.beginPath();
+        ctx.moveTo(0, h - footerBand - 0.5);
+        ctx.lineTo(w, h - footerBand - 0.5);
+        ctx.stroke();
+      }
     }
     const dialCache = getMainDialCache(L, noonOnTop);
     if (dialCache) {
@@ -20282,16 +21191,6 @@
       drawEarthView(ctx, L, updater, lat, lon, getNow);
     }
     drawDateView(ctx, L, now, locationTimezone);
-    ctx.font = '11px "JetBrains Mono", monospace';
-    ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    const timeStr = now.toLocaleTimeString("en-US", {
-      hour12: false,
-      timeZone: locationTimezone
-    });
-    ctx.fillText(`Observatory \xB7 ${timeStr}`, 10, 10);
-    ctx.fillText(`${layout.viewW}\xD7${layout.viewH} \xB7 mainR=${L.mainR.toFixed(0)}`, 10, 24);
     ctx.restore();
   }
   function scheduleFrame() {
@@ -20375,6 +21274,10 @@
     env.variables.set("dialPlanet", selectedPlanet);
     invalidateRingCache();
     needsStaticRedraw = true;
+    if (locationTimezone !== lastLayoutTz) {
+      resizeCanvas();
+      return;
+    }
     scheduleFrame();
   }
   function setupLocationDialog() {
@@ -20477,16 +21380,30 @@
       }
     }
   }
+  function positionNoonIcon() {
+    const icon = document.getElementById("noon-icon");
+    if (!icon) return;
+    if (layout?.anchor === "A5") {
+      icon.style.left = `${Math.min(0.12 * window.innerWidth, 90)}px`;
+      icon.style.transform = "none";
+    } else {
+      icon.style.left = "50%";
+      icon.style.transform = "translateX(-50%)";
+    }
+  }
   function setupNoonToggle() {
     const toggle = document.getElementById("noon-toggle");
-    if (!toggle) return;
+    const icon = document.getElementById("noon-icon");
+    if (!toggle || !icon) return;
     const midnightPill = toggle.querySelector('[data-mode="midnight"]');
     const noonPill = toggle.querySelector('[data-mode="noon"]');
     const updateHighlight = () => {
       midnightPill.classList.toggle("active", !noonOnTop);
       noonPill.classList.toggle("active", noonOnTop);
     };
+    const closeOverlay = () => toggle.classList.remove("open");
     const setNoonOnTop = (value) => {
+      closeOverlay();
       if (value === noonOnTop) return;
       noonOnTop = value;
       env.variables.set("noonOnTop", noonOnTop ? 1 : 0);
@@ -20495,20 +21412,23 @@
       updateHighlight();
       scheduleFrame();
     };
+    icon.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggle.classList.toggle("open");
+    });
     midnightPill.addEventListener("click", () => setNoonOnTop(false));
     noonPill.addEventListener("click", () => setNoonOnTop(true));
-    updateHighlight();
-    const footerRo = new ResizeObserver(() => {
-      if (updateNoonToggleWrap()) resizeCanvas();
+    document.addEventListener("click", (e) => {
+      if (!toggle.classList.contains("open")) return;
+      const t = e.target;
+      if (!toggle.contains(t) && !icon.contains(t)) closeOverlay();
     });
-    footerRo.observe(toggle);
-    for (const id of ["time-bar-label", "time-bar-info", "time-bar-now", "observatory-controls"]) {
-      const el = document.getElementById(id);
-      if (el) footerRo.observe(el);
-    }
+    updateHighlight();
+    positionNoonIcon();
   }
   function init() {
     document.documentElement.style.setProperty("--obs-footer-h", `${FOOTER_H}px`);
+    document.documentElement.style.setProperty("--obs-header-h", `${HEADER_H}px`);
     if (urlState.fps) document.body.classList.add("has-fps");
     initCanvas();
     ro.observe(document.documentElement);
@@ -20581,7 +21501,7 @@
         scheduleFrame();
       },
       onPopoverToggle: () => {
-        resizeCanvas();
+        scheduleFrame();
       }
     });
     if (urlState.tc) {

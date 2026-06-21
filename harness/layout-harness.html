@@ -156,8 +156,11 @@
 <div id="stage"><div id="frame"><canvas id="cv"></canvas></div></div>
 
 <script type="module">
-import { computeLayout, portraitTwoBand, portraitOneBand } from './layout.mjs?v=15';
-import { drawDateView, condensedDateLayout, measureRowTexts } from './date-view.mjs?v=15';
+// §9.6: the harness imports the SAME per-anchor logic the app ships (from
+// anchor-layout.mjs), passing its live slider/checkbox values where production
+// bakes the §9.4 constants — so the reference can't silently drift.
+import { buildBaseLayout, applyAnchor } from './anchor-layout.mjs?v=17';
+import { drawDateView, extractDateFields } from './date-view.mjs?v=17';
 
 // Sample instant for the date block — uses "now" so it matches what a recent
 // build shows on the phone you're comparing against.
@@ -299,39 +302,21 @@ function draw() {
   const contentH = H - headerH;                       // height passed to layout
   // Anchors are pinned to one layout arrangement across all their sizes (bypass
   // the width-triggered row↔stack flip): A2 = two-band (phone), A3 = one-band (iPad).
-  const L = activeAnchor.id === 'A2' ? portraitTwoBand(contentW, contentH - footerH, null)
-          : (activeAnchor.id === 'A3' || activeAnchor.id === 'A3m')
-              ? portraitOneBand(contentW, contentH - footerH, null)
-          : computeLayout(contentW, contentH, { footerH, popover: null });
+  const L = buildBaseLayout(activeAnchor.id, contentW, contentH, footerH);
   const bounds = { left:0, right:contentW, top:0, bottom:contentH - footerH };
-  if (activeAnchor.id === 'A2') a2DateBox(L, contentW);   // decouple date from map
+  const fields = extractDateFields(SAMPLE_DATE, undefined);
+  applyAnchor(L, activeAnchor.id, ctx, fields, bounds, headerH, footerH, anchorOpts());
   if ($('oDateCenter').checked) cachedJ = measureJ(L, contentW, contentH) || cachedJ;
-  applyRules(L, activeAnchor.id, bounds, footerH, headerH);
   const o = { labels:$('oLabels').checked, boxes:$('oBoxes').checked,
               centers:$('oCenters').checked, gaps:$('oGaps').checked };
 
   ctx.clearRect(0,0,W,H);
   ctx.fillStyle = '#0c0e12'; ctx.fillRect(0,0,W,H);
 
-  // header row at the top
-  if (headerH > 0) drawHeader(W, headerH);
-
-  // footer band at the bottom
-  if (footerH > 0) {
-    const fy = H - footerH;
-    ctx.fillStyle = '#191c22'; ctx.fillRect(0, fy, W, footerH);
-    ctx.strokeStyle = '#2c3038'; ctx.beginPath();
-    ctx.moveTo(0, fy + .5); ctx.lineTo(W, fy + .5); ctx.stroke();
-    ctx.fillStyle = '#5b626d'; ctx.font = '11px ui-monospace, monospace';
-    ctx.fillText('FOOTER', 6, fy + footerH/2 + 4);
-
-    // Noon toggle is a footer icon; tapping it raises the Midnight/Noon pill as
-    // an on-demand overlay (rare) that may overlap the dial — so it costs the
-    // layout nothing. Normally centred, but in A5 the big main dial overlaps the
-    // footer centre, so the icon moves left (near the time-controller button).
-    const noonX = activeAnchor.id === 'A5' ? Math.min(0.12 * W, 90) : W / 2;
-    drawNoonIcon(noonX, fy + footerH/2, footerH);
-  }
+  // Header/footer band BACKGROUNDS first — behind the main elements (the dial
+  // may overlap them in A5); the chrome CONTENT is drawn last (after restore).
+  if (headerH > 0) drawHeaderBg(W, headerH);
+  if (footerH > 0) drawFooterBg(W, footerH, H);
 
   // All layout-space drawing is shifted into the safe content area.
   ctx.save();
@@ -387,6 +372,11 @@ function draw() {
 
   ctx.restore();   // end safe-content space
 
+  // Chrome CONTENT last — on top of the main elements (the band backgrounds
+  // were drawn behind them above).
+  if (headerH > 0) drawHeaderContent(W, headerH);
+  if (footerH > 0) drawFooterContent(W, footerH, H);
+
   // Date ink-bounds overlay (absolute coords; offset by ox/oy).
   let inkInfo = null;
   if ($('oInk').checked) {
@@ -433,10 +423,18 @@ function drawHeaderBtn(cx, cy, kind, r) {
   else { ctx.font=`${r*0.85}px -apple-system, system-ui, sans-serif`; ctx.fillText('⬆', cx, cy+1); }
 }
 
-function drawHeader(W, h) {
+// Header/footer are split into BACKGROUND (band fill + separator) and CONTENT
+// (title/buttons, footer label, noon icon). The bg is drawn before the main
+// elements (behind the dial); the content is drawn after (on top) — matching
+// the production renderer, which paints the band bg on the canvas and keeps the
+// DOM chrome content above it.
+function drawHeaderBg(W, h) {
   ctx.fillStyle = '#191c22'; ctx.fillRect(0, 0, W, h);
   ctx.strokeStyle = '#2c3038'; ctx.beginPath();
   ctx.moveTo(0, h-.5); ctx.lineTo(W, h-.5); ctx.stroke();
+}
+
+function drawHeaderContent(W, h) {
   const cy = h/2;
   // title, left
   ctx.fillStyle = '#cdd4dd'; ctx.textBaseline='middle'; ctx.textAlign='left';
@@ -448,721 +446,59 @@ function drawHeader(W, h) {
   const ix = sx - (2*r + 10);        // info to its left
   drawHeaderBtn(ix, cy, 'i', r);
   drawHeaderBtn(sx, cy, 'share', r);
+  ctx.textBaseline='alphabetic'; ctx.textAlign='left';
 }
 
-// ---- candidate layout rules (post-process committed layout) --------------
-
-/**
- * A2: size the date box independently of the map (decoupled). Mode is pinned to
- * 'row'; the box height is a fraction of the content width, so the date FONT
- * scales with available size — no map coupling, no size-triggered mode flip, no
- * accidental 80px cap. Position (dateCY) is set later by the centering rule.
- */
-function a2DateBox(L, W) {
-  L.dateMode = 'row';
-  L.dateCX = W / 2;
-  L.dateW  = W - 32;                                   // generous; fit is height-limited
-  L.dateH  = (+$('dateHFrac').value || 0.144) * W;     // ∝ content width (was 0.45·mapH)
+function drawFooterBg(W, footerH, H) {
+  const fy = H - footerH;
+  ctx.fillStyle = '#191c22'; ctx.fillRect(0, fy, W, footerH);
+  ctx.strokeStyle = '#2c3038'; ctx.beginPath();
+  ctx.moveTo(0, fy + .5); ctx.lineTo(W, fy + .5); ctx.stroke();
 }
 
-function shiftMain(L, d){ L.mainCY+=d; L.utcCY+=d; L.solarCY+=d; L.sidCY+=d; }
-function shiftAll(L, d){ shiftMain(L,d);
-  L.altCY+=d; L.azCY+=d; L.eotCY+=d; L.eclipseCY+=d; }
+function drawFooterContent(W, footerH, H) {
+  const fy = H - footerH;
+  ctx.fillStyle = '#5b626d'; ctx.font = '11px ui-monospace, monospace';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.fillText('FOOTER', 6, fy + footerH/2 + 4);
+  // Noon toggle is a footer icon; tapping it raises the Midnight/Noon pill as an
+  // on-demand overlay (rare). Normally centred, but in A5 the big main dial
+  // overlaps the footer centre, so the icon moves left (near the time button).
+  const noonX = activeAnchor.id === 'A5' ? Math.min(0.12 * W, 90) : W / 2;
+  drawNoonIcon(noonX, fy + footerH/2, footerH);
+}
 
-/**
- * A3 explicit outer-dial rule (replaces the committed corner-solver's hidden
- * shrink-to-fit). Radius = k·mainR, placed at a held rim-gap g in each bottom
- * corner along its committed angle, clamped to the side edges and so its TOP
- * mirror clears the header band; if that clamping pushes it into the main rim,
- * shrink k until it fits. The top dials (alt/ecl) are the bottom dials mirrored
- * across the main center, so all four share one radius and gap.
- */
-function applyA3Dials(L, bounds) {
-  const cx=L.mainCX, cy=L.mainCY, R=L.mainR;
-  const k=+$('a3DialK').value || 0.165, g=(+$('a3DialGap').value || 0.04) * R;   // gap ∝ mainR
-  const bandBottom = Math.max(L.moonCY+L.moonR, L.earthCY+L.earthH/2, L.dateCY+L.dateH/2);
-  const dir=(exC,eyC)=>{ const dx=exC-cx, dy=eyC-cy, d=Math.hypot(dx,dy)||1; return {ux:dx/d, uy:dy/d}; };
-  const dAz=dir(L.azCX,L.azCY), dEot=dir(L.eotCX,L.eotCY);
-  let er=k*R;
-  const place=(d, gap)=>{
-    const D=R+gap+er;
-    let x=cx+d.ux*D, y=cy+d.uy*D;
-    x=Math.max(er, Math.min(bounds.right-er, x));      // clear side edges
-    y=Math.min(y, 2*cy - bandBottom - er);             // mirror (top) clears the band
-    y=Math.max(y, cy);                                 // stay in the bottom half
-    return {x,y};
+// ---- per-anchor tunables → the shared applyAnchor (§9.6) -----------------
+// Read the live sliders/checkboxes into the AnchorOptions the imported
+// applyAnchor accepts. Production omits these (the §9.4 ship defaults apply);
+// the harness passes them so the knobs still tune by eye.
+function anchorOpts() {
+  return {
+    a2Rules:        $('oRules').checked,
+    a2Reclaim:      $('oReclaim').checked,
+    a2Cluster:      $('oCluster').checked,
+    a2DateCenter:   $('oDateCenter').checked,
+    dialK:          +$('dialK').value || 1.36,
+    dateHFrac:      +$('dateHFrac').value || 0.144,
+    mainDy:         +$('mainDy').value || 0,
+    dateDy:         +$('dateDy').value || 0,
+    a3MoonCenter:   $('oMoonCenter').checked,
+    a3OuterAlign:   $('oOuterAlign').checked,
+    a3MapVCenter:   $('oMapVCenter').checked,
+    a3DisplayCenter:$('oDisplayCenter').checked,
+    a3DialK:        +$('a3DialK').value || 0.165,
+    a3DialGap:      +$('a3DialGap').value || 0.04,
+    mapScale:       +$('mapScale').value || 1.10,
+    a4Sym:          $('oA4Sym').checked,
+    a5Row:          $('oA5Row').checked,
+    a5DateCenter:   $('oA5DateCenter').checked,
+    a6DialK:        +$('a6DialK').value || 0.65,
+    a6FontK:        +$('a6FontK').value || 0.35,
+    asqMapK:        +$('asqMapK').value || 0.37,
+    asqOuterT:      +$('asqOuterT').value || 0.42,
+    awMoonK:        +$('awMoonK').value || 1,
+    awMapK:         +$('awMapK').value || 1,
   };
-  // size: shrink er at gap g until the corner dials clear the main rim
-  for (let i=0;i<40;i++) {
-    const az=place(dAz,g), eot=place(dEot,g);
-    const rimOk=p=>Math.hypot(p.x-cx,p.y-cy) >= R+er+g/2;
-    if (rimOk(az) && rimOk(eot)) break;
-    er*=0.94; if (er<8) { er=8; break; }
-  }
-  // moon-proximity cap: alt (top-left = mirror of az) shouldn't sit closer to the
-  // moon than to the main dial. If it does, pull all four dials inward (same size)
-  // until alt's gap to the moon equals its gap to the main rim.
-  const altMoonGapAt=(gap)=>{
-    const D=R+gap+er, ax=cx+dAz.ux*D, ay=cy-dAz.uy*D;  // alt = az direction mirrored in y
-    return Math.hypot(ax-L.moonCX, ay-L.moonCY) - er - L.moonR;
-  };
-  let gMain=g;
-  if (altMoonGapAt(g) < g) {                           // alt closer to moon than to main
-    let lo=0, hi=g;                                    // find gap where moon-gap == main-gap
-    for (let i=0;i<30;i++) { const mid=(lo+hi)/2; if (altMoonGapAt(mid)-mid>0) lo=mid; else hi=mid; }
-    gMain=lo;
-  }
-  const az=place(dAz,gMain), eot=place(dEot,gMain);
-  L.azCX=az.x; L.azCY=az.y; L.azR=er;
-  L.eotCX=eot.x; L.eotCY=eot.y; L.eotR=er;
-  L.altCX=az.x;  L.altCY=2*cy-az.y;  L.altR=er;        // mirror to the top
-  L.eclipseCX=eot.x; L.eclipseCY=2*cy-eot.y;           // ECL draws at L.altR=er
-}
-
-// Rules shared by all one-band iPad portraits (A3 and A3m).
-function applyA3Common(L, bounds) {
-  // 1. center the moon (left of map) and the date (right of map) horizontally
-  if ($('oMoonCenter').checked) {
-    L.moonCX = (L.earthCX - L.earthW/2) / 2;
-    L.dateCX = (L.earthCX + L.earthW/2 + bounds.right) / 2;
-  }
-  // 2. center the map vertically between the header (content top) and the main dial
-  if ($('oMapVCenter').checked) {
-    const dy = ((bounds.top + (L.mainCY - L.mainR)) / 2) - L.earthCY;
-    L.moonCY += dy; L.earthCY += dy; L.dateCY += dy;
-  }
-  // 3. explicit outer-dial sizing + held-gap placement + fit-clamp + mirror
-  if ($('oOuterAlign').checked) applyA3Dials(L, bounds);
-  // 4. center the whole display (everything but chrome) vertically (header↔footer)
-  if ($('oDisplayCenter').checked) {
-    const top = Math.min(L.moonCY-L.moonR, L.earthCY-L.earthH/2, L.mainCY-L.mainR, L.altCY-L.altR, L.eclipseCY-L.altR);
-    const bot = Math.max(L.azCY+L.azR, L.eotCY+L.eotR, L.mainCY+L.mainR);
-    const dy = ((bounds.top + bounds.bottom)/2) - (top+bot)/2;
-    for (const key of ['moonCY','earthCY','dateCY','mainCY','utcCY','solarCY','sidCY','altCY','azCY','eclipseCY','eotCY']) L[key] += dy;
-  }
-}
-
-// iPad mini (narrower 0.683): expand + center the map, shrink the date to fit.
-function applyA3Mini(L, bounds) {
-  const s = +$('mapScale').value || 1.10;
-  L.earthW *= s; L.earthH *= s;            // expand the map
-  L.earthCX = bounds.right / 2;            // center horizontally
-  L.dateW *= 0.95; L.dateH *= 0.95;        // date block −5% (smaller font) to compensate
-  applyA3Common(L, bounds);                // then moon-center (uses expanded map) + map-vcenter
-}
-
-// A4 (iPad landscape): make the four outer dials vertically symmetric. The
-// committed corner-solver leaves alt/az (left) and ecl/eot (right) at different
-// y's because each column is clamped against a different neighbour (moon vs
-// map). Instead, space alt & az evenly — equal gaps around two dials — in the
-// left column between the moon's bottom and the weekday's top, then copy those
-// y's to ecl/eot on the right (x already mirrored). The ecl↔map gap grows, but
-// the cluster reads as a clean symmetric frame around the main dial.
-function applyA4Dials(L) {
-  const r = L.altR;                          // all four share this radius
-  const top = L.moonCY + L.moonR;            // moon bottom
-  const bot = L.dateCY - L.dateH / 2;        // weekday ("Thursday") top
-  const gap = (bot - top - 4 * r) / 3;       // 3 equal gaps around 2 dials
-  L.altCY = top + gap + r;                    // upper-left
-  L.azCY  = top + 2 * gap + 3 * r;            // lower-left
-  L.eclipseCY = L.altCY;                      // right column mirrors the y's
-  L.eotCY     = L.azCY;
-}
-
-// Rescale + move the whole main-dial cluster (main + the three inner subdials),
-// preserving the internal geometry (everything inside is ∝ mainR about the
-// centre). Used by A5 to enlarge the main dial and re-centre it in the full
-// safe rect.
-function rescaleMain(L, cx, cy, r) {
-  const f = r / L.mainR, ox = L.mainCX, oy = L.mainCY;
-  for (const [kx, ky] of [['utcCX','utcCY'],['solarCX','solarCY'],['sidCX','sidCY']]) {
-    L[kx] = cx + f * (L[kx] - ox);
-    L[ky] = cy + f * (L[ky] - oy);
-  }
-  L.subR *= f;
-  if (L.subOffset != null) L.subOffset *= f;
-  L.mainCX = cx; L.mainCY = cy; L.mainR = r;
-}
-
-// A5 full rule (iPhone landscape). Most of the geometry is now *computed*, with
-// the moon radius the only remaining knob:
-//   • Main dial D = 0.95·H, centred in the full safe rect → overlaps header &
-//     footer with 2.5%·H padding top/bottom (matches portrait's 2.5%·W sides).
-//   • Margins: outer dial margins and the map's right margin are halved
-//     (halfPad = 0.0125·W). The moon/map sit below the header with the same
-//     halfPad gap from the header's bottom edge.
-//   • Map auto-grows (≈2:1) until its lower-left corner's *radial* gap to the
-//     main rim equals halfPad.
-//   • Outer dials: left pair (alt/az) centred in moon-bottom↔date-top; right
-//     pair (ecl/eot) centred in map-bottom↔date-top (separate y's so a bigger
-//     moon doesn't drag the right side down). The ecl/eot radius is the largest
-//     for which all three right-side gaps equal halfPad: eot's outer margin,
-//     the eot↔ecl gap, and the ecl↔main gap measured radially to the main
-//     centre. alt/az reuse that radius. The moon is centred over alt/az.
-function applyA5(L, bounds, headerH, footerH) {
-  const W = bounds.right;
-  const H = bounds.bottom + headerH + footerH;   // full safe-rect height
-  const halfPad = 0.0125 * W;
-  const mainCX = W / 2, mainCY = H / 2 - headerH, mainR = 0.475 * H;
-  rescaleMain(L, mainCX, mainCY, mainR);
-
-  // Top edge of moon & map, in content coords. Layout space is drawn translated
-  // down by headerH, so content-y `halfPad` renders at canvas headerH+halfPad —
-  // i.e. a halfPad gap below the header's bottom edge (matching the map's right
-  // margin). (Do NOT add headerH here, or the gap double-counts the header.)
-  const topRow = halfPad;
-  const mAspect = (L.earthW / L.earthH) || 2;
-
-  // Map: right margin = halfPad, top = topRow, ~2:1. Grow until the lower-left
-  // corner's radial gap to the main rim = halfPad.
-  const cornerGap = eW => {
-    const xc = W - halfPad - eW, yc = topRow + eW / mAspect;   // lower-left corner
-    return Math.hypot(xc - mainCX, yc - mainCY) - mainR;
-  };
-  let lo = 40, hi = W;
-  for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (cornerGap(m) > halfPad) lo = m; else hi = m; }
-  L.earthW = lo; L.earthH = lo / mAspect;
-  L.earthCX = W - halfPad - L.earthW / 2;
-  L.earthCY = topRow + L.earthH / 2;
-
-  // Date drop: the weekday & date2 share a baseline placed so the deepest
-  // weekday descender sits halfPad above the footer top. condensedDateLayout
-  // (the same fn date-view renders with) gives the unit / baseline / ink-top.
-  const descBottom = bounds.bottom - halfPad;          // footer top (content) − halfPad
-  L.dateBaselineBottom = descBottom;
-  const wkText = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(SAMPLE_DATE);
-  const dateTop = condensedDateLayout(ctx, wkText, L.dateW, L.dateH, descBottom).top;
-
-  if (!$('oA5Row').checked) {
-    L.moonR = 0.13 * H; L.moonCY = topRow + L.moonR; L.moonCX = halfPad + L.moonR; return;
-  }
-
-  // ecl/eot radius: all three right-side gaps = halfPad. cyR = map↔date centre.
-  // With eot at the halfPad right margin and ecl one (2r+halfPad) inward,
-  //   eclCX = W - 2·halfPad - 3r,  and the ecl↔main radial gap = halfPad gives
-  //   hypot(eclCX-mainCX, cyR-mainCY) = mainR + r + halfPad.
-  const cyR = ((L.earthCY + L.earthH / 2) + dateTop) / 2;
-  const dyR = cyR - mainCY;
-  const gapR = r => Math.hypot((W - 2 * halfPad - 3 * r) - mainCX, dyR) - mainR - r - halfPad;
-  let rlo = 1, rhi = mainR;
-  for (let i = 0; i < 50; i++) { const m = (rlo + rhi) / 2; if (gapR(m) > 0) rlo = m; else rhi = m; }
-  const r = rlo;
-
-  // Left dial x's (independent of the moon): alt at the halfPad margin, az
-  // splits the rest to the main rim into two equal gaps.
-  const rimL = mainCX - mainR;
-  const altCX = halfPad + r;
-  const azCX = (altCX + rimL + r) / 2;
-  const moonCX = (altCX + azCX) / 2;                 // moon centred over the alt/az pair
-
-  // Moon auto-size: grow until the smallest of four gaps = halfPad —
-  //   (1) the radial moon↔alt/az gap, (2) the alt/az-bottom ↔ weekday-top gap,
-  //   (3) the left margin (moon's left edge ≥ halfPad), (4) the radial gap to the
-  //       main dial's rim. (1)/(2) bind in the normal (chromed) case; (3)/(4) are
-  //   guards that bite when the chrome is dropped (A5-small) and the vertical
-  //   space balloons, otherwise the moon would spill past the edge or into the dial.
-  // (1)/(2): the moon-centre↔alt-centre vertical offset is the constant
-  // V = (dateTop − topRow)/2, giving each a closed form. The moon grows downward
-  // (moonCY = topRow + r), so (4) is monotonic in r and solved by search.
-  const V = (dateTop - topRow) / 2;                  // moon-centre → alt-centre vertical offset
-  const dxMoonAlt = (azCX - altCX) / 2;              // moon centred over alt/az → horizontal offset
-  const moonR1 = Math.hypot(dxMoonAlt, V) - r - halfPad;   // radial moon↔alt/az gap = halfPad
-  const moonR2 = V - r - halfPad;                          // alt/az bottom ↔ weekday top = halfPad
-  const moonR3 = moonCX - halfPad;                         // left edge at the halfPad margin
-  const dialGap = mr => Math.hypot(moonCX - mainCX, (topRow + mr) - mainCY) - mainR - mr;
-  let glo = 20, ghi = Math.max(20, moonR3);
-  for (let i = 0; i < 40; i++) { const m = (glo + ghi) / 2; if (dialGap(m) > halfPad) glo = m; else ghi = m; }
-  const moonR4 = glo;                                      // radial moon↔main-dial gap = halfPad
-  const moonR = Math.max(20, Math.min(moonR1, moonR2, moonR3, moonR4));
-  L.moonR = moonR;
-  L.moonCY = topRow + moonR;
-  const cyL = ((L.moonCY + moonR) + dateTop) / 2;    // alt/az: moon↔date centre
-
-  L.altR = L.azR = L.eotR = r;                       // alt/az reuse the ecl/eot radius
-  L.eotCX = W - halfPad - r;             L.eotCY = cyR;
-  L.eclipseCX = W - 2 * halfPad - 3 * r; L.eclipseCY = cyR;   // ECL draws at L.altR = r
-  L.altCX = altCX;  L.altCY = cyL;
-  L.azCX  = azCX;   L.azCY  = cyL;
-  L.moonCX = moonCX;
-}
-
-// Awide (Ultrawide landscape, aspect ~3.56 / 32:9): NEW anchor between A5 (1.99)
-// and A6 (10.0). FIVE columns laid out left→right with EVEN gaps (incl. outer
-// margins): moon · alt/az · MAIN DIAL · ecl/eot · map. Because the moon and map
-// columns differ in width, the dial sits OFF-centre. The dial is full height and
-// the alt/az·ecl/eot pairs centre on it; the moon & map sit in their upper areas
-// (between the header bottom and their own date piece), each sized so it does NOT
-// overlap that date piece. The date is SPLIT on one shared baseline — weekday
-// under the moon, condensed date under the map. Two sliders scale moon & map.
-function applyAwide(L, bounds, headerH, footerH) {
-  const W = bounds.right, availV = bounds.bottom;        // content rect (header/footer dropped)
-  const hp = 0.0125 * W, gap = 2 * hp;                   // halfPad and a "full gap"
-  const cy = availV / 2;
-  const mainR = Math.max(2, availV / 2);                 // FULL height
-  const er_v = L.altR;                                   // base outer-dial radius (may shrink in C1)
-
-  // DATE sizing (split, shared baseline). The unit comes from the condensed date
-  // fitting a *nominal* side region (so the date size is stable as the columns
-  // move); the deepest weekday descender sits a HALF gap above the bottom guard
-  // (footer top, or window bottom when chrome is dropped) so the date hugs the
-  // bottom and frees room above.
-  const UNIT_MAX=72, REF=100;
-  const fmt=new Intl.DateTimeFormat('en-US',{weekday:'long',month:'short',day:'numeric',year:'numeric'});
-  const parts=fmt.formatToParts(SAMPLE_DATE), get=t=>(parts.find(p=>p.type===t)||{}).value||'';
-  const wkText=get('weekday'), md=`${get('month')} ${get('day')}`, yr=get('year');
-  const tz=(new Intl.DateTimeFormat('en-US',{timeZoneName:'short'}).formatToParts(SAMPLE_DATE).find(p=>p.type==='timeZoneName')||{}).value||'';
-  const m100=measureRowTexts(ctx, wkText, md, yr, tz, '', REF);
-  const nomRegW = W/2 - hp - mainR - 2*er_v - gap;        // ≈ the old right-region width
-  const u=Math.min(UNIT_MAX, REF*nomRegW/m100.dateW);
-  const rm=measureRowTexts(ctx, wkText, md, yr, tz, '', u);
-  ctx.font=`${u}px Arial, sans-serif`;
-  let maxDesc=0;
-  for(const n of ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']){
-    const dd=ctx.measureText(n).actualBoundingBoxDescent; if(dd>maxDesc)maxDesc=dd; }
-  const descBottom=availV-hp, baselineY=descBottom-maxDesc;
-  const wkInkTop  = baselineY - ctx.measureText(wkText).actualBoundingBoxAscent;   // floors the moon
-  const dateInkTop= baselineY - ctx.measureText(md).actualBoundingBoxAscent;       // floors the map
-
-  // MOON & MAP vertical maxima. The MAP width is also capped at 25% of W (frees
-  // horizontal room at tight aspects); sliders scale down from there.
-  const moonR_v = Math.max(2, (wkInkTop - 2*gap) / 2) * (+$('awMoonK').value);
-  const moonCY  = wkInkTop / 2;
-  const mapH    = Math.min(Math.max(1, dateInkTop - 2*gap), 0.125 * W) * (+$('awMapK').value);
-  const mapW    = 2 * mapH, mapCY = dateInkTop / 2;
-
-  // Horizontal centre offset for a radial gap `gg` between a radius-`R` element and
-  // an outer dial of radius `e` sitting `vo` px off the connecting axis.
-  const radH = (R, vo, gg, e) => Math.sqrt(Math.max(0, (R + e + gg) ** 2 - vo ** 2));
-  const solveSpan = fn => { let lo=-mainR, hi=W; for (let i=0;i<70;i++){const m=(lo+hi)/2; if (fn(m)<W) lo=m; else hi=m;} return (lo+hi)/2; };
-  const vAz = D => Math.abs(cy - moonCY - D);              // alt/az vertical offset from the dial centre
-
-  // Column spans. Regime A: outer pairs on cy, moon→alt/az horizontal, both dial
-  // gaps radial at offset Dy. Regime B (C1): alt/az shift UP onto the moon
-  // (moon→alt/az radial; alt/az→dial radial, az binds at offset vAz), while
-  // ecl/eot STAY on cy (dial→ecl/eot radial at offset Dy — this asymmetry frees a
-  // little room). `e` = outer-dial radius (shrinks with the moon in C1).
-  const spanA = (mR, D, e) => gg => 4*gg + 2*mR + 2*e + 2*mapH + 2*radH(mainR, D, gg, e);
-  const spanB = (mR, D, e) => gg => 3*gg + mR + radH(mR, D, gg, e) + radH(mainR, vAz(D), gg, e) + radH(mainR, D, gg, e) + e + 2*mapH;
-
-  // Choose the regime & sizes.
-  let regimeB = false, moonR = moonR_v, er = er_v, Dy = er_v + hp;
-  let g = solveSpan(spanA(moonR_v, Dy, er_v));
-  if (g < 0) {
-    regimeB = true;
-    // First try the vertical-max moon with at least a HALF gap between dials and
-    // the upper dials clear of the top boundary.
-    const gB = solveSpan(spanB(moonR_v, er_v + hp, er_v));
-    if (gB >= hp && moonCY - 2*er_v - hp >= 0) { Dy = er_v + hp; }
-    else {
-      // C1 + Rule 3/4: shrink the moon AND all four outer dials together
-      // (er = er_v·moonR/moonR_v) until the layout fits with g = halfGap; keep the
-      // upper dials off the top boundary (alt top = moonCY − 2er − hp ≥ 0).
-      const fit = mR => { const e = er_v * Math.min(1, mR/moonR_v), D = e + hp;
-        return 3*hp + mR + radH(mR, D, hp, e) + radH(mainR, vAz(D), hp, e) + radH(mainR, D, hp, e) + e + 2*mapH; };
-      let lo = 2, hi = moonR_v;                              // fit() increases with moonR
-      for (let i=0;i<70;i++){ const m=(lo+hi)/2; if (fit(m) < W) lo=m; else hi=m; }
-      moonR = (lo+hi)/2;
-      const erTop = (moonCY - hp) / 2;                       // er that puts alt top on y=0
-      if (er_v * Math.min(1, moonR/moonR_v) > erTop) moonR = Math.max(2, erTop/er_v * moonR_v);
-      er = er_v * Math.min(1, moonR/moonR_v);
-      Dy = er + hp;
-    }
-  }
-
-  // Placement for the resolved sizes. Solves the even gap g (floored at halfGap in
-  // regime B). alt/az centre on `aCY` (cy in A; the moon in B); ecl/eot on cy.
-  const aCY = regimeB ? moonCY : cy;
-  const layout = (moonR, Dy, er, regimeB) => {
-    const g = Math.max(regimeB ? hp : 0, solveSpan(regimeB ? spanB(moonR, Dy, er) : spanA(moonR, Dy, er)));
-    const moonCX = g + moonR;
-    const altazX = regimeB ? moonCX + radH(moonR, Dy, g, er)            // radial moon→alt/az
-                           : moonCX + moonR + g + er;                   // horizontal moon→alt/az
-    const dialCX = altazX + radH(mainR, regimeB ? vAz(Dy) : Dy, g, er); // alt/az→dial
-    const ecletX = dialCX + radH(mainR, Dy, g, er);                     // dial→ecl/eot (ecl/eot on cy)
-    const mapCX  = ecletX + er + g + mapH;
-    return { g, moonCX, altazX, dialCX, ecletX, mapCX };
-  };
-
-  // C2/C3: make room for the LONGEST weekday (Wednesday) at the bottom-left.
-  ctx.font = `${u}px Arial, sans-serif`;
-  const wedW = ctx.measureText('Wednesday').width, wkAsc = ctx.measureText('Wednesday').actualBoundingBoxAscent;
-  const fits = (pos, Dy, baseY) => {                            // weekday clears the az dial?
-    const azCY = aCY + Dy, azBottom = azCY + er, azLeft = pos.altazX - er;
-    const vOverlap = (baseY - wkAsc) < azBottom && baseY > azCY - er;
-    const hOverlap = (pos.moonCX + wedW/2) > azLeft;       // weekday ink reaches the az dial
-    return !(vOverlap && hOverlap);
-  };
-  let pos = layout(moonR, Dy, er, regimeB), baseY = baselineY;
-  // The weekday cascade only applies once the moon is horizontally constrained
-  // (regime B / C1). In roomy regime A the outer dials flank the dial centre and a
-  // marginal worst-case (Wednesday) overlap is accepted.
-  if (regimeB && !fits(pos, Dy, baseY)) {
-    // C2: reduce the pair gap to the inter-element gap (Dy = er + g/2), raising az.
-    Dy = er + pos.g / 2;
-    pos = layout(moonR, Dy, er, regimeB);
-    if (!fits(pos, Dy, baseY)) {
-      // C3: move the weekday (and the symmetric date) DOWN until it clears the az
-      // dial, bounded by the bottom guard (availV). Prefer ≥ halfGap (hp) below the
-      // lowest descender; the edge may be reached.
-      const azBottom = aCY + Dy + er;
-      baseY = Math.max(baselineY, Math.min(azBottom + wkAsc, availV - maxDesc));
-    }
-  }
-
-  // Commit. Dial off-centre at dialCX, full height. alt/az centre on aCY (cy in
-  // regime A; the moon in regime B); ecl/eot always on cy. All four dials use the
-  // (possibly shrunk) er.
-  rescaleMain(L, pos.dialCX, cy, mainR);
-  L.altR = er;  L.azR = er;  L.eotR = er;                 // all four outer dials (ECL draws at altR)
-  L.altCX = pos.altazX;  L.altCY = aCY - Dy;   L.azCX = pos.altazX;  L.azCY = aCY + Dy;
-  L.eclipseCX = pos.ecletX;  L.eclipseCY = cy - Dy;   L.eotCX = pos.ecletX;  L.eotCY = cy + Dy;
-  L.moonR = moonR;  L.moonCX = pos.moonCX;  L.moonCY = moonCY;
-  L.earthW = mapW;  L.earthH = mapH;  L.earthCX = pos.mapCX;  L.earthCY = mapCY;
-
-  // Date: weekday under the moon, condensed date under the map, shared baseline at
-  // baseY (moved down by C3 if needed; date2 mirrors it).
-  L.dateMode='split'; L.dateCondensed=true; L.dateSegCenter=false; L.dateForceU=undefined;
-  L.dateBaselineBottom = baseY + maxDesc;
-  L.dateW=rm.weekdayW; L.dateH=4*u;  L.dateCX=pos.moonCX;  L.dateCY=baseY;
-  L.date2CX=pos.mapCX; L.date2CY=baseY;  L.date2W=rm.dateW+4;  L.date2H=4*u;
-}
-
-// Asq (Square, aspect ~1.0): NEW anchor between A3/A3m (~0.7 portrait) and A4
-// (1.45 landscape). Driven by two primary elements — the map (sized by a slider)
-// and the main dial (maximised in the leftover height) — with everything else
-// arranged around them.
-//
-//   Vertical tiling (full "gaps" = 2·halfPad):  header · gap · MAP · gap · DIAL · gap · footer
-//   • map size = slider (width ÷ W), 2:1; map & dial both centred on W/2.
-//   • main dial as big as the leftover height allows, keeping a full gap above
-//     (to the map), below (to the footer top), and the map a full gap to the
-//     header bottom.
-//   • moon (left of map) & date (right of map): vertical centres on the map's
-//     centre, each centred horizontally in the space beside the map.
-//   • alt/ecl/az/eot (inner-sub-dial size): az sits a slider-fraction along the
-//     radial from the rim to the footer's top-left corner; the other three are
-//     its mirror images (across x=cx and y=dialCY).
-function applyAsq(L, bounds, headerH, footerH) {
-  const W = bounds.right;
-  const availV = bounds.bottom;              // header-bottom (0) → footer-top
-  const halfPad = 0.0125 * W;
-  const gap = 2 * halfPad;                    // a "full gap"
-  const cx = W / 2;
-
-  // Map: width from the slider, 2:1.
-  const mapW = (+$('asqMapK').value) * W;
-  const mapH = mapW / 2;
-
-  // Main dial: fill the leftover height after the map and the three full gaps.
-  const dialD = Math.max(2, availV - mapH - 3 * gap);
-  const mainR = dialD / 2;
-
-  const mapCY  = gap + mapH / 2;                       // header · gap · MAP
-  const dialCY = gap + mapH + gap + mainR;             // … gap · DIAL (centre)
-
-  L.earthW = mapW;  L.earthH = mapH;  L.earthCX = cx;  L.earthCY = mapCY;
-  rescaleMain(L, cx, dialCY, mainR);                   // main dial + inner sub-dials
-
-  // Outer dials, sized to the inner sub-dials. az (lower-left) anchors the four:
-  // draw a radial from the main centre to the footer's top-left corner; az sits a
-  // slider-fraction `t` along the gap between where that radial crosses the rim
-  // and the corner (t=0 rim, t=1 corner, 0.5 midway). eot mirrors az across the
-  // vertical centreline (x=cx); alt/ecl mirror az/eot across the dial's horizontal
-  // centreline (y=dialCY). ECL draws at L.altR; EOT at eotR; AZ at azR.
-  const subR = L.subR;                                 // = 0.2·mainR after rescaleMain
-  const t = +$('asqOuterT').value;
-  const vx = bounds.left - cx, vy = bounds.bottom - dialCY;   // centre → footer top-left corner
-  const vlen = Math.hypot(vx, vy);
-  const dist = mainR + t * (vlen - mainR);             // rim → corner, t along the gap
-  const azCX = cx + dist * vx / vlen, azCY = dialCY + dist * vy / vlen;
-  L.altR = subR;  L.azR = subR;  L.eotR = subR;
-  L.azCX = azCX;            L.azCY = azCY;                       // lower-left (anchor)
-  L.eotCX = 2 * cx - azCX;  L.eotCY = azCY;                      // lower-right (mirror x)
-  L.altCX = azCX;           L.altCY = 2 * dialCY - azCY;         // upper-left (mirror y)
-  L.eclipseCX = 2 * cx - azCX;  L.eclipseCY = 2 * dialCY - azCY; // upper-right (mirror x+y)
-
-  // Moon (left of map) & date (right of map): centres on the map's vertical
-  // centre, each centred horizontally in its side space.
-  const mapLeft = cx - mapW / 2, mapRight = cx + mapW / 2;
-  L.moonCX = mapLeft / 2;             L.moonCY = mapCY;
-  // Date: a single STACK block (computeLayout picks 'split' at this aspect, which
-  // would strand the month-day/year box at its default spot — over EOT). Force a
-  // stacked block centred in the right-of-map region, a halfPad inside each edge.
-  L.dateMode = 'stack';  L.dateForceU = undefined;  L.dateCondensed = false;
-  L.dateCX = (mapRight + W) / 2;     L.dateCY = mapCY;
-  L.dateW = Math.max(2, (W - mapRight) - 2 * halfPad);  L.dateH = mapH;
-}
-
-// A1 (extreme portrait, aspect ~0.10): the vertical mirror of A6. One COLUMN,
-// the same order top→bottom as A6's left→right row, with the weekday folded into
-// a full date STACK (Friday / Jun 19 / year / PDT):
-//   moon · alt · az · DIAL · ecl · eot · date · map
-// Sizing (the SMALL dimension is now the width W): main dial ⌀ = W; the five
-// outer circles ⌀ = a6DialK·main-⌀; the map is full-width (margins 0) at 2:1, so
-// mapH = W/2; the date stack is sized to fit W with a halfPad margin each side
-// (internal hierarchy = A6: 1 / 0.42 / 0.21). Chrome is already dropped (CC2:
-// W<200), so the column uses the full height H and centres on W/2.
-function applyA1(L, bounds, headerH, footerH) {
-  const W = bounds.right;
-  const H = bounds.bottom;                    // content height (full; chrome dropped)
-  const cx = W / 2;                            // column centre (horizontal)
-  const halfPad = 0.0125 * W;                  // same spacing unit as A6 (∝ the small dim)
-  const R = W / 2;                             // main-dial radius (fills the column WIDTH)
-  const outerR = (+$('a6DialK').value) * R;    // outer circles: same ratio as A6
-  const oc = 2 * outerR;                       // outer-circle diameter
-
-  // Full date STACK, sized to fit the width with a halfPad margin each side. The
-  // internal relative hierarchy matches A6 (1 / 0.42 / 0.21); we measure the
-  // stack at a reference unit to learn its natural height, then let drawDateView
-  // auto-fit the box (mode 'stack').
-  const REL_BIG = 1.0, REL_YEAR = 0.42, REL_SMALL = 0.21;
-  const LINE_SPACING = 1.18, LINE_PAD = 0.10, UNIT_MAX = 72, REF = 100;
-  const f = new Intl.DateTimeFormat('en-US', { weekday:'long', month:'short', day:'numeric', year:'numeric' });
-  const parts = f.formatToParts(SAMPLE_DATE);
-  const get = t => (parts.find(p => p.type === t) || {}).value || '';
-  const wkText = get('weekday'), md = `${get('month')} ${get('day')}`, yr = get('year');
-  const tzAbbr = (new Intl.DateTimeFormat('en-US', { timeZoneName:'short' }).formatToParts(SAMPLE_DATE).find(p => p.type==='timeZoneName')||{}).value || '';
-  const w100 = (text, rel) => { ctx.font = `${rel*REF}px Arial, sans-serif`; return ctx.measureText(text).width; };
-  const lines = [
-    { text: wkText, rel: REL_BIG,  prom: true  },   // Friday
-    { text: md,     rel: REL_BIG,  prom: true  },   // Jun 19
-    { text: yr,     rel: REL_YEAR, prom: true  },   // 2026
-  ];
-  if (tzAbbr) lines.push({ text: tzAbbr, rel: REL_SMALL, prom: false });  // PDT (faint+small)
-
-  // Width fit: the widest line sets the unit so the stack fits W − 2·halfPad.
-  const dateBoxW = W - 2 * halfPad;
-  let maxW = 0;
-  for (const l of lines) { const lw = w100(l.text, l.rel); if (lw > maxW) maxW = lw; }
-  const uDate = Math.min(UNIT_MAX, REF * dateBoxW / maxW);
-
-  // The date's vertical extent = its real INK bounds, not the em-box. Replicate
-  // drawBlock's stack baselines (em-box advance) + prominent-ink re-centering, so
-  // the slot we reserve matches what's drawn: the gap above is measured to
-  // Friday's ink top, the gap below to PDT's ink bottom (PDT IS included, so the
-  // map can't ride up over it). The block is asymmetric about its prominent
-  // centre (PDT hangs below), so we keep the two offsets separately.
-  let blockH = (lines.length - 1) * LINE_PAD * uDate;
-  for (const l of lines) blockH += l.rel * LINE_SPACING * uDate;
-  let yb = -blockH / 2;
-  const base = [];
-  for (const l of lines) {
-    const lineH = l.rel * uDate;
-    yb += lineH * (LINE_SPACING + 1) / 2;  base.push(yb);
-    yb += lineH * (LINE_SPACING - 1) / 2 + LINE_PAD * uDate;
-  }
-  const asc = [], desc = [];
-  for (const l of lines) {
-    ctx.font = `${l.rel * uDate}px Arial, sans-serif`;
-    const m = ctx.measureText(l.text);  asc.push(m.actualBoundingBoxAscent);  desc.push(m.actualBoundingBoxDescent);
-  }
-  let tp = Infinity, bp = -Infinity;               // prominent ink only (tz excluded)
-  for (let i = 0; i < lines.length; i++) {
-    if (!lines[i].prom) continue;
-    tp = Math.min(tp, base[i] - asc[i]);  bp = Math.max(bp, base[i] + desc[i]);
-  }
-  const shift = -(tp + bp) / 2;                     // prominent centre → 0
-  const last = lines.length - 1;
-  const dateTopOffset = -(base[0] + shift - asc[0]);              // centre → Friday ink top
-  const dateBotOffset = base[last] + shift + desc[last];          // centre → PDT ink bottom
-  const dateH = dateTopOffset + dateBotOffset;                    // true ink height (incl. PDT)
-
-  // Element extents down the column (top→bottom). DIAL = 2R = W; the outer
-  // circles + moon = oc; the date = dateH (ink); the map = W/2 tall.
-  const mapH = W / 2;
-  const heights = [oc, oc, oc, 2 * R, oc, oc, dateH, mapH];  // moon alt az DIAL ecl eot date map
-  const sumEl = heights.reduce((a, b) => a + b, 0);
-  const N = heights.length, inner = N - 1;    // 7 inter-element gaps, 2 outer margins
-
-  // Gap distribution: A6's rule, in Y. The date block floats vertically with
-  // every other element — its only special treatment is the horizontal halfPad
-  // margin each side (dateBoxW above). Surplus (the usual case at aspect 0.10)
-  // expands all 7 inner gaps evenly, outer margins held at halfPad; deficit
-  // (won't occur here) consumes the outer margins to 0 first, then shrinks the
-  // inner gaps evenly.
-  const need = sumEl + (inner + 2) * halfPad;
-  let outerMargin, innerGap;
-  if (H >= need) {
-    outerMargin = halfPad;  innerGap = halfPad + (H - need) / inner;
-  } else {
-    const deficit = need - H;
-    if (deficit <= 2 * halfPad) { outerMargin = halfPad - deficit / 2;  innerGap = halfPad; }
-    else { outerMargin = 0;  innerGap = halfPad - (deficit - 2 * halfPad) / inner; }
-  }
-
-  // Walk down the column: every inter-element gap is innerGap. The date (index 6)
-  // is the one asymmetric element — its rendered prominent centre sits
-  // dateTopOffset below its slot top (not slot centre), so place it explicitly.
-  let y = outerMargin;
-  const cyc = [];
-  for (let i = 0; i < N; i++) {
-    if (i > 0) y += innerGap;
-    cyc.push(i === 6 ? y + dateTopOffset : y + heights[i] / 2);
-    y += heights[i];
-  }
-
-  L.moonR = outerR;  L.moonCX = cx;  L.moonCY = cyc[0];
-  L.altR  = outerR;  L.altCX  = cx;  L.altCY  = cyc[1];   // ECL also draws at altR
-  L.azR   = outerR;  L.azCX   = cx;  L.azCY   = cyc[2];
-  rescaleMain(L, cx, cyc[3], R);                          // central dial (full width)
-  L.eclipseCX = cx;  L.eclipseCY = cyc[4];
-  L.eotR  = outerR;  L.eotCX  = cx;  L.eotCY  = cyc[5];
-  L.dateCX = cx;  L.dateCY = cyc[6];  L.dateW = dateBoxW;  L.dateH = dateH;
-  L.earthW = W;   L.earthH = mapH;    L.earthCX = cx;  L.earthCY = cyc[7];
-
-  L.dateMode = 'stack';  L.dateCondensed = false;  L.dateForceU = uDate;
-}
-
-// A6 (extreme landscape): one row of every element, left→right —
-//   moon · weekday · alt · az · DIAL · ecl · eot · date · map
-// Each is sized to the row height (circles ⌀ = row height; map ~2:1; text fit
-// to the height). If the natural row overflows W, everything *except the central
-// dial* shrinks by one factor s until it fits, keeping ≥ halfPad between
-// elements. Chrome is already dropped (CC2) at this aspect, so the row uses the
-// full height and centres at H/2.
-function applyA6(L, bounds, headerH, footerH) {
-  const W = bounds.right;
-  const hr = bounds.bottom;                 // row height = content height
-  const cy = hr / 2;                         // content-space row centre
-  const halfPad = 0.0125 * W;
-  const R = hr / 2;                           // main-dial radius (fills the row height)
-  const outerR = (+$('a6DialK').value) * R;   // outer circles (moon + alt/az/ecl/eot): ratio · main-R
-  const u = (+$('a6FontK').value) * (2 * outerR); // primary font = ratio · outer-dial ⌀ (tunable):
-                                              // proportional & uncapped, tracks the outer-dial size
-                                              // at every sample. 2026/PDT stay relative to `u`.
-
-  // Main dial ⌀ = hr; the five outer circles ⌀ = 2·outerR (< hr); map ≈ 2hr.
-  // Text scales via `u` (ratio of the outer-dial diameter) — proportional, no cap.
-  const f = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
-  const parts = f.formatToParts(SAMPLE_DATE);
-  const get = t => (parts.find(p => p.type === t) || {}).value || '';
-  const wkText = get('weekday'), md = `${get('month')} ${get('day')}`, yr = get('year');
-  const tzAbbr = (new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' }).formatToParts(SAMPLE_DATE).find(p => p.type === 'timeZoneName') || {}).value || '';
-  const { weekdayW, dateW } = measureRowTexts(ctx, wkText, md, yr, tzAbbr, '', u);
-  const dialW = hr, mapW = 2 * hr;
-
-  // Nine elements, fixed widths, laid out left→right. The four outer dials + moon
-  // are 2·outerR wide; only the central dial is full row height (2R = hr):
-  //   moon · weekday · alt · az · DIAL · ecl · eot · date · map
-  const sumEl = 2 * outerR + weekdayW + 2 * outerR + 2 * outerR + dialW + 2 * outerR + 2 * outerR + dateW + mapW;
-  const N = 9, inner = N - 1;                 // 8 inter-element gaps, 2 outer margins
-
-  // Gap distribution: aim for halfPad everywhere. Surplus expands the inner gaps
-  // evenly (outer stays halfPad). Deficit consumes the two outer margins down to
-  // 0 FIRST, then shrinks the inner gaps evenly (going below halfPad — and into
-  // overlap — when there's nothing left to give).
-  const need = sumEl + (inner + 2) * halfPad;
-  let outerGap, innerGap;
-  if (W >= need) {
-    outerGap = halfPad;  innerGap = halfPad + (W - need) / inner;
-  } else {
-    const deficit = need - W;
-    if (deficit <= 2 * halfPad) { outerGap = halfPad - deficit / 2;  innerGap = halfPad; }
-    else { outerGap = 0;  innerGap = halfPad - (deficit - 2 * halfPad) / inner; }
-  }
-
-  let cx = outerGap;
-  const place = w => { const c = cx + w / 2; cx += w + innerGap; return c; };
-
-  L.moonR = outerR;  L.moonCX = place(2 * outerR);  L.moonCY = cy;
-  L.dateCX = place(weekdayW);  L.dateCY = cy;  L.dateW = weekdayW + 4;  L.dateH = hr;
-  L.altR = outerR;  L.altCX = place(2 * outerR);  L.altCY = cy;
-  L.azR  = outerR;  L.azCX  = place(2 * outerR);  L.azCY  = cy;
-  rescaleMain(L, place(dialW), cy, R);          // central dial (full row height)
-  // Inner sub-dials are now purely proportional everywhere (computeLayout's
-  // 20px/40px floor on subR/subOffset removed), so rescaleMain already carries
-  // the canonical 0.2·R / 0.408·R ratios up — no A6 override needed.
-  L.eclipseCX = place(2 * outerR);  L.eclipseCY = cy;   // ECL draws at L.altR = outerR
-  L.eotR = outerR;  L.eotCX = place(2 * outerR);  L.eotCY = cy;
-  L.date2CX = place(dateW);  L.date2CY = cy;  L.date2W = dateW + 4;  L.date2H = hr;
-  L.earthW = mapW;  L.earthH = hr;  L.earthCX = place(mapW);  L.earthCY = cy;
-
-  L.dateCondensed = true;  L.dateBaselineBottom = undefined;  L.dateForceU = u;
-}
-
-function applyRules(L, anchorId, bounds, footerH, headerH) {
-  if (anchorId === 'A1')  { applyA1(L, bounds, headerH, footerH); return; }
-  if (anchorId === 'Asq') { applyAsq(L, bounds, headerH, footerH); return; }
-  if (anchorId === 'Awide') { applyAwide(L, bounds, headerH, footerH); return; }
-  if (anchorId === 'A3')  { applyA3Common(L, bounds); return; }
-  if (anchorId === 'A3m') { applyA3Mini(L, bounds); return; }
-  if (anchorId === 'A4')  { if ($('oA4Sym').checked) applyA4Dials(L); return; }
-  if (anchorId === 'A5')  {
-    L.dateCondensed = true;                 // right box: one line "md year tz" (A4 sizes, no dots)
-    L.dateSegCenter = $('oA5DateCenter').checked;
-    applyA5(L, bounds, headerH, footerH);
-    return;
-  }
-  if (anchorId === 'A6')  { applyA6(L, bounds, headerH, footerH); return; }
-  if (anchorId !== 'A2') return;
-  const FOOTER_MARGIN = 6;
-  // 1. Halve the (mostly empty) border between the header row and the moon/map.
-  if ($('oReclaim').checked) {
-    const up = Math.min(L.moonCY - L.moonR, L.earthCY - L.earthH/2) * 0.5;
-    L.moonCY -= up; L.earthCY -= up;
-  }
-  const origMain = { x:L.mainCX, y:L.mainCY };
-  // 2. Grow + angularly reposition the outer dials.
-  if ($('oRules').checked) a2OuterDials(L, bounds, +$('dialK').value || 1.5, origMain);
-  // 3. Move the whole dial cluster up so the bottom dials clear the obstruction
-  //    below them by FOOTER_MARGIN px. Normally that's the base footer row; but
-  //    if the wrapped noon pill is too wide to fit horizontally between AZ/EOT,
-  //    they must clear the pill row instead (sit above it). Keeps 430 (pill fits)
-  //    and fixes 360 (pill doesn't).
-  if ($('oCluster').checked) {
-    // clear the single footer row by FOOTER_MARGIN (no pill row anymore)
-    const maxBottom = Math.max(L.azCY+L.azR, L.eotCY+L.eotR);
-    const up = maxBottom - (bounds.bottom - FOOTER_MARGIN);
-    if (up > 0) shiftAll(L, -up);
-  }
-  // manual nudge of the whole cluster (− = up)
-  const dy = +$('mainDy').value || 0;
-  if (dy) shiftAll(L, dy);
-  // 4. Date: plain center between the (moved) map bottom and the (shifted) dial
-  //    top. At this aspect (~0.51) the horizontal room around the date no longer
-  //    reads as a constraint, so no monthDay-cap raise. (That raise returns at
-  //    narrower aspects — an aspect-dependent rule, TBD where it kicks in.)
-  if ($('oDateCenter').checked) {
-    const mapBottom = L.earthCY + L.earthH/2;
-    const mainTop   = L.mainCY - L.mainR;
-    const dateDy    = +$('dateDy').value || 0;
-    L.dateCY = (mapBottom + mainTop) / 2 + dateDy;
-  }
-}
-
-/**
- * A2 candidate: grow the four outer dials by `k`, holding BOTH their distance
- * to the main dial (rim gap, measured from `origMain`) and their margin to the
- * nearest *side* edge (the scarce dimension in portrait). The dial therefore
- * repositions angularly: e.g. the top-right eclipse moves up (along the
- * constant-distance arc) and left (to keep its right-edge margin) as it grows.
- * The eclipse is treated as a plain extR dial like the others (its footprint
- * should be extR, not the committed eclipseR2 ≈ 1.05·extR — see plan).
- */
-function a2OuterDials(L, bounds, k, origMain) {
-  const R=L.mainR, { left, right } = bounds;
-  const extR0 = L.altR;                              // original ext radius (pre-grow)
-  const place = (exC, eyC, er) => {
-    const onRight = exC >= origMain.x;
-    const onTop   = eyC <= origMain.y;
-    const mS  = onRight ? (right - (exC + er)) : ((exC - er) - left);   // side margin (held)
-    const gap = Math.hypot(exC-origMain.x, eyC-origMain.y) - R - er;     // dist to main (held)
-    const er2 = er*k, rho = R + gap + er2;
-    const cX  = onRight ? (right - mS - er2) : (left + mS + er2);
-    const under = rho*rho - (cX - L.mainCX)*(cX - L.mainCX);
-    if (under >= 0) {
-      const off = Math.sqrt(under);
-      return { x:cX, y: onTop ? L.mainCY - off : L.mainCY + off, r:er2 };
-    }
-    // fallback: radial keep-angle if the side margin can't be met on the arc
-    const d=Math.hypot(exC-L.mainCX, eyC-L.mainCY) || 1;
-    return { x:L.mainCX+(exC-L.mainCX)*rho/d, y:L.mainCY+(eyC-L.mainCY)*rho/d, r:er2 };
-  };
-  let m;
-  m=place(L.altCX,L.altCY,L.altR);  L.altCX=m.x; L.altCY=m.y; L.altR=m.r;
-  m=place(L.azCX,L.azCY,L.azR);     L.azCX=m.x; L.azCY=m.y; L.azR=m.r;
-  m=place(L.eotCX,L.eotCY,L.eotR);  L.eotCX=m.x; L.eotCY=m.y; L.eotR=m.r;
-  m=place(L.eclipseCX,L.eclipseCY,extR0);  L.eclipseCX=m.x; L.eclipseCY=m.y;  // grown radius = altR (er2)
 }
 
 function updateHud(L, W, H, inkInfo) {

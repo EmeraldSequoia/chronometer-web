@@ -21,9 +21,56 @@ src/observatory/
 ├── peripheral-hands.ts    Alt/Az/EOT hands + selected-body labels
 ├── eclipse-view.ts        Eclipse simulator disc + status labels + ring hands
 ├── date-view.ts           Header date display (weekday/date/year/leap/tz)
-├── layout.ts              Layout calculations (radii, positions)
+├── layout.ts              Base layout templates (radii, positions) + base builder
+├── anchor-layout.ts       Adaptive layout: 9 aspect anchors + selector (iteration 3)
 └── draw-utils.ts          Shared drawing utilities (circular text, etc.)
 ```
+
+## Adaptive Layout (Aspect Anchors)
+
+The outer composition (where the moon, map, date, main dial, and four outer
+dials sit) is **adaptive by window aspect**, implemented in
+[anchor-layout.ts](../src/observatory/anchor-layout.ts) — the production home of
+the geometry tuned in `harness/layout-harness.html`. See
+[planning/2026-06-15-observatory-layout-iter3.md](../planning/2026-06-15-observatory-layout-iter3.md)
+for the full per-anchor rules.
+
+`computeLayout(viewW, viewH, chrome, ctx, date, timezone)` runs this pipeline:
+
+1. **Safe rect** — the design surface = the physical viewport minus the device
+   safe-area insets (the entry reads `env(safe-area-inset-*)`, exposed by
+   `viewport-fit=cover`; zero on desktop windows). All layout math is in the
+   safe rect.
+2. **Chrome-drop (CC2)** — if the safe rect can't fit the time-controller's
+   default popover (200×368), the header + footer bands are dropped so the
+   degenerate slivers (A1/A6) use the whole surface.
+3. **Anchor selection** — one of **nine** aspect anchors is chosen by a hard
+   snap at the §7 thresholds (no interpolation in v1): A1 extreme-portrait,
+   A2 iPhone-portrait, A3m iPad-mini, A3 iPad-portrait, Asq square, A4
+   iPad-landscape, A5 iPhone-landscape, Awide ultrawide, A6 extreme-landscape.
+4. **Base + adjust** — a base template is built (A2 pins `portraitTwoBand`,
+   A3/A3m pin `portraitOneBand`, the rest use `computeBaseLayout`) and that
+   anchor's `applyXxx` adjustment runs, in content space (top = 0, below the
+   header band). The date-driven anchors (A1/A5/A6/Awide) measure the date text
+   against `ctx` so the region matches what the renderer draws.
+5. **Offset** — every coordinate is shifted into the safe rect, below the
+   header, so the returned `LayoutParams` are absolute canvas coordinates (the
+   renderers and click hit-test are unchanged).
+
+`extDerived` applies **CC1**: the eclipse marker ring's footprint is sized to
+`extR` so all four outer dials read the same size.
+
+**The harness imports the same `applyXxx` functions** (passing its live slider
+values where production bakes the ship constants), so it can't drift from the
+app — see the planning doc §9.6. After editing
+`anchor-layout.ts`/`layout.ts`/`date-view.ts`, rerun `./harness/build-harness.sh`
+and bump the `?v=N` query in `layout-harness.html`.
+
+> **Layout recompute cadence:** the layout is re-solved on resize and on a
+> timezone change (location switch). A same-timezone day-boundary shift that
+> would re-measure the date region (A1/A5/A6/Awide only) is deferred to the next
+> resize — the renderer always re-fits the date text to its box, so this is at
+> most a slight box-size staleness at those anchors.
 
 ## ObsValue System
 
@@ -560,12 +607,21 @@ rendered in the Observatory subdial style:
 
 ## Noon-on-Top Toggle
 
-A Vienna-style pill control ("Midnight on top" / "Noon on top") sits centered in
-the bottom chrome row, sharing it with the time-bar button (left) and the
-location controls (right). The pill markup/CSS mirrors Chronometer's Vienna
-toggle (`face-template.html`); the wiring lives in `setupNoonToggle()` in
-`observatory-entry.ts`. The choice persists as the `onoon` setting via
-`app-state` (observatory namespace; midnight-on-top is the default and is omitted).
+A small **half-disc icon** (`#noon-icon`) sits centered in the bottom chrome
+row, sharing it with the time-bar button (left) and the location controls
+(right). Tapping it raises the Vienna-style pill control ("Midnight on top" /
+"Noon on top") as an **on-demand overlay** above the footer — which may overlap
+the dial (rare), so the pill costs the static layout nothing (iteration 3, §6
+C2). In A5 (iPhone landscape) the big dial overlaps the footer centre, so the
+icon shifts left toward the time-controller button (`positionNoonIcon()`). The
+pill markup/CSS mirrors Chronometer's Vienna toggle (`face-template.html`); the
+wiring lives in `setupNoonToggle()` in `observatory-entry.ts`. The choice
+persists as the `onoon` setting via `app-state` (observatory namespace;
+midnight-on-top is the default and is omitted).
+
+> The earlier always-visible pill that *wrapped* onto a second row when it
+> didn't fit (reserving a two-row footer band) was retired by iteration 3 — the
+> footer is now a single row at every anchor.
 
 Toggling sets the `noonOnTop` env variable (0/1) and calls `updater.reset()`:
 every expression carrying a `+ pi * noonOnTop` term (24h hand, sun-event hands,
@@ -586,7 +642,7 @@ when their sizes change at runtime.
 
 ## Help Popover
 
-The "ℹ" button (top right) opens the same info popover the Chronometer face
+The "ℹ" button (in the header band, top right) opens the same info popover the Chronometer face
 pages use: header + links (GitHub / Credits / Privacy / Support / Disclaimer),
 the local-storage/sharing note, a lazy-loaded "General Help Topics" iframe, the
 app-specific help body, and the version number — with the sliding sub-view
@@ -615,8 +671,10 @@ and animated popup height for the Privacy/Support/Disclaimer pages.
 `EOClock.mm:525-570`): weekday, month + day, year, a "leap"/"not leap" indicator
 (Gregorian %4/%100/%400 rule), and the timezone abbreviation. All fields use
 `Intl.DateTimeFormat` in the **location's** timezone (not the browser's), so the
-display follows the selected location and the scrubbed time. Exact placement is
-rough pending Phase 8 ("Tune the layout").
+display follows the selected location and the scrubbed time. Placement and mode
+(`stack`/`row`/`split`) are set per aspect anchor by the adaptive layout (see
+[Adaptive Layout](#adaptive-layout-aspect-anchors)); `extractDateFields` is
+exported so the layout can measure exactly the strings the view renders.
 
 ## Eclipse Simulator
 

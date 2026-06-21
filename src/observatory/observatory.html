@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="description" content="Emerald Observatory — astronomical clock showing planetary positions, rise/set times, moon phase, day/night terminator, and more." />
     <title>Emerald Observatory</title>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
@@ -43,13 +43,54 @@
          which the entry sets on :root at startup). ─────────────────────── */
       :root {
           --obs-footer-h: 32px;
+          --obs-header-h: 32px;
+      }
+
+      /* ── Top chrome: the iteration-3 header band — "Observatory" (left) and
+         the ℹ + share buttons (right), one fixed row. The canvas layout reserves
+         var(--obs-header-h) at the top of the safe rect for it (see HEADER_H in
+         observatory-entry.ts). The band background bleeds under the notch
+         (padding-top = the top safe-area inset) while its content stays in the
+         safe zone. ─────────────────────────────────────────────────────── */
+      #obs-header {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: calc(var(--obs-header-h) + env(safe-area-inset-top));
+          padding-top: env(safe-area-inset-top);
+          padding-left: calc(16px + env(safe-area-inset-left));
+          padding-right: calc(12px + env(safe-area-inset-right));
+          z-index: 10;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          /* The band background is painted on the canvas behind the main
+             elements (see drawFrame); this DOM layer carries only the content. */
+          background: transparent;
+          -webkit-user-select: none;
+          user-select: none;
+      }
+
+      #obs-title {
+          font-size: 15px;
+          font-weight: 600;
+          letter-spacing: 0.3px;
+          color: rgba(255, 255, 255, 0.7);
+          pointer-events: none;
+      }
+
+      #obs-header-actions {
+          display: flex;
+          align-items: center;
+          gap: 10px;
       }
 
       /* Location controls — right end of the footer row */
       #observatory-controls {
           position: fixed;
-          bottom: 0;
-          right: 12px;
+          bottom: env(safe-area-inset-bottom);
+          right: calc(12px + env(safe-area-inset-right));
           height: var(--obs-footer-h);
           z-index: 11;
           display: flex;
@@ -85,28 +126,59 @@
           color: rgba(255, 255, 255, 0.7);
       }
 
-      /* ── Noon-on-top toggle — centered in the footer row. When it doesn't
-         fit between the time-bar contents (left) and the location controls
-         (right), the entry adds .wrapped to lift it onto a second row above
-         the footer (and reserves the extra band in the canvas layout — see
-         updateNoonToggleWrap in observatory-entry.ts). Pill appearance
+      /* ── Noon-on-top control (iteration 3): a footer-centre icon that raises
+         the Midnight/Noon pill as an on-demand overlay (§6 C2). Pill appearance
          matches Chronometer's Vienna noon toggle (face-template.html). ── */
-      #noon-toggle {
+      /* The noon-on-top access icon — a small half-filled disc centred in the
+         footer row. Tapping it raises the Midnight/Noon pill overlay below. The
+         entry shifts it left in A5 (the dial overlaps the footer centre). */
+      #noon-icon {
           position: fixed;
-          bottom: 0;
+          bottom: env(safe-area-inset-bottom);
           left: 50%;
           transform: translateX(-50%);
           height: var(--obs-footer-h);
+          width: 32px;
           z-index: 11;
           display: flex;
+          align-items: center;
+          justify-content: center;
+          background: none;
+          border: none;
+          padding: 0;
+          cursor: pointer;
+          color: rgba(150, 160, 200, 0.85);
+          transition: color 0.15s;
+      }
+
+      #noon-icon:hover {
+          color: #ccf;
+      }
+
+      #noon-icon svg {
+          width: 18px;
+          height: 18px;
+          display: block;
+      }
+
+      /* On-demand pill overlay: hidden until the icon is tapped (.open), then
+         raised above the footer (centred). It may overlap the dial — rare — so
+         it costs the static layout nothing (§6 C2). */
+      #noon-toggle {
+          position: fixed;
+          bottom: calc(var(--obs-footer-h) + 8px + env(safe-area-inset-bottom));
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 21;
+          display: none;
           align-items: center;
           gap: 0;
           user-select: none;
           -webkit-user-select: none;
       }
 
-      #noon-toggle.wrapped {
-          bottom: var(--obs-footer-h);
+      #noon-toggle.open {
+          display: flex;
       }
 
       .noon-pill {
@@ -144,56 +216,40 @@
       /* ── Info ("ℹ") button + help popover — mirrors the Chronometer face
          pages (face-template.html); behavior is wired by the shared
          src/shared/help-popover.ts module. ───────────────────────────── */
-      #info-btn {
-          position: fixed;
-          top: 16px;
-          right: 16px;
+      /* ℹ + share now live inline in the header-actions group (no longer
+         free-floating top-right circles). */
+      #info-btn,
+      #share-btn {
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 36px;
-          height: 36px;
+          width: 26px;
+          height: 26px;
           border-radius: 50%;
           background: rgba(255, 255, 255, 0.08);
           color: #889;
           border: none;
           cursor: pointer;
-          font-size: 18px;
-          font-family: serif;
-          font-style: italic;
-          font-weight: 700;
           padding: 0;
-          z-index: 10;
           transition: background 0.2s, color 0.2s;
       }
 
-      #info-btn:hover {
+      #info-btn {
+          font-size: 14px;
+          font-family: serif;
+          font-style: italic;
+          font-weight: 700;
+      }
+
+      #info-btn:hover,
+      #share-btn:hover {
           background: rgba(255, 255, 255, 0.15);
           color: #bbd;
       }
 
-      #share-btn {
-          position: fixed;
-          top: 60px;
-          right: 16px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 36px;
-          height: 36px;
-          border-radius: 50%;
-          background: rgba(255, 255, 255, 0.08);
-          color: #889;
-          border: none;
-          cursor: pointer;
-          padding: 0;
-          z-index: 10;
-          transition: background 0.2s, color 0.2s;
-      }
-
       #share-btn svg {
-          width: 17px;
-          height: 17px;
+          width: 14px;
+          height: 14px;
           fill: currentColor;
       }
 
@@ -381,15 +437,16 @@
          the single bottom chrome row (location controls are the right part). */
       #time-bar {
           position: fixed;
-          bottom: 0;
+          bottom: env(safe-area-inset-bottom);
           left: 0;
           right: 0;
           height: var(--obs-footer-h);
           z-index: 10;
-          padding: 0 12px;
+          padding: 0 calc(12px + env(safe-area-inset-right)) 0 calc(12px + env(safe-area-inset-left));
           justify-content: flex-start;
-          background: rgba(0, 0, 0, 0.5);
-          border-top: 1px solid rgba(255, 255, 255, 0.08);
+          /* Band background is painted on the canvas (see drawFrame); the
+             time-bar DOM layer carries only its controls. */
+          background: transparent;
       }
 
       /* The ?fps overlay sits at the left end of the row — make room for it. */
@@ -411,8 +468,8 @@
 
       #time-popover {
           position: fixed;
-          bottom: calc(var(--obs-footer-h) + 6px);
-          right: 12px;
+          bottom: calc(var(--obs-footer-h) + 6px + env(safe-area-inset-bottom));
+          right: calc(12px + env(safe-area-inset-right));
           z-index: 20;
       }
     </style>
@@ -420,11 +477,18 @@
   <body>
     <canvas id="observatory-canvas"></canvas>
 
-    <!-- Help button + popover (shared wiring in src/shared/help-popover.ts) -->
-    <button id="info-btn" title="About Observatory">ℹ&#xFE0E;</button>
-    <button id="share-btn" title="Share this view">
-      <svg viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>
-    </button>
+    <!-- Top chrome: header band — title (left) + ℹ/share (right). Help button
+         wiring is shared (src/shared/help-popover.ts). -->
+    <div id="obs-header">
+      <span id="obs-title">Observatory</span>
+      <div id="obs-header-actions">
+        <button id="info-btn" title="About Observatory">ℹ&#xFE0E;</button>
+        <button id="share-btn" title="Share this view">
+          <svg viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>
+        </button>
+      </div>
+    </div>
+
     <div id="info-overlay">
       <div id="info-popup">
         <button id="info-close">&times;</button>
@@ -525,7 +589,14 @@
       <button id="set-location-btn">Set Location</button>
     </div>
 
-    <!-- Noon-on-top toggle (Vienna-style pills) -->
+    <!-- Noon-on-top: footer-centre icon (half-filled disc) raises the pill
+         overlay on tap (wiring in setupNoonToggle, observatory-entry.ts). -->
+    <button id="noon-icon" title="Midnight / Noon on top" aria-label="Midnight or Noon on top">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        <path d="M12 3.9 A8.1 8.1 0 0 0 12 20.1 Z" fill="currentColor"/>
+      </svg>
+    </button>
     <div id="noon-toggle">
       <button class="noon-pill" data-mode="midnight">Midnight on top</button>
       <button class="noon-pill" data-mode="noon">Noon on top</button>

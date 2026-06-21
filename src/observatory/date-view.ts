@@ -39,7 +39,7 @@ function isLeapYear(year: number): boolean {
     return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
 }
 
-interface DateFields {
+export interface DateFields {
     weekday: string;
     monthDay: string;
     year: string;
@@ -47,7 +47,13 @@ interface DateFields {
     tzAbbrev: string;
 }
 
-function extractFields(date: Date, timezone: string | undefined): DateFields {
+/**
+ * The date strings (in the location's timezone) that the date view renders.
+ * Exported so the layout engine (`anchor-layout.ts`) can measure exactly the
+ * text it will draw — the extreme/landscape anchors (A1/A5/A6/Awide) size the
+ * date region from these glyph widths, so measurement must match rendering.
+ */
+export function extractDateFields(date: Date, timezone: string | undefined): DateFields {
     const tz = timezone || undefined;
     const parts = new Intl.DateTimeFormat('en-US', {
         timeZone: tz,
@@ -368,7 +374,7 @@ export function drawDateView(
     date: Date,
     timezone: string | undefined,
 ): void {
-    const f = extractFields(date, timezone);
+    const f = extractDateFields(date, timezone);
     const wk: Segment = { text: f.weekday, rel: REL_BIG, color: COLOR };
     const md: Segment = { text: f.monthDay, rel: REL_BIG, color: COLOR };
     const yr: Segment = { text: f.year, rel: REL_YEAR, color: COLOR };

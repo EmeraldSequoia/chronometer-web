@@ -23,7 +23,8 @@ import { initTimeControls } from '../shared/time-controls-ui.js';
 import { initHelpPopover } from '../shared/help-popover.js';
 import { initShareButton } from '../shared/share-button.js';
 import type { TimeControlsAPI } from '../shared/time-controls-ui.js';
-import { computeLayout, type ChromeParams, type LayoutParams } from './layout.js';
+import { type LayoutParams } from './layout.js';
+import { computeLayout, type ObsChrome } from './anchor-layout.js';
 import { getBackgroundCache, invalidateBackgroundCache, waitForBackgroundImage } from './background.js';
 import { getMainDialCache, invalidateMainDialCache, waitForImages } from './main-dial.js';
 import { drawPlanetHands, waitForPlanetImages } from './planet-hands.js';
@@ -70,6 +71,12 @@ let fpsIndicator: FpsIndicator | null = null;
 
 /** Current layout parameters (recomputed on resize) */
 let layout: LayoutParams;
+
+/** Timezone the current `layout` was solved for, so a tz change re-solves it. */
+let lastLayoutTz: string | undefined;
+
+/** Last logged "W×H · mainR · anchor" signature, so we log only on change. */
+let lastSizeSig = '';
 
 /** The canvas element */
 let canvas: HTMLCanvasElement;
@@ -198,60 +205,43 @@ function onCanvasClick(ev: MouseEvent): void {
 const FOOTER_H = 32;
 
 /**
- * True when the noon-on-top toggle doesn't fit in the footer row and has
- * wrapped onto a second row above it (CSS class `wrapped`). The canvas layout
- * then reserves a two-row bottom band so the dial isn't occluded.
+ * Height of the top chrome row (the iteration-3 header band: "Observatory" left,
+ * ℹ + share right). Mirrored into --obs-header-h so the DOM band and the canvas
+ * layout reserve the same strip. The layout designs in the safe rect *below*
+ * this band (anchor-layout.ts §1).
  */
-let noonToggleWrapped = false;
-
-/** Minimum horizontal clearance between the noon toggle and its row neighbors. */
-const NOON_TOGGLE_GAP = 16;
+const HEADER_H = 32;
 
 /**
- * Decide whether the centered noon toggle fits in the footer row between the
- * time-bar contents (left) and the location controls (right); wrap it onto a
- * second row above the footer when it doesn't. Returns true when the wrap
- * state changed — the caller must then re-solve the canvas layout, since
- * chromeParams() reserves an extra footer row while wrapped.
+ * Read the device safe-area insets (notch / home indicator) via a hidden probe
+ * whose paddings are set to `env(safe-area-inset-*)`. Zero on desktop windows,
+ * so the safe rect equals the window there. `viewport-fit=cover` (in
+ * observatory.html) is what exposes these to CSS — see plan §5.
  */
-function updateNoonToggleWrap(): boolean {
-    const toggle = document.getElementById('noon-toggle');
-    if (!toggle) return false;
-    const w = window.innerWidth;
-    const toggleW = toggle.getBoundingClientRect().width;
-    // Rightmost extent of the time-bar's left-aligned contents (hidden
-    // elements — e.g. the Now button at 1× real time — report zero width).
-    let leftEdge = 0;
-    for (const id of ['time-bar-label', 'time-bar-info', 'time-bar-now']) {
-        const r = document.getElementById(id)?.getBoundingClientRect();
-        if (r && r.width > 0) leftEdge = Math.max(leftEdge, r.right);
+let insetProbe: HTMLDivElement | null = null;
+function readSafeInsets(): { insetTop: number; insetRight: number; insetBottom: number; insetLeft: number } {
+    if (!insetProbe) {
+        insetProbe = document.createElement('div');
+        insetProbe.style.cssText =
+            'position:fixed;top:0;left:0;width:0;height:0;visibility:hidden;pointer-events:none;'
+            + 'padding-top:env(safe-area-inset-top);padding-right:env(safe-area-inset-right);'
+            + 'padding-bottom:env(safe-area-inset-bottom);padding-left:env(safe-area-inset-left);';
+        document.body.appendChild(insetProbe);
     }
-    const controls = document.getElementById('observatory-controls')?.getBoundingClientRect();
-    const rightEdge = controls && controls.width > 0 ? controls.left : w;
-    const fits = (w - toggleW) / 2 >= leftEdge + NOON_TOGGLE_GAP
-        && (w + toggleW) / 2 <= rightEdge - NOON_TOGGLE_GAP;
-    const shouldWrap = !fits;
-    if (shouldWrap === noonToggleWrapped) return false;
-    noonToggleWrapped = shouldWrap;
-    toggle.classList.toggle('wrapped', noonToggleWrapped);
-    return true;
+    const cs = getComputedStyle(insetProbe);
+    return {
+        insetTop: parseFloat(cs.paddingTop) || 0,
+        insetRight: parseFloat(cs.paddingRight) || 0,
+        insetBottom: parseFloat(cs.paddingBottom) || 0,
+        insetLeft: parseFloat(cs.paddingLeft) || 0,
+    };
 }
 
-/** Chrome insets for the layout: footer row(s) + popover arms when open. */
-function chromeParams(): ChromeParams {
-    let popover: ChromeParams['popover'] = null;
-    if (timeUI?.isPopoverOpen()) {
-        const upper = document.getElementById('tp-upper')?.getBoundingClientRect();
-        const lower = document.getElementById('tp-lower')?.getBoundingClientRect();
-        if (upper && lower && upper.width > 0) {
-            popover = {
-                upperW: upper.width, upperH: upper.height,
-                lowerW: lower.width, lowerH: lower.height,
-            };
-        }
-    }
-    // A wrapped noon toggle occupies a second row above the footer.
-    return { footerH: FOOTER_H * (noonToggleWrapped ? 2 : 1), popover };
+/** Chrome bands + safe-area insets for the layout (iteration 3). */
+function chromeParams(): ObsChrome {
+    // Iteration 3: the time-controller popover and the noon pill are on-demand
+    // overlays that cost the static layout nothing (§6 C2), so no popover arms.
+    return { footerH: FOOTER_H, headerH: HEADER_H, ...readSafeInsets() };
 }
 
 function resizeCanvas(): void {
@@ -264,12 +254,20 @@ function resizeCanvas(): void {
     canvas.style.width = `${w}px`;
     canvas.style.height = `${h}px`;
 
-    // Re-check whether the noon toggle still fits in the footer row at the new
-    // size (chromeParams reserves a second row while it's wrapped).
-    updateNoonToggleWrap();
+    // Recompute layout. The date region of the extreme/landscape anchors is
+    // sized from measured text, so we feed the live display time + location tz
+    // and measure against the canvas context (see anchor-layout computeLayout).
+    layout = computeLayout(w, h, chromeParams(), ctx, timeController.getDisplayTime(), locationTimezone);
+    lastLayoutTz = locationTimezone;
+    positionNoonIcon();
 
-    // Recompute layout (accounting for the footer row(s) + open popover)
-    layout = computeLayout(w, h, chromeParams());
+    // Log the window size + mainR whenever either changes (startup + each resize
+    // / anchor switch). Replaces the old on-canvas debug overlay.
+    const sizeSig = `${w}×${h} · mainR=${layout.mainR.toFixed(1)} · ${layout.anchor ?? '?'}`;
+    if (sizeSig !== lastSizeSig) {
+        console.log(`[Observatory] viewport ${sizeSig}`);
+        lastSizeSig = sizeSig;
+    }
 
     // Invalidate static caches so they rebuild at new size
     invalidateBackgroundCache();
@@ -315,6 +313,28 @@ function drawFrame(): void {
     const bgCache = getBackgroundCache(L);
     if (bgCache) {
         ctx.drawImage(bgCache, 0, 0);
+    }
+
+    // ================================================================
+    // 0b. Header/footer band BACKGROUNDS — painted behind every main element
+    //     (the dial may overlap them in A5), so the chrome's DOM content sits
+    //     on top while its band backdrop stays behind the dial. Device-px here
+    //     (before the dpr scale). Zero-height when chrome is dropped (CC2).
+    // ================================================================
+    const headerBand = (L.headerBandH ?? 0) * dpr;
+    const footerBand = (L.footerBandH ?? 0) * dpr;
+    if (headerBand > 0 || footerBand > 0) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.lineWidth = 1;
+        if (headerBand > 0) {
+            ctx.fillRect(0, 0, w, headerBand);
+            ctx.beginPath(); ctx.moveTo(0, headerBand + 0.5); ctx.lineTo(w, headerBand + 0.5); ctx.stroke();
+        }
+        if (footerBand > 0) {
+            ctx.fillRect(0, h - footerBand, w, footerBand);
+            ctx.beginPath(); ctx.moveTo(0, h - footerBand - 0.5); ctx.lineTo(w, h - footerBand - 0.5); ctx.stroke();
+        }
     }
 
     // ================================================================
@@ -392,21 +412,9 @@ function drawFrame(): void {
 
     // Date display (Phase 7)
     drawDateView(ctx, L, now, locationTimezone);
-
-    // ================================================================
-    // 6. Debug status overlay (top-left)
-    // ================================================================
-    ctx.font = '11px "JetBrains Mono", monospace';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    const timeStr = now.toLocaleTimeString('en-US', {
-        hour12: false,
-        timeZone: locationTimezone,
-    });
-    ctx.fillText(`Observatory · ${timeStr}`, 10, 10);
-    ctx.fillText(`${layout.viewW}×${layout.viewH} · mainR=${L.mainR.toFixed(0)}`, 10, 24);
     // FPS is shown via the shared DOM overlay (createFpsIndicator), bottom-left.
+    // (The old top-left size/mainR overlay is gone — see the console log in
+    // resizeCanvas, which prints the window size + mainR whenever they change.)
 
     ctx.restore();
 }
@@ -527,6 +535,11 @@ function rebuildEnv(): void {
     env.variables.set('dialPlanet', selectedPlanet);
     invalidateRingCache();
     needsStaticRedraw = true;
+    // The date-region geometry of some anchors (A1/A5/A6/Awide) is sized in the
+    // location's timezone, so a timezone change must re-solve the layout. Guard
+    // on the tz so scrubbing (which fires rebuildEnv every tick) doesn't relayout
+    // each frame — a same-tz day-boundary shift is left to the next resize.
+    if (locationTimezone !== lastLayoutTz) { resizeCanvas(); return; }
     // The loop may be idle (stopped); env changes must trigger a redraw.
     scheduleFrame();
 }
@@ -685,9 +698,33 @@ function setupLocationDialog(): void {
  * location change. The main-dial static cache keys on noonOnTop and rebuilds
  * on the next frame.
  */
+/**
+ * Position the footer's noon-toggle icon. Normally centred; in A5 (iPhone
+ * landscape) the main dial overlaps the footer centre, so the icon shifts left
+ * toward the time-controller button (§6 A5-L2 / harness `noonX`).
+ */
+function positionNoonIcon(): void {
+    const icon = document.getElementById('noon-icon');
+    if (!icon) return;
+    if (layout?.anchor === 'A5') {
+        icon.style.left = `${Math.min(0.12 * window.innerWidth, 90)}px`;
+        icon.style.transform = 'none';
+    } else {
+        icon.style.left = '50%';
+        icon.style.transform = 'translateX(-50%)';
+    }
+}
+
+/**
+ * Noon-on-top control (iteration 3, §6 C2): a small footer-centre icon that, on
+ * tap, raises the Midnight/Noon pill as an on-demand overlay (which may overlap
+ * the dial — rare — so it costs the static layout nothing). Replaces the
+ * always-present wrapping pill row.
+ */
 function setupNoonToggle(): void {
     const toggle = document.getElementById('noon-toggle');
-    if (!toggle) return;
+    const icon = document.getElementById('noon-icon');
+    if (!toggle || !icon) return;
     const midnightPill = toggle.querySelector('[data-mode="midnight"]') as HTMLButtonElement;
     const noonPill = toggle.querySelector('[data-mode="noon"]') as HTMLButtonElement;
 
@@ -695,8 +732,10 @@ function setupNoonToggle(): void {
         midnightPill.classList.toggle('active', !noonOnTop);
         noonPill.classList.toggle('active', noonOnTop);
     };
+    const closeOverlay = () => toggle.classList.remove('open');
 
     const setNoonOnTop = (value: boolean) => {
+        closeOverlay();
         if (value === noonOnTop) return;
         noonOnTop = value;
         env.variables.set('noonOnTop', noonOnTop ? 1 : 0);
@@ -707,23 +746,17 @@ function setupNoonToggle(): void {
         scheduleFrame();
     };
 
+    icon.addEventListener('click', (e) => { e.stopPropagation(); toggle.classList.toggle('open'); });
     midnightPill.addEventListener('click', () => setNoonOnTop(false));
     noonPill.addEventListener('click', () => setNoonOnTop(true));
-    updateHighlight();
-
-    // The footer's neighbors change size at runtime (the red offset label and
-    // the Now button appear when time is overridden), which can change whether
-    // the centered toggle fits in the row. Watch them and re-solve the canvas
-    // layout when the wrap state flips. (Observing the toggle itself also
-    // catches the font-load width change.)
-    const footerRo = new ResizeObserver(() => {
-        if (updateNoonToggleWrap()) resizeCanvas();
+    // Dismiss the overlay on any click outside it (and outside the icon).
+    document.addEventListener('click', (e) => {
+        if (!toggle.classList.contains('open')) return;
+        const t = e.target as Node;
+        if (!toggle.contains(t) && !icon.contains(t)) closeOverlay();
     });
-    footerRo.observe(toggle);
-    for (const id of ['time-bar-label', 'time-bar-info', 'time-bar-now', 'observatory-controls']) {
-        const el = document.getElementById(id);
-        if (el) footerRo.observe(el);
-    }
+    updateHighlight();
+    positionNoonIcon();
 }
 
 // ============================================================================
@@ -731,8 +764,9 @@ function setupNoonToggle(): void {
 // ============================================================================
 
 function init(): void {
-    // Keep the DOM footer row and the canvas layout's reserved band in sync.
+    // Keep the DOM chrome rows and the canvas layout's reserved bands in sync.
     document.documentElement.style.setProperty('--obs-footer-h', `${FOOTER_H}px`);
+    document.documentElement.style.setProperty('--obs-header-h', `${HEADER_H}px`);
     if (urlState.fps) document.body.classList.add('has-fps');
 
     initCanvas();
@@ -823,9 +857,9 @@ function init(): void {
             scheduleFrame();
         },
         onPopoverToggle: () => {
-            // The open popover participates in the layout (its L-arms become
-            // exclusion zones) — re-solve so the whole display stays visible.
-            resizeCanvas();
+            // Iteration 3: the popover is a pure overlay (it no longer reshapes
+            // the layout), so just make sure the idle loop redraws.
+            scheduleFrame();
         },
     });
 

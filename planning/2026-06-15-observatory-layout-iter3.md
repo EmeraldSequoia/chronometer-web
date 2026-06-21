@@ -1,7 +1,7 @@
 # Observatory Layout — Iteration 3 (Design Points & Transitions)
 
-**Date:** 2026-06-15 (tuning complete 2026-06-20)
-**Status:** ✅ **Tuning complete — good enough to ship.** All nine anchors tuned (A1, A2, A3, A3m, A4, A5, A6, **Asq** square 1.0, **Awide** ultrawide 3.556); anchor-by-aspect selection + thresholds wired; transitions ship as **hard snaps** at the thresholds (no per-transition interpolation — future work). **The harness (`harness/layout-harness.html`) is the reference implementation.** **To implement in the real app, start at [§9](#9-implementation-handoff).**
+**Date:** 2026-06-15 (tuning complete 2026-06-20; implemented in the app 2026-06-20)
+**Status:** ✅ **Implemented in production (2026-06-20).** All nine anchors tuned (A1, A2, A3, A3m, A4, A5, A6, **Asq** square 1.0, **Awide** ultrawide 3.556); anchor-by-aspect selection + thresholds wired; transitions ship as **hard snaps** at the thresholds (no per-transition interpolation — future work). The per-anchor logic now lives in [`src/observatory/anchor-layout.ts`](../src/observatory/anchor-layout.ts), which the harness imports (§9.6), so the harness and the app share one copy. CC1 (eclipse footprint = `extR`), CC2 (chrome-drop), `viewport-fit=cover` + safe-area insets, the header band, and the footer noon-icon/overlay all landed. **The harness (`harness/layout-harness.html`) remains the reference for by-eye tweaks.**
 **Parents:**
 - [2026-06-06-observatory-phase-8-layout.md](2026-06-06-observatory-phase-8-layout.md) — adaptive two-template engine
 - [2026-06-10-observatory-phase-8b-layout-refinement.md](2026-06-10-observatory-phase-8b-layout-refinement.md) — refinements R1–R6
@@ -209,7 +209,7 @@ stay clean.
 | # | Rule | Where | Status |
 |---|---|---|---|
 | RR1 | **Date block centers on real glyph ink, not the em-box** — and on the **prominent** ink only. `drawBlock` shifts all baselines so the visible ink's vertical midpoint lands on the box center, using `actualBoundingBox*` metrics. The **faint *and* small secondary fields (timezone, "leap")** are excluded from the centering bounds (they don't read as part of the date's mass, so counting them made the prominent content look shifted up — visible in `stack` mode where tz is its own bottom line). Makes the box a faithful proxy for the *prominent* ink in all three modes (`row`/`split`/`stack`). | [date-view.ts](../src/observatory/date-view.ts) `drawBlock` (`prominentOnly`) | ✅ done |
-| CC1 | **Eclipse footprint = `extR`.** All four outer dials are the same size. The eclipse is a disc (`eclipseR1`) + marker ring (`eclipseR2`); `extDerived` authored `eclipseR2 = extR + 3·es ≈ 1.05·extR` (an iOS port: 63 px ring vs 60 px ext dials), so its footprint was 5 % over. Fix: size the eclipse's outer ring to `extR` (preserve the internal R1/R2 proportions). | [layout.ts](../src/observatory/layout.ts) `extDerived` | 🔲 impl |
+| CC1 | **Eclipse footprint = `extR`.** All four outer dials are the same size. The eclipse is a disc (`eclipseR1`) + marker ring (`eclipseR2`); `extDerived` authored `eclipseR2 = extR + 3·es ≈ 1.05·extR` (an iOS port: 63 px ring vs 60 px ext dials), so its footprint was 5 % over. Fix: size the eclipse's outer ring to `extR` (preserve the internal R1/R2 proportions). | [layout.ts](../src/observatory/layout.ts) `extDerived` | ✅ done |
 | RR2 | **Landscape bottom date: month-day on the bottom line, year/tz on top, tight spacing.** In `split` mode (landscape, date along the bottom), the date2 block draws **year+tz above month-day** so the prominent month-day sits at the same height as the weekday on the left, with the year/tz reading above it. The two lines use **ink-tight spacing** (`drawBlock({ tight })`): lines are placed on real `actualBoundingBox` ink + a proportional pad (`TIGHT_LINE_GAP`), not the em-box advance (which reserved the big line's full ascent and floated the year far above). Matches the iOS landscape spacing (EOClock.mm `bdY3 = bdY + 34.5`, big font 48 → year centre ~0.72× big-font above month-day centre) and scales with the font. Element rendering (sizes/colors) is unchanged — only line order and gap. | [date-view.ts](../src/observatory/date-view.ts) `drawDateView` (`split`) / `drawBlock` | ✅ done |
 
 *RR1 verified in harness:* A2 `row` ink offset went +5px → −0 (top↕12/bot↕1 →
@@ -496,7 +496,8 @@ primitives it builds on already live in `src/observatory/`.
 - **CC2 chrome-drop** (harness `draw()`): `dropChrome = (W < 200) || (H < 368)` →
   zero header+footer. (Footprint = the time-controller default popover, 200×368.)
 - The **aspect → anchor selector** + thresholds (§7) and **CC1** (eclipse
-  footprint = `extR`, still 🔲 — `extDerived` in `layout.ts`).
+  footprint = `extR`). *(Implemented: the selector + applyXxx live in
+  `anchor-layout.ts`; CC1 is in `extDerived` in `layout.ts`.)*
 
 ### 9.3 Target architecture in `computeLayout`
 
@@ -565,9 +566,9 @@ silently drift from production logic.
 - **Awide extreme-low edge (~2.6, the A5↔Awide boundary)** degrades but no longer
   breaks (moon/dials shrink, half-gap spacing); acceptable as the "use A5 below
   here" boundary.
-- **CC1** (eclipse footprint = `extR`) is still 🔲 — apply it in `extDerived`.
-- **§5 `viewport-fit=cover`** must land first (the layout is defined in the safe
-  rect).
+- ~~**CC1** (eclipse footprint = `extR`)~~ → **done** in `extDerived`.
+- ~~**§5 `viewport-fit=cover`** must land first~~ → **done**; the entry reads
+  `env(safe-area-inset-*)` and feeds the safe rect to `computeLayout`.
 - Real dial **content** wasn't in the harness — re-check the by-eye size choices
   (A3-L6 `k`, A2-L3 growth, Asq/Awide moon vs outer-dial balance) once live dials
   render.

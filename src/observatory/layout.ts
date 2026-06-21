@@ -102,6 +102,25 @@ export interface LayoutParams {
     viewH: number;
     dpr: number;
 
+    /**
+     * The iteration-3 anchor this layout was built for (e.g. 'A2', 'A5'), set by
+     * `computeLayout` in `anchor-layout.ts`. Lets chrome that depends on the
+     * arrangement (the A5 noon icon, which dodges the footer-overlapping dial)
+     * react without re-deriving the aspect. Undefined for base-only layouts.
+     */
+    anchor?: string;
+
+    /**
+     * Canvas-space heights (CSS px) of the header/footer chrome *bands*,
+     * including any safe-area inset bleed — the header band spans `[0,
+     * headerBandH]` from the top, the footer band spans `[viewH−footerBandH,
+     * viewH]`. The renderer paints these backgrounds *behind* the main elements
+     * (the DOM chrome content draws on top). Zero when chrome is dropped (CC2).
+     * Set by `computeLayout`; undefined for base-only layouts.
+     */
+    headerBandH?: number;
+    footerBandH?: number;
+
     // --- Main orrery dial ---
     mainCX: number;
     mainCY: number;
@@ -347,12 +366,24 @@ function innerSubdials(mainCX: number, mainCY: number, subOffset: number) {
     };
 }
 
-/** Eclipse annulus radii + peripheral font sizes, proportional to the ext dial. */
+/**
+ * Eclipse annulus radii + peripheral font sizes, proportional to the ext dial.
+ *
+ * CC1 (iteration 3, §6.0): the eclipse's outer marker ring is its visible
+ * footprint and must equal `extR` so all four outer dials read the same size.
+ * The iOS port authored `eclipseR2 = extR + 3·es ≈ 1.05·extR` (a 63 px ring vs
+ * 60 px ext dials), making the eclipse 5 % oversized. We rescale both annulus
+ * radii by `extR / rawR2` so the outer ring lands exactly on `extR` while the
+ * internal R1/R2 proportions (disc vs. ring) are preserved.
+ */
 function extDerived(extR: number) {
     const es = extR / 60;            // iOS authored ext dials at R = 60
+    const rawR2 = extR + 3 * es;     // iOS-authored ring radius (≈1.05·extR)
+    const rawR1 = extR + 3 * es - 14 * es;
+    const fit = rawR2 > 0 ? extR / rawR2 : 1;   // scale the ring footprint down to extR
     return {
-        eclipseR2: extR + 3 * es,
-        eclipseR1: extR + 3 * es - 14 * es,
+        eclipseR2: rawR2 * fit,      // = extR (footprint matches the other dials)
+        eclipseR1: rawR1 * fit,      // disc, same proportion to the ring as before
         extFontSize: 10 * es,
         eclipseFontSize: 10 * es,
         eotFontSize: 8 * es,
@@ -363,7 +394,17 @@ function extDerived(extR: number) {
 // Compute layout from viewport
 // ---------------------------------------------------------------------------
 
-export function computeLayout(
+/**
+ * Build the *base* layout for a window of the given dimensions, choosing the
+ * iteration-2 portrait/landscape template by aspect. Iteration 3 (see
+ * planning/2026-06-15-observatory-layout-iter3.md and `anchor-layout.ts`) wraps
+ * this: it picks one of nine aspect *anchors*, builds the matching base here
+ * (or pins `portraitTwoBand`/`portraitOneBand`), then applies per-anchor
+ * adjustments. This is exported for both that orchestrator and the layout
+ * harness; the production entry calls `computeLayout` (in `anchor-layout.ts`),
+ * not this directly.
+ */
+export function computeBaseLayout(
     viewW: number,
     viewH: number,
     chrome?: ChromeParams,
