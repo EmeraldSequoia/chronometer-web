@@ -1,7 +1,7 @@
 # Observatory Layout — Iteration 3 (Design Points & Transitions)
 
-**Date:** 2026-06-15
-**Status:** 🟡 In progress — A1, A2, A3, A3m, A4, A5, A6 ✅ complete; **Asq (square, 1.0) tuned**; **Awide (ultrawide, 3.556) added — rules TBD** (new anchor between A5 and A6); transition **auto-switch + thresholds** wired (§7), per-transition blend rules pending.
+**Date:** 2026-06-15 (tuning complete 2026-06-20)
+**Status:** ✅ **Tuning complete — good enough to ship.** All nine anchors tuned (A1, A2, A3, A3m, A4, A5, A6, **Asq** square 1.0, **Awide** ultrawide 3.556); anchor-by-aspect selection + thresholds wired; transitions ship as **hard snaps** at the thresholds (no per-transition interpolation — future work). **The harness (`harness/layout-harness.html`) is the reference implementation.** **To implement in the real app, start at [§9](#9-implementation-handoff).**
 **Parents:**
 - [2026-06-06-observatory-phase-8-layout.md](2026-06-06-observatory-phase-8-layout.md) — adaptive two-template engine
 - [2026-06-10-observatory-phase-8b-layout-refinement.md](2026-06-10-observatory-phase-8b-layout-refinement.md) — refinements R1–R6
@@ -10,14 +10,18 @@
 
 ## 0. What this document is
 
-This is **not** an implementation plan. It is the *record of an extended tuning
-phase*. The output is a set of **optimum layout rules** per design point (and
-per transition), captured in English tables here, which a *later* plan will turn
-into production code.
+This began as the *record of an extended tuning phase* and is **now also the
+implementation spec**. The output is a set of **optimum layout rules** per design
+point, captured in the English tables in §6, **realised exactly in the harness**
+(`harness/layout-harness.html`). Tuning is done; the next step is to port the
+harness geometry into the production renderer — see **[§9](#9-implementation-handoff)**.
 
-We do this empirically: build an instrumented harness that reproduces the
-**committed** layout logic, then refine it by eye at carefully chosen aspect
-ratios and sizes, recording each rule as we agree on it.
+We did this empirically: built an instrumented harness that reuses the
+**committed** `computeLayout`/date-view (imported from `src/observatory/`), then
+refined per-anchor adjustments by eye at chosen aspect ratios and sizes,
+recording each rule as we agreed on it. Because the harness imports the real
+modules, its geometry is the source of truth — §6 is the human-readable version
+of what the harness's `applyXxx` functions do.
 
 ### Why anchors + transitions instead of incremental code
 
@@ -278,7 +282,7 @@ The mini's narrower aspect gets its **own anchor**. It **inherits all of A3's ru
 
 The **A3 ↔ A3m** map-expansion and date-shrink interpolate across aspect (≈0.725 → 0.683) — a transition (§7).
 
-### Asq — Square (aspect 1.0) 🟡
+### Asq — Square (aspect 1.0) ✅
 *Samples: 820×820 · 1024×1024 · 1280×1280 (aspect 1.0).*
 
 **New anchor**, added between the portrait iPad points (A3/A3m, ~0.7) and the landscape iPad point (A4, 1.45). At a square aspect neither the portrait stack nor the landscape spread fits well, so the rules differ significantly from both neighbours — hence a dedicated anchor rather than an A3↔A4 interpolation. The idea is to **pick a relative size for the two primary elements (map + main dial) and arrange everything else around them.** A *full gap* here = **`2·halfPad`** (`halfPad = 0.0125·W`).
@@ -333,7 +337,7 @@ Everything below is in the **content rect** but the **main dial is centred in th
 
 **Implementation notes:** the shared `condensedDateLayout(ctx, weekday, boxW, boxH, descenderBottomY)` (in `date-view.ts`) returns `{u, baselineY, top}` and is the **single source** used by both the renderer (to draw) and the layout (to place the dials), so dial geometry and rendered text agree. `drawBlock` gained `forceU`/`baselineY`/`segCenter` and returns `{u, baselineY}`. New `LayoutParams`: `dateCondensed`, `dateSegCenter`, `dateBaselineBottom`.
 
-### Awide — Ultrawide landscape (aspect 3.556, 32:9) 🟡
+### Awide — Ultrawide landscape (aspect 3.556, 32:9) ✅
 *Samples: 1280×360 · 1920×540 · 2560×720 (aspect 3.556).*
 
 **New anchor**, added between A5 (iPhone landscape, 1.99) and A6 (extreme, 10.0). In tuning the A5↔A6 transition, A5's layout stops reading well above **≈2.6** (the `A5↔Awide` threshold is set to **2.595**), but A6's single-row collapse is too aggressive until **≈8.687** (the chosen `Awide↔A6` threshold) — so a dedicated wide-landscape anchor fills the gap. Basis: 32:9 super-ultrawide. **Strategy:** lay the elements out as **five columns with even gaps** — moon · alt/az · main dial · ecl/eot · map — so alt/az and ecl/eot read as separate columns flanking the dial (the dial goes off-centre, which is fine). The moon & map sit in their upper areas with the split date below them, each sized so it doesn't overlap its date piece:
@@ -412,7 +416,11 @@ A1 is the **vertical mirror of A6**: the degenerate *portrait* sliver. Chrome is
 
 ## 7. Transitions (filled in after all anchors)
 
-**Anchor selection by aspect (harness "Transitions" panel).** With **Auto-anchor by viewport aspect** on, the active anchor is chosen from the live viewport aspect `W/H`: the eight anchors are sorted by aspect and a **threshold** sits between each adjacent pair; the aspect lands in exactly one band. Each threshold **defaults to the log midpoint** `√(Aₙ·Aₙ₊₁)` (= `exp((ln Aₙ + ln Aₙ₊₁)/2)`) and has a **slider** (range `[Aₙ, Aₙ₊₁]`) to move where the switch happens. Three thresholds are **chosen overrides** of that default (`CHOSEN_THRESH` in the harness): **A1↔A2 = 0.177**, **A5↔Awide = 2.595**, and **Awide↔A6 = 8.687** (below 8.687 A6's single-row collapse is too aggressive); the rest stay at their log midpoints (which matched Steve's picks). Current thresholds (aspect-sorted A1·A2·A3m·A3·Asq·A4·A5·Awide·A6): **0.177 · 0.591 · 0.704 · 0.851 · 1.204 · 1.699 · 2.595 · 8.687**. This is the scrubbing mechanism for tuning the blend rules below; for now the switch is a hard snap at the threshold (blends TBD).
+**Shipping behaviour: anchor selection by aspect, hard snap at the thresholds.** The active anchor is chosen from the live viewport aspect `W/H`: the nine anchors are sorted by aspect and a **threshold** sits between each adjacent pair; the aspect lands in exactly one band and that anchor's rules apply — **a hard snap at the threshold, no interpolation**. (In the harness this is the "Auto-anchor by viewport aspect" toggle.) Each threshold **defaults to the log midpoint** `√(Aₙ·Aₙ₊₁)`; three are **chosen overrides** (`CHOSEN_THRESH`): **A1↔A2 = 0.177**, **A5↔Awide = 2.595**, **Awide↔A6 = 8.687**; the rest stay at the log midpoint. **Ship these thresholds** (aspect-sorted A1·A2·A3m·A3·Asq·A4·A5·Awide·A6):
+
+> **0.177 · 0.591 · 0.704 · 0.851 · 1.204 · 1.699 · 2.595 · 8.687**
+
+The per-transition **blend rules below remain TBD** — they are a *future* refinement to soften specific snaps, not required for v1. The snaps that are most visible (and candidates for later interpolation): **A2↔A3m** (two-band ⇄ one-band date), **A4↔A5** (two-column split ⇄ one-row-per-side), and the Awide regime-A⇄B outer-dial jump (within Awide, §Awide-C1).
 
 | Transition | From → To | Blend rule | Notes |
 |---|---|---|---|
@@ -429,8 +437,9 @@ A1 is the **vertical mirror of A6**: the degenerate *portrait* sliver. Chrome is
 
 ## 8. Open questions
 
-- A1/A6 canonical pixel sizes and sample sizes (TBD once we see the degenerate
-  layouts).
+- ~~A1/A6 canonical pixel sizes and sample sizes~~ → **resolved** (see §2.1): A1
+  100×1000·120×1200·160×1600; A6 1000×100·1200×120·1600×160; plus Asq
+  820/1024/1280² and Awide 1280×360·1920×540·2560×720.
 - ~~Whether A3's canonical should be 0.69 or 0.75~~ → **resolved:** A3 = 0.725
   (iPad 11"), with A3m (0.683) split off as its own anchor and 13" (0.775) a
   wider sample.
@@ -442,3 +451,123 @@ A1 is the **vertical mirror of A6**: the degenerate *portrait* sliver. Chrome is
 - The dial-content (real dials with live values) isn't in the harness — some
   size choices (A3-L6 `k`, A2-L3 grow) are "looks right as outlines" and may need
   a pass once real content is in place.
+
+---
+
+## 9. Implementation handoff
+
+*Read this section to take iteration 3 from the harness into the real app. It is
+self-contained: with this section, §6 (per-anchor rules), §7 (thresholds), and the
+harness file, you can implement without re-deriving anything.*
+
+### 9.1 The harness IS the reference implementation
+
+`harness/layout-harness.html` is not a throwaway mock — it produces the **exact
+final geometry** and it does so by importing the **real** production modules:
+
+- It bundles `src/observatory/layout.ts` → `harness/layout.mjs` and
+  `src/observatory/date-view.ts` → `harness/date-view.mjs` (via
+  `harness/build-harness.sh`), then imports `computeLayout`, `portraitTwoBand`,
+  `portraitOneBand`, `rescaleMain`, `drawDateView`, `condensedDateLayout`,
+  `measureRowTexts` from them.
+- On top of that base it runs **per-anchor `applyXxx(L, bounds, headerH, footerH)`**
+  functions that mutate the `LayoutParams` `L`, a cross-cutting **chrome-drop**,
+  and an **aspect → anchor** selector.
+
+So "implement" = **move the harness's anchor logic into the production renderer**
+so the live app produces the same `LayoutParams` the harness draws. The base
+primitives it builds on already live in `src/observatory/`.
+
+### 9.2 What's already in production source vs. only in the harness
+
+**Already committed to `src/observatory/` during tuning (production-ready, used by the harness as-is):**
+- `date-view.ts` — RR1 ink-centering (`drawBlock`, `prominentOnly`); `forceU` /
+  `baselineY` / `segCenter` options; `condensedDateLayout`; `measureRowTexts`;
+  `stack` honours `forceU`; the `split`/`dateCondensed` paths (RR2). New
+  `LayoutParams` fields: `dateCondensed`, `dateSegCenter`, `dateBaselineBottom`,
+  `dateForceU`, `dateMode`.
+- `layout.ts` — `innerDialGeometry` sub-dial **floor removed** (sub-dials are
+  globally proportional: `subR = 0.2·mainR`, `subOffset = 0.408·mainR`).
+
+**Only in the harness — must be ported into `layout.ts` (or a new module):**
+- The per-anchor functions: `applyA1`, `applyA2` (inline in the harness's
+  `applyRules`), `applyA3Common` + `applyA3Mini`, `applyA4Dials`, `applyA5`,
+  `applyAsq`, `applyAwide`, `applyA6`.
+- **CC2 chrome-drop** (harness `draw()`): `dropChrome = (W < 200) || (H < 368)` →
+  zero header+footer. (Footprint = the time-controller default popover, 200×368.)
+- The **aspect → anchor selector** + thresholds (§7) and **CC1** (eclipse
+  footprint = `extR`, still 🔲 — `extDerived` in `layout.ts`).
+
+### 9.3 Target architecture in `computeLayout`
+
+Restructure `computeLayout(viewW, viewH, chrome)` to:
+
+1. **Safe rect** — do §5 first (`viewport-fit=cover`, read `env(safe-area-inset-*)`);
+   the `W`/`H` used everywhere below are **safe-rect** dims.
+2. **CC2 chrome-drop** — `if (W < 200 || H < 368) headerH = footerH = 0`.
+3. **Pick the anchor** — `aspect = W/H`; sort anchors by aspect; the thresholds in
+   §7 define the bands; choose the band the aspect falls in (hard snap).
+4. **Base template + per-anchor adjust** — build the base `L` for that anchor
+   (A2 → `portraitTwoBand`; A3/A3m → `portraitOneBand`; everything else →
+   `computeLayout`'s default body), then run that anchor's `applyXxx(L, bounds,
+   headerH, footerH)` with `bounds = {left:0, right:contentW, top:0,
+   bottom:contentH−footerH}`.
+5. Return `L`. The renderer already consumes `LayoutParams` + `drawDateView`.
+
+Port each `applyXxx` **verbatim**, replacing every harness slider read
+`+$('id').value` with the baked constant from §9.4. `halfPad = 0.0125·W`; a "full
+gap" = `2·halfPad`; "half gap" = `halfPad`.
+
+### 9.4 Constants to bake in (slider defaults → fixed values)
+
+| Anchor | Constant (harness id) | Ship value | Meaning |
+|---|---|---|---|
+| A2 | `dialK` | **1.36** | outer-dial growth |
+| A2 | `dateHFrac` | **0.144** | date box height ÷ W |
+| A2 | (the `oRules`/`oReclaim`/`oCluster`/`oDateCenter` toggles) | **all on** | A2 candidate rules |
+| A3 | `a3DialK` / `a3DialGap` | **0.165 / 0.04** | ext-dial size / gap (×R) |
+| A3m | `mapScale` | **1.10** | map width ×, + date −5% |
+| A6 | `a6DialK` / `a6FontK` | **0.65 / 0.35** | outer ÷ main-R / font ÷ outer-⌀ |
+| Asq | `asqMapK` / `asqOuterT` | **0.37 / 0.42** | map width ÷ W / outer-dial radial % |
+| Awide | `awMoonK` / `awMapK` | **1.0 / 1.0** | moon/map ÷ their computed max |
+
+**Thresholds** (aspect-sorted boundaries A1·A2·A3m·A3·Asq·A4·A5·Awide·A6):
+**0.177 · 0.591 · 0.704 · 0.851 · 1.204 · 1.699 · 2.595 · 8.687** (§7).
+
+*(These are the harness defaults today, so a fresh `build-harness.sh` + open
+reproduces the shipping layout at every anchor.)*
+
+### 9.5 Transitions = hard snaps (v1)
+
+Ship the **anchor-by-aspect hard snap** (§7). The per-transition blend rules
+(T1–T5) are **not** implemented and **not** required for v1. Revisit interpolation
+later for the most visible snaps (A2↔A3m, A4↔A5, Awide's internal regime A⇄B).
+
+### 9.6 Keep the harness in `main`
+
+**Decision: merge `harness/` to `main` and maintain it.** It's the living
+reference for future by-eye tweaks and it imports the real modules, so it can't
+silently drift from production logic.
+
+- Run: `./harness/build-harness.sh` (rebuilds `harness/{layout,date-view}.mjs`
+  from `src/observatory/*.ts`), **bump the `?v=N`** query on the two imports in
+  `layout-harness.html` (browser ESM cache), then serve the repo and open
+  `/layout-harness.html`. `harness/*.mjs` are git-ignored build artifacts.
+- **After any change to `src/observatory/layout.ts` or `date-view.ts`, rebuild the
+  harness bundle** so the reference stays in sync.
+- When implementing §9.3, the cleanest path keeps the harness honest: move each
+  `applyXxx` into a production module that **both** the app and the harness import
+  (so there's a single copy), rather than leaving a fork in the HTML.
+
+### 9.7 Known limitations to accept for v1
+
+- **No transition interpolation** — hard snaps (§9.5).
+- **Awide extreme-low edge (~2.6, the A5↔Awide boundary)** degrades but no longer
+  breaks (moon/dials shrink, half-gap spacing); acceptable as the "use A5 below
+  here" boundary.
+- **CC1** (eclipse footprint = `extR`) is still 🔲 — apply it in `extDerived`.
+- **§5 `viewport-fit=cover`** must land first (the layout is defined in the safe
+  rect).
+- Real dial **content** wasn't in the harness — re-check the by-eye size choices
+  (A3-L6 `k`, A2-L3 growth, Asq/Awide moon vs outer-dial balance) once live dials
+  render.
