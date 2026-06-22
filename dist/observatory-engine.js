@@ -16804,6 +16804,7 @@
       eotFontSize: 8 * es
     };
   }
+  var OUTER_DIAL_TITLE_RATIO = 10 / 46.9;
   function computeBaseLayout(viewW, viewH, chrome) {
     const dpr = typeof devicePixelRatio !== "undefined" ? devicePixelRatio : 1;
     const footerH = chrome?.footerH ?? 0;
@@ -18271,6 +18272,10 @@
     }
     L.eclipseR2 = L.altR;
     L.eclipseR1 = L.altR * ECLIPSE_R1_RATIO;
+    const es = L.altR / 60;
+    L.extFontSize = 10 * es;
+    L.eclipseFontSize = 10 * es;
+    L.eotFontSize = 8 * es;
   }
   var ECLIPSE_R1_RATIO = 49 / 63;
   function buildBaseLayout(anchorId, W, H, footerH) {
@@ -20542,7 +20547,7 @@
     const labels = "90,,,,,,-90,-60,-30,-,30,60".split(",");
     drawDialNumbersDemiRadial(ctx2, cx, cy, labels, `${f}px Arial, sans-serif`, WHITE, R - f, R - f + 1);
     const labelR = (R - f - 1) / 2;
-    drawText(ctx2, "Altitude", cx, cy + labelR, `${f}px Arial, sans-serif`, WHITE);
+    drawText(ctx2, "Altitude", cx, cy + labelR, `${OUTER_DIAL_TITLE_RATIO * R}px Arial, sans-serif`, WHITE);
   }
   function drawAzimuthDial(ctx2, L) {
     const cx = L.azCX, cy = L.azCY, R = L.azR;
@@ -20563,7 +20568,7 @@
     drawTicks(ctx2, cx, cy, 36, R - f + 4, R, 1 * s, LIGHT_GRAY);
     drawTicks(ctx2, cx, cy, 72, R - f + 7, R, 1 * s, LIGHT_GRAY);
     const labelR = (R - f - 1) / 2;
-    drawText(ctx2, "Azimuth", cx, cy + labelR, `${f}px Arial, sans-serif`, WHITE);
+    drawText(ctx2, "Azimuth", cx, cy + labelR, `${OUTER_DIAL_TITLE_RATIO * R}px Arial, sans-serif`, WHITE);
   }
   function drawEOTDial(ctx2, L) {
     const cx = L.eotCX, cy = L.eotCY, R = L.eotR;
@@ -20634,7 +20639,7 @@
       ctx2.fillText("\u2013", px - fullW / 2 + numPartW, baseY);
       ctx2.restore();
     }
-    drawText(ctx2, "Equation of Time", cx, cy + R / 2.5, `${10 * s}px Arial, sans-serif`, WHITE);
+    drawText(ctx2, "Equation of Time", cx, cy + R / 2.5, `${OUTER_DIAL_TITLE_RATIO * R}px Arial, sans-serif`, WHITE);
   }
   function drawEclipseDial(ctx2, L) {
     const cx = L.eclipseCX, cy = L.eclipseCY;
@@ -20682,7 +20687,7 @@
     const s = L.altR / 60;
     const width = 3 * s;
     const name = bodyName(key);
-    const labelFont = `${L.extFontSize}px Arial, sans-serif`;
+    const labelFont = `${OUTER_DIAL_TITLE_RATIO * L.altR}px Arial, sans-serif`;
     const f = L.extFontSize;
     const altLabelR = (L.altR - f - 1) / 2;
     const azLabelR = (L.azR - f - 1) / 2;
@@ -20728,6 +20733,16 @@
   var eclipseRingDesNode_default = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAA8AAAAPCAYAAAA71pVKAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAyJpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuMC1jMDYwIDYxLjEzNDc3NywgMjAxMC8wMi8xMi0xNzozMjowMCAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvIiB4bWxuczp4bXBNTT0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wL21tLyIgeG1sbnM6c3RSZWY9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9zVHlwZS9SZXNvdXJjZVJlZiMiIHhtcDpDcmVhdG9yVG9vbD0iQWRvYmUgUGhvdG9zaG9wIENTNSBNYWNpbnRvc2giIHhtcE1NOkluc3RhbmNlSUQ9InhtcC5paWQ6ODBGMUMyREZGNTJGMTFERjlCQjU4RjJCREM3QzAzOUMiIHhtcE1NOkRvY3VtZW50SUQ9InhtcC5kaWQ6ODBGMUMyRTBGNTJGMTFERjlCQjU4RjJCREM3QzAzOUMiPiA8eG1wTU06RGVyaXZlZEZyb20gc3RSZWY6aW5zdGFuY2VJRD0ieG1wLmlpZDo4MEYxQzJEREY1MkYxMURGOUJCNThGMkJEQzdDMDM5QyIgc3RSZWY6ZG9jdW1lbnRJRD0ieG1wLmRpZDo4MEYxQzJERUY1MkYxMURGOUJCNThGMkJEQzdDMDM5QyIvPiA8L3JkZjpEZXNjcmlwdGlvbj4gPC9yZGY6UkRGPiA8L3g6eG1wbWV0YT4gPD94cGFja2V0IGVuZD0iciI/Pnf1QEoAAAA8SURBVHjaYvz//z8DNrCdkZEfSD30/P9fgAEHYGKgAIxqxh7q/ymyGZcBtPczMKEwkqUZl8aRmkgAAgwAfG0PG7xDuxIAAAAASUVORK5CYII=";
 
   // src/observatory/eclipse-view.ts
+  function drawEclipseCaption(ctx2, cx, cy, fontPx, color) {
+    const font = `${fontPx}px Arial, sans-serif`;
+    ctx2.save();
+    ctx2.font = font;
+    const capE = ctx2.measureText("E").actualBoundingBoxAscent || fontPx * 0.72;
+    ctx2.restore();
+    const lh = fontPx * 1.05 + capE;
+    drawText(ctx2, "Eclipse", cx, cy - lh / 2, font, color);
+    drawText(ctx2, "Simulator", cx, cy + lh / 2, font, color);
+  }
   var PERIGEE_DISTANCE_KM2 = 355e3;
   var AU_KM2 = 1496e5;
   var LUNAR_RADIUS_KM2 = 1737.1;
@@ -20803,12 +20818,12 @@
     const cx = L.eclipseCX, cy = L.eclipseCY;
     const viewR = L.eclipseR1;
     const s = viewR / IOS_REF_ECLIPSE_R1;
-    const font = `${L.eclipseFontSize}px Arial, sans-serif`;
+    const captionFontPx = OUTER_DIAL_TITLE_RATIO * L.eclipseR2;
     const captionColor = "rgba(255,255,255,0.55)";
     drawRingHands(ctx2, L, u, s);
     const separation = u.get("eclSeparation").currentValue;
     if (separation >= ECLIPSE_THRESHOLD2) {
-      drawText(ctx2, "Eclipse Simulator", cx, cy, font, captionColor);
+      drawEclipseCaption(ctx2, cx, cy, captionFontPx, captionColor);
       return;
     }
     const moonRadiusAtPerigee = IOS_MOON_RADIUS_AT_PERIGEE * s;
@@ -20928,9 +20943,9 @@
     }
     ctx2.restore();
     if (showHorizonLabel) {
-      drawText(ctx2, "Below horizon", cx, cy, `${10 * s}px Arial, sans-serif`, captionColor);
+      drawText(ctx2, "Below horizon", cx, cy, `${captionFontPx}px Arial, sans-serif`, captionColor);
     } else if (!drawingSomething) {
-      drawText(ctx2, "Eclipse Simulator", cx, cy, font, captionColor);
+      drawEclipseCaption(ctx2, cx, cy, captionFontPx, captionColor);
     }
   }
   function drawRingHands(ctx2, L, u, s) {

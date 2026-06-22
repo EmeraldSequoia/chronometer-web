@@ -390,6 +390,17 @@ function extDerived(extR: number) {
     };
 }
 
+/**
+ * Outer-dial *title* font size as a fraction of that dial's radius (Altitude,
+ * Azimuth, Equation of Time, and the Eclipse Simulator caption). Anchored to
+ * 10 px at the A2 iPhone Pro Max size (440×956, outer-dial radius ≈ 46.9), and
+ * applied uniformly at every anchor so each title always tracks its dial's size
+ * — no floor, no per-dial special case. (Replaces the old `extFontSize`-for-the-
+ * title, which was derived from the *base* outer radius and didn't grow with the
+ * dial, and EOT's one-off `10·R/60`.)
+ */
+export const OUTER_DIAL_TITLE_RATIO = 10 / 46.9;
+
 // ---------------------------------------------------------------------------
 // Compute layout from viewport
 // ---------------------------------------------------------------------------

@@ -51,6 +51,26 @@ import type { ObsValueName } from './obs-values.js';
 import type { Updater } from '../shared/updater.js';
 import { EclipseKind, eclipseKindIsMoreSolarThanLunar } from '../astronomy/es-astro.js';
 import { drawText } from './draw-utils.js';
+import { OUTER_DIAL_TITLE_RATIO } from './layout.js';
+
+/**
+ * "Eclipse Simulator" caption, on two lines so it fits the small disc, at the
+ * shared outer-dial title size (OUTER_DIAL_TITLE_RATIO · the eclipse footprint).
+ */
+function drawEclipseCaption(
+    ctx: CanvasRenderingContext2D, cx: number, cy: number, fontPx: number, color: string,
+): void {
+    const font = `${fontPx}px Arial, sans-serif`;
+    // Line spacing: the line-height plus roughly the cap-height of the "E" in
+    // "Eclipse", so the two lines breathe a bit.
+    ctx.save();
+    ctx.font = font;
+    const capE = ctx.measureText('E').actualBoundingBoxAscent || fontPx * 0.72;
+    ctx.restore();
+    const lh = fontPx * 1.05 + capE;
+    drawText(ctx, 'Eclipse', cx, cy - lh / 2, font, color);
+    drawText(ctx, 'Simulator', cx, cy + lh / 2, font, color);
+}
 
 // ============================================================================
 // Pixel-scale constants (port of EOEclipseView.mm:70-77)
@@ -189,7 +209,9 @@ export function drawEclipseView(
     const cx = L.eclipseCX, cy = L.eclipseCY;
     const viewR = L.eclipseR1;
     const s = viewR / IOS_REF_ECLIPSE_R1;
-    const font = `${L.eclipseFontSize}px Arial, sans-serif`;
+    // Caption font tracks the eclipse footprint (eclipseR2 = the outer-dial
+    // radius), same rule as the other dial titles.
+    const captionFontPx = OUTER_DIAL_TITLE_RATIO * L.eclipseR2;
     const captionColor = 'rgba(255,255,255,0.55)';
 
     // Always draw the ring markers (they track even when no eclipse is near).
@@ -199,7 +221,7 @@ export function drawEclipseView(
 
     // Gate: nothing to draw in the disc unless within 10°.
     if (separation >= ECLIPSE_THRESHOLD) {
-        drawText(ctx, 'Eclipse Simulator', cx, cy, font, captionColor);
+        drawEclipseCaption(ctx, cx, cy, captionFontPx, captionColor);
         return;
     }
 
@@ -348,9 +370,9 @@ export function drawEclipseView(
 
     // Labels (drawn on top, in screen space).
     if (showHorizonLabel) {
-        drawText(ctx, 'Below horizon', cx, cy, `${10 * s}px Arial, sans-serif`, captionColor);
+        drawText(ctx, 'Below horizon', cx, cy, `${captionFontPx}px Arial, sans-serif`, captionColor);
     } else if (!drawingSomething) {
-        drawText(ctx, 'Eclipse Simulator', cx, cy, font, captionColor);
+        drawEclipseCaption(ctx, cx, cy, captionFontPx, captionColor);
     }
 }
 

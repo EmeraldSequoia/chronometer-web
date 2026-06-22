@@ -20,6 +20,7 @@
  */
 
 import type { LayoutParams } from './layout.js';
+import { OUTER_DIAL_TITLE_RATIO } from './layout.js';
 import { drawArc, drawTicks, drawDialNumbersDemiRadial, drawDialNumbersUpright, drawText, textVisualCenterY } from './draw-utils.js';
 
 const TWO_PI = 2 * Math.PI;
@@ -113,9 +114,10 @@ function drawAltitudeDial(ctx: Ctx2D, L: LayoutParams): void {
     drawDialNumbersDemiRadial(ctx, cx, cy, labels, `${f}px Arial, sans-serif`, WHITE, R - f, R - f + 1);
 
     // "Altitude" title, centered in the lower radial gap (hub → −90), mirroring
-    // the body-name label drawn above by the hands layer.
+    // the body-name label drawn above by the hands layer. Title font scales with
+    // the dial radius (OUTER_DIAL_TITLE_RATIO), independent of the label font `f`.
     const labelR = (R - f - 1) / 2;
-    drawText(ctx, 'Altitude', cx, cy + labelR, `${f}px Arial, sans-serif`, WHITE);
+    drawText(ctx, 'Altitude', cx, cy + labelR, `${OUTER_DIAL_TITLE_RATIO * R}px Arial, sans-serif`, WHITE);
 }
 
 // ---------------------------------------------------------------------------
@@ -150,7 +152,7 @@ function drawAzimuthDial(ctx: Ctx2D, L: LayoutParams): void {
     drawTicks(ctx, cx, cy, 72, R - f + 7, R, 1 * s, LIGHT_GRAY);
 
     const labelR = (R - f - 1) / 2;
-    drawText(ctx, 'Azimuth', cx, cy + labelR, `${f}px Arial, sans-serif`, WHITE);
+    drawText(ctx, 'Azimuth', cx, cy + labelR, `${OUTER_DIAL_TITLE_RATIO * R}px Arial, sans-serif`, WHITE);
 }
 
 // ---------------------------------------------------------------------------
@@ -258,9 +260,9 @@ function drawEOTDial(ctx: Ctx2D, L: LayoutParams): void {
     }
 
     // ── Title (lower half, below center) ──
-    // iOS draws this at Arial 10 (= the other dials' title size, extFontSize),
-    // not at EOTFontSize (8) which is reserved for the numeric labels.
-    drawText(ctx, 'Equation of Time', cx, cy + R / 2.5, `${10 * s}px Arial, sans-serif`, WHITE);
+    // Same title-font rule as the other outer dials (OUTER_DIAL_TITLE_RATIO · R),
+    // not EOTFontSize (which is reserved for the numeric labels).
+    drawText(ctx, 'Equation of Time', cx, cy + R / 2.5, `${OUTER_DIAL_TITLE_RATIO * R}px Arial, sans-serif`, WHITE);
 }
 
 // ---------------------------------------------------------------------------

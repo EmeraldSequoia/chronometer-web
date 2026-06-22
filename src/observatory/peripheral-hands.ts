@@ -11,6 +11,7 @@
  */
 
 import type { LayoutParams } from './layout.js';
+import { OUTER_DIAL_TITLE_RATIO } from './layout.js';
 import type { ObsValueName } from './obs-values.js';
 import { DIAL_BODIES } from './obs-values.js';
 import type { Updater } from '../shared/updater.js';
@@ -45,7 +46,10 @@ export function drawPeripheralHands(
     const s = L.altR / 60;
     const width = 3 * s;
     const name = bodyName(key);
-    const labelFont = `${L.extFontSize}px Arial, sans-serif`;
+    // The body-name label is the counterpart to the dial *title* ("Altitude" /
+    // "Azimuth"), so it uses the same title-font rule (OUTER_DIAL_TITLE_RATIO · R),
+    // not the smaller numeric-label font.
+    const labelFont = `${OUTER_DIAL_TITLE_RATIO * L.altR}px Arial, sans-serif`;
 
     // Both hands track the selected body via the shared dialAlt/dialAz values,
     // which animate (rather than snap) when the selection changes — see

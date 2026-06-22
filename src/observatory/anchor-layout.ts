@@ -774,6 +774,17 @@ export function applyAnchor(
     // ECL directly at `altR`, so this keeps the real renderer in step with it.)
     L.eclipseR2 = L.altR;
     L.eclipseR1 = L.altR * (ECLIPSE_R1_RATIO);
+
+    // Outer-dial label/number fonts (the alt/az tick labels, the EOT digits, and
+    // the alt/az planet-name labels) also scale with the *final* dial radius. The
+    // base `extDerived` values were computed from the un-grown radius, so they
+    // didn't track an anchor that resizes the dials (e.g. A2's ×1.36 growth).
+    // Same iOS proportions (10/60 for labels, 8/60 for the EOT numbers) — no
+    // floor, no special case — now keyed off altR like the titles.
+    const es = L.altR / 60;
+    L.extFontSize = 10 * es;
+    L.eclipseFontSize = 10 * es;
+    L.eotFontSize = 8 * es;
 }
 
 /** Disc-to-ring proportion of the eclipse annulus (from `extDerived`: 49/63). */
