@@ -212,7 +212,7 @@ export function drawEclipseView(
     // Caption font tracks the eclipse footprint (eclipseR2 = the outer-dial
     // radius), same rule as the other dial titles.
     const captionFontPx = OUTER_DIAL_TITLE_RATIO * L.eclipseR2;
-    const captionColor = 'rgba(255,255,255,0.55)';
+    const captionColor = 'rgba(255,255,255,1)';   // match the dial titles (full white)
 
     // Always draw the ring markers (they track even when no eclipse is near).
     drawRingHands(ctx, L, u, s);

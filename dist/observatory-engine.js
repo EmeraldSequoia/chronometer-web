@@ -16720,15 +16720,15 @@
     const zodiacFontSize = 36 * s;
     const smallZodiacFontSize = 11 * s;
     const subdialFontSize = 10 * s;
-    const plR = Math.max(100, 332 * s);
-    const sunRingWidth = Math.max(16, 64 * s);
-    const orbitInc = Math.max(10, 40 * s);
+    const plR = 332 * s;
+    const sunRingWidth = 64 * s;
+    const orbitInc = 40 * s;
     const subR = 73 * s;
     const subOffset = 149 * s;
-    const sunD = Math.max(24, 100 * s);
-    const zD = Math.max(100, 526 * s);
-    const zR = Math.max(80, 272 * s);
-    const plR2 = Math.max(60, 254 * s);
+    const sunD = 100 * s;
+    const zD = 526 * s;
+    const zR = 272 * s;
+    const plR2 = 254 * s;
     const secLen = (zR - zodiacFontSize / 2) * 1.05;
     const minLen = zR - zodiacFontSize / 2;
     const h12Len = minLen * 0.75;
@@ -17277,6 +17277,48 @@
       eotFontSize: a.ext.eotFontSize
     };
   }
+  function rescaleMainDial(L, cx, cy, r) {
+    const i = innerDialGeometry(r);
+    const subs = innerSubdials(cx, cy, i.subOffset);
+    L.mainCX = cx;
+    L.mainCY = cy;
+    L.mainR = r;
+    L.subR = i.subR;
+    L.zR = i.zR;
+    L.zD = i.zD;
+    L.sunD = i.sunD;
+    L.tickHeight = i.tickHeight;
+    L.secLen = i.secLen;
+    L.plR = i.plR;
+    L.plR2 = i.plR2;
+    L.orbitInc = i.orbitInc;
+    L.sunRingWidth = i.sunRingWidth;
+    L.h24Len = i.h24Len;
+    L.h12Len = i.h12Len;
+    L.minLen = i.minLen;
+    L.sunRiseSetLen = i.sunRiseSetLen;
+    L.h24Arrow = i.h24Arrow;
+    L.h24Wid = i.h24Wid;
+    L.sunRiseSetArrow = i.sunRiseSetArrow;
+    L.len2 = i.len2;
+    L.breH12Width = i.breH12Width;
+    L.breH12CenterR = i.breH12CenterR;
+    L.breMinWidth = i.breMinWidth;
+    L.breMinCenterR = i.breMinCenterR;
+    L.secWidth = i.secWidth;
+    L.secBallR = i.secBallR;
+    L.mainFontSize = i.mainFontSize;
+    L.subdialFontSize = i.subdialFontSize;
+    L.zodiacFontSize = i.zodiacFontSize;
+    L.smallZodiacFontSize = i.smallZodiacFontSize;
+    L.subOffset = i.subOffset;
+    L.utcCX = subs.utcCX;
+    L.utcCY = subs.utcCY;
+    L.solarCX = subs.solarCX;
+    L.solarCY = subs.solarCY;
+    L.sidCX = subs.sidCX;
+    L.sidCY = subs.sidCY;
+  }
 
   // src/observatory/date-view.ts
   var COLOR = "rgba(255,255,255,0.9)";
@@ -17634,22 +17676,7 @@
     };
   }
   function rescaleMain(L, cx, cy, r) {
-    const f = r / L.mainR;
-    const ox = L.mainCX, oy = L.mainCY;
-    const pairs = [
-      ["utcCX", "utcCY"],
-      ["solarCX", "solarCY"],
-      ["sidCX", "sidCY"]
-    ];
-    for (const [kx, ky] of pairs) {
-      L[kx] = cx + f * (L[kx] - ox);
-      L[ky] = cy + f * (L[ky] - oy);
-    }
-    L.subR *= f;
-    if (L.subOffset != null) L.subOffset *= f;
-    L.mainCX = cx;
-    L.mainCY = cy;
-    L.mainR = r;
+    rescaleMainDial(L, cx, cy, r);
   }
   function shiftMain(L, d) {
     L.mainCY += d;
@@ -18300,9 +18327,10 @@
     const insetLeft = chrome.insetLeft ?? 0;
     const safeW = Math.max(1, viewW - insetLeft - insetRight);
     const safeH = Math.max(1, viewH - insetTop - insetBottom);
+    const dropChrome = safeW < TC_POPOVER_W || safeH < TC_POPOVER_H;
     let headerH = chrome.headerH;
     let footerH = chrome.footerH;
-    if (safeW < TC_POPOVER_W || safeH < TC_POPOVER_H) {
+    if (dropChrome) {
       headerH = 0;
       footerH = 0;
     }
@@ -18320,6 +18348,7 @@
     L.anchor = anchorId;
     L.headerBandH = headerH > 0 ? insetTop + headerH : 0;
     L.footerBandH = footerH > 0 ? insetBottom + footerH : 0;
+    L.chromeDropped = dropChrome;
     return L;
   }
 
@@ -20677,7 +20706,7 @@
   // src/observatory/peripheral-hands.ts
   var HAND_STROKE = "rgba(200,200,200,1)";
   var HAND_FILL = "rgba(170,170,170,1)";
-  var LABEL_COLOR = "rgba(255,255,255,0.85)";
+  var LABEL_COLOR = "rgba(255,255,255,1)";
   var PN_TO_BODY = new Map(DIAL_BODIES.map((b) => [b.pn, b.key]));
   function bodyName(key) {
     return key.charAt(0).toUpperCase() + key.slice(1);
@@ -20819,7 +20848,7 @@
     const viewR = L.eclipseR1;
     const s = viewR / IOS_REF_ECLIPSE_R1;
     const captionFontPx = OUTER_DIAL_TITLE_RATIO * L.eclipseR2;
-    const captionColor = "rgba(255,255,255,0.55)";
+    const captionColor = "rgba(255,255,255,1)";
     drawRingHands(ctx2, L, u, s);
     const separation = u.get("eclSeparation").currentValue;
     if (separation >= ECLIPSE_THRESHOLD2) {
@@ -21121,6 +21150,7 @@
     canvas.style.height = `${h}px`;
     layout = computeLayout(w, h, chromeParams(), ctx, timeController.getDisplayTime(), locationTimezone);
     lastLayoutTz = locationTimezone;
+    document.body.classList.toggle("obs-chrome-dropped", !!layout.chromeDropped);
     positionNoonIcon();
     const sizeSig = `${w}\xD7${h} \xB7 mainR=${layout.mainR.toFixed(1)} \xB7 ${layout.anchor ?? "?"}`;
     if (sizeSig !== lastSizeSig) {

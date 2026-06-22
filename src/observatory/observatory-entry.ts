@@ -259,6 +259,9 @@ function resizeCanvas(): void {
     // and measure against the canvas context (see anchor-layout computeLayout).
     layout = computeLayout(w, h, chromeParams(), ctx, timeController.getDisplayTime(), locationTimezone);
     lastLayoutTz = locationTimezone;
+    // CC2: when the chrome is dropped (the time controller can't fit), hide the
+    // DOM header/footer too so they don't overlap the full-surface layout.
+    document.body.classList.toggle('obs-chrome-dropped', !!layout.chromeDropped);
     positionNoonIcon();
 
     // Log the window size + mainR whenever either changes (startup + each resize

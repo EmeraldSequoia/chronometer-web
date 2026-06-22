@@ -86,6 +86,17 @@
           gap: 10px;
       }
 
+      /* CC2: the time controller can't fit (safe rect < 200×368), so the layout
+         dropped the chrome — hide the DOM header/footer to match, giving the
+         dial the full surface (A1/A6/short-Awide). */
+      body.obs-chrome-dropped #obs-header,
+      body.obs-chrome-dropped #time-bar,
+      body.obs-chrome-dropped #observatory-controls,
+      body.obs-chrome-dropped #noon-icon,
+      body.obs-chrome-dropped #noon-toggle {
+          display: none !important;
+      }
+
       /* Location controls — right end of the footer row */
       #observatory-controls {
           position: fixed;
@@ -1508,7 +1519,7 @@
             <div id="help-content">
               <!-- Populated from help-template on first info click -->
             </div>
-            <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v1.4.271</div>
+            <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v1.4.274</div>
           </div>
 
           <div id="info-sub-view">

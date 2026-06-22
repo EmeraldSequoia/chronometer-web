@@ -33,6 +33,7 @@ import {
     computeBaseLayout,
     portraitTwoBand,
     portraitOneBand,
+    rescaleMainDial,
 } from './layout.js';
 import {
     type DateFields,
@@ -168,18 +169,11 @@ export interface Bounds {
  * centre).
  */
 export function rescaleMain(L: LayoutParams, cx: number, cy: number, r: number): void {
-    const f = r / L.mainR;
-    const ox = L.mainCX, oy = L.mainCY;
-    const pairs: [keyof LayoutParams, keyof LayoutParams][] = [
-        ['utcCX', 'utcCY'], ['solarCX', 'solarCY'], ['sidCX', 'sidCY'],
-    ];
-    for (const [kx, ky] of pairs) {
-        (L[kx] as number) = cx + f * ((L[kx] as number) - ox);
-        (L[ky] as number) = cy + f * ((L[ky] as number) - oy);
-    }
-    L.subR *= f;
-    if (L.subOffset != null) L.subOffset *= f;
-    L.mainCX = cx; L.mainCY = cy; L.mainR = r;
+    // Delegate to the production helper, which rebuilds the dial's *full*
+    // mainR-proportional geometry (rings/ticks/numbers/fonts), not just the
+    // radius + subdials. (The old factor-scaling here left the 24-hour ring at
+    // the base radius, drawing it outside a resized dial — the Asq bug.)
+    rescaleMainDial(L, cx, cy, r);
 }
 
 function shiftMain(L: LayoutParams, d: number): void {
@@ -854,9 +848,10 @@ export function computeLayout(
     const safeH = Math.max(1, viewH - insetTop - insetBottom);
 
     // 2. CC2 chrome-drop: drop both bands if the controller popover can't fit.
+    const dropChrome = safeW < TC_POPOVER_W || safeH < TC_POPOVER_H;
     let headerH = chrome.headerH;
     let footerH = chrome.footerH;
-    if (safeW < TC_POPOVER_W || safeH < TC_POPOVER_H) { headerH = 0; footerH = 0; }
+    if (dropChrome) { headerH = 0; footerH = 0; }
 
     // 3. Pick the anchor (hard snap at the §7 thresholds).
     const anchorId = pickAnchor(safeW / safeH);
@@ -880,6 +875,7 @@ export function computeLayout(
     // paint behind the main elements. Zero when CC2 dropped the chrome.
     L.headerBandH = headerH > 0 ? insetTop + headerH : 0;
     L.footerBandH = footerH > 0 ? insetBottom + footerH : 0;
+    L.chromeDropped = dropChrome;
     return L;
 }
 

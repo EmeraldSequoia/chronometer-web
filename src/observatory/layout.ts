@@ -121,6 +121,13 @@ export interface LayoutParams {
     headerBandH?: number;
     footerBandH?: number;
 
+    /**
+     * True when CC2 dropped the chrome (the safe rect can't fit the
+     * time-controller popover, 200×368). The entry hides the DOM header/footer
+     * elements in this state so they don't overlap the full-surface layout.
+     */
+    chromeDropped?: boolean;
+
     // --- Main orrery dial ---
     mainCX: number;
     mainCY: number;
@@ -318,15 +325,21 @@ function innerDialGeometry(mainR: number): InnerDial {
     const smallZodiacFontSize = 11 * s;
     const subdialFontSize = 10 * s;
 
-    const plR = Math.max(100, 332 * s);
-    const sunRingWidth = Math.max(16, 64 * s);
-    const orbitInc = Math.max(10, 40 * s);
+    // Every radius is purely proportional to mainR (no Math.max floors). A floor
+    // lets a ring grow relative to a shrinking main dial and spill outside it —
+    // e.g. plR's old `max(100, …)` exceeded mainR once mainR < 110 (the Awide
+    // chrome-dropped case, mainR ≈ 85, drew the planet/sun rings off the dial).
+    // The sub-dial floors were already removed at source (§6 A6-L4); this
+    // completes that for the rest, so the dial stays self-contained at any size.
+    const plR = 332 * s;
+    const sunRingWidth = 64 * s;
+    const orbitInc = 40 * s;
     const subR = 73 * s;
     const subOffset = 149 * s;
-    const sunD = Math.max(24, 100 * s);
-    const zD = Math.max(100, 526 * s);
-    const zR = Math.max(80, 272 * s);
-    const plR2 = Math.max(60, 254 * s);
+    const sunD = 100 * s;
+    const zD = 526 * s;
+    const zR = 272 * s;
+    const plR2 = 254 * s;
 
     const secLen = (zR - zodiacFontSize / 2) * 1.05;
     const minLen = zR - zodiacFontSize / 2;
@@ -919,4 +932,38 @@ function assemble(a: AssembleArgs): LayoutParams {
         eclipseFontSize: a.ext.eclipseFontSize,
         eotFontSize: a.ext.eotFontSize,
     };
+}
+
+/**
+ * Move + resize the main orrery dial in place, recomputing *all* of its
+ * mainR-proportional geometry — not just the radius and the three inner
+ * subdials, but the rings/ticks/hands/zodiac/fonts (`zR`, `zD`, `tickHeight`,
+ * `mainFontSize`, `h24Len`, …). Used by the iteration-3 anchors (Asq/A5/Awide/
+ * A1/A6) that override the dial size after the base layout is built.
+ *
+ * Without the full recompute, the 24-hour ring + tick marks + numbers keep the
+ * *base* layout's larger radii and draw outside the resized dial (the Asq bug).
+ * This mirrors `assemble`'s main-dial assignments exactly, so a rescaled dial is
+ * identical to one the base layout had built at this radius. Only the main dial
+ * and its inner subdials are touched — the outer dials, moon, map, and date are
+ * positioned separately by the anchors.
+ */
+export function rescaleMainDial(L: LayoutParams, cx: number, cy: number, r: number): void {
+    const i = innerDialGeometry(r);
+    const subs = innerSubdials(cx, cy, i.subOffset);
+    L.mainCX = cx; L.mainCY = cy; L.mainR = r;
+    L.subR = i.subR; L.zR = i.zR; L.zD = i.zD; L.sunD = i.sunD;
+    L.tickHeight = i.tickHeight; L.secLen = i.secLen;
+    L.plR = i.plR; L.plR2 = i.plR2; L.orbitInc = i.orbitInc; L.sunRingWidth = i.sunRingWidth;
+    L.h24Len = i.h24Len; L.h12Len = i.h12Len; L.minLen = i.minLen; L.sunRiseSetLen = i.sunRiseSetLen;
+    L.h24Arrow = i.h24Arrow; L.h24Wid = i.h24Wid; L.sunRiseSetArrow = i.sunRiseSetArrow; L.len2 = i.len2;
+    L.breH12Width = i.breH12Width; L.breH12CenterR = i.breH12CenterR;
+    L.breMinWidth = i.breMinWidth; L.breMinCenterR = i.breMinCenterR;
+    L.secWidth = i.secWidth; L.secBallR = i.secBallR;
+    L.mainFontSize = i.mainFontSize; L.subdialFontSize = i.subdialFontSize;
+    L.zodiacFontSize = i.zodiacFontSize; L.smallZodiacFontSize = i.smallZodiacFontSize;
+    L.subOffset = i.subOffset;
+    L.utcCX = subs.utcCX; L.utcCY = subs.utcCY;
+    L.solarCX = subs.solarCX; L.solarCY = subs.solarCY;
+    L.sidCX = subs.sidCX; L.sidCY = subs.sidCY;
 }

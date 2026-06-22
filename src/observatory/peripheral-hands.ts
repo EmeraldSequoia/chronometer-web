@@ -20,7 +20,7 @@ import { drawText } from './draw-utils.js';
 
 const HAND_STROKE = 'rgba(200,200,200,1)';
 const HAND_FILL = 'rgba(170,170,170,1)';
-const LABEL_COLOR = 'rgba(255,255,255,0.85)';
+const LABEL_COLOR = 'rgba(255,255,255,1)';   // match the dial titles (full white)
 
 /** Planet number → dial body key (e.g. 0 → 'sun'). Earth (4) has no entry. */
 const PN_TO_BODY = new Map<number, string>(DIAL_BODIES.map((b) => [b.pn, b.key]));
