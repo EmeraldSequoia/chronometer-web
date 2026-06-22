@@ -21400,6 +21400,7 @@
     const updateHighlight = () => {
       midnightPill.classList.toggle("active", !noonOnTop);
       noonPill.classList.toggle("active", noonOnTop);
+      icon.classList.toggle("noon", noonOnTop);
     };
     const closeOverlay = () => toggle.classList.remove("open");
     const setNoonOnTop = (value) => {
@@ -21459,6 +21460,7 @@
         const toggle = document.getElementById("noon-toggle");
         toggle?.querySelector('[data-mode="midnight"]')?.classList.toggle("active", !noonOnTop);
         toggle?.querySelector('[data-mode="noon"]')?.classList.toggle("active", noonOnTop);
+        document.getElementById("noon-icon")?.classList.toggle("noon", noonOnTop);
         changed = true;
       }
       if (s.off !== null) {

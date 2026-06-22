@@ -731,6 +731,9 @@ function setupNoonToggle(): void {
     const updateHighlight = () => {
         midnightPill.classList.toggle('active', !noonOnTop);
         noonPill.classList.toggle('active', noonOnTop);
+        // Rotate the disc icon: dark half on top for midnight, light half on
+        // top for noon (the .noon class flips it the extra 180°).
+        icon.classList.toggle('noon', noonOnTop);
     };
     const closeOverlay = () => toggle.classList.remove('open');
 
@@ -805,6 +808,7 @@ function init(): void {
             const toggle = document.getElementById('noon-toggle');
             toggle?.querySelector('[data-mode="midnight"]')?.classList.toggle('active', !noonOnTop);
             toggle?.querySelector('[data-mode="noon"]')?.classList.toggle('active', noonOnTop);
+            document.getElementById('noon-icon')?.classList.toggle('noon', noonOnTop);
             changed = true;
         }
 

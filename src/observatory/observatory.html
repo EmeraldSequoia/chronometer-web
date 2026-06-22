@@ -155,10 +155,20 @@
           color: #ccf;
       }
 
+      /* Rotate the disc so its dark half is on TOP when midnight is on top (the
+         default, rotate(270deg)), then a further 180° (→ light half on top) when
+         noon is on top (rotate(90deg)). The .noon class is toggled by
+         setupNoonToggle as the state changes. */
       #noon-icon svg {
           width: 18px;
           height: 18px;
           display: block;
+          transform: rotate(270deg);
+          transition: transform 0.3s ease;
+      }
+
+      #noon-icon.noon svg {
+          transform: rotate(90deg);
       }
 
       /* On-demand pill overlay: hidden until the icon is tapped (.open), then
