@@ -452,8 +452,20 @@ function applyAwide(
     const UNIT_MAX = 72, REF = 100;
     const wkText = fields.weekday, md = fields.monthDay, yr = fields.year, tz = fields.tzAbbrev;
     const m100 = measureRowTexts(ctx, wkText, md, yr, tz, '', REF);
-    const nomRegW = W / 2 - hp - mainR - 2 * er_v - gap;
-    const u = Math.min(UNIT_MAX, REF * nomRegW / m100.dateW);
+    // Size the shared date unit to the actual space it must fit, on both axes —
+    // not a single nominal width capped at UNIT_MAX (which pinned the date at 72
+    // px and overflowed the side columns on short/chrome-dropped Awide windows).
+    // The MDYtz line fits the right (map) column and the weekday fits the left
+    // (moon) column, both ≈ the map-column budget 0.25·W (W5); and the block
+    // scales with the viewport height (availV/4) so it shrinks with everything
+    // else when the window is short.
+    const sideBudget = 0.25 * W;
+    const u = Math.min(
+        UNIT_MAX,
+        REF * sideBudget / m100.dateW,        // MDYtz fits the right column
+        REF * sideBudget / m100.weekdayW,     // weekday fits the left column
+        availV / 4,                           // scale with the height
+    );
     const rm = measureRowTexts(ctx, wkText, md, yr, tz, '', u);
     ctx.font = `${u}px Arial, sans-serif`;
     let maxDesc = 0;
@@ -550,6 +562,12 @@ function applyAwide(
     L.dateBaselineBottom = baseY + maxDesc;
     L.dateW = rm.weekdayW; L.dateH = 4 * u; L.dateCX = pos.moonCX; L.dateCY = baseY;
     L.date2CX = pos.mapCX; L.date2CY = baseY; L.date2W = rm.dateW + 4; L.date2H = 4 * u;
+
+    // Guard: keep both date boxes on-screen regardless of u — clamp the MDYtz
+    // box's right edge and the weekday box's left edge to a halfPad window margin.
+    const rightEdge = W - hp, leftEdge = hp;
+    if (L.date2CX + L.date2W / 2 > rightEdge) L.date2CX = rightEdge - L.date2W / 2;
+    if (L.dateCX - L.dateW / 2 < leftEdge) L.dateCX = leftEdge + L.dateW / 2;
 }
 
 // ===========================================================================

@@ -17932,8 +17932,16 @@
     const UNIT_MAX2 = 72, REF = 100;
     const wkText = fields.weekday, md = fields.monthDay, yr = fields.year, tz = fields.tzAbbrev;
     const m100 = measureRowTexts(ctx2, wkText, md, yr, tz, "", REF);
-    const nomRegW = W / 2 - hp - mainR - 2 * er_v - gap;
-    const u = Math.min(UNIT_MAX2, REF * nomRegW / m100.dateW);
+    const sideBudget = 0.25 * W;
+    const u = Math.min(
+      UNIT_MAX2,
+      REF * sideBudget / m100.dateW,
+      // MDYtz fits the right column
+      REF * sideBudget / m100.weekdayW,
+      // weekday fits the left column
+      availV / 4
+      // scale with the height
+    );
     const rm = measureRowTexts(ctx2, wkText, md, yr, tz, "", u);
     ctx2.font = `${u}px Arial, sans-serif`;
     let maxDesc = 0;
@@ -18045,6 +18053,9 @@
     L.date2CY = baseY;
     L.date2W = rm.dateW + 4;
     L.date2H = 4 * u;
+    const rightEdge = W - hp, leftEdge = hp;
+    if (L.date2CX + L.date2W / 2 > rightEdge) L.date2CX = rightEdge - L.date2W / 2;
+    if (L.dateCX - L.dateW / 2 < leftEdge) L.dateCX = leftEdge + L.dateW / 2;
   }
   function applyAsq(L, bounds, _headerH, _footerH, o) {
     const W = bounds.right;
