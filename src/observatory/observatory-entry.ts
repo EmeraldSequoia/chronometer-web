@@ -319,28 +319,6 @@ function drawFrame(): void {
     }
 
     // ================================================================
-    // 0b. Header/footer band BACKGROUNDS — painted behind every main element
-    //     (the dial may overlap them in A5), so the chrome's DOM content sits
-    //     on top while its band backdrop stays behind the dial. Device-px here
-    //     (before the dpr scale). Zero-height when chrome is dropped (CC2).
-    // ================================================================
-    const headerBand = (L.headerBandH ?? 0) * dpr;
-    const footerBand = (L.footerBandH ?? 0) * dpr;
-    if (headerBand > 0 || footerBand > 0) {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-        ctx.lineWidth = 1;
-        if (headerBand > 0) {
-            ctx.fillRect(0, 0, w, headerBand);
-            ctx.beginPath(); ctx.moveTo(0, headerBand + 0.5); ctx.lineTo(w, headerBand + 0.5); ctx.stroke();
-        }
-        if (footerBand > 0) {
-            ctx.fillRect(0, h - footerBand, w, footerBand);
-            ctx.beginPath(); ctx.moveTo(0, h - footerBand - 0.5); ctx.lineTo(w, h - footerBand - 0.5); ctx.stroke();
-        }
-    }
-
-    // ================================================================
     // 1. Draw static main dial cache (composited at native resolution)
     // ================================================================
     const dialCache = getMainDialCache(L, noonOnTop);
@@ -702,15 +680,25 @@ function setupLocationDialog(): void {
  * on the next frame.
  */
 /**
- * Position the footer's noon-toggle icon. Normally centred; in A5 (iPhone
- * landscape) the main dial overlaps the footer centre, so the icon shifts left
- * toward the time-controller button (§6 A5-L2 / harness `noonX`).
+ * Position the footer's noon-toggle icon. Normally centred; when the main dial
+ * reaches into the footer row (e.g. A5), the centred icon would sit under the
+ * dial, so it moves to the right of the time-controller button (and the red
+ * offset label / Now button, when shown).
  */
 function positionNoonIcon(): void {
     const icon = document.getElementById('noon-icon');
-    if (!icon) return;
-    if (layout?.anchor === 'A5') {
-        icon.style.left = `${Math.min(0.12 * window.innerWidth, 90)}px`;
+    if (!icon || !layout) return;
+    const footerTop = window.innerHeight - readSafeInsets().insetBottom - FOOTER_H;
+    const dialInFooter = layout.mainCY + layout.mainR > footerTop;
+    if (dialInFooter) {
+        // Rightmost edge of the time-bar's left-aligned contents (hidden
+        // elements — e.g. the Now button at 1× real time — report zero width).
+        let rightEdge = 0;
+        for (const id of ['time-bar-label', 'time-bar-info', 'time-bar-now']) {
+            const r = document.getElementById(id)?.getBoundingClientRect();
+            if (r && r.width > 0) rightEdge = Math.max(rightEdge, r.right);
+        }
+        icon.style.left = `${rightEdge + 12}px`;
         icon.style.transform = 'none';
     } else {
         icon.style.left = '50%';
@@ -763,6 +751,8 @@ function setupNoonToggle(): void {
     });
     updateHighlight();
     positionNoonIcon();
+    // (Re-placement on time-bar content changes is driven by timeController.onTick
+    // and the initial deferred call in init(), not a ResizeObserver here.)
 }
 
 // ============================================================================
@@ -832,7 +822,10 @@ function init(): void {
     // as on each quantized tick, so this keeps env (timezone offset, DST) fresh
     // across both continuous advance and discrete jumps — which is why the time
     // controls need no transition callbacks of their own (see below).
-    timeController.onTick = () => rebuildEnv();
+    // Also re-place the footer noon icon: a transport change shows/hides the red
+    // offset label + Now button, changing where the icon must sit when the dial
+    // reaches into the footer (A5). onTick fires on every transition + tick.
+    timeController.onTick = () => { rebuildEnv(); positionNoonIcon(); };
 
     // Initialize Observatory value system
     env.variables.set('noonOnTop', noonOnTop ? 1 : 0);
@@ -874,6 +867,10 @@ function init(): void {
     if (urlState.tc) {
         timeUI?.showPopover();
     }
+
+    // Place the noon icon once the time bar has laid out its contents (the
+    // offset label / Now button appear when ?t/?off seed an overridden time).
+    requestAnimationFrame(() => positionNoonIcon());
 
     console.log('[Observatory] Initialized — lat:', lat, 'lon:', lon, 'tz:', locationTimezone);
 

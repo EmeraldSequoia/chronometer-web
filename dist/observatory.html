@@ -65,8 +65,8 @@
           display: flex;
           align-items: center;
           justify-content: space-between;
-          /* The band background is painted on the canvas behind the main
-             elements (see drawFrame); this DOM layer carries only the content. */
+          /* No band background/border by design — the header is just its
+             content (title + buttons) floating over the dial/starfield. */
           background: transparent;
           -webkit-user-select: none;
           user-select: none;
@@ -1395,9 +1395,11 @@
           z-index: 10;
           padding: 0 calc(12px + env(safe-area-inset-right)) 0 calc(12px + env(safe-area-inset-left));
           justify-content: flex-start;
-          /* Band background is painted on the canvas (see drawFrame); the
-             time-bar DOM layer carries only its controls. */
+          /* No band background/border by design — the footer is just its
+             controls floating over the dial/starfield. (border-top: none cancels
+             the shared time-controller.css band border.) */
           background: transparent;
+          border-top: none;
       }
 
       /* The ?fps overlay sits at the left end of the row — make room for it. */
@@ -1519,7 +1521,7 @@
             <div id="help-content">
               <!-- Populated from help-template on first info click -->
             </div>
-            <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v1.4.275</div>
+            <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v1.4.283</div>
           </div>
 
           <div id="info-sub-view">

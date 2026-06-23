@@ -445,7 +445,10 @@ function applyAwide(
     const W = bounds.right, availV = bounds.bottom;
     const hp = 0.0125 * W, gap = 2 * hp;
     const cy = availV / 2;
-    const mainR = Math.max(2, availV / 2);                 // FULL height
+    // Near-full height, with a little breathing room top & bottom so the dial's
+    // rim isn't flattened against the screen edges (min(halfGap/4, 2) px).
+    const edgeMargin = Math.min(hp / 4, 2);
+    const mainR = Math.max(2, availV / 2 - edgeMargin);
     const er_v = L.altR;                                   // base outer-dial radius
 
     // DATE sizing (split, shared baseline).
@@ -475,6 +478,9 @@ function applyAwide(
     const descBottom = availV - hp, baselineY = descBottom - maxDesc;
     const wkInkTop = baselineY - ctx.measureText(wkText).actualBoundingBoxAscent;   // floors the moon
     const dateInkTop = baselineY - ctx.measureText(md).actualBoundingBoxAscent;     // floors the map
+    // Longest weekday (day-stable collision checks): width + ascent.
+    const wedW = ctx.measureText('Wednesday').width;
+    const wkAsc = ctx.measureText('Wednesday').actualBoundingBoxAscent;
 
     // MOON & MAP vertical maxima (map width also capped at 25% of W).
     const moonR_v = Math.max(2, (wkInkTop - 2 * gap) / 2) * o.awMoonK;
@@ -518,6 +524,70 @@ function applyAwide(
         }
     }
 
+    // --- Side-by-side outer-dial flavor (wide Awide) ------------------------
+    // Alternative to the stacked alt/az & ecl/eot pairs: lay all four outer dials
+    // as their own columns on `cy` (moon · alt · az · MAIN · ecl · eot · map),
+    // with even gaps. A single dial (not a stacked pair) can be larger because it
+    // doesn't share its column's height — capped at 0.8·mainR. We size it from the
+    // even-gap horizontal packing (gap floored at halfPad) and use this flavor
+    // only when it beats the stacked outer-dial size (so narrow Awide, where the
+    // columns wouldn't fit, keeps the stacked pairs). Moon/map/weekday/date are
+    // unchanged (moon still over the weekday, map over the date).
+    const SBS_CAP_FRAC = 0.8;
+    const clearG = hp;
+    const DATE_FLOOR = 0.6;   // smallest date scale before we shrink the dials instead
+    const sbsHorizFit = (W - 8 * hp - 2 * moonR_v - 2 * mainR - 2 * mapH) / 8;
+    const baseFit = sbsHorizFit + hp;   // = (W − 2·moonR − 2·mainR − 2·mapH)/8 = g + erSbs
+    // Resolve any date↔dial collision "date first, then dials": keep the big
+    // dials and shrink the date so the weekday (under the moon, left) / the MDYtz
+    // (under the map, right) clears the adjacent dial column; only if the date
+    // would have to shrink past DATE_FLOOR do we shrink the dials instead (and
+    // let the stacked layout win below if that's larger). The even gap at a dial
+    // size e is g = baseFit − e, so the largest date scale that clears is:
+    const dateScaleAt = (e: number) => {
+        const g = baseFit - e;
+        const sL = wedW > 0 ? 2 * (moonR_v + g - clearG) / wedW : 1;
+        const sR = rm.dateW > 0 ? 2 * (mapH + g - clearG) / rm.dateW : 1;
+        return Math.min(1, sL, sR);
+    };
+    let erSbs = Math.min(SBS_CAP_FRAC * mainR, sbsHorizFit);
+    let dateScaleSbs = dateScaleAt(erSbs);
+    if (dateScaleSbs < DATE_FLOOR) {
+        const erL = baseFit - (DATE_FLOOR * wedW / 2 + clearG - moonR_v);
+        const erR = baseFit - (DATE_FLOOR * rm.dateW / 2 + clearG - mapH);
+        erSbs = Math.min(erSbs, erL, erR);
+        dateScaleSbs = DATE_FLOOR;
+    }
+    if (erSbs > er) {
+        const g = (W - 2 * moonR_v - 8 * erSbs - 2 * mainR - 2 * mapH) / 8;   // even gap (≥ hp)
+        const moonCXs = g + moonR_v;
+        const altCXs = moonCXs + moonR_v + g + erSbs;
+        const azCXs = altCXs + 2 * erSbs + g;
+        const dialCXs = azCXs + erSbs + g + mainR;
+        const eclCXs = dialCXs + mainR + g + erSbs;
+        const eotCXs = eclCXs + 2 * erSbs + g;
+        const mapCXs = eotCXs + erSbs + g + mapH;
+
+        rescaleMain(L, dialCXs, cy, mainR);
+        L.altR = L.azR = L.eotR = erSbs;
+        L.altCX = altCXs; L.altCY = cy;
+        L.azCX = azCXs; L.azCY = cy;
+        L.eclipseCX = eclCXs; L.eclipseCY = cy;
+        L.eotCX = eotCXs; L.eotCY = cy;
+        L.moonR = moonR_v; L.moonCX = moonCXs; L.moonCY = moonCY;
+        L.earthW = mapW; L.earthH = mapH; L.earthCX = mapCXs; L.earthCY = mapCY;
+
+        L.dateMode = 'split'; L.dateCondensed = true; L.dateSegCenter = false; L.dateForceU = undefined;
+        L.dateBaselineBottom = baselineY + maxDesc;
+        L.dateW = rm.weekdayW * dateScaleSbs; L.dateH = 4 * u * dateScaleSbs; L.dateCX = moonCXs; L.dateCY = baselineY;
+        L.date2CX = mapCXs; L.date2CY = baselineY; L.date2W = (rm.dateW + 4) * dateScaleSbs; L.date2H = 4 * u * dateScaleSbs;
+
+        const rEdge = W - hp, lEdge = hp;
+        if (L.date2CX + L.date2W / 2 > rEdge) L.date2CX = rEdge - L.date2W / 2;
+        if (L.dateCX - L.dateW / 2 < lEdge) L.dateCX = lEdge + L.dateW / 2;
+        return;
+    }
+
     // Placement for the resolved sizes.
     const aCY = regimeB ? moonCY : cy;
     const layout = (mR: number, D: number, e: number, rb: boolean) => {
@@ -532,8 +602,7 @@ function applyAwide(
     };
 
     // C2/C3: make room for the LONGEST weekday (Wednesday) at the bottom-left.
-    ctx.font = `${u}px Arial, sans-serif`;
-    const wedW = ctx.measureText('Wednesday').width, wkAsc = ctx.measureText('Wednesday').actualBoundingBoxAscent;
+    // (wedW / wkAsc computed above.)
     const fitsWk = (pos: ReturnType<typeof layout>, D: number, baseY: number) => {
         const azCY = aCY + D, azBottom = azCY + er, azLeft = pos.altazX - er;
         const vOverlap = (baseY - wkAsc) < azBottom && baseY > azCY - er;
@@ -550,6 +619,18 @@ function applyAwide(
         }
     }
 
+    // If the longest weekday still runs into the az dial (e.g. roomy regime A,
+    // which the C2/C3 cascade doesn't cover), shrink the date font so the weekday
+    // clears the dial horizontally — and shrink the MDYtz on the right to match.
+    // Uses Wednesday (longest) so it's day-stable; bottom-aligned, so the smaller
+    // date still hugs the baseline.
+    let dateScale = 1;
+    {
+        const azLeft = pos.altazX - er;
+        const targetHalf = azLeft - hp - pos.moonCX;     // weekday half-width that clears az
+        if (targetHalf > 0 && wedW / 2 > targetHalf) dateScale = Math.max(0.45, (2 * targetHalf) / wedW);
+    }
+
     // Commit.
     rescaleMain(L, pos.dialCX, cy, mainR);
     L.altR = er; L.azR = er; L.eotR = er;
@@ -560,8 +641,8 @@ function applyAwide(
 
     L.dateMode = 'split'; L.dateCondensed = true; L.dateSegCenter = false; L.dateForceU = undefined;
     L.dateBaselineBottom = baseY + maxDesc;
-    L.dateW = rm.weekdayW; L.dateH = 4 * u; L.dateCX = pos.moonCX; L.dateCY = baseY;
-    L.date2CX = pos.mapCX; L.date2CY = baseY; L.date2W = rm.dateW + 4; L.date2H = 4 * u;
+    L.dateW = rm.weekdayW * dateScale; L.dateH = 4 * u * dateScale; L.dateCX = pos.moonCX; L.dateCY = baseY;
+    L.date2CX = pos.mapCX; L.date2CY = baseY; L.date2W = (rm.dateW + 4) * dateScale; L.date2H = 4 * u * dateScale;
 
     // Guard: keep both date boxes on-screen regardless of u — clamp the MDYtz
     // box's right edge and the weekday box's left edge to a halfPad window margin.
@@ -625,7 +706,9 @@ function applyA1(
     const H = bounds.bottom;                    // content height (full; chrome dropped)
     const cx = W / 2;
     const halfPad = 0.0125 * W;
-    const R = W / 2;                             // main-dial radius (fills the column WIDTH)
+    // Fills the column width, less a small edge margin so the rim isn't flattened
+    // against the left/right screen edges (min(halfGap/4, 2) px).
+    const R = Math.max(2, W / 2 - Math.min(halfPad / 4, 2));
     const outerR = o.a6DialK * R;
     const oc = 2 * outerR;
 
@@ -717,13 +800,15 @@ function applyA6(
     const hr = bounds.bottom;                 // row height = content height
     const cy = hr / 2;
     const halfPad = 0.0125 * W;
-    const R = hr / 2;                           // main-dial radius (fills the row height)
+    // Fills the row height, less a small edge margin so the rim isn't flattened
+    // against the top/bottom screen edges (min(halfGap/4, 2) px).
+    const R = Math.max(2, hr / 2 - Math.min(halfPad / 4, 2));
     const outerR = o.a6DialK * R;
     const u = o.a6FontK * (2 * outerR);         // primary font = ratio · outer-dial ⌀
 
     const wkText = fields.weekday, md = fields.monthDay, yr = fields.year, tzAbbr = fields.tzAbbrev;
     const { weekdayW, dateW } = measureRowTexts(ctx, wkText, md, yr, tzAbbr, '', u);
-    const dialW = hr, mapW = 2 * hr;
+    const dialW = 2 * R, mapW = 2 * hr;
 
     const sumEl = 2 * outerR + weekdayW + 2 * outerR + 2 * outerR + dialW + 2 * outerR + 2 * outerR + dateW + mapW;
     const N = 9, inner = N - 1;
@@ -889,10 +974,6 @@ export function computeLayout(
     L.viewH = viewH;
     L.dpr = dpr;
     L.anchor = anchorId;
-    // Chrome band heights (incl. the safe-area inset bleed) for the renderer to
-    // paint behind the main elements. Zero when CC2 dropped the chrome.
-    L.headerBandH = headerH > 0 ? insetTop + headerH : 0;
-    L.footerBandH = footerH > 0 ? insetBottom + footerH : 0;
     L.chromeDropped = dropChrome;
     return L;
 }

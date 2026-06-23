@@ -17927,7 +17927,8 @@
     const W = bounds.right, availV = bounds.bottom;
     const hp = 0.0125 * W, gap = 2 * hp;
     const cy = availV / 2;
-    const mainR = Math.max(2, availV / 2);
+    const edgeMargin = Math.min(hp / 4, 2);
+    const mainR = Math.max(2, availV / 2 - edgeMargin);
     const er_v = L.altR;
     const UNIT_MAX2 = 72, REF = 100;
     const wkText = fields.weekday, md = fields.monthDay, yr = fields.year, tz = fields.tzAbbrev;
@@ -17952,6 +17953,8 @@
     const descBottom = availV - hp, baselineY = descBottom - maxDesc;
     const wkInkTop = baselineY - ctx2.measureText(wkText).actualBoundingBoxAscent;
     const dateInkTop = baselineY - ctx2.measureText(md).actualBoundingBoxAscent;
+    const wedW = ctx2.measureText("Wednesday").width;
+    const wkAsc = ctx2.measureText("Wednesday").actualBoundingBoxAscent;
     const moonR_v = Math.max(2, (wkInkTop - 2 * gap) / 2) * o.awMoonK;
     const moonCY = wkInkTop / 2;
     const mapH = Math.min(Math.max(1, dateInkTop - 2 * gap), 0.125 * W) * o.awMapK;
@@ -17994,6 +17997,69 @@
         Dy = er + hp;
       }
     }
+    const SBS_CAP_FRAC = 0.8;
+    const clearG = hp;
+    const DATE_FLOOR = 0.6;
+    const sbsHorizFit = (W - 8 * hp - 2 * moonR_v - 2 * mainR - 2 * mapH) / 8;
+    const baseFit = sbsHorizFit + hp;
+    const dateScaleAt = (e) => {
+      const g = baseFit - e;
+      const sL = wedW > 0 ? 2 * (moonR_v + g - clearG) / wedW : 1;
+      const sR = rm.dateW > 0 ? 2 * (mapH + g - clearG) / rm.dateW : 1;
+      return Math.min(1, sL, sR);
+    };
+    let erSbs = Math.min(SBS_CAP_FRAC * mainR, sbsHorizFit);
+    let dateScaleSbs = dateScaleAt(erSbs);
+    if (dateScaleSbs < DATE_FLOOR) {
+      const erL = baseFit - (DATE_FLOOR * wedW / 2 + clearG - moonR_v);
+      const erR = baseFit - (DATE_FLOOR * rm.dateW / 2 + clearG - mapH);
+      erSbs = Math.min(erSbs, erL, erR);
+      dateScaleSbs = DATE_FLOOR;
+    }
+    if (erSbs > er) {
+      const g = (W - 2 * moonR_v - 8 * erSbs - 2 * mainR - 2 * mapH) / 8;
+      const moonCXs = g + moonR_v;
+      const altCXs = moonCXs + moonR_v + g + erSbs;
+      const azCXs = altCXs + 2 * erSbs + g;
+      const dialCXs = azCXs + erSbs + g + mainR;
+      const eclCXs = dialCXs + mainR + g + erSbs;
+      const eotCXs = eclCXs + 2 * erSbs + g;
+      const mapCXs = eotCXs + erSbs + g + mapH;
+      rescaleMain(L, dialCXs, cy, mainR);
+      L.altR = L.azR = L.eotR = erSbs;
+      L.altCX = altCXs;
+      L.altCY = cy;
+      L.azCX = azCXs;
+      L.azCY = cy;
+      L.eclipseCX = eclCXs;
+      L.eclipseCY = cy;
+      L.eotCX = eotCXs;
+      L.eotCY = cy;
+      L.moonR = moonR_v;
+      L.moonCX = moonCXs;
+      L.moonCY = moonCY;
+      L.earthW = mapW;
+      L.earthH = mapH;
+      L.earthCX = mapCXs;
+      L.earthCY = mapCY;
+      L.dateMode = "split";
+      L.dateCondensed = true;
+      L.dateSegCenter = false;
+      L.dateForceU = void 0;
+      L.dateBaselineBottom = baselineY + maxDesc;
+      L.dateW = rm.weekdayW * dateScaleSbs;
+      L.dateH = 4 * u * dateScaleSbs;
+      L.dateCX = moonCXs;
+      L.dateCY = baselineY;
+      L.date2CX = mapCXs;
+      L.date2CY = baselineY;
+      L.date2W = (rm.dateW + 4) * dateScaleSbs;
+      L.date2H = 4 * u * dateScaleSbs;
+      const rEdge = W - hp, lEdge = hp;
+      if (L.date2CX + L.date2W / 2 > rEdge) L.date2CX = rEdge - L.date2W / 2;
+      if (L.dateCX - L.dateW / 2 < lEdge) L.dateCX = lEdge + L.dateW / 2;
+      return;
+    }
     const aCY = regimeB ? moonCY : cy;
     const layout2 = (mR, D, e, rb) => {
       const g = Math.max(rb ? hp : 0, solveSpan(rb ? spanB(mR, D, e) : spanA(mR, D, e)));
@@ -18004,8 +18070,6 @@
       const mapCX = ecletX + e + g + mapH;
       return { g, moonCX, altazX, dialCX, ecletX, mapCX };
     };
-    ctx2.font = `${u}px Arial, sans-serif`;
-    const wedW = ctx2.measureText("Wednesday").width, wkAsc = ctx2.measureText("Wednesday").actualBoundingBoxAscent;
     const fitsWk = (pos2, D, baseY2) => {
       const azCY = aCY + D, azBottom = azCY + er, azLeft = pos2.altazX - er;
       const vOverlap = baseY2 - wkAsc < azBottom && baseY2 > azCY - er;
@@ -18020,6 +18084,12 @@
         const azBottom = aCY + Dy + er;
         baseY = Math.max(baselineY, Math.min(azBottom + wkAsc, availV - maxDesc));
       }
+    }
+    let dateScale = 1;
+    {
+      const azLeft = pos.altazX - er;
+      const targetHalf = azLeft - hp - pos.moonCX;
+      if (targetHalf > 0 && wedW / 2 > targetHalf) dateScale = Math.max(0.45, 2 * targetHalf / wedW);
     }
     rescaleMain(L, pos.dialCX, cy, mainR);
     L.altR = er;
@@ -18045,14 +18115,14 @@
     L.dateSegCenter = false;
     L.dateForceU = void 0;
     L.dateBaselineBottom = baseY + maxDesc;
-    L.dateW = rm.weekdayW;
-    L.dateH = 4 * u;
+    L.dateW = rm.weekdayW * dateScale;
+    L.dateH = 4 * u * dateScale;
     L.dateCX = pos.moonCX;
     L.dateCY = baseY;
     L.date2CX = pos.mapCX;
     L.date2CY = baseY;
-    L.date2W = rm.dateW + 4;
-    L.date2H = 4 * u;
+    L.date2W = (rm.dateW + 4) * dateScale;
+    L.date2H = 4 * u * dateScale;
     const rightEdge = W - hp, leftEdge = hp;
     if (L.date2CX + L.date2W / 2 > rightEdge) L.date2CX = rightEdge - L.date2W / 2;
     if (L.dateCX - L.dateW / 2 < leftEdge) L.dateCX = leftEdge + L.dateW / 2;
@@ -18107,7 +18177,7 @@
     const H = bounds.bottom;
     const cx = W / 2;
     const halfPad = 0.0125 * W;
-    const R = W / 2;
+    const R = Math.max(2, W / 2 - Math.min(halfPad / 4, 2));
     const outerR = o.a6DialK * R;
     const oc = 2 * outerR;
     const REL_BIG2 = 1, REL_YEAR2 = 0.42, REL_SMALL2 = 0.21;
@@ -18216,12 +18286,12 @@
     const hr = bounds.bottom;
     const cy = hr / 2;
     const halfPad = 0.0125 * W;
-    const R = hr / 2;
+    const R = Math.max(2, hr / 2 - Math.min(halfPad / 4, 2));
     const outerR = o.a6DialK * R;
     const u = o.a6FontK * (2 * outerR);
     const wkText = fields.weekday, md = fields.monthDay, yr = fields.year, tzAbbr = fields.tzAbbrev;
     const { weekdayW, dateW } = measureRowTexts(ctx2, wkText, md, yr, tzAbbr, "", u);
-    const dialW = hr, mapW = 2 * hr;
+    const dialW = 2 * R, mapW = 2 * hr;
     const sumEl = 2 * outerR + weekdayW + 2 * outerR + 2 * outerR + dialW + 2 * outerR + 2 * outerR + dateW + mapW;
     const N2 = 9, inner = N2 - 1;
     const need = sumEl + (inner + 2) * halfPad;
@@ -18357,8 +18427,6 @@
     L.viewH = viewH;
     L.dpr = dpr;
     L.anchor = anchorId;
-    L.headerBandH = headerH > 0 ? insetTop + headerH : 0;
-    L.footerBandH = footerH > 0 ? insetBottom + footerH : 0;
     L.chromeDropped = dropChrome;
     return L;
   }
@@ -21194,27 +21262,6 @@
     if (bgCache) {
       ctx.drawImage(bgCache, 0, 0);
     }
-    const headerBand = (L.headerBandH ?? 0) * dpr;
-    const footerBand = (L.footerBandH ?? 0) * dpr;
-    if (headerBand > 0 || footerBand > 0) {
-      ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
-      ctx.lineWidth = 1;
-      if (headerBand > 0) {
-        ctx.fillRect(0, 0, w, headerBand);
-        ctx.beginPath();
-        ctx.moveTo(0, headerBand + 0.5);
-        ctx.lineTo(w, headerBand + 0.5);
-        ctx.stroke();
-      }
-      if (footerBand > 0) {
-        ctx.fillRect(0, h - footerBand, w, footerBand);
-        ctx.beginPath();
-        ctx.moveTo(0, h - footerBand - 0.5);
-        ctx.lineTo(w, h - footerBand - 0.5);
-        ctx.stroke();
-      }
-    }
     const dialCache = getMainDialCache(L, noonOnTop);
     if (dialCache) {
       ctx.drawImage(dialCache, 0, 0);
@@ -21438,9 +21485,16 @@
   }
   function positionNoonIcon() {
     const icon = document.getElementById("noon-icon");
-    if (!icon) return;
-    if (layout?.anchor === "A5") {
-      icon.style.left = `${Math.min(0.12 * window.innerWidth, 90)}px`;
+    if (!icon || !layout) return;
+    const footerTop = window.innerHeight - readSafeInsets().insetBottom - FOOTER_H;
+    const dialInFooter = layout.mainCY + layout.mainR > footerTop;
+    if (dialInFooter) {
+      let rightEdge = 0;
+      for (const id of ["time-bar-label", "time-bar-info", "time-bar-now"]) {
+        const r = document.getElementById(id)?.getBoundingClientRect();
+        if (r && r.width > 0) rightEdge = Math.max(rightEdge, r.right);
+      }
+      icon.style.left = `${rightEdge + 12}px`;
       icon.style.transform = "none";
     } else {
       icon.style.left = "50%";
@@ -21541,7 +21595,10 @@
         rebuildEnv();
       }
     });
-    timeController.onTick = () => rebuildEnv();
+    timeController.onTick = () => {
+      rebuildEnv();
+      positionNoonIcon();
+    };
     env.variables.set("noonOnTop", noonOnTop ? 1 : 0);
     env.variables.set("dialPlanet", selectedPlanet);
     updater = buildObsValues(env, performance.now(), getNow);
@@ -21565,6 +21622,7 @@
     if (urlState.tc) {
       timeUI?.showPopover();
     }
+    requestAnimationFrame(() => positionNoonIcon());
     console.log("[Observatory] Initialized \u2014 lat:", lat, "lon:", lon, "tz:", locationTimezone);
     fpsIndicator = createFpsIndicator(urlState.fps);
     Promise.all([waitForImages(), waitForPlanetImages(), waitForBackgroundImage()]).then(() => {

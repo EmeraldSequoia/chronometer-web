@@ -111,17 +111,6 @@ export interface LayoutParams {
     anchor?: string;
 
     /**
-     * Canvas-space heights (CSS px) of the header/footer chrome *bands*,
-     * including any safe-area inset bleed — the header band spans `[0,
-     * headerBandH]` from the top, the footer band spans `[viewH−footerBandH,
-     * viewH]`. The renderer paints these backgrounds *behind* the main elements
-     * (the DOM chrome content draws on top). Zero when chrome is dropped (CC2).
-     * Set by `computeLayout`; undefined for base-only layouts.
-     */
-    headerBandH?: number;
-    footerBandH?: number;
-
-    /**
      * True when CC2 dropped the chrome (the safe rect can't fit the
      * time-controller popover, 200×368). The entry hides the DOM header/footer
      * elements in this state so they don't overlap the full-surface layout.
