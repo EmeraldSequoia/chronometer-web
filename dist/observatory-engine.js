@@ -14793,6 +14793,28 @@
       distanceDeg: Math.sqrt(bestDist)
     };
   }
+  function findLargestCityNear(lat2, lon2, radiusDeg) {
+    if (!loaded || N === 0) return null;
+    const cosLat = Math.cos(lat2 * Math.PI / 180);
+    const r2 = radiusDeg * radiusDeg;
+    for (let i = 0; i < N; i++) {
+      const dLat = cLat[i] / 1e3 - lat2;
+      const dLon = (cLon[i] / 1e3 - lon2) * cosLat;
+      if (dLat * dLat + dLon * dLon <= r2) {
+        const name = rowStr(names, nameOff, i);
+        return {
+          label: cityLabel(i, name),
+          shortLabel: name,
+          lat: cLat[i] / 1e3,
+          lon: cLon[i] / 1e3,
+          timezone: TZ[cTz[i]] || "",
+          isAirport: false,
+          distanceDeg: Math.sqrt(dLat * dLat + dLon * dLon)
+        };
+      }
+    }
+    return null;
+  }
 
   // src/shared/tz-resolve.ts
   function resolveTimezone(lat2, lon2, cityTz) {
@@ -21784,9 +21806,16 @@
     lon = newLon;
     const nameEl = document.getElementById("location-name");
     if (isCityDataLoaded()) {
-      const closest = findClosestCity(lat, lon);
-      locationTimezone = closest?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
-      if (nameEl) nameEl.textContent = closest?.shortLabel ?? `${lat.toFixed(1)}\xB0, ${lon.toFixed(1)}\xB0`;
+      const radiusDeg = layout ? 360 / layout.earthW : 1;
+      const nearby = findLargestCityNear(lat, lon, radiusDeg);
+      if (nearby) {
+        locationTimezone = nearby.timezone;
+        if (nameEl) nameEl.textContent = nearby.shortLabel;
+      } else {
+        const closest = findClosestCity(lat, lon);
+        locationTimezone = closest?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+        if (nameEl) nameEl.textContent = closest?.shortLabel ?? `${lat.toFixed(1)}\xB0, ${lon.toFixed(1)}\xB0`;
+      }
     } else {
       const offsetHours = Math.round(lon / 15);
       locationTimezone = `Etc/GMT${offsetHours <= 0 ? "+" : "-"}${Math.abs(offsetHours)}`;

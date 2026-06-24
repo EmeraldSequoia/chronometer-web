@@ -15,7 +15,7 @@ import { createAstroEnvironment, computeTzDeltaMs } from '../shared/astro-env.js
 import type { Environment } from '../expr/evaluator.js';
 import { getState, setState, initAppState, onSharedChange, isPersistentMode } from '../shared/app-state.js';
 import { resolveTimezone } from '../shared/tz-resolve.js';
-import { findClosestCity, prefetchCityData, loadCityData, releaseCityData, isCityDataLoaded } from '../shared/city-search.js';
+import { findClosestCity, findLargestCityNear, prefetchCityData, loadCityData, releaseCityData, isCityDataLoaded } from '../shared/city-search.js';
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
 import { showStorageWarning } from '../shared/incoming-settings-dialog.js';
 import { TimeController } from '../shared/time-controller.js';
@@ -809,11 +809,21 @@ function applyTemporaryLocation(newLat: number, newLon: number): void {
     lon = newLon;
     const nameEl = document.getElementById('location-name');
     if (isCityDataLoaded()) {
-        // Single lookup: use the closest city for both timezone and display name.
-        const closest = findClosestCity(lat, lon);
-        locationTimezone = closest?.timezone
-            || Intl.DateTimeFormat().resolvedOptions().timeZone;
-        if (nameEl) nameEl.textContent = closest?.shortLabel ?? `${lat.toFixed(1)}°, ${lon.toFixed(1)}°`;
+        // Try the largest city within 1 CSS pixel of the cursor first.
+        const radiusDeg = layout ? 360 / layout.earthW : 1;
+        const nearby = findLargestCityNear(lat, lon, radiusDeg);
+        if (nearby) {
+            locationTimezone = nearby.timezone;
+            if (nameEl) nameEl.textContent = nearby.shortLabel;
+        } else {
+            // No city within 1 pixel — fall back to closest for both tz
+            // and display (previews what accept will do).
+            const closest = findClosestCity(lat, lon);
+            locationTimezone = closest?.timezone
+                || Intl.DateTimeFormat().resolvedOptions().timeZone;
+            if (nameEl) nameEl.textContent = closest?.shortLabel
+                ?? `${lat.toFixed(1)}°, ${lon.toFixed(1)}°`;
+        }
     } else {
         // City DB not loaded yet — use longitude-based UTC offset as fallback.
         const offsetHours = Math.round(lon / 15);

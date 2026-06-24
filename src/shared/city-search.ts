@@ -498,3 +498,40 @@ export function findClosestCity(lat: number, lon: number): CityResult | null {
         distanceDeg: Math.sqrt(bestDist),
     };
 }
+
+/**
+ * Find the largest city within `radiusDeg` degrees of (lat, lon).
+ *
+ * Cities are stored sorted by population descending, so the **first** city
+ * found inside the radius is guaranteed to be the most populous — early exit.
+ * In populated areas (Tokyo, NYC, London) this returns almost immediately.
+ * In empty regions the full scan runs and returns null.
+ *
+ * Uses the same equirectangular distance approximation as `findClosestCity`.
+ */
+export function findLargestCityNear(
+    lat: number, lon: number, radiusDeg: number,
+): CityResult | null {
+    if (!loaded || N === 0) return null;
+
+    const cosLat = Math.cos(lat * Math.PI / 180);
+    const r2 = radiusDeg * radiusDeg;
+
+    for (let i = 0; i < N; i++) {
+        const dLat = cLat[i] / 1000 - lat;
+        const dLon = (cLon[i] / 1000 - lon) * cosLat;
+        if (dLat * dLat + dLon * dLon <= r2) {
+            const name = rowStr(names, nameOff, i);
+            return {
+                label: cityLabel(i, name),
+                shortLabel: name,
+                lat: cLat[i] / 1000,
+                lon: cLon[i] / 1000,
+                timezone: TZ[cTz[i]] || '',
+                isAirport: false,
+                distanceDeg: Math.sqrt(dLat * dLat + dLon * dLon),
+            };
+        }
+    }
+    return null;
+}
