@@ -21583,7 +21583,7 @@
     loadCityData().then(() => {
       if (getState().city) return;
       applyClosest();
-      if (!dialogShown()) releaseCityData();
+      if (!dialogShown() && dragState === "idle") releaseCityData();
     }).catch(() => {
     });
   }
@@ -21768,8 +21768,17 @@
   function applyTemporaryLocation(newLat, newLon) {
     lat = newLat;
     lon = newLon;
-    locationTimezone = resolveTimezone(lat, lon, null);
+    const t0 = performance.now();
+    if (isCityDataLoaded()) {
+      locationTimezone = resolveTimezone(lat, lon, null);
+    } else {
+      const offsetHours = Math.round(lon / 15);
+      locationTimezone = `Etc/GMT${offsetHours <= 0 ? "+" : "-"}${Math.abs(offsetHours)}`;
+    }
+    const t1 = performance.now();
+    console.log(`[Drag] lat=${lat.toFixed(2)} lon=${lon.toFixed(2)} tz=${locationTimezone} resolveMs=${(t1 - t0).toFixed(1)} cityLoaded=${isCityDataLoaded()}`);
     rebuildEnv();
+    console.log(`[Drag] after rebuildEnv: tzOffsetSec=${env.tzOffsetSec}`);
     updater?.reset();
     scheduleFrame();
   }
@@ -21781,6 +21790,10 @@
       const x = ev.clientX - rect.left;
       const y = ev.clientY - rect.top;
       if (!isInsideEarthMap(x, y, layout)) return;
+      if (!isCityDataLoaded()) {
+        loadCityData().catch(() => {
+        });
+      }
       savedLat = lat;
       savedLon = lon;
       savedTz = locationTimezone;
@@ -21875,6 +21888,9 @@
       setState({ lat, lon, city: null, tz: locationTimezone || null });
       updateLocationDisplay();
       timeUI?.updateTimezoneDisplay();
+      rebuildEnv();
+      updater?.reset();
+      scheduleFrame();
     } else {
       lat = savedLat;
       lon = savedLon;

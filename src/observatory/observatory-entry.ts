@@ -521,7 +521,7 @@ function updateLocationDisplay(): void {
     loadCityData().then(() => {
         if (getState().city) return;            // a named location was set meanwhile
         applyClosest();
-        if (!dialogShown()) releaseCityData();   // one-shot: drop unless dialog open
+        if (!dialogShown() && dragState === 'idle') releaseCityData();   // one-shot: drop unless dialog open or dragging
     }).catch(() => {});
 }
 
@@ -800,8 +800,20 @@ function setupNoonToggle(): void {
 function applyTemporaryLocation(newLat: number, newLon: number): void {
     lat = newLat;
     lon = newLon;
-    locationTimezone = resolveTimezone(lat, lon, null);
+    const t0 = performance.now();
+    if (isCityDataLoaded()) {
+        locationTimezone = resolveTimezone(lat, lon, null);
+    } else {
+        // City DB not loaded yet — use longitude-based UTC offset as fallback.
+        // This gives a reasonable timezone for drag-to-explore until the async
+        // load completes (±30 min accuracy for most locations).
+        const offsetHours = Math.round(lon / 15);
+        locationTimezone = `Etc/GMT${offsetHours <= 0 ? '+' : '-'}${Math.abs(offsetHours)}`;
+    }
+    const t1 = performance.now();
+    console.log(`[Drag] lat=${lat.toFixed(2)} lon=${lon.toFixed(2)} tz=${locationTimezone} resolveMs=${(t1 - t0).toFixed(1)} cityLoaded=${isCityDataLoaded()}`);
     rebuildEnv();
+    console.log(`[Drag] after rebuildEnv: tzOffsetSec=${env.tzOffsetSec}`);
     updater?.reset();
     scheduleFrame();
 }
@@ -824,6 +836,14 @@ function setupMapDrag(): void {
         const x = ev.clientX - rect.left;
         const y = ev.clientY - rect.top;
         if (!isInsideEarthMap(x, y, layout)) return;
+
+        // Ensure city DB is loaded for timezone resolution during drag.
+        // The compressed blob is already prefetched; this just decompresses
+        // + parses (~few ms from cache). The first pointerdown/move may use
+        // the longitude-based fallback if the async load hasn't finished.
+        if (!isCityDataLoaded()) {
+            loadCityData().catch(() => {});
+        }
 
         // Save the current location so we can revert.
         savedLat = lat;
@@ -950,6 +970,11 @@ function dismissKeepDialog(keep: boolean): void {
         setState({ lat, lon, city: null, tz: locationTimezone || null });
         updateLocationDisplay();
         timeUI?.updateTimezoneDisplay();
+        // Transition values back to normal scheduling and trigger redraw
+        // so crosshairs disappear and the dot moves to the new position.
+        rebuildEnv();
+        updater?.reset();
+        scheduleFrame();
     } else {
         // Revert to the saved location.
         lat = savedLat;
