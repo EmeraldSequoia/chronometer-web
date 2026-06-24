@@ -490,13 +490,20 @@
 
       .map-drag-confirm-pill {
           display: flex;
+          flex-direction: column;
           align-items: center;
-          gap: 12px;
+          gap: 10px;
           background: rgba(30, 30, 50, 0.95);
           border: 1px solid rgba(100, 120, 200, 0.3);
-          border-radius: 14px;
-          padding: 12px 20px;
+          border-radius: 16px;
+          padding: 14px 20px;
           box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      }
+
+      .map-drag-confirm-row {
+          display: flex;
+          align-items: center;
+          gap: 12px;
           white-space: nowrap;
       }
 
@@ -504,6 +511,23 @@
           font-size: 14px;
           color: rgba(220, 225, 245, 0.9);
           font-weight: 500;
+      }
+
+      .map-drag-tz-label {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 11px;
+          color: rgba(220, 225, 245, 0.7);
+          cursor: pointer;
+          user-select: none;
+          margin-top: 2px;
+      }
+
+      .map-drag-tz-label input {
+          margin: 0;
+          cursor: pointer;
+          accent-color: #6478c8;
       }
 
       .map-drag-btn {
@@ -702,9 +726,15 @@
     <!-- Drag-to-explore confirmation modal (hidden until pointer-up on earth map) -->
     <div id="map-drag-confirm" class="map-drag-confirm" style="display:none">
       <div class="map-drag-confirm-pill">
-        <span class="map-drag-confirm-text">Keep this location?</span>
-        <button id="map-drag-keep" class="map-drag-btn keep">Keep</button>
-        <button id="map-drag-revert" class="map-drag-btn revert">Revert</button>
+        <div class="map-drag-confirm-row">
+          <span class="map-drag-confirm-text">Keep this location?</span>
+          <button id="map-drag-keep" class="map-drag-btn keep">Keep</button>
+          <button id="map-drag-revert" class="map-drag-btn revert">Revert</button>
+        </div>
+        <label id="map-drag-tz-label" class="map-drag-tz-label" style="display:none">
+          <input type="checkbox" id="map-drag-tz-checkbox" checked />
+          Use this location's timezone
+        </label>
       </div>
     </div>
 

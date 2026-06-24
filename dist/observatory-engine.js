@@ -21419,6 +21419,7 @@
   var savedCity = null;
   var dragAxisLock = "none";
   var dragNeedsUpdate = false;
+  var dragWasTimezoneLocked = false;
   var suppressNextClick = false;
   function initCanvas() {
     canvas = document.getElementById("observatory-canvas");
@@ -21801,7 +21802,7 @@
     updateHighlight();
     positionNoonIcon();
   }
-  function applyTemporaryLocation(newLat, newLon) {
+  function applyTemporaryLocation(newLat, newLon, lockTimezone) {
     lat = newLat;
     lon = newLon;
     const nameEl = document.getElementById("location-name");
@@ -21809,16 +21810,20 @@
       const radiusDeg = layout ? 360 / layout.earthW : 1;
       const nearby = findLargestCityNear(lat, lon, radiusDeg);
       if (nearby) {
-        locationTimezone = nearby.timezone;
+        locationTimezone = lockTimezone ? savedTz : nearby.timezone;
         if (nameEl) nameEl.textContent = nearby.shortLabel;
       } else {
         const closest = findClosestCity(lat, lon);
-        locationTimezone = closest?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+        locationTimezone = lockTimezone ? savedTz : closest?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
         if (nameEl) nameEl.textContent = closest?.shortLabel ?? `${lat.toFixed(1)}\xB0, ${lon.toFixed(1)}\xB0`;
       }
     } else {
-      const offsetHours = Math.round(lon / 15);
-      locationTimezone = `Etc/GMT${offsetHours <= 0 ? "+" : "-"}${Math.abs(offsetHours)}`;
+      if (lockTimezone) {
+        locationTimezone = savedTz;
+      } else {
+        const offsetHours = Math.round(lon / 15);
+        locationTimezone = `Etc/GMT${offsetHours <= 0 ? "+" : "-"}${Math.abs(offsetHours)}`;
+      }
       if (nameEl) nameEl.textContent = `${lat.toFixed(1)}\xB0, ${lon.toFixed(1)}\xB0`;
     }
     rebuildEnv();
@@ -21842,8 +21847,9 @@
       savedLon = lon;
       savedTz = locationTimezone;
       savedCity = getState().city;
+      dragWasTimezoneLocked = ev.altKey;
       const { lat: newLat, lon: newLon } = computeDragLatLon(x, y, ev.shiftKey);
-      applyTemporaryLocation(newLat, newLon);
+      applyTemporaryLocation(newLat, newLon, dragWasTimezoneLocked);
       dragState = "dragging";
       canvas.setPointerCapture(ev.pointerId);
       ev.preventDefault();
@@ -21854,8 +21860,9 @@
       const y = ev.clientY - rect.top;
       if (dragState === "dragging") {
         if (isInsideEarthMap(x, y, layout)) {
+          dragWasTimezoneLocked = ev.altKey;
           const { lat: newLat, lon: newLon } = computeDragLatLon(x, y, ev.shiftKey);
-          applyTemporaryLocation(newLat, newLon);
+          applyTemporaryLocation(newLat, newLon, dragWasTimezoneLocked);
         }
         return;
       }
@@ -21867,9 +21874,19 @@
       if (dragState !== "dragging") return;
       canvas.releasePointerCapture(ev.pointerId);
       suppressNextClick = true;
-      locationTimezone = resolveTimezone(lat, lon, null);
-      rebuildEnv();
-      scheduleFrame();
+      const tzLabel = document.getElementById("map-drag-tz-label");
+      const tzCheckbox = document.getElementById("map-drag-tz-checkbox");
+      const dragEndedWithAlt = ev.altKey || dragWasTimezoneLocked;
+      console.log("[DragEnd] pointerup.altKey:", ev.altKey, "dragWasTimezoneLocked:", dragWasTimezoneLocked, "showCheckbox:", !!(dragEndedWithAlt && tzLabel && tzCheckbox));
+      if (dragEndedWithAlt && tzLabel && tzCheckbox) {
+        tzLabel.style.display = "flex";
+        tzCheckbox.checked = true;
+      } else {
+        if (tzLabel) tzLabel.style.display = "none";
+        locationTimezone = resolveTimezone(lat, lon, null);
+        rebuildEnv();
+        scheduleFrame();
+      }
       dragState = "confirming";
       showKeepLocationDialog();
     });
@@ -21928,7 +21945,16 @@
         overlay._keyHandler = null;
       }
     }
+    const tzLabel = document.getElementById("map-drag-tz-label");
+    const tzCheckbox = document.getElementById("map-drag-tz-checkbox");
     if (keep) {
+      if (tzLabel && tzLabel.style.display !== "none" && tzCheckbox) {
+        if (tzCheckbox.checked) {
+          locationTimezone = resolveTimezone(lat, lon, null);
+        } else {
+          locationTimezone = savedTz;
+        }
+      }
       setState({ lat, lon, city: null, tz: locationTimezone || null });
       updateLocationDisplay();
       timeUI?.updateTimezoneDisplay();

@@ -173,6 +173,8 @@ let savedCity: string | null = null;
 let dragAxisLock: 'none' | 'lat' | 'lon' = 'none';
 /** True when a drag moved the location and values need re-evaluation. */
 let dragNeedsUpdate = false;
+/** True when the timezone was locked during dragging. */
+let dragWasTimezoneLocked = false;
 /** Flag to suppress the synthetic click event after a drag. */
 let suppressNextClick = false;
 
@@ -804,7 +806,7 @@ function setupNoonToggle(): void {
  * Rebuilds the astronomy environment and resets all ObsValue schedules
  * so the display immediately reflects the new position.
  */
-function applyTemporaryLocation(newLat: number, newLon: number): void {
+function applyTemporaryLocation(newLat: number, newLon: number, lockTimezone?: boolean): void {
     lat = newLat;
     lon = newLon;
     const nameEl = document.getElementById('location-name');
@@ -813,21 +815,26 @@ function applyTemporaryLocation(newLat: number, newLon: number): void {
         const radiusDeg = layout ? 360 / layout.earthW : 1;
         const nearby = findLargestCityNear(lat, lon, radiusDeg);
         if (nearby) {
-            locationTimezone = nearby.timezone;
+            locationTimezone = lockTimezone ? savedTz : nearby.timezone;
             if (nameEl) nameEl.textContent = nearby.shortLabel;
         } else {
             // No city within 1 pixel — fall back to closest for both tz
             // and display (previews what accept will do).
             const closest = findClosestCity(lat, lon);
-            locationTimezone = closest?.timezone
-                || Intl.DateTimeFormat().resolvedOptions().timeZone;
+            locationTimezone = lockTimezone
+                ? savedTz
+                : (closest?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone);
             if (nameEl) nameEl.textContent = closest?.shortLabel
                 ?? `${lat.toFixed(1)}°, ${lon.toFixed(1)}°`;
         }
     } else {
         // City DB not loaded yet — use longitude-based UTC offset as fallback.
-        const offsetHours = Math.round(lon / 15);
-        locationTimezone = `Etc/GMT${offsetHours <= 0 ? '+' : '-'}${Math.abs(offsetHours)}`;
+        if (lockTimezone) {
+            locationTimezone = savedTz;
+        } else {
+            const offsetHours = Math.round(lon / 15);
+            locationTimezone = `Etc/GMT${offsetHours <= 0 ? '+' : '-'}${Math.abs(offsetHours)}`;
+        }
         if (nameEl) nameEl.textContent = `${lat.toFixed(1)}°, ${lon.toFixed(1)}°`;
     }
     rebuildEnv();
@@ -870,8 +877,9 @@ function setupMapDrag(): void {
         savedCity = getState().city;
 
         // Compute the clicked lat/lon and apply immediately.
+        dragWasTimezoneLocked = ev.altKey;
         const { lat: newLat, lon: newLon } = computeDragLatLon(x, y, ev.shiftKey);
-        applyTemporaryLocation(newLat, newLon);
+        applyTemporaryLocation(newLat, newLon, dragWasTimezoneLocked);
 
         dragState = 'dragging';
         canvas.setPointerCapture(ev.pointerId);
@@ -886,8 +894,9 @@ function setupMapDrag(): void {
         if (dragState === 'dragging') {
             // Only update the location if the pointer is inside the map.
             if (isInsideEarthMap(x, y, layout)) {
+                dragWasTimezoneLocked = ev.altKey;
                 const { lat: newLat, lon: newLon } = computeDragLatLon(x, y, ev.shiftKey);
-                applyTemporaryLocation(newLat, newLon);
+                applyTemporaryLocation(newLat, newLon, dragWasTimezoneLocked);
             }
             return;
         }
@@ -903,10 +912,26 @@ function setupMapDrag(): void {
         canvas.releasePointerCapture(ev.pointerId);
         suppressNextClick = true;  // suppress the synthetic click after pointerup
 
-        // Final timezone resolution at the release position.
-        locationTimezone = resolveTimezone(lat, lon, null);
-        rebuildEnv();
-        scheduleFrame();
+        const tzLabel = document.getElementById('map-drag-tz-label');
+        const tzCheckbox = document.getElementById('map-drag-tz-checkbox') as HTMLInputElement;
+
+        // Check if Alt was held on pointerup OR if it was tracked during dragging.
+        const dragEndedWithAlt = ev.altKey || dragWasTimezoneLocked;
+        console.log('[DragEnd] pointerup.altKey:', ev.altKey, 'dragWasTimezoneLocked:', dragWasTimezoneLocked, 'showCheckbox:', !!(dragEndedWithAlt && tzLabel && tzCheckbox));
+
+        if (dragEndedWithAlt && tzLabel && tzCheckbox) {
+            // Show checkbox and check it by default.
+            tzLabel.style.display = 'flex';
+            tzCheckbox.checked = true;
+        } else {
+            // Hide checkbox
+            if (tzLabel) tzLabel.style.display = 'none';
+
+            // Standard resolution (if dragging without Alt, timezone is already resolved at coordinates)
+            locationTimezone = resolveTimezone(lat, lon, null);
+            rebuildEnv();
+            scheduleFrame();
+        }
 
         dragState = 'confirming';
         showKeepLocationDialog();
@@ -983,7 +1008,18 @@ function dismissKeepDialog(keep: boolean): void {
         }
     }
 
+    const tzLabel = document.getElementById('map-drag-tz-label');
+    const tzCheckbox = document.getElementById('map-drag-tz-checkbox') as HTMLInputElement;
+
     if (keep) {
+        // If the timezone checkbox was displayed, read its state.
+        if (tzLabel && tzLabel.style.display !== 'none' && tzCheckbox) {
+            if (tzCheckbox.checked) {
+                locationTimezone = resolveTimezone(lat, lon, null);
+            } else {
+                locationTimezone = savedTz;
+            }
+        }
         // Persist the new location.
         setState({ lat, lon, city: null, tz: locationTimezone || null });
         updateLocationDisplay();
