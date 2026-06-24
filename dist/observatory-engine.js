@@ -21548,6 +21548,40 @@
     updateLocationDisplay();
     initHelpPopover({ generalHelpUrl: "help.html?embed=1&app=observatory" });
     initShareButton({ getState });
+    const fullscreenBtn = document.getElementById("fullscreen-btn");
+    if (fullscreenBtn) {
+      const isFullscreenSupported = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled || document.mozFullScreenEnabled || document.msFullscreenEnabled);
+      if (!isFullscreenSupported) {
+        fullscreenBtn.style.display = "none";
+      } else {
+        fullscreenBtn.addEventListener("click", () => {
+          const doc = document;
+          const docEl = document.documentElement;
+          const fullscreenElement = doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement;
+          if (fullscreenElement) {
+            if (doc.exitFullscreen) {
+              doc.exitFullscreen();
+            } else if (doc.webkitExitFullscreen) {
+              doc.webkitExitFullscreen();
+            } else if (doc.mozCancelFullScreen) {
+              doc.mozCancelFullScreen();
+            } else if (doc.msExitFullscreen) {
+              doc.msExitFullscreen();
+            }
+          } else {
+            if (docEl.requestFullscreen) {
+              docEl.requestFullscreen();
+            } else if (docEl.webkitRequestFullscreen) {
+              docEl.webkitRequestFullscreen();
+            } else if (docEl.mozRequestFullScreen) {
+              docEl.mozRequestFullScreen();
+            } else if (docEl.msRequestFullscreen) {
+              docEl.msRequestFullscreen();
+            }
+          }
+        });
+      }
+    }
     onSharedChange((s) => {
       let changed = false;
       if (s.lat !== null && s.lon !== null && (s.lat !== lat || s.lon !== lon || (s.tz || void 0) !== locationTimezone)) {

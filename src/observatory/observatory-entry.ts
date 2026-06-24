@@ -776,6 +776,48 @@ function init(): void {
     initHelpPopover({ generalHelpUrl: 'help.html?embed=1&app=observatory' });
     initShareButton({ getState });
 
+    // --- Fullscreen toggle button ---
+    const fullscreenBtn = document.getElementById('fullscreen-btn');
+    if (fullscreenBtn) {
+        const isFullscreenSupported = !!(
+            document.fullscreenEnabled ||
+            (document as any).webkitFullscreenEnabled ||
+            (document as any).mozFullScreenEnabled ||
+            (document as any).msFullscreenEnabled
+        );
+        if (!isFullscreenSupported) {
+            fullscreenBtn.style.display = 'none';
+        } else {
+            fullscreenBtn.addEventListener('click', () => {
+                const doc = document as any;
+                const docEl = document.documentElement as any;
+                const fullscreenElement = doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement;
+
+                if (fullscreenElement) {
+                    if (doc.exitFullscreen) {
+                        doc.exitFullscreen();
+                    } else if (doc.webkitExitFullscreen) {
+                        doc.webkitExitFullscreen();
+                    } else if (doc.mozCancelFullScreen) {
+                        doc.mozCancelFullScreen();
+                    } else if (doc.msExitFullscreen) {
+                        doc.msExitFullscreen();
+                    }
+                } else {
+                    if (docEl.requestFullscreen) {
+                        docEl.requestFullscreen();
+                    } else if (docEl.webkitRequestFullscreen) {
+                        docEl.webkitRequestFullscreen();
+                    } else if (docEl.mozRequestFullScreen) {
+                        docEl.mozRequestFullScreen();
+                    } else if (docEl.msRequestFullscreen) {
+                        docEl.msRequestFullscreen();
+                    }
+                }
+            });
+        }
+    }
+
     // Live cross-tab sync: apply shared location/time and Observatory config
     // (selected planet, noon-on-top) when another tab/app changes them.
     onSharedChange((s) => {
