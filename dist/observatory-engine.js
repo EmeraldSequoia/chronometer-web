@@ -22109,6 +22109,22 @@
       scheduleFrame();
       console.log("[Observatory] All images loaded");
     });
+    window.addEventListener("keydown", (ev) => {
+      if (dragState === "dragging" && ev.key === "Alt") {
+        if (!dragWasTimezoneLocked) {
+          dragWasTimezoneLocked = true;
+          applyTemporaryLocation(lat, lon, true);
+        }
+      }
+    });
+    window.addEventListener("keyup", (ev) => {
+      if (dragState === "dragging" && ev.key === "Alt") {
+        if (dragWasTimezoneLocked) {
+          dragWasTimezoneLocked = false;
+          applyTemporaryLocation(lat, lon, false);
+        }
+      }
+    });
     scheduleFrame();
   }
   if (document.readyState === "loading") {

@@ -1234,6 +1234,26 @@ function init(): void {
         console.log('[Observatory] All images loaded');
     });
 
+    // Listen for Alt key transitions during active map dragging to dynamically
+    // lock or unlock the timezone display in real-time.
+    window.addEventListener('keydown', (ev: KeyboardEvent) => {
+        if (dragState === 'dragging' && ev.key === 'Alt') {
+            if (!dragWasTimezoneLocked) {
+                dragWasTimezoneLocked = true;
+                applyTemporaryLocation(lat, lon, true);
+            }
+        }
+    });
+
+    window.addEventListener('keyup', (ev: KeyboardEvent) => {
+        if (dragState === 'dragging' && ev.key === 'Alt') {
+            if (dragWasTimezoneLocked) {
+                dragWasTimezoneLocked = false;
+                applyTemporaryLocation(lat, lon, false);
+            }
+        }
+    });
+
     // Start render loop
     scheduleFrame();
 }
