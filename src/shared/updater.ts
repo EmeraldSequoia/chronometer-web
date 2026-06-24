@@ -651,4 +651,13 @@ export class Updater<K extends string = string> {
         }
         animateObsValues(this.values, perfNow);
     }
+
+    /**
+     * Interpolation-only pass — advance in-flight animations without
+     * re-evaluating expressions.  Use on frames where the inputs (env)
+     * haven't changed but existing animations should keep progressing.
+     */
+    animateOnly(perfNow: number): void {
+        animateObsValues(this.values, perfNow);
+    }
 }

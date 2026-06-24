@@ -19645,6 +19645,14 @@
       }
       animateObsValues(this.values, perfNow);
     }
+    /**
+     * Interpolation-only pass — advance in-flight animations without
+     * re-evaluating expressions.  Use on frames where the inputs (env)
+     * haven't changed but existing animations should keep progressing.
+     */
+    animateOnly(perfNow) {
+      animateObsValues(this.values, perfNow);
+    }
   };
 
   // src/observatory/obs-values.ts
@@ -21388,6 +21396,7 @@
   var savedTz;
   var savedCity = null;
   var dragAxisLock = "none";
+  var dragNeedsUpdate = false;
   var suppressNextClick = false;
   function initCanvas() {
     canvas = document.getElementById("observatory-canvas");
@@ -21536,8 +21545,13 @@
     timeController.beginFrame();
     let animating = false;
     if (updater) {
-      if (dragState === "dragging") {
-        updater.tickFixedDuration(env, perfNow, 300);
+      if (dragState === "dragging" || dragState === "confirming") {
+        if (dragNeedsUpdate) {
+          updater.tickFixedDuration(env, perfNow, 300);
+          dragNeedsUpdate = false;
+        } else {
+          updater.animateOnly(perfNow);
+        }
       } else {
         updater.tick(
           env,
@@ -21768,17 +21782,14 @@
   function applyTemporaryLocation(newLat, newLon) {
     lat = newLat;
     lon = newLon;
-    const t0 = performance.now();
     if (isCityDataLoaded()) {
       locationTimezone = resolveTimezone(lat, lon, null);
     } else {
       const offsetHours = Math.round(lon / 15);
       locationTimezone = `Etc/GMT${offsetHours <= 0 ? "+" : "-"}${Math.abs(offsetHours)}`;
     }
-    const t1 = performance.now();
-    console.log(`[Drag] lat=${lat.toFixed(2)} lon=${lon.toFixed(2)} tz=${locationTimezone} resolveMs=${(t1 - t0).toFixed(1)} cityLoaded=${isCityDataLoaded()}`);
     rebuildEnv();
-    console.log(`[Drag] after rebuildEnv: tzOffsetSec=${env.tzOffsetSec}`);
+    dragNeedsUpdate = true;
     updater?.reset();
     scheduleFrame();
   }

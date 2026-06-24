@@ -14367,6 +14367,14 @@
       }
       animateObsValues(this.values, perfNow);
     }
+    /**
+     * Interpolation-only pass — advance in-flight animations without
+     * re-evaluating expressions.  Use on frames where the inputs (env)
+     * haven't changed but existing animations should keep progressing.
+     */
+    animateOnly(perfNow) {
+      animateObsValues(this.values, perfNow);
+    }
   };
 
   // src/shared/astro-stepper.ts

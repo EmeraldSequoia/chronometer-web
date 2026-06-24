@@ -171,6 +171,8 @@ let savedTz: string | undefined;
 let savedCity: string | null = null;
 /** Current shift-key axis constraint during drag. */
 let dragAxisLock: 'none' | 'lat' | 'lon' = 'none';
+/** True when a drag moved the location and values need re-evaluation. */
+let dragNeedsUpdate = false;
 /** Flag to suppress the synthetic click event after a drag. */
 let suppressNextClick = false;
 
@@ -455,10 +457,15 @@ function tick(): void {
     // rate, per-tick display delta, direction) is derived generically from the
     // controller — the shared updater seam, no hand-rolled glue here.
     if (updater) {
-        if (dragState === 'dragging') {
-            // During drag, bypass normal scheduling and force all animations
-            // to exactly 0.3s for responsive, uniform transitions.
-            updater.tickFixedDuration(env, perfNow, 300);
+        if (dragState === 'dragging' || dragState === 'confirming') {
+            if (dragNeedsUpdate) {
+                // Location changed — re-evaluate all expressions with fixed 0.3s animation.
+                updater.tickFixedDuration(env, perfNow, 300);
+                dragNeedsUpdate = false;
+            } else {
+                // No location change — just interpolate existing animations.
+                updater.animateOnly(perfNow);
+            }
         } else {
             updater.tick(env, perfNow, getNow, withDisplayTime,
                 timingContextForFrame(timeController));
@@ -800,7 +807,6 @@ function setupNoonToggle(): void {
 function applyTemporaryLocation(newLat: number, newLon: number): void {
     lat = newLat;
     lon = newLon;
-    const t0 = performance.now();
     if (isCityDataLoaded()) {
         locationTimezone = resolveTimezone(lat, lon, null);
     } else {
@@ -810,10 +816,8 @@ function applyTemporaryLocation(newLat: number, newLon: number): void {
         const offsetHours = Math.round(lon / 15);
         locationTimezone = `Etc/GMT${offsetHours <= 0 ? '+' : '-'}${Math.abs(offsetHours)}`;
     }
-    const t1 = performance.now();
-    console.log(`[Drag] lat=${lat.toFixed(2)} lon=${lon.toFixed(2)} tz=${locationTimezone} resolveMs=${(t1 - t0).toFixed(1)} cityLoaded=${isCityDataLoaded()}`);
     rebuildEnv();
-    console.log(`[Drag] after rebuildEnv: tzOffsetSec=${env.tzOffsetSec}`);
+    dragNeedsUpdate = true;
     updater?.reset();
     scheduleFrame();
 }
