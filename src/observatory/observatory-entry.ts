@@ -609,7 +609,14 @@ function setupLocationDialog(): void {
     });
 
     if (locationDialog && setLocationBtn) {
-        setLocationBtn.addEventListener('click', () => locationDialog.show());
+        setLocationBtn.addEventListener('click', () => {
+            const s = getState();
+            if (s.lat !== null && s.lon !== null) {
+                const sourceType = s.bloc ? 'browser' : (s.city ? 'url-city' : 'manual');
+                locationDialog.updateState(s.lat, s.lon, sourceType, s.city || '', s.city || '');
+            }
+            locationDialog.show();
+        });
 
         if (needsPrompt) {
             locationDialog.show();
