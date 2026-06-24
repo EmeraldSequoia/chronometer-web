@@ -917,7 +917,6 @@ function setupMapDrag(): void {
 
         // Check if Alt was held on pointerup OR if it was tracked during dragging.
         const dragEndedWithAlt = ev.altKey || dragWasTimezoneLocked;
-        console.log('[DragEnd] pointerup.altKey:', ev.altKey, 'dragWasTimezoneLocked:', dragWasTimezoneLocked, 'showCheckbox:', !!(dragEndedWithAlt && tzLabel && tzCheckbox));
 
         if (dragEndedWithAlt && tzLabel && tzCheckbox) {
             // Show checkbox and check it by default.

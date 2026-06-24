@@ -21877,7 +21877,6 @@
       const tzLabel = document.getElementById("map-drag-tz-label");
       const tzCheckbox = document.getElementById("map-drag-tz-checkbox");
       const dragEndedWithAlt = ev.altKey || dragWasTimezoneLocked;
-      console.log("[DragEnd] pointerup.altKey:", ev.altKey, "dragWasTimezoneLocked:", dragWasTimezoneLocked, "showCheckbox:", !!(dragEndedWithAlt && tzLabel && tzCheckbox));
       if (dragEndedWithAlt && tzLabel && tzCheckbox) {
         tzLabel.style.display = "flex";
         tzCheckbox.checked = true;
