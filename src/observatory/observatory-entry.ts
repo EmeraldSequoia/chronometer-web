@@ -807,14 +807,18 @@ function setupNoonToggle(): void {
 function applyTemporaryLocation(newLat: number, newLon: number): void {
     lat = newLat;
     lon = newLon;
+    const nameEl = document.getElementById('location-name');
     if (isCityDataLoaded()) {
-        locationTimezone = resolveTimezone(lat, lon, null);
+        // Single lookup: use the closest city for both timezone and display name.
+        const closest = findClosestCity(lat, lon);
+        locationTimezone = closest?.timezone
+            || Intl.DateTimeFormat().resolvedOptions().timeZone;
+        if (nameEl) nameEl.textContent = closest?.shortLabel ?? `${lat.toFixed(1)}°, ${lon.toFixed(1)}°`;
     } else {
         // City DB not loaded yet — use longitude-based UTC offset as fallback.
-        // This gives a reasonable timezone for drag-to-explore until the async
-        // load completes (±30 min accuracy for most locations).
         const offsetHours = Math.round(lon / 15);
         locationTimezone = `Etc/GMT${offsetHours <= 0 ? '+' : '-'}${Math.abs(offsetHours)}`;
+        if (nameEl) nameEl.textContent = `${lat.toFixed(1)}°, ${lon.toFixed(1)}°`;
     }
     rebuildEnv();
     dragNeedsUpdate = true;

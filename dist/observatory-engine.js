@@ -21782,11 +21782,15 @@
   function applyTemporaryLocation(newLat, newLon) {
     lat = newLat;
     lon = newLon;
+    const nameEl = document.getElementById("location-name");
     if (isCityDataLoaded()) {
-      locationTimezone = resolveTimezone(lat, lon, null);
+      const closest = findClosestCity(lat, lon);
+      locationTimezone = closest?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (nameEl) nameEl.textContent = closest?.shortLabel ?? `${lat.toFixed(1)}\xB0, ${lon.toFixed(1)}\xB0`;
     } else {
       const offsetHours = Math.round(lon / 15);
       locationTimezone = `Etc/GMT${offsetHours <= 0 ? "+" : "-"}${Math.abs(offsetHours)}`;
+      if (nameEl) nameEl.textContent = `${lat.toFixed(1)}\xB0, ${lon.toFixed(1)}\xB0`;
     }
     rebuildEnv();
     dragNeedsUpdate = true;
