@@ -562,7 +562,16 @@ function rebuildEnv(): void {
     // location's timezone, so a timezone change must re-solve the layout. Guard
     // on the tz so scrubbing (which fires rebuildEnv every tick) doesn't relayout
     // each frame — a same-tz day-boundary shift is left to the next resize.
-    if (locationTimezone !== lastLayoutTz) { resizeCanvas(); return; }
+    if (locationTimezone !== lastLayoutTz) {
+        if (dragState === 'dragging') {
+            // Defer layout recomputation and static cache invalidation during active drag
+            // to keep the drag interaction smooth. The layout will be recomputed for the
+            // final timezone upon release.
+        } else {
+            resizeCanvas();
+            return;
+        }
+    }
     // The loop may be idle (stopped); env changes must trigger a redraw.
     scheduleFrame();
 }
@@ -928,6 +937,7 @@ function setupMapDrag(): void {
 
             // Standard resolution (if dragging without Alt, timezone is already resolved at coordinates)
             locationTimezone = resolveTimezone(lat, lon, null);
+            dragState = 'confirming';
             rebuildEnv();
             scheduleFrame();
         }

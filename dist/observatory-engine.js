@@ -21643,8 +21643,11 @@
     invalidateRingCache();
     needsStaticRedraw = true;
     if (locationTimezone !== lastLayoutTz) {
-      resizeCanvas();
-      return;
+      if (dragState === "dragging") {
+      } else {
+        resizeCanvas();
+        return;
+      }
     }
     scheduleFrame();
   }
@@ -21883,6 +21886,7 @@
       } else {
         if (tzLabel) tzLabel.style.display = "none";
         locationTimezone = resolveTimezone(lat, lon, null);
+        dragState = "confirming";
         rebuildEnv();
         scheduleFrame();
       }
