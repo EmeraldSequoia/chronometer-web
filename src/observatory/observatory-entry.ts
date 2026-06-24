@@ -23,6 +23,7 @@ import { initTimeControls } from '../shared/time-controls-ui.js';
 import { initHelpPopover } from '../shared/help-popover.js';
 import { initShareButton } from '../shared/share-button.js';
 import type { TimeControlsAPI } from '../shared/time-controls-ui.js';
+import { updateDynamicCompositeIcon } from '../shared/composite-icon.js';
 import { type LayoutParams } from './layout.js';
 import { computeLayout, type ObsChrome } from './anchor-layout.js';
 import { getBackgroundCache, invalidateBackgroundCache, waitForBackgroundImage } from './background.js';
@@ -984,6 +985,7 @@ function init(): void {
 
     initCanvas();
     ro.observe(document.documentElement);
+    updateDynamicCompositeIcon(['thumb-observatory.png'], '#000000');
     setupLocationDialog();
     setupNoonToggle();
     setupMapDrag();

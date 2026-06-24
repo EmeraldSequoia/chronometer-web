@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="description" content="Emerald Observatory — astronomical clock showing planetary positions, rise/set times, moon phase, day/night terminator, and more." />
+    <link rel="apple-touch-icon" href="thumb-observatory.png" />
+    <link rel="icon" type="image/png" href="thumb-observatory.png" />
     <title>Emerald Observatory</title>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
     <style>
@@ -73,6 +75,7 @@
       }
 
       #obs-title {
+          margin: 0;
           font-size: 15px;
           font-weight: 600;
           letter-spacing: 0.3px;
@@ -1511,7 +1514,7 @@
     <!-- Top chrome: header band — title (left) + ℹ/share (right). Help button
          wiring is shared (src/shared/help-popover.ts). -->
     <div id="obs-header">
-      <span id="obs-title">Observatory</span>
+      <h1 id="obs-title">Observatory</h1>
       <div id="obs-header-actions">
         <button id="info-btn" title="About Observatory">ℹ&#xFE0E;</button>
         <button id="share-btn" title="Share this view">
@@ -1603,7 +1606,7 @@
             <div id="help-content">
               <!-- Populated from help-template on first info click -->
             </div>
-            <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v1.4.285</div>
+            <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v1.4.289</div>
           </div>
 
           <div id="info-sub-view">
@@ -2160,9 +2163,9 @@ with Chronometer.
   automatically to match the selected location.
 </p>
 <p>
-  You can also drag directly on the Earth map to preview any location — all
-  the dials and rings update in real time as you drag. On release you'll be
-  asked to keep the new location or revert.
+  You can also drag directly on the Earth map to preview any location — all the
+  dials and rings update in real time as you drag. On release you'll be asked to
+  keep the new location or revert.
 </p>
  </template>
 

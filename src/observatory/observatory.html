@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="description" content="Emerald Observatory — astronomical clock showing planetary positions, rise/set times, moon phase, day/night terminator, and more." />
+    <link rel="apple-touch-icon" href="thumb-observatory.png" />
+    <link rel="icon" type="image/png" href="thumb-observatory.png" />
     <title>Emerald Observatory</title>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
     <style>
@@ -73,6 +75,7 @@
       }
 
       #obs-title {
+          margin: 0;
           font-size: 15px;
           font-weight: 600;
           letter-spacing: 0.3px;
@@ -581,7 +584,7 @@
     <!-- Top chrome: header band — title (left) + ℹ/share (right). Help button
          wiring is shared (src/shared/help-popover.ts). -->
     <div id="obs-header">
-      <span id="obs-title">Observatory</span>
+      <h1 id="obs-title">Observatory</h1>
       <div id="obs-header-actions">
         <button id="info-btn" title="About Observatory">ℹ&#xFE0E;</button>
         <button id="share-btn" title="Share this view">

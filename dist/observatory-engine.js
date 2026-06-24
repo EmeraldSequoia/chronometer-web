@@ -16666,6 +16666,151 @@
     selectAll();
   }
 
+  // src/shared/composite-icon.ts
+  function parseColorToRgb(color) {
+    if (!color) return null;
+    const rgbMatch = color.match(/rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/i);
+    if (rgbMatch) {
+      return {
+        r: parseInt(rgbMatch[1], 10),
+        g: parseInt(rgbMatch[2], 10),
+        b: parseInt(rgbMatch[3], 10)
+      };
+    }
+    if (color.startsWith("#")) {
+      const hex = color.substring(1);
+      if (hex.length === 3) {
+        return {
+          r: parseInt(hex[0] + hex[0], 16),
+          g: parseInt(hex[1] + hex[1], 16),
+          b: parseInt(hex[2] + hex[2], 16)
+        };
+      } else if (hex.length === 6) {
+        return {
+          r: parseInt(hex.substring(0, 2), 16),
+          g: parseInt(hex.substring(2, 4), 16),
+          b: parseInt(hex.substring(4, 6), 16)
+        };
+      }
+    }
+    return null;
+  }
+  function getBezelBackgroundColor(bezelColor) {
+    const parsed = parseColorToRgb(bezelColor);
+    if (!parsed) return "#000000";
+    const newR = Math.round(parsed.r / 3);
+    const newG = Math.round(parsed.g / 3);
+    const newB = Math.round(parsed.b / 3);
+    return `rgb(${newR}, ${newG}, ${newB})`;
+  }
+  function loadImg(src) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error(`Failed to load ${src}`));
+      img.src = src;
+    });
+  }
+  function drawClippedImage(ctx2, img, x, y, size) {
+    ctx2.save();
+    const r = size / 2;
+    ctx2.beginPath();
+    ctx2.arc(x + r, y + r, r - 0.5, 0, Math.PI * 2);
+    ctx2.clip();
+    ctx2.drawImage(img, x, y, size, size);
+    ctx2.restore();
+  }
+  function getAverageBezelBackgroundColor(bezelColors) {
+    let bg = "#1a1a2e";
+    if (bezelColors) {
+      const colors = typeof bezelColors === "string" ? [bezelColors] : bezelColors;
+      let sumR = 0, sumG = 0, sumB = 0, validCount = 0;
+      for (const color of colors) {
+        if (!color || parseColorToRgb(color) === null) {
+          continue;
+        }
+        const bgColor = getBezelBackgroundColor(color);
+        const parsed = parseColorToRgb(bgColor);
+        if (parsed) {
+          sumR += parsed.r;
+          sumG += parsed.g;
+          sumB += parsed.b;
+          validCount++;
+        }
+      }
+      if (validCount > 0) {
+        bg = `rgb(${Math.round(sumR / validCount)}, ${Math.round(sumG / validCount)}, ${Math.round(sumB / validCount)})`;
+      }
+    }
+    return bg;
+  }
+  async function updateDynamicCompositeIcon(thumbDataUrls, bezelColors) {
+    if (typeof document === "undefined") return;
+    const appleLink = document.querySelector('link[rel~="apple-touch-icon"]');
+    const iconLink = document.querySelector('link[rel~="icon"]');
+    if (!appleLink && !iconLink) return;
+    const bg = getAverageBezelBackgroundColor(bezelColors);
+    if (thumbDataUrls.length === 0) {
+      updateLinks("thumb-all-faces.png", "thumb-all-faces.png");
+      return;
+    }
+    try {
+      const canvas2 = document.createElement("canvas");
+      canvas2.width = 400;
+      canvas2.height = 400;
+      const ctx2 = canvas2.getContext("2d");
+      if (!ctx2) return;
+      if (thumbDataUrls.length === 1) {
+        const img = await loadImg(thumbDataUrls[0]);
+        drawClippedImage(ctx2, img, 0, 0, 400);
+      } else if (thumbDataUrls.length === 2) {
+        const imgs = await Promise.all(thumbDataUrls.slice(0, 2).map((url) => loadImg(url)));
+        drawClippedImage(ctx2, imgs[0], 0, 0, 230);
+        drawClippedImage(ctx2, imgs[1], 170, 170, 230);
+      } else if (thumbDataUrls.length === 3) {
+        const imgs = await Promise.all(thumbDataUrls.slice(0, 3).map((url) => loadImg(url)));
+        drawClippedImage(ctx2, imgs[0], 87.5, 0, 225);
+        drawClippedImage(ctx2, imgs[1], 0, 200, 200);
+        drawClippedImage(ctx2, imgs[2], 200, 200, 200);
+      } else {
+        const imgs = await Promise.all(thumbDataUrls.slice(0, 4).map((url) => loadImg(url)));
+        drawClippedImage(ctx2, imgs[0], 0, 0, 200);
+        drawClippedImage(ctx2, imgs[1], 200, 0, 200);
+        drawClippedImage(ctx2, imgs[2], 0, 200, 200);
+        drawClippedImage(ctx2, imgs[3], 200, 200, 200);
+      }
+      const iconHref = canvas2.toDataURL("image/png");
+      ctx2.globalCompositeOperation = "destination-over";
+      ctx2.fillStyle = bg;
+      ctx2.fillRect(0, 0, 400, 400);
+      ctx2.globalCompositeOperation = "source-over";
+      const appleHref = canvas2.toDataURL("image/png");
+      updateLinks(appleHref, iconHref);
+    } catch (err) {
+      console.error("Error compositing picks icon:", err);
+    }
+    function updateLinks(appleHref, iconHref) {
+      const head = document.head;
+      const existingApple = document.querySelector('link[rel~="apple-touch-icon"]');
+      if (existingApple) {
+        head.removeChild(existingApple);
+      }
+      const newApple = document.createElement("link");
+      newApple.rel = "apple-touch-icon";
+      newApple.href = appleHref;
+      head.appendChild(newApple);
+      const existingIcon = document.querySelector('link[rel~="icon"]');
+      if (existingIcon) {
+        head.removeChild(existingIcon);
+      }
+      const newIcon = document.createElement("link");
+      newIcon.rel = "icon";
+      newIcon.type = "image/png";
+      newIcon.href = iconHref;
+      head.appendChild(newIcon);
+    }
+  }
+
   // src/observatory/layout.ts
   var REF_MAIN_R = 365;
   var DIAL_FRAC_MAX = 0.95;
@@ -20903,7 +21048,7 @@
     ascNode: 15,
     desNode: 15
   };
-  function loadImg(src, name) {
+  function loadImg2(src, name) {
     const rec = { el: new Image(), ready: false };
     rec.el.onload = () => {
       rec.ready = true;
@@ -20926,15 +21071,15 @@
   var initialized = false;
   function initEclipseView() {
     if (initialized) return;
-    moonImg2 = loadImg(moon300_default, "moon300.png");
-    sunImg2 = loadImg(sunEclipse_default, "sunEclipse.png");
-    totalImg = loadImg(totalEclipse_default, "totalEclipse.png");
-    shadowImg = loadImg(earthShadow_default, "earthShadow.png");
-    ringSun = loadImg(eclipseRingSun_default, "eclipseRingSun.png");
-    ringMoon = loadImg(eclipseRingMoon_default, "eclipseRingMoon.png");
-    ringEarthShadow = loadImg(eclipseRingEarthShadow_default, "eclipseRingEarthShadow.png");
-    ringAscNode = loadImg(eclipseRingAscNode_default, "eclipseRingAscNode.png");
-    ringDesNode = loadImg(eclipseRingDesNode_default, "eclipseRingDesNode.png");
+    moonImg2 = loadImg2(moon300_default, "moon300.png");
+    sunImg2 = loadImg2(sunEclipse_default, "sunEclipse.png");
+    totalImg = loadImg2(totalEclipse_default, "totalEclipse.png");
+    shadowImg = loadImg2(earthShadow_default, "earthShadow.png");
+    ringSun = loadImg2(eclipseRingSun_default, "eclipseRingSun.png");
+    ringMoon = loadImg2(eclipseRingMoon_default, "eclipseRingMoon.png");
+    ringEarthShadow = loadImg2(eclipseRingEarthShadow_default, "eclipseRingEarthShadow.png");
+    ringAscNode = loadImg2(eclipseRingAscNode_default, "eclipseRingAscNode.png");
+    ringDesNode = loadImg2(eclipseRingDesNode_default, "eclipseRingDesNode.png");
     initialized = true;
   }
   function fmod4(value, modulus) {
@@ -21728,6 +21873,7 @@
     if (urlState.fps) document.body.classList.add("has-fps");
     initCanvas();
     ro.observe(document.documentElement);
+    updateDynamicCompositeIcon(["thumb-observatory.png"], "#000000");
     setupLocationDialog();
     setupNoonToggle();
     setupMapDrag();
