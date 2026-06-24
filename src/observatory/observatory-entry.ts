@@ -407,8 +407,9 @@ function drawFrame(): void {
 
     // Earth map (Phase 5: day/night terminator)
     if (updater) {
-        // During drag, pin the observer dot at the saved (home) location.
-        if (dragState === 'dragging') {
+        // During drag or while confirming, pin the observer dot at the saved
+        // (home) location and show the crosshair at the rendered position.
+        if (dragState === 'dragging' || dragState === 'confirming') {
             drawEarthView(ctx, L, updater, lat, lon, getNow, savedLat, savedLon);
             // Crosshair at the rendered (temporary) location.
             drawDragCrosshair(ctx, L, lat, lon);
@@ -454,8 +455,14 @@ function tick(): void {
     // rate, per-tick display delta, direction) is derived generically from the
     // controller — the shared updater seam, no hand-rolled glue here.
     if (updater) {
-        updater.tick(env, perfNow, getNow, withDisplayTime,
-            timingContextForFrame(timeController));
+        if (dragState === 'dragging') {
+            // During drag, bypass normal scheduling and force all animations
+            // to exactly 0.3s for responsive, uniform transitions.
+            updater.tickFixedDuration(env, perfNow, 300);
+        } else {
+            updater.tick(env, perfNow, getNow, withDisplayTime,
+                timingContextForFrame(timeController));
+        }
         animating = updater.anyAnimating();
     }
 
@@ -898,16 +905,7 @@ function showKeepLocationDialog(): void {
     const overlay = document.getElementById('map-drag-confirm');
     if (!overlay) return;
 
-    // Position the overlay near the earth map.
-    const L = layout;
-    const mapBottom = L.earthCY + L.earthH / 2;
-    const mapCenterX = L.earthCX;
-    // Try below the map; if it won't fit, place above.
-    const belowY = mapBottom + 8;
-    const aboveY = L.earthCY - L.earthH / 2 - 44;  // approximate overlay height
-    const yPos = belowY + 40 < window.innerHeight ? belowY : Math.max(4, aboveY);
-    overlay.style.left = `${mapCenterX}px`;
-    overlay.style.top = `${yPos}px`;
+    // The modal is centered by CSS flexbox — no position calculation needed.
     overlay.style.display = '';
     // Trigger reflow before adding visible class for transition.
     void overlay.offsetHeight;

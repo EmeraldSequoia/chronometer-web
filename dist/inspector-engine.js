@@ -14180,6 +14180,19 @@
       v.linear
     );
   }
+  function updateObsValueFixedDuration(v, env2, perfNow, durationMs) {
+    const newTarget = evalAttr(v.expr, env2);
+    v.nextUpdateTime = 0;
+    v.pendingSweep = null;
+    if (v.discrete) {
+      v.anim.currentValue = newTarget;
+      v.anim.targetValue = newTarget;
+      v.anim.animating = false;
+      return;
+    }
+    const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
+    startAnimationRaw(v.anim, newTarget, perfNow, multiplier, durationMs, v.linear);
+  }
   function snapToTargetAtBoundary(v, env2, perfNow, getNow2, timeDirection) {
     const newTarget = evalAttr(v.expr, env2);
     const nextDisplayMs = computeNextBoundary(v.updateInterval * 1e3, getNow2, timeDirection, env2);
@@ -14338,6 +14351,21 @@
      */
     reset() {
       resetObsValueSchedules(this.values);
+    }
+    /**
+     * Like `tick()`, but forces every value to animate over exactly
+     * `durationMs` of real time — no boundary scheduling, no two-phase
+     * sweep.  Used for drag-to-explore, where pointer events drive
+     * continuous re-evaluation at a fixed animation budget.
+     *
+     * Bypasses the `nextUpdateTime` gate (every value is always updated)
+     * and ignores the `TimingContext` entirely.
+     */
+    tickFixedDuration(env2, perfNow, durationMs) {
+      for (const v of this.values) {
+        updateObsValueFixedDuration(v, env2, perfNow, durationMs);
+      }
+      animateObsValues(this.values, perfNow);
     }
   };
 

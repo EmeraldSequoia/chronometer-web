@@ -469,22 +469,18 @@
 
       /* ── Drag-to-explore confirmation overlay ────────── */
       .map-drag-confirm {
-          position: absolute;
-          transform: translateX(-50%);
-          z-index: 15;
+          position: fixed;
+          inset: 0;
+          z-index: 50;
           display: flex;
           align-items: center;
-          gap: 8px;
-          background: rgba(26, 26, 46, 0.88);
-          backdrop-filter: blur(10px);
-          -webkit-backdrop-filter: blur(10px);
-          border: 1px solid rgba(100, 120, 200, 0.25);
-          border-radius: 12px;
-          padding: 6px 12px;
+          justify-content: center;
+          background: rgba(0, 0, 0, 0.6);
+          backdrop-filter: blur(6px);
+          -webkit-backdrop-filter: blur(6px);
           opacity: 0;
           transition: opacity 0.2s ease;
           pointer-events: none;
-          white-space: nowrap;
       }
 
       .map-drag-confirm.visible {
@@ -492,9 +488,21 @@
           pointer-events: auto;
       }
 
+      .map-drag-confirm-pill {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          background: rgba(30, 30, 50, 0.95);
+          border: 1px solid rgba(100, 120, 200, 0.3);
+          border-radius: 14px;
+          padding: 12px 20px;
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+          white-space: nowrap;
+      }
+
       .map-drag-confirm-text {
-          font-size: 12px;
-          color: rgba(200, 210, 240, 0.85);
+          font-size: 14px;
+          color: rgba(220, 225, 245, 0.9);
           font-weight: 500;
       }
 
@@ -503,9 +511,9 @@
           border: 1px solid rgba(255, 255, 255, 0.15);
           border-radius: 6px;
           color: rgba(255, 255, 255, 0.7);
-          font-size: 11px;
+          font-size: 12px;
           font-weight: 500;
-          padding: 3px 10px;
+          padding: 5px 14px;
           cursor: pointer;
           transition: background 0.15s, border-color 0.15s, color 0.15s;
           font-family: inherit;
@@ -691,11 +699,13 @@
     <template id="disclaimer-template"> {{DISCLAIMER_CONTENT}} </template>
     <template id="help-template"> {{HELP_CONTENT}} </template>
 
-    <!-- Drag-to-explore confirmation overlay (hidden until pointer-up on earth map) -->
+    <!-- Drag-to-explore confirmation modal (hidden until pointer-up on earth map) -->
     <div id="map-drag-confirm" class="map-drag-confirm" style="display:none">
-      <span class="map-drag-confirm-text">Keep this location?</span>
-      <button id="map-drag-keep" class="map-drag-btn keep">Keep</button>
-      <button id="map-drag-revert" class="map-drag-btn revert">Revert</button>
+      <div class="map-drag-confirm-pill">
+        <span class="map-drag-confirm-text">Keep this location?</span>
+        <button id="map-drag-keep" class="map-drag-btn keep">Keep</button>
+        <button id="map-drag-revert" class="map-drag-btn revert">Revert</button>
+      </div>
     </div>
 
     <!-- Minimal overlay controls -->

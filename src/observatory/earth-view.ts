@@ -345,7 +345,7 @@ export function drawDragCrosshair(
     ctx.beginPath();
     ctx.rect(ex, ey, L.earthW, L.earthH);
     ctx.clip();
-    ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+    ctx.strokeStyle = 'rgba(255, 0, 0, 1.0)';
     ctx.lineWidth = 1 / (L.dpr || 1);  // 1 CSS pixel
     ctx.beginPath();
     ctx.moveTo(ex, crossY); ctx.lineTo(ex + L.earthW, crossY);

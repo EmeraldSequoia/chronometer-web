@@ -19458,6 +19458,19 @@
       v.linear
     );
   }
+  function updateObsValueFixedDuration(v, env2, perfNow, durationMs) {
+    const newTarget = evalAttr(v.expr, env2);
+    v.nextUpdateTime = 0;
+    v.pendingSweep = null;
+    if (v.discrete) {
+      v.anim.currentValue = newTarget;
+      v.anim.targetValue = newTarget;
+      v.anim.animating = false;
+      return;
+    }
+    const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
+    startAnimationRaw(v.anim, newTarget, perfNow, multiplier, durationMs, v.linear);
+  }
   function snapToTargetAtBoundary(v, env2, perfNow, getNow2, timeDirection) {
     const newTarget = evalAttr(v.expr, env2);
     const nextDisplayMs = computeNextBoundary(v.updateInterval * 1e3, getNow2, timeDirection, env2);
@@ -19616,6 +19629,21 @@
      */
     reset() {
       resetObsValueSchedules(this.values);
+    }
+    /**
+     * Like `tick()`, but forces every value to animate over exactly
+     * `durationMs` of real time — no boundary scheduling, no two-phase
+     * sweep.  Used for drag-to-explore, where pointer events drive
+     * continuous re-evaluation at a fixed animation budget.
+     *
+     * Bypasses the `nextUpdateTime` gate (every value is always updated)
+     * and ignores the `TimingContext` entirely.
+     */
+    tickFixedDuration(env2, perfNow, durationMs) {
+      for (const v of this.values) {
+        updateObsValueFixedDuration(v, env2, perfNow, durationMs);
+      }
+      animateObsValues(this.values, perfNow);
     }
   };
 
@@ -20641,7 +20669,7 @@
     ctx2.beginPath();
     ctx2.rect(ex, ey, L.earthW, L.earthH);
     ctx2.clip();
-    ctx2.strokeStyle = "rgba(255, 0, 0, 0.5)";
+    ctx2.strokeStyle = "rgba(255, 0, 0, 1.0)";
     ctx2.lineWidth = 1 / (L.dpr || 1);
     ctx2.beginPath();
     ctx2.moveTo(ex, crossY);
@@ -21482,7 +21510,7 @@
       drawMoonView(ctx, L, updater);
     }
     if (updater) {
-      if (dragState === "dragging") {
+      if (dragState === "dragging" || dragState === "confirming") {
         drawEarthView(ctx, L, updater, lat, lon, getNow, savedLat, savedLon);
         drawDragCrosshair(ctx, L, lat, lon);
       } else {
@@ -21508,13 +21536,17 @@
     timeController.beginFrame();
     let animating = false;
     if (updater) {
-      updater.tick(
-        env,
-        perfNow,
-        getNow,
-        withDisplayTime,
-        timingContextForFrame(timeController)
-      );
+      if (dragState === "dragging") {
+        updater.tickFixedDuration(env, perfNow, 300);
+      } else {
+        updater.tick(
+          env,
+          perfNow,
+          getNow,
+          withDisplayTime,
+          timingContextForFrame(timeController)
+        );
+      }
       animating = updater.anyAnimating();
     }
     drawFrame();
@@ -21803,14 +21835,6 @@
   function showKeepLocationDialog() {
     const overlay = document.getElementById("map-drag-confirm");
     if (!overlay) return;
-    const L = layout;
-    const mapBottom = L.earthCY + L.earthH / 2;
-    const mapCenterX = L.earthCX;
-    const belowY = mapBottom + 8;
-    const aboveY = L.earthCY - L.earthH / 2 - 44;
-    const yPos = belowY + 40 < window.innerHeight ? belowY : Math.max(4, aboveY);
-    overlay.style.left = `${mapCenterX}px`;
-    overlay.style.top = `${yPos}px`;
     overlay.style.display = "";
     void overlay.offsetHeight;
     overlay.classList.add("visible");

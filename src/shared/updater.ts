@@ -392,6 +392,36 @@ function settleAtNow(v: ObsValue, env: Environment, perfNow: number): void {
 }
 
 /**
+ * Fixed-duration update: evaluate at the current time and animate to
+ * the target over exactly `durationMs` of real time.  Re-evaluates
+ * every frame (`nextUpdateTime = 0`) since the caller is driving
+ * continuous input (e.g. drag-to-explore pointer events).
+ *
+ * Modeled on `updateObsValueScrub`'s duration-override path but with a
+ * constant budget instead of a computed one.  Discrete values snap
+ * instantly (they represent logical/enum values where interpolation is
+ * meaningless).
+ */
+function updateObsValueFixedDuration(
+    v: ObsValue, env: Environment, perfNow: number, durationMs: number,
+): void {
+    const newTarget = evalAttr(v.expr, env);
+    v.nextUpdateTime = 0;  // re-evaluate every frame
+    v.pendingSweep = null;
+
+    if (v.discrete) {
+        // Discrete values snap — no interpolation.
+        v.anim.currentValue = newTarget;
+        v.anim.targetValue = newTarget;
+        v.anim.animating = false;
+        return;
+    }
+
+    const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
+    startAnimationRaw(v.anim, newTarget, perfNow, multiplier, durationMs, v.linear);
+}
+
+/**
  * Non-eval-ahead continuous value at 1× / reverse: evaluate at the current time
  * and animate to it at `animSpeed`, scheduling the next re-eval at the boundary.
  * (Legacy snap path — Observatory values that don't opt into eval-ahead.)
@@ -605,4 +635,20 @@ export class Updater<K extends string = string> {
      * "react to transitions" without computing how the controller affects values.
      */
     reset(): void { resetObsValueSchedules(this.values); }
+
+    /**
+     * Like `tick()`, but forces every value to animate over exactly
+     * `durationMs` of real time — no boundary scheduling, no two-phase
+     * sweep.  Used for drag-to-explore, where pointer events drive
+     * continuous re-evaluation at a fixed animation budget.
+     *
+     * Bypasses the `nextUpdateTime` gate (every value is always updated)
+     * and ignores the `TimingContext` entirely.
+     */
+    tickFixedDuration(env: Environment, perfNow: number, durationMs: number): void {
+        for (const v of this.values) {
+            updateObsValueFixedDuration(v, env, perfNow, durationMs);
+        }
+        animateObsValues(this.values, perfNow);
+    }
 }
