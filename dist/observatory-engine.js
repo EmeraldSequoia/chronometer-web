@@ -20475,7 +20475,40 @@
     lastMaskWidth = w;
     lastMaskHeight = h;
   }
-  function drawEarthView(ctx2, L, u, observerLat, observerLon, getNow2) {
+  function isInsideEarthMap(cssX, cssY, L) {
+    const ex = L.earthCX - L.earthW / 2;
+    const ey = L.earthCY - L.earthH / 2;
+    return cssX >= ex && cssX <= ex + L.earthW && cssY >= ey && cssY <= ey + L.earthH;
+  }
+  function earthPixelToLatLon(cssX, cssY, L) {
+    const ex = L.earthCX - L.earthW / 2;
+    const ey = L.earthCY - L.earthH / 2;
+    const lon2 = Math.max(-180, Math.min(180, (cssX - ex) / L.earthW * 360 - 180));
+    const lat2 = Math.max(-90, Math.min(90, 90 - (cssY - ey) / L.earthH * 180));
+    return { lat: lat2, lon: lon2 };
+  }
+  function drawDragCrosshair(ctx2, L, renderLat, renderLon) {
+    const ex = L.earthCX - L.earthW / 2;
+    const ey = L.earthCY - L.earthH / 2;
+    const crossX = ex + (renderLon + 180) / 360 * L.earthW;
+    const crossY = ey + (90 - renderLat) / 180 * L.earthH;
+    ctx2.save();
+    ctx2.beginPath();
+    ctx2.rect(ex, ey, L.earthW, L.earthH);
+    ctx2.clip();
+    ctx2.strokeStyle = "rgba(255, 0, 0, 0.5)";
+    ctx2.lineWidth = 1 / (L.dpr || 1);
+    ctx2.beginPath();
+    ctx2.moveTo(ex, crossY);
+    ctx2.lineTo(ex + L.earthW, crossY);
+    ctx2.stroke();
+    ctx2.beginPath();
+    ctx2.moveTo(crossX, ey);
+    ctx2.lineTo(crossX, ey + L.earthH);
+    ctx2.stroke();
+    ctx2.restore();
+  }
+  function drawEarthView(ctx2, L, u, observerLat, observerLon, getNow2, dotOverrideLat, dotOverrideLon) {
     if (!imagesReady || !tableReady) return;
     const sslat = u.get("earthSslat").currentValue;
     const sslng = u.get("earthSslng").currentValue;
@@ -20525,8 +20558,10 @@
       dayMaskCtx.globalCompositeOperation = "source-over";
     }
     ctx2.drawImage(dayMaskCanvas, ex, ey, L.earthW, L.earthH);
-    const dotX = ex + (observerLon + 180) / 360 * L.earthW;
-    const dotY = ey + (90 - observerLat) / 180 * L.earthH;
+    const dotLat = dotOverrideLat ?? observerLat;
+    const dotLon = dotOverrideLon ?? observerLon;
+    const dotX = ex + (dotLon + 180) / 360 * L.earthW;
+    const dotY = ey + (90 - dotLat) / 180 * L.earthH;
     ctx2.fillStyle = "#ff3333";
     ctx2.beginPath();
     const dotR = Math.max(2, L.earthW * 8e-3);
@@ -21174,6 +21209,13 @@
   var timeUI = null;
   var SELECTABLE_PLANETS = /* @__PURE__ */ new Set([0, 1, 2, 3, 5, 6, 7]);
   var selectedPlanet = urlState.op !== null && SELECTABLE_PLANETS.has(urlState.op) ? urlState.op : 0;
+  var dragState = "idle";
+  var savedLat = 0;
+  var savedLon = 0;
+  var savedTz;
+  var savedCity = null;
+  var dragAxisLock = "none";
+  var suppressNextClick = false;
   function initCanvas() {
     canvas = document.getElementById("observatory-canvas");
     const context = canvas.getContext("2d");
@@ -21183,6 +21225,10 @@
     resizeCanvas();
   }
   function onCanvasClick(ev) {
+    if (suppressNextClick) {
+      suppressNextClick = false;
+      return;
+    }
     if (!layout) return;
     const rect = canvas.getBoundingClientRect();
     const x = ev.clientX - rect.left;
@@ -21291,7 +21337,12 @@
       drawMoonView(ctx, L, updater);
     }
     if (updater) {
-      drawEarthView(ctx, L, updater, lat, lon, getNow);
+      if (dragState === "dragging") {
+        drawEarthView(ctx, L, updater, lat, lon, getNow, savedLat, savedLon);
+        drawDragCrosshair(ctx, L, lat, lon);
+      } else {
+        drawEarthView(ctx, L, updater, lat, lon, getNow);
+      }
     }
     drawDateView(ctx, L, now, locationTimezone);
     ctx.restore();
@@ -21537,6 +21588,140 @@
     updateHighlight();
     positionNoonIcon();
   }
+  function applyTemporaryLocation(newLat, newLon) {
+    lat = newLat;
+    lon = newLon;
+    locationTimezone = resolveTimezone(lat, lon, null);
+    rebuildEnv();
+    updater?.reset();
+    scheduleFrame();
+  }
+  function setupMapDrag() {
+    canvas.addEventListener("pointerdown", (ev) => {
+      if (!layout) return;
+      if (dragState !== "idle") return;
+      const rect = canvas.getBoundingClientRect();
+      const x = ev.clientX - rect.left;
+      const y = ev.clientY - rect.top;
+      if (!isInsideEarthMap(x, y, layout)) return;
+      savedLat = lat;
+      savedLon = lon;
+      savedTz = locationTimezone;
+      savedCity = getState().city;
+      const { lat: newLat, lon: newLon } = computeDragLatLon(x, y, ev.shiftKey);
+      applyTemporaryLocation(newLat, newLon);
+      dragState = "dragging";
+      canvas.setPointerCapture(ev.pointerId);
+      ev.preventDefault();
+    });
+    canvas.addEventListener("pointermove", (ev) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = ev.clientX - rect.left;
+      const y = ev.clientY - rect.top;
+      if (dragState === "dragging") {
+        if (isInsideEarthMap(x, y, layout)) {
+          const { lat: newLat, lon: newLon } = computeDragLatLon(x, y, ev.shiftKey);
+          applyTemporaryLocation(newLat, newLon);
+        }
+        return;
+      }
+      if (dragState === "idle" && layout) {
+        canvas.style.cursor = isInsideEarthMap(x, y, layout) ? "crosshair" : "";
+      }
+    });
+    canvas.addEventListener("pointerup", (ev) => {
+      if (dragState !== "dragging") return;
+      canvas.releasePointerCapture(ev.pointerId);
+      suppressNextClick = true;
+      locationTimezone = resolveTimezone(lat, lon, null);
+      rebuildEnv();
+      scheduleFrame();
+      dragState = "confirming";
+      showKeepLocationDialog();
+    });
+  }
+  function computeDragLatLon(cssX, cssY, shiftKey) {
+    const raw = earthPixelToLatLon(cssX, cssY, layout);
+    if (!shiftKey) {
+      dragAxisLock = "none";
+      return raw;
+    }
+    const dLat = Math.abs(raw.lat - savedLat);
+    const dLon = Math.abs(raw.lon - savedLon);
+    dragAxisLock = dLat >= dLon ? "lat" : "lon";
+    if (dragAxisLock === "lat") {
+      return { lat: raw.lat, lon: savedLon };
+    } else {
+      return { lat: savedLat, lon: raw.lon };
+    }
+  }
+  function showKeepLocationDialog() {
+    const overlay = document.getElementById("map-drag-confirm");
+    if (!overlay) return;
+    const L = layout;
+    const mapBottom = L.earthCY + L.earthH / 2;
+    const mapCenterX = L.earthCX;
+    const belowY = mapBottom + 8;
+    const aboveY = L.earthCY - L.earthH / 2 - 44;
+    const yPos = belowY + 40 < window.innerHeight ? belowY : Math.max(4, aboveY);
+    overlay.style.left = `${mapCenterX}px`;
+    overlay.style.top = `${yPos}px`;
+    overlay.style.display = "";
+    void overlay.offsetHeight;
+    overlay.classList.add("visible");
+    const onKey = (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        dismissKeepDialog(true);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        dismissKeepDialog(false);
+      }
+    };
+    document.addEventListener("keydown", onKey, { capture: true });
+    overlay._keyHandler = onKey;
+    const keepBtn = document.getElementById("map-drag-keep");
+    const revertBtn = document.getElementById("map-drag-revert");
+    if (keepBtn && !keepBtn.dataset.bound) {
+      keepBtn.dataset.bound = "1";
+      keepBtn.addEventListener("click", () => dismissKeepDialog(true));
+    }
+    if (revertBtn && !revertBtn.dataset.bound) {
+      revertBtn.dataset.bound = "1";
+      revertBtn.addEventListener("click", () => dismissKeepDialog(false));
+    }
+  }
+  function dismissKeepDialog(keep) {
+    const overlay = document.getElementById("map-drag-confirm");
+    if (overlay) {
+      overlay.classList.remove("visible");
+      overlay.style.display = "none";
+      const handler = overlay._keyHandler;
+      if (handler) {
+        document.removeEventListener("keydown", handler, { capture: true });
+        overlay._keyHandler = null;
+      }
+    }
+    if (keep) {
+      setState({ lat, lon, city: null, tz: locationTimezone || null });
+      updateLocationDisplay();
+      timeUI?.updateTimezoneDisplay();
+    } else {
+      lat = savedLat;
+      lon = savedLon;
+      locationTimezone = savedTz;
+      rebuildEnv();
+      updater?.reset();
+      scheduleFrame();
+      if (savedCity !== getState().city) {
+        setState({ city: savedCity });
+      }
+      updateLocationDisplay();
+      timeUI?.updateTimezoneDisplay();
+    }
+    dragState = "idle";
+    canvas.style.cursor = "";
+  }
   function init() {
     document.documentElement.style.setProperty("--obs-footer-h", `${FOOTER_H}px`);
     document.documentElement.style.setProperty("--obs-header-h", `${HEADER_H}px`);
@@ -21545,6 +21730,7 @@
     ro.observe(document.documentElement);
     setupLocationDialog();
     setupNoonToggle();
+    setupMapDrag();
     updateLocationDisplay();
     initHelpPopover({ generalHelpUrl: "help.html?embed=1&app=observatory" });
     initShareButton({ getState });

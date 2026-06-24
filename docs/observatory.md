@@ -761,3 +761,63 @@ Y-up CTM). The ring markers replicate the iOS layer transform
 (`rotate(firstAngle) → translate(0, radius) → rotate(glyph)`) as
 `rotate(−firstAngle) → translate(0, −radius) → rotate(−glyph)`, placing each
 marker at `firstAngle` CCW from the top — the same screen position as iOS.
+
+## Drag-to-Explore (Earth Map)
+
+The earth map supports interactive location exploration via pointer events.
+The user can click and drag on the map to temporarily switch the Observatory
+display to any location, with all dials, rings, and hands animating in real time.
+
+### State machine
+
+```
+idle → dragging → confirming → idle
+```
+
+- **idle**: normal rendering; pointer-move over the earth map shows a `crosshair`
+  cursor as a hint.
+- **dragging**: active drag in progress. `pointerdown` inside the earth map
+  rectangle (hit-tested via `isInsideEarthMap()`) saves the current
+  `lat`/`lon`/`tz`/`city`, then on every `pointermove` inside the map:
+  1. Convert CSS-pixel position to lat/lon via `earthPixelToLatLon()` (inverse
+     Mercator, clamped to [-90,90] / [-180,180]).
+  2. Apply shift-key axis lock: if Shift is held, constrain to whichever of
+     latitude or longitude has the larger absolute delta from the saved position.
+     Re-evaluated per move (no sticky axis).
+  3. Call `applyTemporaryLocation(lat, lon)` → `resolveTimezone()` → `rebuildEnv()`
+     → `updater.reset()` → `scheduleFrame()`. No `setState()` (no persistence).
+  4. The observer dot stays at the saved (home) location (via `dotOverrideLat`/
+     `dotOverrideLon` on `drawEarthView`). A 1px red crosshair at 50% opacity
+     (`drawDragCrosshair`) marks the rendered (temporary) location.
+- **confirming**: pointer released. A compact "Keep this location?" overlay
+  appears near the map. Enter or clicking Keep persists; Escape or clicking
+  Revert restores the saved location.
+
+### Coordinate conversion
+
+The earth map uses equirectangular (plate carrée) projection:
+
+```
+Forward:  dotX = ex + (lon + 180) / 360 × earthW
+          dotY = ey + (90 - lat) / 180 × earthH
+
+Inverse:  lon = (cssX - ex) / earthW × 360 - 180
+          lat = 90 - (cssY - ey) / earthH × 180
+```
+
+Both directions are implemented in `earth-view.ts`.
+
+### Pointer capture
+
+`canvas.setPointerCapture(ev.pointerId)` is called on `pointerdown` so that
+`pointermove` and `pointerup` events continue to fire on the canvas even if the
+pointer leaves it. This ensures the drag isn't silently dropped. Moves outside
+the earth map rect are ignored (the location stays at the last in-map position).
+
+### Performance
+
+`resolveTimezone()` calls `findClosestCity()` which scans ~167K cities. This
+runs on every `pointermove` during drag (no throttling) to keep the displayed
+timezone fully in sync with lat/lon. Empirical testing shows this adds < 5 ms
+per event. If performance becomes an issue, throttling to every N ms is a
+straightforward follow-up.

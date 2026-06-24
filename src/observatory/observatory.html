@@ -464,6 +464,68 @@
 
       {{HELP_SUBVIEW_CSS}}
 
+      /* ── Drag-to-explore confirmation overlay ────────── */
+      .map-drag-confirm {
+          position: absolute;
+          transform: translateX(-50%);
+          z-index: 15;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: rgba(26, 26, 46, 0.88);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          border: 1px solid rgba(100, 120, 200, 0.25);
+          border-radius: 12px;
+          padding: 6px 12px;
+          opacity: 0;
+          transition: opacity 0.2s ease;
+          pointer-events: none;
+          white-space: nowrap;
+      }
+
+      .map-drag-confirm.visible {
+          opacity: 1;
+          pointer-events: auto;
+      }
+
+      .map-drag-confirm-text {
+          font-size: 12px;
+          color: rgba(200, 210, 240, 0.85);
+          font-weight: 500;
+      }
+
+      .map-drag-btn {
+          background: rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(255, 255, 255, 0.15);
+          border-radius: 6px;
+          color: rgba(255, 255, 255, 0.7);
+          font-size: 11px;
+          font-weight: 500;
+          padding: 3px 10px;
+          cursor: pointer;
+          transition: background 0.15s, border-color 0.15s, color 0.15s;
+          font-family: inherit;
+      }
+
+      .map-drag-btn:hover {
+          background: rgba(255, 255, 255, 0.16);
+          border-color: rgba(255, 255, 255, 0.3);
+          color: #fff;
+      }
+
+      .map-drag-btn.keep {
+          background: rgba(100, 160, 255, 0.15);
+          border-color: rgba(100, 160, 255, 0.35);
+          color: #8af;
+      }
+
+      .map-drag-btn.keep:hover {
+          background: rgba(100, 160, 255, 0.3);
+          border-color: rgba(100, 160, 255, 0.5);
+          color: #bdf;
+      }
+
       /* ── Location dialog injection ─────────────────── */
       {{LOCATION_CSS}}
 
@@ -625,6 +687,13 @@
     <template id="support-template"> {{SUPPORT_CONTENT}} </template>
     <template id="disclaimer-template"> {{DISCLAIMER_CONTENT}} </template>
     <template id="help-template"> {{HELP_CONTENT}} </template>
+
+    <!-- Drag-to-explore confirmation overlay (hidden until pointer-up on earth map) -->
+    <div id="map-drag-confirm" class="map-drag-confirm" style="display:none">
+      <span class="map-drag-confirm-text">Keep this location?</span>
+      <button id="map-drag-keep" class="map-drag-btn keep">Keep</button>
+      <button id="map-drag-revert" class="map-drag-btn revert">Revert</button>
+    </div>
 
     <!-- Minimal overlay controls -->
     <div id="observatory-controls">

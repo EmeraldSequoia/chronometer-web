@@ -297,6 +297,66 @@ function regenerateNightMask(sslat: number, w: number, h: number): void {
 }
 
 // ============================================================================
+// Hit testing and coordinate conversion
+// ============================================================================
+
+/** Test whether CSS-pixel coordinates fall inside the earth map rectangle. */
+export function isInsideEarthMap(cssX: number, cssY: number, L: LayoutParams): boolean {
+    const ex = L.earthCX - L.earthW / 2;
+    const ey = L.earthCY - L.earthH / 2;
+    return cssX >= ex && cssX <= ex + L.earthW
+        && cssY >= ey && cssY <= ey + L.earthH;
+}
+
+/**
+ * Convert CSS-pixel coordinates on the canvas to geographic lat/lon.
+ * Inverse of the observer-dot Mercator formula used in drawEarthView.
+ * Clamped to valid ranges.
+ */
+export function earthPixelToLatLon(
+    cssX: number, cssY: number, L: LayoutParams,
+): { lat: number; lon: number } {
+    const ex = L.earthCX - L.earthW / 2;
+    const ey = L.earthCY - L.earthH / 2;
+    const lon = Math.max(-180, Math.min(180, (cssX - ex) / L.earthW * 360 - 180));
+    const lat = Math.max(-90, Math.min(90, 90 - (cssY - ey) / L.earthH * 180));
+    return { lat, lon };
+}
+
+// ============================================================================
+// Drag crosshair
+// ============================================================================
+
+/**
+ * Draw a 1px crosshair at the given lat/lon on the earth map.
+ * Used during drag-to-explore to show the rendered (temporary) location.
+ * Clipped to the earth map rectangle.
+ */
+export function drawDragCrosshair(
+    ctx: CanvasRenderingContext2D, L: LayoutParams,
+    renderLat: number, renderLon: number,
+): void {
+    const ex = L.earthCX - L.earthW / 2;
+    const ey = L.earthCY - L.earthH / 2;
+    // Forward Mercator (same as observer dot)
+    const crossX = ex + (renderLon + 180) / 360 * L.earthW;
+    const crossY = ey + (90 - renderLat) / 180 * L.earthH;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(ex, ey, L.earthW, L.earthH);
+    ctx.clip();
+    ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+    ctx.lineWidth = 1 / (L.dpr || 1);  // 1 CSS pixel
+    ctx.beginPath();
+    ctx.moveTo(ex, crossY); ctx.lineTo(ex + L.earthW, crossY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(crossX, ey); ctx.lineTo(crossX, ey + L.earthH);
+    ctx.stroke();
+    ctx.restore();
+}
+
+// ============================================================================
 // Drawing
 // ============================================================================
 
@@ -306,12 +366,14 @@ function regenerateNightMask(sslat: number, w: number, h: number): void {
  * Called from observatory-entry.ts drawFrame().
  * Reads animated values from the Updater for smooth scrubbing.
  *
- * @param ctx         Main canvas 2D context
- * @param L           Layout params (earthCX, earthCY, earthW, earthH, dpr)
- * @param u           Observatory animated value updater
- * @param observerLat Observer latitude in degrees (north positive)
- * @param observerLon Observer longitude in degrees (west negative)
- * @param getNow      Time source (for month selection)
+ * @param ctx             Main canvas 2D context
+ * @param L               Layout params (earthCX, earthCY, earthW, earthH, dpr)
+ * @param u               Observatory animated value updater
+ * @param observerLat     Observer latitude in degrees (north positive)
+ * @param observerLon     Observer longitude in degrees (west negative)
+ * @param getNow          Time source (for month selection)
+ * @param dotOverrideLat  If provided, draw the observer dot at this lat instead of observerLat
+ * @param dotOverrideLon  If provided, draw the observer dot at this lon instead of observerLon
  */
 export function drawEarthView(
     ctx: CanvasRenderingContext2D,
@@ -320,6 +382,8 @@ export function drawEarthView(
     observerLat: number,
     observerLon: number,
     getNow: () => Date,
+    dotOverrideLat?: number,
+    dotOverrideLon?: number,
 ): void {
     if (!imagesReady || !tableReady) return;
 
@@ -418,9 +482,12 @@ export function drawEarthView(
     ctx.drawImage(dayMaskCanvas!, ex, ey, L.earthW, L.earthH);
 
     // ── 4. Observer dot ──
-    // Map observer lat/lon to pixel coordinates
-    const dotX = ex + (observerLon + 180) / 360 * L.earthW;
-    const dotY = ey + (90 - observerLat) / 180 * L.earthH;
+    // During drag-to-explore the dot stays at the saved (home) location,
+    // passed via dotOverrideLat/Lon; otherwise it tracks the observer.
+    const dotLat = dotOverrideLat ?? observerLat;
+    const dotLon = dotOverrideLon ?? observerLon;
+    const dotX = ex + (dotLon + 180) / 360 * L.earthW;
+    const dotY = ey + (90 - dotLat) / 180 * L.earthH;
 
     ctx.fillStyle = '#ff3333';
     ctx.beginPath();

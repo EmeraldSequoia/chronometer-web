@@ -30,7 +30,7 @@ import { getMainDialCache, invalidateMainDialCache, waitForImages } from './main
 import { drawPlanetHands, waitForPlanetImages } from './planet-hands.js';
 import { drawRiseSetRings, invalidateRingCache } from './ring-view.js';
 import { drawClockHands, drawSubdialHands } from './hand-views.js';
-import { initEarthView, drawEarthView } from './earth-view.js';
+import { initEarthView, drawEarthView, isInsideEarthMap, earthPixelToLatLon, drawDragCrosshair } from './earth-view.js';
 import { initMoonView, drawMoonView } from './moon-view.js';
 import { getPeripheralDialsCache, invalidatePeripheralDialsCache } from './peripheral-dials.js';
 import { drawPeripheralHands, cycleSelectablePlanet } from './peripheral-hands.js';
@@ -158,6 +158,22 @@ let selectedPlanet: number =
     urlState.op !== null && SELECTABLE_PLANETS.has(urlState.op) ? urlState.op : 0;
 
 // ============================================================================
+// Drag-to-explore state
+// ============================================================================
+
+/** Drag-to-explore state machine: idle → dragging → confirming → idle. */
+let dragState: 'idle' | 'dragging' | 'confirming' = 'idle';
+/** Saved location before drag started (restored on Revert). */
+let savedLat = 0;
+let savedLon = 0;
+let savedTz: string | undefined;
+let savedCity: string | null = null;
+/** Current shift-key axis constraint during drag. */
+let dragAxisLock: 'none' | 'lat' | 'lon' = 'none';
+/** Flag to suppress the synthetic click event after a drag. */
+let suppressNextClick = false;
+
+// ============================================================================
 // Canvas setup
 // ============================================================================
 
@@ -176,6 +192,8 @@ function initCanvas(): void {
 
 /** Cycle the alt/az body when the user clicks within either dial. */
 function onCanvasClick(ev: MouseEvent): void {
+    // Suppress the synthetic click that fires after a drag-to-explore pointerup.
+    if (suppressNextClick) { suppressNextClick = false; return; }
     if (!layout) return;
     const rect = canvas.getBoundingClientRect();
     const x = ev.clientX - rect.left;
@@ -388,7 +406,14 @@ function drawFrame(): void {
 
     // Earth map (Phase 5: day/night terminator)
     if (updater) {
-        drawEarthView(ctx, L, updater, lat, lon, getNow);
+        // During drag, pin the observer dot at the saved (home) location.
+        if (dragState === 'dragging') {
+            drawEarthView(ctx, L, updater, lat, lon, getNow, savedLat, savedLon);
+            // Crosshair at the rendered (temporary) location.
+            drawDragCrosshair(ctx, L, lat, lon);
+        } else {
+            drawEarthView(ctx, L, updater, lat, lon, getNow);
+        }
     }
 
     // Date display (Phase 7)
@@ -756,6 +781,198 @@ function setupNoonToggle(): void {
 }
 
 // ============================================================================
+// Drag-to-explore (earth map)
+// ============================================================================
+
+/**
+ * Apply a temporary location without persisting to LocalStorage.
+ * Rebuilds the astronomy environment and resets all ObsValue schedules
+ * so the display immediately reflects the new position.
+ */
+function applyTemporaryLocation(newLat: number, newLon: number): void {
+    lat = newLat;
+    lon = newLon;
+    locationTimezone = resolveTimezone(lat, lon, null);
+    rebuildEnv();
+    updater?.reset();
+    scheduleFrame();
+}
+
+/**
+ * Set up pointer event listeners on the canvas for drag-to-explore.
+ *
+ * Press on the earth map to immediately switch the display to that location;
+ * drag to explore in real time; on release, confirm (Keep) or revert.
+ *
+ * Shift-key axis lock: hold Shift to constrain to latitude-only or
+ * longitude-only change from the saved position (whichever axis has the
+ * larger delta). The lock is re-evaluated on every move — no sticky axis.
+ */
+function setupMapDrag(): void {
+    canvas.addEventListener('pointerdown', (ev: PointerEvent) => {
+        if (!layout) return;
+        if (dragState !== 'idle') return;
+        const rect = canvas.getBoundingClientRect();
+        const x = ev.clientX - rect.left;
+        const y = ev.clientY - rect.top;
+        if (!isInsideEarthMap(x, y, layout)) return;
+
+        // Save the current location so we can revert.
+        savedLat = lat;
+        savedLon = lon;
+        savedTz = locationTimezone;
+        savedCity = getState().city;
+
+        // Compute the clicked lat/lon and apply immediately.
+        const { lat: newLat, lon: newLon } = computeDragLatLon(x, y, ev.shiftKey);
+        applyTemporaryLocation(newLat, newLon);
+
+        dragState = 'dragging';
+        canvas.setPointerCapture(ev.pointerId);
+        ev.preventDefault();  // prevent text selection / default touch behavior
+    });
+
+    canvas.addEventListener('pointermove', (ev: PointerEvent) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = ev.clientX - rect.left;
+        const y = ev.clientY - rect.top;
+
+        if (dragState === 'dragging') {
+            // Only update the location if the pointer is inside the map.
+            if (isInsideEarthMap(x, y, layout)) {
+                const { lat: newLat, lon: newLon } = computeDragLatLon(x, y, ev.shiftKey);
+                applyTemporaryLocation(newLat, newLon);
+            }
+            return;
+        }
+
+        // Cursor feedback: show crosshair when hovering over the earth map.
+        if (dragState === 'idle' && layout) {
+            canvas.style.cursor = isInsideEarthMap(x, y, layout) ? 'crosshair' : '';
+        }
+    });
+
+    canvas.addEventListener('pointerup', (ev: PointerEvent) => {
+        if (dragState !== 'dragging') return;
+        canvas.releasePointerCapture(ev.pointerId);
+        suppressNextClick = true;  // suppress the synthetic click after pointerup
+
+        // Final timezone resolution at the release position.
+        locationTimezone = resolveTimezone(lat, lon, null);
+        rebuildEnv();
+        scheduleFrame();
+
+        dragState = 'confirming';
+        showKeepLocationDialog();
+    });
+}
+
+/**
+ * Compute the drag target lat/lon, applying shift-key axis lock.
+ * When Shift is held, constrains to whichever axis (lat or lon) has the
+ * larger absolute delta from the saved position.
+ */
+function computeDragLatLon(
+    cssX: number, cssY: number, shiftKey: boolean,
+): { lat: number; lon: number } {
+    const raw = earthPixelToLatLon(cssX, cssY, layout);
+    if (!shiftKey) {
+        dragAxisLock = 'none';
+        return raw;
+    }
+    // Choose axis based on the larger delta from saved position.
+    const dLat = Math.abs(raw.lat - savedLat);
+    const dLon = Math.abs(raw.lon - savedLon);
+    dragAxisLock = dLat >= dLon ? 'lat' : 'lon';
+    if (dragAxisLock === 'lat') {
+        return { lat: raw.lat, lon: savedLon };
+    } else {
+        return { lat: savedLat, lon: raw.lon };
+    }
+}
+
+// ---- Confirmation overlay ----
+
+function showKeepLocationDialog(): void {
+    const overlay = document.getElementById('map-drag-confirm');
+    if (!overlay) return;
+
+    // Position the overlay near the earth map.
+    const L = layout;
+    const mapBottom = L.earthCY + L.earthH / 2;
+    const mapCenterX = L.earthCX;
+    // Try below the map; if it won't fit, place above.
+    const belowY = mapBottom + 8;
+    const aboveY = L.earthCY - L.earthH / 2 - 44;  // approximate overlay height
+    const yPos = belowY + 40 < window.innerHeight ? belowY : Math.max(4, aboveY);
+    overlay.style.left = `${mapCenterX}px`;
+    overlay.style.top = `${yPos}px`;
+    overlay.style.display = '';
+    // Trigger reflow before adding visible class for transition.
+    void overlay.offsetHeight;
+    overlay.classList.add('visible');
+
+    // Keyboard handler: Enter = Keep, Escape = Revert.
+    const onKey = (e: KeyboardEvent) => {
+        if (e.key === 'Enter') { e.preventDefault(); dismissKeepDialog(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); dismissKeepDialog(false); }
+    };
+    document.addEventListener('keydown', onKey, { capture: true });
+    // Store the handler so dismissKeepDialog can remove it.
+    (overlay as any)._keyHandler = onKey;
+
+    // Wire buttons (idempotent — only bind once via the data attribute guard).
+    const keepBtn = document.getElementById('map-drag-keep');
+    const revertBtn = document.getElementById('map-drag-revert');
+    if (keepBtn && !keepBtn.dataset.bound) {
+        keepBtn.dataset.bound = '1';
+        keepBtn.addEventListener('click', () => dismissKeepDialog(true));
+    }
+    if (revertBtn && !revertBtn.dataset.bound) {
+        revertBtn.dataset.bound = '1';
+        revertBtn.addEventListener('click', () => dismissKeepDialog(false));
+    }
+}
+
+function dismissKeepDialog(keep: boolean): void {
+    const overlay = document.getElementById('map-drag-confirm');
+    if (overlay) {
+        overlay.classList.remove('visible');
+        overlay.style.display = 'none';
+        const handler = (overlay as any)._keyHandler;
+        if (handler) {
+            document.removeEventListener('keydown', handler, { capture: true } as EventListenerOptions);
+            (overlay as any)._keyHandler = null;
+        }
+    }
+
+    if (keep) {
+        // Persist the new location.
+        setState({ lat, lon, city: null, tz: locationTimezone || null });
+        updateLocationDisplay();
+        timeUI?.updateTimezoneDisplay();
+    } else {
+        // Revert to the saved location.
+        lat = savedLat;
+        lon = savedLon;
+        locationTimezone = savedTz;
+        rebuildEnv();
+        updater?.reset();
+        scheduleFrame();
+        // Restore the city name (setState may have cleared it on a previous Keep;
+        // if the user never kept, savedCity is still correct).
+        if (savedCity !== getState().city) {
+            setState({ city: savedCity });
+        }
+        updateLocationDisplay();
+        timeUI?.updateTimezoneDisplay();
+    }
+
+    dragState = 'idle';
+    canvas.style.cursor = '';
+}
+
+// ============================================================================
 // Initialization
 // ============================================================================
 
@@ -769,6 +986,7 @@ function init(): void {
     ro.observe(document.documentElement);
     setupLocationDialog();
     setupNoonToggle();
+    setupMapDrag();
     updateLocationDisplay();
 
     // Help ("ℹ") popover — shared wiring; the General Help iframe drops the

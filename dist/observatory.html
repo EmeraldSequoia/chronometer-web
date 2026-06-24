@@ -531,6 +531,68 @@
 }
 
 
+      /* ── Drag-to-explore confirmation overlay ────────── */
+      .map-drag-confirm {
+          position: absolute;
+          transform: translateX(-50%);
+          z-index: 15;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: rgba(26, 26, 46, 0.88);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          border: 1px solid rgba(100, 120, 200, 0.25);
+          border-radius: 12px;
+          padding: 6px 12px;
+          opacity: 0;
+          transition: opacity 0.2s ease;
+          pointer-events: none;
+          white-space: nowrap;
+      }
+
+      .map-drag-confirm.visible {
+          opacity: 1;
+          pointer-events: auto;
+      }
+
+      .map-drag-confirm-text {
+          font-size: 12px;
+          color: rgba(200, 210, 240, 0.85);
+          font-weight: 500;
+      }
+
+      .map-drag-btn {
+          background: rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(255, 255, 255, 0.15);
+          border-radius: 6px;
+          color: rgba(255, 255, 255, 0.7);
+          font-size: 11px;
+          font-weight: 500;
+          padding: 3px 10px;
+          cursor: pointer;
+          transition: background 0.15s, border-color 0.15s, color 0.15s;
+          font-family: inherit;
+      }
+
+      .map-drag-btn:hover {
+          background: rgba(255, 255, 255, 0.16);
+          border-color: rgba(255, 255, 255, 0.3);
+          color: #fff;
+      }
+
+      .map-drag-btn.keep {
+          background: rgba(100, 160, 255, 0.15);
+          border-color: rgba(100, 160, 255, 0.35);
+          color: #8af;
+      }
+
+      .map-drag-btn.keep:hover {
+          background: rgba(100, 160, 255, 0.3);
+          border-color: rgba(100, 160, 255, 0.5);
+          color: #bdf;
+      }
+
       /* ── Location dialog injection ─────────────────── */
               /* Location prompt overlay */
         #location-prompt {
@@ -1541,7 +1603,7 @@
             <div id="help-content">
               <!-- Populated from help-template on first info click -->
             </div>
-            <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v1.4.284</div>
+            <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v1.4.285</div>
           </div>
 
           <div id="info-sub-view">
@@ -1813,6 +1875,14 @@ with Chronometer.
   <a href="#setting-the-location">Setting the location</a>, below). It is
   important that this be the location for which you want the astronomical
   information to be shown.
+</p>
+<p>
+  You can click and drag on the Earth map to explore how the display changes at
+  different locations. While dragging, a red crosshair marks the explored
+  location and the red dot stays at your home location. Hold the <b>Shift</b>
+  key while dragging to constrain movement to latitude only or longitude only
+  (whichever direction you drag more). When you release, a prompt asks whether
+  to keep the new location or revert to the original.
 </p>
 <p>
   <a href="#setting-the-time">Animate</a> at one hour per step to see the
@@ -2089,7 +2159,19 @@ with Chronometer.
   dot on the Earth map to ensure the values are correct. The timezone is set
   automatically to match the selected location.
 </p>
+<p>
+  You can also drag directly on the Earth map to preview any location — all
+  the dials and rings update in real time as you drag. On release you'll be
+  asked to keep the new location or revert.
+</p>
  </template>
+
+    <!-- Drag-to-explore confirmation overlay (hidden until pointer-up on earth map) -->
+    <div id="map-drag-confirm" class="map-drag-confirm" style="display:none">
+      <span class="map-drag-confirm-text">Keep this location?</span>
+      <button id="map-drag-keep" class="map-drag-btn keep">Keep</button>
+      <button id="map-drag-revert" class="map-drag-btn revert">Revert</button>
+    </div>
 
     <!-- Minimal overlay controls -->
     <div id="observatory-controls">
