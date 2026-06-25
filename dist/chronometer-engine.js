@@ -11237,6 +11237,44 @@
     const omegaDeg = 125.0445479 - 1934.1362891 * T + 20754e-7 * T * T + T * T * T / 467441 - T * T * T * T / 60616e3;
     return fmod(omegaDeg * Math.PI / 180, TWO_PI3);
   }
+  var MEAN_TROPICAL_YEAR_SECONDS = 365.2421897 * 86400;
+  function sunApparentLongitudeAt(dateInterval) {
+    const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(dateInterval, null);
+    return WB_sunLongitudeApparent(julianCenturiesSince2000Epoch / 100);
+  }
+  function solarLongitudeCrossingTime(targetLongitudeRad, approxDateInterval, _cache) {
+    const meanMotion = TWO_PI3 / MEAN_TROPICAL_YEAR_SECONDS;
+    let di = approxDateInterval;
+    for (let iter = 0; iter < 12; iter++) {
+      const lon = sunApparentLongitudeAt(di);
+      let diff = (lon - targetLongitudeRad) % TWO_PI3;
+      if (diff > Math.PI) diff -= TWO_PI3;
+      if (diff < -Math.PI) diff += TWO_PI3;
+      const step = diff / meanMotion;
+      di -= step;
+      if (Math.abs(step) < 0.5) break;
+    }
+    return di;
+  }
+  function vernalEquinoxOnOrBefore(dateInterval, cache) {
+    let ve = solarLongitudeCrossingTime(0, dateInterval, cache);
+    if (ve > dateInterval) {
+      ve = solarLongitudeCrossingTime(0, dateInterval - MEAN_TROPICAL_YEAR_SECONDS, cache);
+    }
+    return ve;
+  }
+  function vernalEquinoxAfter(dateInterval, cache) {
+    let ve = solarLongitudeCrossingTime(0, dateInterval, cache);
+    if (ve <= dateInterval) {
+      ve = solarLongitudeCrossingTime(0, dateInterval + MEAN_TROPICAL_YEAR_SECONDS, cache);
+    }
+    return ve;
+  }
+  function fractionOfVernalEquinoxYear(dateInterval, cache) {
+    const prev = vernalEquinoxOnOrBefore(dateInterval, cache);
+    const next = vernalEquinoxAfter(dateInterval, cache);
+    return (dateInterval - prev) / (next - prev);
+  }
 
   // src/astronomy/es-riseset.ts
   var TWO_PI4 = Math.PI * 2;
@@ -16086,12 +16124,11 @@
 
   // src/watch/analemma.ts
   var REF_LAT_RAD = 45 * Math.PI / 180;
-  var REF_LON_RAD = 0;
   var REF_EPOCH_SECONDS = (() => {
     const d = new Date(Date.UTC(2024, 2, 20, 12, 0, 0));
     return d.getTime() / 1e3 - 978307200;
   })();
-  var PATH_DAYS = 365;
+  var PATH_SAMPLE_COUNT = 1e3;
   var DEFAULT_UPDATE_SEC = 300;
   var PATH_MARGIN_FRACTION = 0.15;
   function normalizeAngleDelta(delta) {
@@ -16099,21 +16136,46 @@
     while (delta < -Math.PI) delta += 2 * Math.PI;
     return delta;
   }
+  function analemmaPointFromEotDecl(di, phi) {
+    const dec = sunRAandDecl(di, null).declination;
+    const H = EOTSeconds(di, null) * (2 * Math.PI / 86400);
+    const sinAlt = Math.sin(dec) * Math.sin(phi) + Math.cos(dec) * Math.cos(phi) * Math.cos(H);
+    const alt = Math.asin(sinAlt);
+    const az = Math.atan2(
+      -Math.cos(dec) * Math.cos(phi) * Math.sin(H),
+      Math.sin(dec) - Math.sin(phi) * sinAlt
+    );
+    return { alt, az };
+  }
   function computeAnalemmaPath() {
-    const refAlt = sunAltitude(REF_EPOCH_SECONDS, REF_LAT_RAD, REF_LON_RAD, null);
-    const refAz = sunAzimuth(REF_EPOCH_SECONDS, REF_LAT_RAD, REF_LON_RAD, null);
+    const veRef = vernalEquinoxOnOrBefore(REF_EPOCH_SECONDS, null);
+    const yearLen = vernalEquinoxAfter(veRef, null) - veRef;
+    const ref = analemmaPointFromEotDecl(veRef, REF_LAT_RAD);
+    const refAlt = ref.alt;
+    const refAz = ref.az;
     const path = [];
-    for (let d = 0; d < PATH_DAYS; d++) {
-      const di = REF_EPOCH_SECONDS + d * 86400;
-      const alt = sunAltitude(di, REF_LAT_RAD, REF_LON_RAD, null);
-      const az = sunAzimuth(di, REF_LAT_RAD, REF_LON_RAD, null);
+    for (let d = 0; d < PATH_SAMPLE_COUNT; d++) {
+      const di = veRef + d / PATH_SAMPLE_COUNT * yearLen;
+      const { alt, az } = analemmaPointFromEotDecl(di, REF_LAT_RAD);
       path.push({
-        dayOfYear: d,
         deltaAz: normalizeAngleDelta(az - refAz),
         deltaAlt: alt - refAlt
       });
     }
-    return { path, refAlt, refAz };
+    return { path, refAlt, refAz, veRef };
+  }
+  function pathParamToXY(pathScaled, pathParameter) {
+    const n = pathScaled.length;
+    if (n === 0) return [0, 0];
+    let t = pathParameter % n;
+    if (!Number.isFinite(t)) t = 0;
+    if (t < 0) t += n;
+    const i0 = Math.floor(t);
+    const i1 = (i0 + 1) % n;
+    const frac = t - i0;
+    const [x0, y0] = pathScaled[i0];
+    const [x1, y1] = pathScaled[i1];
+    return [x0 + (x1 - x0) * frac, y0 + (y1 - y0) * frac];
   }
   function expandAnalemma(part, env, images) {
     const centerX = evalAttr(part.x, env);
@@ -16126,7 +16188,7 @@
     const channelWidth = evalAttr(part.channelWidth, env) || 0.8;
     const bgRotates = (evalAttr(part.bgRotates, env) || 0) !== 0;
     const updateIntervalSec = evalAttr(part.update, env) || DEFAULT_UPDATE_SEC;
-    const { path, refAlt, refAz } = computeAnalemmaPath();
+    const { path, refAlt, refAz, veRef } = computeAnalemmaPath();
     const usableRadius = radius * (1 - PATH_MARGIN_FRACTION);
     let maxAbsX = 0;
     let maxAbsY = 0;
@@ -16167,11 +16229,13 @@
       bgBitmap = createFallbackDiscBackground(radius);
     }
     const { bitmap: sunBitmap, anchorX: sunAnchorX, anchorY: sunAnchorY, w: sunW, h: sunH } = buildSunBitmap(sunRadius, sunFillColor, sunStrokeColor);
+    const seasonTicks = computeSeasonTicks(veRef);
     const channelBitmap = buildChannelBitmap(
       pathScaled,
       radius,
       channelColor,
-      channelWidth
+      channelWidth,
+      seasonTicks
     );
     const state = {
       path,
@@ -16190,9 +16254,9 @@
       channelColor,
       channelWidth,
       bgRotates,
-      currentSunX: 0,
-      currentSunY: 0,
+      currentPathParameter: 0,
       currentRotation: 0,
+      seasonTicks,
       updateIntervalSec,
       nextUpdateTime: 0,
       channelBitmap,
@@ -16216,7 +16280,7 @@
     p.closePath();
     return p;
   }
-  function buildChannelBitmap(pathScaled, radius, channelColor, channelWidth) {
+  function buildChannelBitmap(pathScaled, radius, channelColor, channelWidth, seasonTicks) {
     const scale = 4;
     const size = radius * 2;
     const pxSize = Math.ceil(size * scale);
@@ -16236,8 +16300,8 @@
     const tickLen = 2;
     const tickAlong = 0.5;
     const gap = channelWidth / 2;
-    for (const { dayIndex, color } of SEASON_TICKS) {
-      const idx = dayIndex % pathScaled.length;
+    for (const { index, color } of seasonTicks) {
+      const idx = (Math.round(index) % pathScaled.length + pathScaled.length) % pathScaled.length;
       const [px, py] = pathScaled[idx];
       const prev = (idx - 1 + pathScaled.length) % pathScaled.length;
       const next = (idx + 1) % pathScaled.length;
@@ -16338,19 +16402,7 @@
     if (!getNow) return;
     const now = getNow();
     const di = dateToDateInterval(now);
-    const nowUTC = new Date(Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate(),
-      12,
-      0,
-      0
-    ));
-    const noonDI = dateToDateInterval(nowUTC);
-    const alt = sunAltitude(noonDI, REF_LAT_RAD, REF_LON_RAD, null);
-    const az = sunAzimuth(noonDI, REF_LAT_RAD, REF_LON_RAD, null);
-    state.currentSunX = normalizeAngleDelta(az - state.refAz) * Math.cos(alt) * state.scaleFactor - state.pathOffsetX;
-    state.currentSunY = (alt - state.refAlt) * state.scaleFactor - state.pathOffsetY;
+    state.currentPathParameter = fractionOfVernalEquinoxYear(di, null) * PATH_SAMPLE_COUNT;
     const obsLat = env.observerLatRad ?? 0;
     const obsLon = env.observerLonRad ?? 0;
     state.currentRotation = sunSkyOrientationAngle(di, obsLat, obsLon, null);
@@ -16385,16 +16437,25 @@
     ctx.arc(cx, cy, innerRadius, 0, 2 * Math.PI);
     ctx.fill();
   }
-  var SEASON_TICKS = [
-    { dayIndex: 0, color: "#22aa22" },
+  var MEAN_TROPICAL_YEAR_SECONDS2 = 365.2421897 * 86400;
+  var SEASON_TARGETS = [
+    { longitude: 0, color: "#22aa22" },
     // Vernal equinox — green
-    { dayIndex: 93, color: "#ddcc00" },
+    { longitude: Math.PI / 2, color: "#ddcc00" },
     // Summer solstice — yellow
-    { dayIndex: 184, color: "#ee7722" },
+    { longitude: Math.PI, color: "#ee7722" },
     // Autumnal equinox — orange
-    { dayIndex: 275, color: "#2266cc" }
+    { longitude: 3 * Math.PI / 2, color: "#2266cc" }
     // Winter solstice — blue
   ];
+  function computeSeasonTicks(veRef) {
+    return SEASON_TARGETS.map(({ longitude, color }) => {
+      const approx = veRef + longitude / (2 * Math.PI) * MEAN_TROPICAL_YEAR_SECONDS2;
+      const crossing = solarLongitudeCrossingTime(longitude, approx, null);
+      const frac = fractionOfVernalEquinoxYear(crossing, null);
+      return { index: frac * PATH_SAMPLE_COUNT, color };
+    });
+  }
   function drawAnalemma(ctx, state) {
     const { centerX, centerY, radius, currentRotation, bgRotates } = state;
     ctx.save();
@@ -16418,10 +16479,11 @@
       ctx.drawImage(state.channelBitmap, -radius, -radius, radius * 2, radius * 2);
     }
     if (state.sunBitmap) {
+      const [sunX, sunY] = pathParamToXY(state.pathScaled, state.currentPathParameter);
       ctx.drawImage(
         state.sunBitmap,
-        state.currentSunX - state.sunBitmapAnchorX,
-        -state.currentSunY - state.sunBitmapAnchorY,
+        sunX - state.sunBitmapAnchorX,
+        -sunY - state.sunBitmapAnchorY,
         state.sunBitmapW,
         state.sunBitmapH
       );

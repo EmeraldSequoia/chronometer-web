@@ -21,7 +21,15 @@ import type { Environment } from '../expr/evaluator.js';
 import { evalAttr, evalColor } from './watch-env.js';
 import type { LoadedImage } from './image-loader.js';
 import { dateToDateInterval } from '../astronomy/es-time.js';
-import { sunAltitude, sunAzimuth, sunSkyOrientationAngle } from '../astronomy/es-astro.js';
+import {
+    sunSkyOrientationAngle,
+    EOTSeconds,
+    solarLongitudeCrossingTime,
+    vernalEquinoxOnOrBefore,
+    vernalEquinoxAfter,
+    fractionOfVernalEquinoxYear,
+} from '../astronomy/es-astro.js';
+import { sunRAandDecl } from '../astronomy/es-coordinates.js';
 
 // ============================================================================
 // Constants
@@ -30,8 +38,9 @@ import { sunAltitude, sunAzimuth, sunSkyOrientationAngle } from '../astronomy/es
 /** Reference latitude for path generation: 45°N */
 const REF_LAT_RAD = 45 * Math.PI / 180;
 
-/** Reference longitude: 0° (Greenwich) */
-const REF_LON_RAD = 0;
+// Reference longitude is 0° (Greenwich): the (EOT, declination) decomposition in
+// analemmaPointFromEotDecl reconstructs the Sun's position at *mean noon*, which
+// occurs at 12:00 UT on the Greenwich meridian.
 
 /**
  * Reference date: vernal equinox 2024 (March 20, 2024 at 12:00 UT).
@@ -43,8 +52,14 @@ const REF_EPOCH_SECONDS = (() => {
     return (d.getTime() / 1000) - 978307200;  // Convert to Apple epoch
 })();
 
-/** Number of days in the analemma path. */
-const PATH_DAYS = 365;
+/**
+ * Number of points in the rendered analemma path. This is a pure resolution
+ * knob — the path parameter runs [0, PATH_SAMPLE_COUNT) over one equinox year —
+ * with no astronomical meaning. Points are genuinely sampled (not upsampled) via
+ * the (EOT, declination) decomposition, so a high count smooths the figure's
+ * sharp solstice turns at no correctness cost.
+ */
+const PATH_SAMPLE_COUNT = 1000;
 
 /** Default update interval in seconds (5 minutes). */
 const DEFAULT_UPDATE_SEC = 300;
@@ -71,43 +86,95 @@ function normalizeAngleDelta(delta: number): number {
 // ============================================================================
 
 interface AnalemmaPathPoint {
-    dayOfYear: number;
     deltaAz: number;   // radians, normalized to [-π, π]
     deltaAlt: number;   // radians
 }
 
 /**
- * Pre-compute the 365-point analemma path using alt/az deltas.
+ * Sun's "mean-noon" altitude/azimuth at instant `di` for latitude `phi`
+ * (reference longitude 0), reconstructed from the (equation-of-time,
+ * declination) decomposition.
  *
- * For each day 0–364, computes Sun altitude/azimuth at the same civil
- * time (12:00 UT) at the reference location, and stores the delta from
- * the reference day (vernal equinox) values.
+ * Unlike raw `sunAltitude`/`sunAzimuth`, this places the Sun at the hour angle
+ * it has at *mean noon* (H = EOT) rather than its actual hour angle at `di`, so
+ * the result is a continuous function of time suitable for sub-day sampling of
+ * the analemma — raw alt/az would fold in the Sun's diurnal motion and smear the
+ * figure. At 12:00 UT (mean noon at Greenwich) H equals the actual hour angle,
+ * so this reproduces `sunAltitude`/`sunAzimuth` at integer-day noons (verified to
+ * sub-arcsecond in altitude / arcseconds in azimuth).
+ */
+function analemmaPointFromEotDecl(di: number, phi: number): { alt: number; az: number } {
+    const dec = sunRAandDecl(di, null).declination;
+    const H = EOTSeconds(di, null) * (2 * Math.PI / 86400);
+    const sinAlt = Math.sin(dec) * Math.sin(phi) + Math.cos(dec) * Math.cos(phi) * Math.cos(H);
+    const alt = Math.asin(sinAlt);
+    const az = Math.atan2(
+        -Math.cos(dec) * Math.cos(phi) * Math.sin(H),
+        Math.sin(dec) - Math.sin(phi) * sinAlt,
+    );
+    return { alt, az };
+}
+
+/**
+ * Pre-compute the analemma path as `PATH_SAMPLE_COUNT` alt/az-delta points.
  *
- * The equation of time causes the Sun to be east or west of due south
- * at the same civil time each day — this is what creates the figure-eight's
- * horizontal extent. The changing declination creates the vertical extent.
+ * Sampling is anchored to the true vernal equinox (sample 0) and spread evenly
+ * across the actual equinox-to-equinox year, so sample index `d` corresponds to
+ * fraction `d / PATH_SAMPLE_COUNT` of the year — exactly how the runtime path
+ * parameter indexes it. Each point is genuinely computed via the (EOT,
+ * declination) decomposition (see `analemmaPointFromEotDecl`), so the high
+ * sample count yields a smooth figure-eight (no spline upsampling).
+ *
+ * The equation of time creates the figure-eight's horizontal extent; the
+ * changing declination creates the vertical extent.
  */
 function computeAnalemmaPath(): {
     path: AnalemmaPathPoint[];
     refAlt: number;
     refAz: number;
+    veRef: number;
 } {
-    const refAlt = sunAltitude(REF_EPOCH_SECONDS, REF_LAT_RAD, REF_LON_RAD, null);
-    const refAz = sunAzimuth(REF_EPOCH_SECONDS, REF_LAT_RAD, REF_LON_RAD, null);
+    const veRef = vernalEquinoxOnOrBefore(REF_EPOCH_SECONDS, null);
+    const yearLen = vernalEquinoxAfter(veRef, null) - veRef;
+
+    const ref = analemmaPointFromEotDecl(veRef, REF_LAT_RAD);
+    const refAlt = ref.alt;
+    const refAz = ref.az;
 
     const path: AnalemmaPathPoint[] = [];
-    for (let d = 0; d < PATH_DAYS; d++) {
-        const di = REF_EPOCH_SECONDS + d * 86400;
-        const alt = sunAltitude(di, REF_LAT_RAD, REF_LON_RAD, null);
-        const az = sunAzimuth(di, REF_LAT_RAD, REF_LON_RAD, null);
+    for (let d = 0; d < PATH_SAMPLE_COUNT; d++) {
+        const di = veRef + (d / PATH_SAMPLE_COUNT) * yearLen;
+        const { alt, az } = analemmaPointFromEotDecl(di, REF_LAT_RAD);
         path.push({
-            dayOfYear: d,
             deltaAz: normalizeAngleDelta(az - refAz),
             deltaAlt: alt - refAlt,
         });
     }
 
-    return { path, refAlt, refAz };
+    return { path, refAlt, refAz, veRef };
+}
+
+/**
+ * Map a path parameter (fraction-of-year × PATH_SAMPLE_COUNT, range
+ * [0, PATH_SAMPLE_COUNT)) to an (x, y) point in XML coords by linearly
+ * interpolating between adjacent points of the closed-loop `pathScaled` array.
+ * `pathScaled` is already offset-corrected, so no further offset is applied.
+ */
+function pathParamToXY(
+    pathScaled: [number, number][],
+    pathParameter: number,
+): [number, number] {
+    const n = pathScaled.length;
+    if (n === 0) return [0, 0];
+    let t = pathParameter % n;
+    if (!Number.isFinite(t)) t = 0;
+    if (t < 0) t += n;
+    const i0 = Math.floor(t);
+    const i1 = (i0 + 1) % n;            // wraps last sample → 0 (closed loop)
+    const frac = t - i0;
+    const [x0, y0] = pathScaled[i0];
+    const [x1, y1] = pathScaled[i1];
+    return [x0 + (x1 - x0) * frac, y0 + (y1 - y0) * frac];
 }
 
 // ============================================================================
@@ -135,10 +202,12 @@ export interface AnalemmaState {
     channelWidth: number;
     bgRotates: boolean;
 
-    // Current state (updated at each interval, no interpolation)
-    currentSunX: number;
-    currentSunY: number;
+    // Current state (recomputed each frame from the display time, no interpolation)
+    currentPathParameter: number;   // fraction-of-year × PATH_SAMPLE_COUNT, [0, PATH_SAMPLE_COUNT)
     currentRotation: number;
+
+    // Pre-computed season-tick path indices (fractional), from real crossings
+    seasonTicks: { index: number; color: string }[];
 
     // Scheduling
     updateIntervalSec: number;
@@ -185,7 +254,7 @@ export function expandAnalemma(
     const updateIntervalSec = evalAttr(part.update, env) || DEFAULT_UPDATE_SEC;
 
     // Generate the path
-    const { path, refAlt, refAz } = computeAnalemmaPath();
+    const { path, refAlt, refAz, veRef } = computeAnalemmaPath();
 
     // Scale the path to fit within the disc.
     // Azimuth is foreshortened by cos(altitude) — a degree of azimuth
@@ -242,9 +311,12 @@ export function expandAnalemma(
     const { bitmap: sunBitmap, anchorX: sunAnchorX, anchorY: sunAnchorY, w: sunW, h: sunH } =
         buildSunBitmap(sunRadius, sunFillColor, sunStrokeColor);
 
+    // Season-tick path indices from the real solstice/equinox crossings
+    const seasonTicks = computeSeasonTicks(veRef);
+
     // Build pre-rendered channel + season ticks + dark overlay bitmap
     const channelBitmap = buildChannelBitmap(
-        pathScaled, radius, channelColor, channelWidth,
+        pathScaled, radius, channelColor, channelWidth, seasonTicks,
     );
 
     const state: AnalemmaState = {
@@ -264,9 +336,9 @@ export function expandAnalemma(
         channelColor,
         channelWidth,
         bgRotates,
-        currentSunX: 0,
-        currentSunY: 0,
+        currentPathParameter: 0,
         currentRotation: 0,
+        seasonTicks,
         updateIntervalSec,
         nextUpdateTime: 0,
         channelBitmap,
@@ -311,6 +383,7 @@ function buildChannelBitmap(
     radius: number,
     channelColor: string,
     channelWidth: number,
+    seasonTicks: { index: number; color: string }[],
 ): OffscreenCanvas {
     const scale = 4;  // 4x resolution for quality
     const size = radius * 2;
@@ -340,8 +413,8 @@ function buildChannelBitmap(
     const tickAlong = 0.5;
     const gap = channelWidth / 2;
 
-    for (const { dayIndex, color } of SEASON_TICKS) {
-        const idx = dayIndex % pathScaled.length;
+    for (const { index, color } of seasonTicks) {
+        const idx = ((Math.round(index) % pathScaled.length) + pathScaled.length) % pathScaled.length;
         const [px, py] = pathScaled[idx];
 
         const prev = (idx - 1 + pathScaled.length) % pathScaled.length;
@@ -515,19 +588,14 @@ function updateAnalemmaValues(state: AnalemmaState, env: Environment): void {
     const now = getNow();
     const di = dateToDateInterval(now);
 
-    // --- Sun position within the analemma (at reference location/time) ---
-    // We compute the Sun's alt/az at the reference location for the current date
-    // at the same civil time (12:00 UT), then take the delta from the reference day.
-    const nowUTC = new Date(Date.UTC(
-        now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12, 0, 0,
-    ));
-    const noonDI = dateToDateInterval(nowUTC);
-
-    const alt = sunAltitude(noonDI, REF_LAT_RAD, REF_LON_RAD, null);
-    const az = sunAzimuth(noonDI, REF_LAT_RAD, REF_LON_RAD, null);
-
-    state.currentSunX = normalizeAngleDelta(az - state.refAz) * Math.cos(alt) * state.scaleFactor - state.pathOffsetX;
-    state.currentSunY = (alt - state.refAlt) * state.scaleFactor - state.pathOffsetY;
+    // --- Sun position within the analemma (parametric) ---
+    // The path parameter is the fraction through the current vernal-equinox year
+    // (anchored to the real bracketing equinoxes, so exact at any epoch), scaled
+    // to the path's sample domain. It is a continuous function of the display
+    // instant `di`, so the marker advances smoothly along the figure as time
+    // changes — which is what lets the Phase 8 ObsValue animate it. The marker
+    // (x, y) is derived from this parameter at draw time.
+    state.currentPathParameter = fractionOfVernalEquinoxYear(di, null) * PATH_SAMPLE_COUNT;
 
     // --- Rotation (at observer's actual location/time) ---
     const obsLat = env.observerLatRad ?? 0;
@@ -606,16 +674,35 @@ function drawSunGlyph(
     ctx.fill();
 }
 
+/** Mean tropical year in seconds — only to seed the season-tick crossing search. */
+const MEAN_TROPICAL_YEAR_SECONDS = 365.2421897 * 86400;
+
 /**
- * Season tick marks: colored squares straddling the channel at equinox/solstice points.
- * Perpendicular to the local path direction, 1 unit on a side.
+ * Season markers: apparent ecliptic longitude of the Sun (radians) and color
+ * for each equinox/solstice. Their path positions are computed from the real
+ * crossing times (seasons are unequal lengths), not assumed quarter-points.
  */
-const SEASON_TICKS: { dayIndex: number; color: string }[] = [
-    { dayIndex: 0,   color: '#22aa22' },  // Vernal equinox — green
-    { dayIndex: 93,  color: '#ddcc00' },  // Summer solstice — yellow
-    { dayIndex: 184, color: '#ee7722' },  // Autumnal equinox — orange
-    { dayIndex: 275, color: '#2266cc' },  // Winter solstice — blue
+const SEASON_TARGETS: { longitude: number; color: string }[] = [
+    { longitude: 0,              color: '#22aa22' },  // Vernal equinox — green
+    { longitude: Math.PI / 2,    color: '#ddcc00' },  // Summer solstice — yellow
+    { longitude: Math.PI,        color: '#ee7722' },  // Autumnal equinox — orange
+    { longitude: 3 * Math.PI / 2, color: '#2266cc' }, // Winter solstice — blue
 ];
+
+/**
+ * Compute the (fractional) path index of each season marker from the real
+ * solstice/equinox crossing times in the reference year `[veRef, veRef+yearLen)`.
+ * `tickParam = PATH_SAMPLE_COUNT × fractionOfVernalEquinoxYear(crossing)`.
+ */
+function computeSeasonTicks(veRef: number): { index: number; color: string }[] {
+    return SEASON_TARGETS.map(({ longitude, color }) => {
+        // Seed the crossing search near the expected fraction of the year.
+        const approx = veRef + (longitude / (2 * Math.PI)) * MEAN_TROPICAL_YEAR_SECONDS;
+        const crossing = solarLongitudeCrossingTime(longitude, approx, null);
+        const frac = fractionOfVernalEquinoxYear(crossing, null);
+        return { index: frac * PATH_SAMPLE_COUNT, color };
+    });
+}
 
 /**
  * Draw the analemma onto the canvas.
@@ -666,10 +753,11 @@ export function drawAnalemma(
 
     // --- Sun marker (pre-rendered bitmap with shadow) ---
     if (state.sunBitmap) {
+        const [sunX, sunY] = pathParamToXY(state.pathScaled, state.currentPathParameter);
         ctx.drawImage(
             state.sunBitmap,
-            state.currentSunX - state.sunBitmapAnchorX,
-            -state.currentSunY - state.sunBitmapAnchorY,
+            sunX - state.sunBitmapAnchorX,
+            -sunY - state.sunBitmapAnchorY,
             state.sunBitmapW,
             state.sunBitmapH,
         );

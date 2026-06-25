@@ -10728,6 +10728,7 @@
     const omegaDeg = 125.0445479 - 1934.1362891 * T + 20754e-7 * T * T + T * T * T / 467441 - T * T * T * T / 60616e3;
     return fmod(omegaDeg * Math.PI / 180, TWO_PI3);
   }
+  var MEAN_TROPICAL_YEAR_SECONDS = 365.2421897 * 86400;
 
   // src/astronomy/es-riseset.ts
   var TWO_PI4 = Math.PI * 2;

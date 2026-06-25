@@ -1045,3 +1045,98 @@ export function lunarAscendingNodeLongitude(
     return fmod(omegaDeg * Math.PI / 180, TWO_PI);
 }
 
+// ============================================================================
+// Solar longitude crossings (equinoxes / solstices) and seasonal phase
+// ============================================================================
+
+/**
+ * Mean tropical year in seconds. Used only to seed root-finds and bracket
+ * searches — never as an exact year length in any returned value.
+ */
+const MEAN_TROPICAL_YEAR_SECONDS = 365.2421897 * 86400;
+
+/**
+ * Sun's apparent ecliptic longitude (radians, [0, 2π)) at a given instant.
+ * Stateless helper for root-finding: evaluates many distinct instants, so it
+ * deliberately uses no per-date cache.
+ */
+function sunApparentLongitudeAt(dateInterval: number): number {
+    const { julianCenturiesSince2000Epoch } =
+        julianCenturiesSince2000EpochForDateInterval(dateInterval, null);
+    return WB_sunLongitudeApparent(julianCenturiesSince2000Epoch / 100);
+}
+
+/**
+ * Date interval at which the Sun's apparent ecliptic longitude equals
+ * targetLongitudeRad, nearest to approxDateInterval.
+ *
+ * Newton iteration on the signed angular distance to the target. The Sun's
+ * apparent longitude advances ~0.9856°/day (varying ±1.7% over the year due to
+ * orbital eccentricity), wrapping at 2π; seeding the step from the mean motion
+ * is a contraction, so this converges to sub-second in a handful of iterations.
+ * Equinoxes/solstices are the targets 0, π/2, π, 3π/2.
+ *
+ * The cache argument is accepted for signature consistency with the rest of the
+ * library but is not used for the per-instant longitude evaluations.
+ */
+export function solarLongitudeCrossingTime(
+    targetLongitudeRad: number,
+    approxDateInterval: number,
+    _cache: AstroCache | null,
+): number {
+    const meanMotion = TWO_PI / MEAN_TROPICAL_YEAR_SECONDS;  // rad/sec
+    let di = approxDateInterval;
+    for (let iter = 0; iter < 12; iter++) {
+        const lon = sunApparentLongitudeAt(di);
+        let diff = (lon - targetLongitudeRad) % TWO_PI;
+        if (diff > Math.PI) diff -= TWO_PI;
+        if (diff < -Math.PI) diff += TWO_PI;
+        const step = diff / meanMotion;   // seconds the Sun is "ahead" of the target
+        di -= step;
+        if (Math.abs(step) < 0.5) break;  // sub-second convergence
+    }
+    return di;
+}
+
+/** Vernal equinox (apparent λ☉ = 0) on or before the given instant. */
+export function vernalEquinoxOnOrBefore(
+    dateInterval: number,
+    cache: AstroCache | null,
+): number {
+    let ve = solarLongitudeCrossingTime(0, dateInterval, cache);
+    if (ve > dateInterval) {
+        ve = solarLongitudeCrossingTime(0, dateInterval - MEAN_TROPICAL_YEAR_SECONDS, cache);
+    }
+    return ve;
+}
+
+/** Vernal equinox (apparent λ☉ = 0) strictly after the given instant. */
+export function vernalEquinoxAfter(
+    dateInterval: number,
+    cache: AstroCache | null,
+): number {
+    let ve = solarLongitudeCrossingTime(0, dateInterval, cache);
+    if (ve <= dateInterval) {
+        ve = solarLongitudeCrossingTime(0, dateInterval + MEAN_TROPICAL_YEAR_SECONDS, cache);
+    }
+    return ve;
+}
+
+/**
+ * Fraction [0, 1) of the way through the current vernal-equinox year:
+ *   (t − VE_prev) / (VE_next − VE_prev),
+ * where VE_prev / VE_next are the vernal equinoxes bracketing t.
+ *
+ * Because it is anchored to the *actual* bracketing equinoxes, it is exact at
+ * any epoch — independent of any fixed (365 / 365.2422) year-length assumption,
+ * and absorbing the year-to-year variation in the equinox-to-equinox interval.
+ */
+export function fractionOfVernalEquinoxYear(
+    dateInterval: number,
+    cache: AstroCache | null,
+): number {
+    const prev = vernalEquinoxOnOrBefore(dateInterval, cache);
+    const next = vernalEquinoxAfter(dateInterval, cache);
+    return (dateInterval - prev) / (next - prev);
+}
+

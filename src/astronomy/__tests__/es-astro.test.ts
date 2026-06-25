@@ -38,6 +38,10 @@ import {
     moonRelativePositionAngle,
     EOTSeconds,
     localSiderealTime,
+    solarLongitudeCrossingTime,
+    vernalEquinoxOnOrBefore,
+    vernalEquinoxAfter,
+    fractionOfVernalEquinoxYear,
 } from '../es-astro';
 import {
     sunriseForDay,
@@ -432,5 +436,64 @@ describe('Moon astronomy end-to-end', () => {
         const { phase: phaseFull } = moonAge(fullMoon, null);
         expect(phaseNew).toBeLessThan(0.05);
         expect(phaseFull).toBeGreaterThan(0.95);
+    });
+});
+
+describe('Solar longitude crossings (equinoxes / solstices)', () => {
+    const TWO_PI = Math.PI * 2;
+
+    // Published 2024 equinox/solstice instants (UT), good to the minute.
+    test('2024 equinoxes and solstices match published times within 2 min', () => {
+        const cases: { target: number; approx: Date; expected: Date }[] = [
+            { target: 0,            approx: new Date('2024-03-20T12:00:00Z'), expected: new Date('2024-03-20T03:06:00Z') },
+            { target: Math.PI / 2,  approx: new Date('2024-06-20T00:00:00Z'), expected: new Date('2024-06-20T20:51:00Z') },
+            { target: Math.PI,      approx: new Date('2024-09-22T00:00:00Z'), expected: new Date('2024-09-22T12:44:00Z') },
+            { target: 3 * Math.PI / 2, approx: new Date('2024-12-21T00:00:00Z'), expected: new Date('2024-12-21T09:21:00Z') },
+        ];
+        for (const { target, approx, expected } of cases) {
+            const di = solarLongitudeCrossingTime(target, appleEpoch(approx), null);
+            const errSec = Math.abs(di - appleEpoch(expected));
+            expect(errSec).toBeLessThan(120);
+        }
+    });
+
+    test('vernalEquinoxOnOrBefore / After bracket the instant', () => {
+        const t = appleEpoch(new Date('2026-06-25T12:00:00Z'));
+        const prev = vernalEquinoxOnOrBefore(t, null);
+        const next = vernalEquinoxAfter(t, null);
+        expect(prev).toBeLessThanOrEqual(t);
+        expect(next).toBeGreaterThan(t);
+        // The bracketing interval is one tropical year (~365.24 d) ± a few minutes.
+        const lenDays = (next - prev) / 86400;
+        expect(lenDays).toBeGreaterThan(365.0);
+        expect(lenDays).toBeLessThan(365.5);
+    });
+
+    test('fractionOfVernalEquinoxYear: 0 at equinox, monotonic, wraps to ~1', () => {
+        const ve = solarLongitudeCrossingTime(0, appleEpoch(new Date('2025-03-20T12:00:00Z')), null);
+        // Just after the equinox → fraction ≈ 0.
+        expect(fractionOfVernalEquinoxYear(ve + 60, null)).toBeLessThan(0.001);
+        // Quarter / half / three-quarter year in: strictly increasing within [0, 1).
+        const f25 = fractionOfVernalEquinoxYear(ve + 0.25 * 365.2422 * 86400, null);
+        const f50 = fractionOfVernalEquinoxYear(ve + 0.50 * 365.2422 * 86400, null);
+        const f75 = fractionOfVernalEquinoxYear(ve + 0.75 * 365.2422 * 86400, null);
+        expect(f25).toBeGreaterThan(0.2);
+        expect(f25).toBeLessThan(0.3);
+        expect(f50).toBeGreaterThan(f25);
+        expect(f75).toBeGreaterThan(f50);
+        expect(f75).toBeLessThan(1);
+        // Just before the next equinox → fraction ≈ 1.
+        const next = vernalEquinoxAfter(ve, null);
+        expect(fractionOfVernalEquinoxYear(next - 60, null)).toBeGreaterThan(0.999);
+    });
+
+    test('crossing of every multiple of π/2 is found near its seed', () => {
+        for (let k = 0; k < 4; k++) {
+            const target = (k * Math.PI / 2) % TWO_PI;
+            const seed = appleEpoch(new Date('2030-01-01T00:00:00Z')) + k * 91 * 86400;
+            const di = solarLongitudeCrossingTime(target, seed, null);
+            // Returned instant should actually have that longitude (within ~1 arcmin).
+            expect(Math.abs(di - seed)).toBeLessThan(120 * 86400);
+        }
     });
 });
