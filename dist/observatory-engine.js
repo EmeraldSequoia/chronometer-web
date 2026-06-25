@@ -21311,7 +21311,7 @@
   // src/shared/fps-indicator.ts
   var FPS_WATCHDOG_MS = 1e3;
   function createFpsIndicator(enabled) {
-    if (!enabled || typeof document === "undefined") return null;
+    if (typeof document === "undefined") return null;
     let active = 0;
     let activeLastTime = 0;
     let wasContinuous = false;
@@ -21332,6 +21332,34 @@
     thruEl.textContent = "0 avg";
     el.append(activeEl, sep, thruEl);
     document.body.appendChild(el);
+    if (enabled) {
+      document.body.classList.add("has-fps");
+    } else {
+      el.style.display = "none";
+    }
+    window.addEventListener("keydown", (ev) => {
+      const target = ev.target;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+        return;
+      }
+      if (ev.key.toLowerCase() === "f" && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+        const params = new URLSearchParams(window.location.search);
+        const isVisible = el.style.display !== "none";
+        if (isVisible) {
+          el.style.display = "none";
+          document.body.classList.remove("has-fps");
+          params.delete("fps");
+        } else {
+          el.style.display = "";
+          document.body.classList.add("has-fps");
+          params.set("fps", "1");
+        }
+        const qs = params.toString();
+        const newUrl = window.location.pathname + (qs ? "?" + qs : "");
+        window.history.replaceState(null, "", newUrl);
+        updateNavigationLinks();
+      }
+    });
     setInterval(() => {
       const nowW = performance.now();
       const elapsedSec = (nowW - windowStart) / 1e3;
