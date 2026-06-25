@@ -1,7 +1,7 @@
 # Port Chronometer to the ObsValue System
 
 **Date:** 2026-06-15
-**Status:** Draft — awaiting review (revision 3).
+**Status:** Draft — awaiting review (revision 4).
 
 > **Scope.** Replace Chronometer's per-part `HandState` / `tickAnimations`
 > animation system with `ObsValue`s driven by the shared `Updater`, including
@@ -116,6 +116,25 @@ The only scenario where eval-ahead adds extra invalidations is if two
 astro-dependent values fire on the same frame with different future targets —
 but this is rare (update intervals are typically identical for astro parts on
 the same face), and a single extra cache rebuild per 60–300s is negligible.
+
+### Context: state management
+
+Since this plan was originally drafted, all application state (location,
+configuration, time) has moved to `app-state.ts` — a `getState()`/`setState()`
+abstraction backed by browser **LocalStorage** by default, with URL-parameter
+fallback for `file://` URLs. See
+[planning/2026-06-13-localstorage-state-and-sharing.md](2026-06-13-localstorage-state-and-sharing.md).
+
+Key implications for this plan:
+- **Observer location** (`lat`/`lon`) is already read via `getState()` and passed
+  to `createWatchEnvironment` as parameters. No changes needed — the ObsValue
+  port doesn't touch location plumbing.
+- **No precision restriction.** Because LocalStorage is device-local (never sent
+  to a server), there is no need to truncate lat/lon precision. Full `number`
+  precision is stored and used.
+- **Cross-tab sync.** `onSharedChange` fires when another tab changes shared
+  state (location, time). The env rebuild + `updater.reset()` pattern handles
+  this correctly — same as any location change.
 
 ### One `Updater` per face
 
@@ -392,8 +411,7 @@ face.updater = buildHandValues(
 -}
 +function finishAllAnimations() {
 +    for (const face of faces) {
-+        face.updater.finish();  // new method, see below
-+        finishLeafAnimations(face.terminatorLeaves);
++        face.updater.finish();  // covers hands, wedges, terminator, analemma
 +    }
 +}
 ```
@@ -408,8 +426,7 @@ face.updater = buildHandValues(
 -}
 +function resetAllSchedules() {
 +    for (const face of faces) {
-+        face.updater.reset();
-+        resetLeafSchedules(face.terminatorLeaves);
++        face.updater.reset();  // covers hands, wedges, terminator, analemma
 +    }
 +}
 ```
@@ -430,8 +447,13 @@ generic transition callbacks (scrub start/end, transport change) auto-call
 **`anyAnimating`:**
 ```diff
 -const faceAnimating = anyAnimating(face.handStates) || anyLeafAnimating(face.terminatorLeaves) || ringAnimating;
-+const faceAnimating = face.updater.anyAnimating() || anyLeafAnimating(face.terminatorLeaves);
++const faceAnimating = face.updater.anyAnimating();  // covers hands, wedges, terminator, analemma
 ```
+
+> [!NOTE]
+> The diffs above show the **final state** after all phases (1–8). During
+> Phase 4 implementation, terminator/analemma calls will still be present;
+> they are removed in Phase 7 (terminator) and Phase 8 (analemma).
 
 **Vienna noon/midnight toggle and Kyoto mode switch:**
 Replace manual `startAnimationRaw(part._masterOffsetAnim, ...)` logic with
@@ -651,8 +673,10 @@ Remove `tickAnalemma` / `resetAnalemmaSchedule` calls (covered by Updater).
   Chronometer-specific bridge.
 - **[observatory.md](../docs/observatory.md)** — Minor update noting Chronometer
   now also uses the shared Updater.
-- **[development-rules.md](../docs/development-rules.md)** — §6 (schedule reset
-  rules) is updated to reference the Updater's `reset()`.
+- **[development-rules.md](../docs/development-rules.md)** — §3 (animation-
+  preserving pattern) is updated to reference `updater.reset()` instead of
+  `HandState` / `initHandStates` / hand schedule resets. §6 (schedule reset
+  rules) is similarly updated to reference the Updater's `reset()`.
 
 ## Open Questions
 
