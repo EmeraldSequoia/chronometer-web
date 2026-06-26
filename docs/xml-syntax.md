@@ -513,7 +513,7 @@ Colored wedges showing daylight hours on a 24-hour dial. Computes sunrise/sunset
 | `slideDistance` | expr | Wadokei slide: distance (px) to translate hidden wedges inward (used for Kyoto) |
 | `slideAnimSpeed` | expr | Wadokei slide: animation speed multiplier (used for Kyoto) |
 
-Wedge angles are cached in a **bidirectional display-time window** (`[_cacheStart, _cacheNextUpdate]`) keyed on `env.getNow()`. The cache expires when display time moves past either bound — forward (normal play) or backward (reverse animation/scrubbing). The cache is also force-invalidated via `invalidateDayNightCaches()` on environment changes.
+Each wedge is its own **ObsValue** on the face `Updater` (built by `buildHandValues` → `buildDayNightRing` in `hand-values.ts`): a `wedgeAngle.<i>` per wedge, plus a `wedgeSlide.<i>` for wadokei slide mode, plus the ring's `masterOffset`. The renderer reads `part._obsWedgeAngles[i].currentValue` (and adds `masterOffset` at draw time). There is no per-frame angle cache — each wedge's expression is independently computable from astro-cached scalars (`dayNightLeafAngle` / the `dayNightWedgeSlide*` env functions), and re-evaluation is governed by the ObsValue's `update` interval and re-armed by `face.updater.reset()` on environment changes.
 
 ---
 
@@ -584,7 +584,7 @@ Each point's `deltaAz` is multiplied by `cos(refAlt + deltaAlt)`, applying the c
 ### Rendering Architecture
 
 - **State**: `AnalemmaState` (in `analemma.ts`) holds the 365-point path (with azimuth foreshortening applied), pre-computed bounding-box centering offset, and three pre-rendered `OffscreenCanvas` bitmaps: background disc (with border baked in), channel path + season ticks + dark overlay, and Sun glyph with drop shadow.
-- **Tick**: `tickAnalemma()` is called every frame but only recomputes Sun position and sky rotation when the update interval elapses.
+- **Drive**: the Sun's parametric position along the figure-eight (`pathParam`, a cyclic value with period `PATH_SAMPLE_COUNT`) and the disc `rotation` are two **ObsValues** on the face `Updater` (built by `buildAnalemmaValues` in `hand-values.ts`, expressions `analemmaPathParameter()` / `analemmaRotation()`); `drawAnalemma()` reads `state._obsPathParam`/`state._obsRotation` and maps the path parameter to (x, y).
 - **Draw**: `drawAnalemma()` is pure blitting — three `drawImage()` calls plus one `arc()` clip: background bitmap → clip to disc → rotated channel bitmap → rotated Sun bitmap. No canvas drawing primitives (path strokes, fills, etc.) are executed per-frame.
 - **Sun glyph**: Rays and central disc are drawn as a single combined path to ensure uniform fill color. Pre-rendered with drop shadow onto an `OffscreenCanvas` at init.
 

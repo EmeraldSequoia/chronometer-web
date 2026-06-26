@@ -195,7 +195,8 @@ Key patterns from Inspector:
 | Module | What it provides | Key exports |
 |--------|-----------------|-------------|
 | `shared/astro-env.ts` | ~159 astronomy/calendar/time functions | `createAstroEnvironment()`, `registerAstroFunctions()`, `computeTzDeltaMs()`, `evalAttr()`, `evalColor()` |
-| `shared/animation.ts` | Full animation system | `AnimatingValue`, `HandState`, `initHandStates()`, `tickAnimations()`, `computeNextBoundary()` |
+| `shared/animation.ts` | Animation primitives + scheduling | `AnimatingValue`, `startAnimationRaw()`, `interpolateValue()`, `computeNextBoundary()` |
+| `shared/obs-value.ts` / `shared/updater.ts` | Expression-driven animated values + per-frame `Updater` | `ObsValue`, `createObsValue()`, `Updater`, `makeOverridableGetNow()` |
 | `shared/time-controller.ts` | Time scrubbing/stepping | `TimeController` class |
 | `shared/location-dialog.ts` | Location picker UI | `initLocationDialog()`, `requestBrowserLocation()` |
 | `shared/city-search.ts` | City name search | `findClosestCity()`, `searchCities()` |

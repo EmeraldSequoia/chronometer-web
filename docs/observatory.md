@@ -195,7 +195,8 @@ then resumes smooth ticking.
 
 **3. Scrub compression** (quantized mode, all values):
 During hold-to-scrub, display time jumps by large units per tick. The
-compression logic mirrors the watch-face `tickAnimations`:
+compression logic (the Updater's `updateObsValueScrub` branch, modeled on the
+legacy watch-face tick loop):
 - Compute ticks until next update boundary: `ceil(displayDelta / displayDeltaPerTick)`
 - Real-time budget: `ticksUntilUpdate × TICK_INTERVAL_MS`
 - If natural animation duration exceeds the budget, compress to fit

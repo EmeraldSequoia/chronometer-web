@@ -2,27 +2,19 @@
 
 The animation system manages how watch hands move between their computed positions, supporting both real-time ticking and accelerated time scrubbing.
 
-> [!IMPORTANT]
-> **Current architecture (June 2026).** Chronometer animation runs on the shared
-> **ObsValue / Updater** system — the same one Observatory and the Inspector use
-> ([shared/obs-value.ts](../src/shared/obs-value.ts), [shared/updater.ts](../src/shared/updater.ts)).
-> Each face has one `Updater`; the Chronometer-specific bridge that turns parts
-> into ObsValues is [watch/hand-values.ts](../src/watch/hand-values.ts)
-> (`buildHandValues` + `buildTerminatorValues` + `buildAnalemmaValues`). The
-> renderer reads each part's `_obs*` handle's `.currentValue`. Per-frame driving is
-> `face.updater.tick(...)`; transitions use `updater.reset()` / `updater.finish()`
-> / `updater.nextWakeupTime()` / `updater.anyAnimating()`.
->
-> The former per-part **`HandState` / `tickAnimations`** driver (and the separate
-> terminator-leaf and analemma tick loops) were **retired** in the port — see
-> [planning/2026-06-15-chronometer-obsvalue-port.md](../planning/2026-06-15-chronometer-obsvalue-port.md).
-> `animation.ts` now holds only the low-level primitives (`AnimatingValue`,
-> `startAnimationRaw`, `interpolateValue`, `computeNextBoundary`, the update-interval
-> sentinel resolvers). Sections below describing `HandState`/`tickAnimations` are
-> historical; the mechanics (two time bases, `beatsPerSecond` quantization, adaptive
-> duration) carry over to the Updater. Eval-ahead is **off** for Chronometer
-> (`EVAL_AHEAD = false` in `hand-values.ts`) so hands tick and the 1× loop idles;
-> see the planning doc and [2026-06-26-worker-eval-ahead-pipeline.md](../planning/2026-06-26-worker-eval-ahead-pipeline.md).
+> [!NOTE]
+> **Architecture at a glance.** Chronometer animation runs on the shared **ObsValue /
+> Updater** system ([shared/obs-value.ts](../src/shared/obs-value.ts),
+> [shared/updater.ts](../src/shared/updater.ts)) — the same one Observatory and the
+> Inspector use. Each face owns one `Updater`; the Chronometer↔Updater bridge is
+> [watch/hand-values.ts](../src/watch/hand-values.ts). The June-2026 port retired the
+> former per-part `HandState`/`tickAnimations` driver (and the separate terminator-leaf
+> and analemma tick loops); `animation.ts` is now just primitives + scheduling. Eval-ahead
+> is **off** for Chronometer (`EVAL_AHEAD = false`) so hands tick and the 1× loop idles —
+> see [the port plan](../planning/2026-06-15-chronometer-obsvalue-port.md) and
+> [the worker-eval-ahead follow-up](../planning/2026-06-26-worker-eval-ahead-pipeline.md).
+> The two-time-base, `beatsPerSecond`, update-interval, and `animSpeed` mechanics below all
+> carry over to the Updater.
 
 ## iOS/Android Reference
 
@@ -45,11 +37,11 @@ Each watch declares `beatsPerSecond` on its `<watch>` element. This controls the
 
 The default is `0` (continuous), matching iOS (`ECWatchDefinitionManager.m`, `df:0`).
 
-**Implementation**: `makeGetNow(bps)` in `engine-entry.ts` wraps the raw `timeController.getDisplayTime()` with quantization, mirroring iOS `latchTimeForBeatsPerSecond`:
+**Implementation**: `makeGetNow(bps, base)` in `engine-entry.ts` wraps a base time source with quantization, mirroring iOS `latchTimeForBeatsPerSecond`:
 ```typescript
 const quantizedMs = Math.round(ms / 1000 * bps) / bps * 1000;
 ```
-Each face gets its own quantized `getNow` closure, passed to `createWatchEnvironment` (for expression evaluation) and as the `getNow` parameter of `initHandStates`. A separate **unquantized** `rawGetNow` is also passed to `initHandStates` for boundary scheduling (see below).
+Each face gets a per-face **overridable** time seam, `makeOverridableGetNow(rawGetNow)` (rawGetNow = `timeController.getDisplayTime`), and layers the quantizer on top of *that* base. The quantized `getNow` is what `createWatchEnvironment` captures (so every expression sees quantized time); the **unquantized** overridable base is what `face.updater.tick(env, perfNow, getNow, withDisplayTime, ctx)` receives for boundary scheduling (see below). Layering the quantizer on the overridable base is also what lets eval-ahead's `withDisplayTime` shift the env's evaluation time — though Chronometer keeps eval-ahead off.
 
 > [!IMPORTANT]
 > **Boundary scheduling must use raw (unquantized) time.** The quantized `getNow` is only for expression evaluation — determining *what* angle a hand should show. The `rawGetNow` is used by `computeNextBoundary` and `displayTimeToPerfNow` to determine *when* the next update fires. This matches the iOS architecture where `ECDynamicUpdate.getNextUpdateTimeForInterval` computes boundaries in "iPhone time" (real device time), not in latched/quantized watch time.
@@ -62,12 +54,14 @@ The system uses two independent time bases:
 
 | Time Base | Source | Used For |
 |-----------|--------|----------|
-| **Display time** | `getNow()` → `makeGetNow(bps)` → `timeController.getDisplayTime()` | Evaluating angle expressions — determines **what** the target position should be |
-| **Real time** | `performance.now()` | Animation interpolation — determines **where** the hand is drawn right now |
+| **Display time** | `getNow()` → `makeGetNow(bps, overridableBase)` → `timeController.getDisplayTime()` | Evaluating angle expressions — determines **what** the target position should be |
+| **Real time** | `performance.now()` | Animation interpolation — determines **where** the value is drawn right now |
 
 These must never be conflated. Display time can jump by hours/days per tick; real time always advances smoothly at 1:1.
 
 ## Core Types
+
+`AnimatingValue` is the raw interpolation state in `animation.ts`:
 
 ```typescript
 interface AnimatingValue {
@@ -77,20 +71,26 @@ interface AnimatingValue {
     animationStopTime: number;  // When animation should be complete
     animating: boolean;         // Is an animation in progress?
 }
-
-interface HandState {
-    part: QHandPart | WheelPart | QWedgePart;
-    angle: AnimatingValue;
-    offsetAngle: AnimatingValue | null;   // For orbit hands (e.g. Moon)
-    xMotion: AnimatingValue | null;       // Linear X translation (calendar wires)
-    yMotion: AnimatingValue | null;       // Linear Y translation (calendar wires)
-    updateIntervalMs: number;             // From XML update attr
-    nextUpdateTime: number;               // performance.now() for next re-eval
-    animSpeed: number;                    // From XML animSpeed attr (default 1.0)
-    getNow: () => Date;                   // Display time source (quantized) — for expressions
-    rawGetNow: () => Date;                // Unquantized time — for boundary scheduling
-}
 ```
+
+An **`ObsValue`** wraps one `AnimatingValue` with a parsed expression, `updateInterval`,
+`animSpeed`, a `period` (2π for angles / `Infinity` for linear / arbitrary-cyclic, e.g.
+the analemma path), and `nextUpdateTime`/`nextUpdateDisplayTime` scheduling fields (full
+shape in [obs-value.ts](../src/shared/obs-value.ts)). `buildHandValues`
+([hand-values.ts](../src/watch/hand-values.ts)) walks the part tree and creates one
+ObsValue per animated quantity, storing a direct handle on the part:
+
+| Part | ObsValue handles |
+|------|-------------------|
+| QHand / Wheel / QWedge / QDial | `_obsAngle`, plus `_obsOffsetAngle` (orbit hands), `_obsXMotion` / `_obsYMotion` (calendar wires) |
+| QDayNightRing | `_obsMasterOffset` + `_obsWedgeAngles[]` (+ `_obsWedgeSlides[]` for wadokei) |
+| CalendarRowCover | `_obsXMotion` (the cover slide) |
+| Terminator leaf | `_obsAngle` per leaf + one shared `_obsRotation` |
+| Analemma | `_obsPathParam` (cyclic, period = `PATH_SAMPLE_COUNT`) + `_obsRotation` |
+
+The renderer reads `part._obs*.currentValue` directly — there is no per-part `HandState`
+struct; the timing fields (`updateInterval`, `nextUpdateTime`, the quantized/unquantized
+time sources) live on the ObsValue and the per-face seam, respectively.
 
 ## Update Interval (`update` attribute)
 
@@ -146,7 +146,7 @@ val.currentValue = newTarget - delta;  // unwrap so animation goes shortest path
 - Expressions re-evaluate at local-time-aligned boundaries
 - Animations use natural speed (`kECGLAngleAnimationSpeed × animSpeed`)
 - No compression logic
-- Both directions use the same idle-timeout scheduler; `nextAlignedUpdate()` is direction-aware, using `Math.ceil` (forward) or `Math.floor` (backward) to find the next boundary in the direction time is flowing
+- Both directions use the same idle-timeout scheduler; `computeNextBoundary()` is direction-aware, using `Math.ceil` (forward) or `Math.floor` (backward) to find the next boundary in the direction time is flowing
 
 ### Quantized Mode (Scrubbing / Accelerated)
 
@@ -167,16 +167,16 @@ Used for hold-to-scrub at rates like 10 hr/s, 10 day/s:
 ### Single-Step Mode
 
 - Triggered by a single tap on a step button
-- **Stops time first** (`timeController.stop()`) and snaps in-flight animations (`finishAllAnimations()`), matching scrub behavior
-- Then calls `timeController.step()`, `resetHandSchedules`, and `tickAnimations` once
+- **Stops time first** (`timeController.stop()`) and snaps in-flight animations (`finishAllAnimations()` → `face.updater.finish()` per face), matching scrub behavior
+- Then calls `timeController.step()`, `face.updater.reset()`, and one `face.updater.tick(...)`
 - Animations use natural speed (no compression)
-- `ensureSchedulerRunning()` keeps the rAF loop running while `anyAnimating` is true
+- `ensureSchedulerRunning()` keeps the rAF loop running while `face.updater.anyAnimating()` is true
 
 ### Astro Step Mode
 
 - Triggered by tapping a ◀/▶ button on the **Astro tab** of the time controller
 - Jumps to the next/previous occurrence of an astronomical event (sunrise, sunset, moonrise, moonset, moon phase, transit)
-- **Flow**: `stop()` → `finishAllAnimations()` → `setTime(targetDate)` → `beginFrame()` → `tickAnimations()` per face → `endFrame()` → `startScheduler()`
+- **Flow**: `stop()` → `finishAllAnimations()` → `setTime(targetDate)` → `beginFrame()` → `face.updater.tick(...)` per face → `endFrame()` → `startScheduler()`
 - Uses `computeAstroTarget()` (in `src/watch/astro-stepper.ts`) to find the event time
 - **Degree/radian conversion**: `lat`/`lon` are stored in degrees in `engine-entry.ts` but the astronomy routines expect radians; the handler converts with `× Math.PI / 180`
 - **Invalid date guard**: If the astro computation returns `null` or `NaN`, the button flashes red and no time change occurs (prevents time controller corruption)
@@ -206,9 +206,9 @@ When holding a step button, `timeController.setRate()` starts quantized scrubbin
 |-----------|--------------|
 | **Single tap** | Stop time, snap in-flight animations, step by one unit, animate at natural speed |
 | **Astro tap** | Stop time, snap in-flight, compute next event, `setTime()`, animate all hands to new positions |
-| **Hold → scrub** | After 300ms hold delay, enter quantized mode. `resetHandSchedules()` forces immediate re-eval |
-| **Pause** | Freeze display time. `finishAnimations()` snaps all hands to targets **and freezes their schedules** (`nextUpdateTime = Infinity`). Schedules are **not** re-armed on stop |
-| **Resume (Play)** | Unfreeze at 1×. `resetHandSchedules()` forces immediate re-eval with normal scheduling |
+| **Hold → scrub** | After 300ms hold delay, enter quantized mode. `face.updater.reset()` forces immediate re-eval |
+| **Pause** | Freeze display time. `face.updater.finish()` snaps all values to targets **and freezes their schedules** (`nextUpdateTime = Infinity`). Schedules are **not** re-armed on stop |
+| **Resume (Play)** | Unfreeze at 1×. `face.updater.reset()` forces immediate re-eval with normal scheduling |
 
 ### Stopped state: no re-evaluation, full idle
 
@@ -221,20 +221,28 @@ This was added to fix faces rendering continuously (or busy-looping the idle sch
 
 ## Key Functions
 
+**Per-face driving — the `Updater`** (`updater.ts`):
+
 | Function | Purpose |
 |----------|---------|
-| `initHandStates(watch, env, now, getNow)` | Build animation state for all dynamic parts |
-| `tickAnimations(states, env, now, tickMs, deltaSec, timeDir)` | Per-frame: re-evaluate + start animations |
+| `buildHandValues(faceName, watch, env, perfNow, lightweight?)` | Build the per-face `Updater` + the parts' `_obs*` handles (the bench passes `lightweight=true`) |
+| `buildTerminatorValues(updater, …)` / `buildAnalemmaValues(updater, …)` | Add the terminator-leaf / analemma ObsValues to the same Updater |
+| `updater.tick(env, perfNow, getNow, withDisplayTime, ctx)` | Per-frame: re-evaluate expired values + interpolate all |
+| `updater.reset()` | Set every value's `nextUpdateTime = 0` so all re-evaluate next frame |
+| `updater.finish()` | Snap all in-flight animations to targets and freeze schedules (`= Infinity`) |
+| `updater.nextWakeupTime()` | Earliest scheduled update across all values (for the idle timer) |
+| `updater.anyAnimating()` | True while any value is mid-animation |
+| `makeGetNow(bps, base)` / `makeOverridableGetNow(base)` | Per-face quantized getNow over the overridable time seam |
+
+**Animation primitives** (`animation.ts`):
+
+| Function | Purpose |
+|----------|---------|
 | `startValueAnimation(val, target, now, speed, durationOverride?)` | Core: begin/restart an animation on an abstract value |
-| `startAnimationRaw(val, target, now, speed, durationOverride?, linear?)` | Angle wrapper: unwraps for shortest-path, then calls core. If `linear` is true, skips `fmod` normalization and angular unwrapping (used for Observatory earth view's sun declination) |
-| `startLinearAnimation(val, target, now, speed, durationOverride?)` | Linear wrapper: calls core without angle wrapping |
+| `startAnimationRaw(val, target, now, animSpeed?, durationOverride?, period?)` | Period-aware wrapper: `2π` = angle (shortest-path unwrap, default), `Infinity` = linear, arbitrary finite = cyclic |
 | `interpolateValue(val, now)` | Advance currentValue toward target (abstract, semantics-free) |
 | `interpolateRaw(val, now)` | Angle wrapper: calls core, applies `fmod(2π)` when done |
-| `finishAnimations(states)` | Snap all in-flight animations to targets |
-| `finishAllAnimations()` | Snap all hands on all faces |
-| `resetHandSchedules(states)` | Set nextUpdateTime=0 so all hands re-evaluate next frame |
-| `nextWakeupTime(states)` | Find earliest scheduled update (for idle timer) |
-| `makeGetNow(bps)` | Create a per-face quantized getNow closure |
+| `computeNextBoundary(intervalMs, getNow, dir, env)` | Next update boundary (epoch-aligned, or via a sentinel resolver) |
 
 ## Constants (from `ECConstants.h`)
 
@@ -246,17 +254,21 @@ This was added to fix faces rendering continuously (or busy-looping the idle sch
 
 ## Unified Animation Core
 
-All animation types (angular, linear, terminator leaf) share a common semantics-free core:
+All value types (angular, linear, cyclic) share a common semantics-free core:
 
 1. **`startValueAnimation(val, target, now, speed, durationOverride?)`** — Sets `targetValue`, computes `animationStopTime`, marks `animating = true`
 2. **`interpolateValue(val, now)`** — Linear interpolation from current to target based on elapsed real time
 
-Specialized wrappers add type-specific behavior:
-- **`startAnimationRaw`** — Normalizes angles to `[0, 2π)` and unwraps for shortest-path before calling core
-- **`startLinearAnimation`** — Calls core directly (no wrapping needed for pixel translations)
-- **`interpolateRaw`** — Calls core, then applies `fmod(2π)` when animation completes
+`startAnimationRaw` is the single period-aware entry point the Updater uses: it takes a
+**`period`** and, when finite, normalizes the target to `[0, period)` and unwraps
+`currentValue` for the shortest path before calling the core; `Infinity` means linear (no
+wrapping). The ObsValue derives its `period` from `linear` / `def.period` — `2π` for
+angles, `Infinity` for linear motions, and `PATH_SAMPLE_COUNT` for the analemma path
+parameter (so a year-rollover takes the short way). `interpolateRaw` (calls the core, then
+`fmod(2π)` on completion) survives only for the static terminator-cache path.
 
-The terminator leaf system (`terminator.ts`) also uses the unified core via `startAnimationRaw` for leaf angles and rotations.
+Terminator leaves and the analemma are now ordinary ObsValues on the face `Updater`, not a
+separate animation loop — see [Terminator](terminator.md).
 
 ## ObsValue Layer
 
@@ -281,7 +293,19 @@ Eval-ahead is the *single continuous mechanism*, made **mode-aware** by where th
 
 Two things fall out of this:
 - **Scrub needs no compression branch** — it is just eval-ahead with the next point at the next tick, and is **lag-free at every tick** (the displayed value equals the true value when display reaches that point).
-- **`naturalSpeed` falls out** — a constant-rate value's "natural speed" is the slope between `A(now)` and `A(next)`; sweeping the chord over the budget reproduces constant velocity with the rate *inferred*, not configured. The legacy `naturalSpeed` two-phase and scrub-compression branches remain for Observatory but are mechanisms we converge away from.
+- **`naturalSpeed` falls out** — a constant-rate value's "natural speed" is the slope between `A(now)` and `A(next)`; sweeping the chord over the budget reproduces constant velocity with the rate *inferred*, not configured.
+
+> [!IMPORTANT]
+> **Chronometer keeps eval-ahead off** (`EVAL_AHEAD = false` in `hand-values.ts`). For
+> ticking watches it sweeps the wrong way: a 1-bps hand (`update=1s`) would sweep the
+> whole second instead of *ticking*, the 1× loop would never idle, and — fatally for
+> performance — each scrub frame would evaluate astronomy a full interval *ahead* while the
+> env rebuild / terminator evaluate at *now*, thrashing the single `AstroCachePool`.
+> Chronometer therefore uses the **snap-at-boundary** (1×) and **scrub-compression** paths
+> instead — the same branches Observatory inherited from the legacy `tickAnimations`, which
+> reproduce ticks, 1× idle, and single-time astronomy. The proper way to bring eval-ahead
+> back for watches (on-beat scheduling + a worker that evaluates ahead on its own cache) is
+> captured in [the worker-eval-ahead plan](../planning/2026-06-26-worker-eval-ahead-pipeline.md).
 
 Eval-ahead evaluates the expression at a shifted display time via **`makeOverridableGetNow(base)`** (updater.ts), which returns a `getNow` plus a `withDisplayTime(displayMs, fn)` that transiently overrides the clock for the duration of `fn`. The display time enters expressions only through `getNow`, so shifting it shifts the whole evaluation — no second environment needed. The Inspector uses eval-ahead to show smooth, lag-free readouts while fully re-evaluating only 10×/s; see [Inspector — Expression Evaluator](inspector.md#expression-evaluator).
 
@@ -289,7 +313,7 @@ Eval-ahead evaluates the expression at a shifted display time via **`makeOverrid
 
 The per-frame timing state (`tickIntervalMs`, `displayDeltaSec`, `direction`) is bundled as a **`TimingContext`** — the generic seam between the time controller and the updater. `timingContextForFrame(timeController)` builds it; the **`Updater`** object (updater.ts) owns an `ObsValue` collection and advances it each frame via `tick(env, perfNow, getNow, withDisplayTime, ctx)`, exposing `anyAnimating()` and `reset()`.
 
-The `Updater<K extends string = string>` is **name-keyed**: `add(v)` registers a value (keyed by `v.name`) and `get(name: K)` looks one up (throwing on a miss). `K` is a pure client-side convenience — the shared updater stores values in a plain `Map<string, ObsValue>` and never references any client's key union, so the shared layer stays unaware of client-specific types. Observatory instantiates `Updater<ObsValueName>` so its renderers get typo-checked lookups; the Inspector uses the default `Updater` (`K = string`) for its catalog and never calls `get()`. Both Observatory and the Inspector are consumers.
+The `Updater<K extends string = string>` is **name-keyed**: `add(v)` registers a value (keyed by `v.name`) and `get(name: K)` looks one up (throwing on a miss). `K` is a pure client-side convenience — the shared updater stores values in a plain `Map<string, ObsValue>` and never references any client's key union, so the shared layer stays unaware of client-specific types. Observatory instantiates `Updater<ObsValueName>` so its renderers get typo-checked lookups; the Inspector uses the default `Updater` (`K = string`) for its catalog and never calls `get()`; Chronometer uses the default `Updater` and reads through the parts' `_obs*` handles rather than `get()`. All three apps are consumers.
 
 **The controller↔updater seam is generic.** A client constructs an `Updater` with its values and hands it to `initTimeControls({ updater, … })`. From then on the shared time-controls UI performs the generic work on **every** transition (scrub start/end, single-step, astro-step, date-input, Now, transport): it runs the controller action (`reset()`/`stop()`/etc.), calls `updater.reset()` to re-arm all schedules, and persists the time state (`writeTimeStateToUrl`, the default `writeTimeState`, which routes through `app-state`). A client only supplies a transition callback (`onNowClicked`, `onScrubEnd`, …) when it has **custom** work beyond that — e.g. the Inspector re-parses its free-form expression box (which lives outside the updater for error isolation); Observatory rebuilds its astro `env` via the time controller's own `onTick` and so needs **no** transition callbacks at all. See the contract below.
 
@@ -323,14 +347,15 @@ The **`ObsValue.discrete`** flag tells the updater to evaluate a value at the **
 
 | File | Purpose |
 |------|---------|
-| `src/shared/animation.ts` | All animation logic: hand states, ticking, interpolation, unified core |
-| `src/shared/obs-value.ts` | `ObsValue` — general expression-driven animated value (type + `createObsValue`) |
-| `src/shared/updater.ts` | ObsValue per-frame update/animate passes + `makeOverridableGetNow` (eval-ahead) |
+| `src/shared/animation.ts` | Animation primitives (`AnimatingValue`, `startAnimationRaw`, `interpolateValue`) + update-interval sentinel scheduling |
+| `src/shared/obs-value.ts` | `ObsValue` — general expression-driven animated value (type + `createObsValue` / `createObsValueFromAST`) |
+| `src/shared/updater.ts` | The `Updater` + ObsValue per-frame update/animate passes + `makeOverridableGetNow` (eval-ahead seam) |
+| `src/watch/hand-values.ts` | Chronometer↔Updater bridge: `buildHandValues` / `buildTerminatorValues` / `buildAnalemmaValues` (parts → ObsValues) |
 | `src/watch/astro-stepper.ts` | Astronomical event stepping: rise/set, moon phase, transit search |
-| `src/watch/terminator.ts` | Moon-phase leaf animation (uses unified core) |
-| `src/time-controller.ts` | Display time management, rate control, tick scheduling |
-| `src/engine-entry.ts` | Main loop, scheduler, transition handling, `makeGetNow` |
-| `src/watch/watch-env.ts` | Expression environment (receives quantized `getNow`) |
+| `src/watch/terminator.ts` | Moon-phase leaf geometry + `terminatorAngle` (leaves are ObsValues on the face Updater) |
+| `src/shared/time-controller.ts` | Display time management, rate control, tick scheduling |
+| `src/engine-entry.ts` | Main loop, scheduler, transition handling, per-face `Updater` + `makeGetNow`/seam |
+| `src/watch/watch-env.ts` | Expression environment (receives the quantized `getNow`; registers the wedge/terminator/analemma/calendar env functions) |
 
 ## Related Docs
 
