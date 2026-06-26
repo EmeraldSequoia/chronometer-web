@@ -1,10 +1,14 @@
 /**
  * TestBench — Core test driver for watch face regression testing.
  *
- * Wraps TimeController + createWatchEnvironment + initHandStates + tickAnimations
- * into a single class that can be used to set mock times, simulate user
+ * Wraps TimeController + createWatchEnvironment + buildHandValues +
+ * Updater.tick into a single class that can set mock times, simulate user
  * interactions (step, scrub, play/pause), and capture snapshots of all
  * dynamic part values for comparison against golden baselines.
+ *
+ * Mirrors the engine's animation path (the ObsValue/Updater system): a per-bench
+ * overridable getNow seam with beatsPerSecond quantization layered on top, exactly
+ * as engine-entry.ts wires it.
  *
  * Usage:
  *   const bench = new TestBench({ faceName: 'Babylon', location: TEST_LOCATIONS[0] });
@@ -24,26 +28,13 @@ import {
 
 import { parseWatchXML } from '../watch/xml-parser.js';
 import { createWatchEnvironment } from '../watch/watch-env.js';
-import type { Watch } from '../watch/types.js';
+import type { Watch, WatchPart, QDialPart } from '../watch/types.js';
 import type { Environment } from '../expr/evaluator.js';
 import {
-    type HandState,
-    initHandStates,
-    tickAnimations,
-    finishAnimations,
-    resetHandSchedules,
-    anyAnimating,
-} from '../shared/animation.js';
-import {
-    type TerminatorLeafState,
-    expandTerminatorToLeaves,
-    tickLeafAnimations,
-    finishLeafAnimations,
-    resetLeafSchedules,
-    anyLeafAnimating,
-} from '../watch/terminator.js';
+    Updater, makeOverridableGetNow, type WithDisplayTime, type TimingContext,
+} from '../shared/updater.js';
+import { buildHandValues } from '../watch/hand-values.js';
 import { TimeController, type TimeUnit, RATE_OPTIONS, TICK_INTERVAL_MS, displaySecondsPerTick } from '../shared/time-controller.js';
-import type { TerminatorPart } from '../watch/types.js';
 
 // ============================================================================
 // TestBench
@@ -64,9 +55,13 @@ export class TestBench {
 
     // Mutable state
     env!: Environment;
-    handStates!: HandState[];
-    terminatorLeaves!: TerminatorLeafState[];
+    updater!: Updater;
     timeController!: TimeController;
+
+    /** Overridable (unquantized) display-time source — the base of the env's
+     *  quantized getNow and of the Updater's getNow/withDisplayTime. */
+    private getNow!: () => Date;
+    private withDisplayTime!: WithDisplayTime;
 
     /** Mocked performance.now() value (ms). */
     perfNow: number = 1000; // Start at 1s to avoid edge cases at 0
@@ -74,8 +69,7 @@ export class TestBench {
     /**
      * Simulated play direction. When non-null, advanceRealTime() advances
      * display time by deltaMs × playDirection in addition to perfNow.
-     * This avoids using TimeController's 1×/-1× mode which relies on
-     * Date.now() and is inherently non-deterministic.
+     * This avoids using TimeController's 1×/-1× mode (which relies on Date.now()).
      */
     private playDirection: 1 | -1 | null = null;
 
@@ -103,6 +97,24 @@ export class TestBench {
         this.timeController = new TimeController();
     }
 
+    /** beatsPerSecond quantizer over a base time source (mirrors engine makeGetNow). */
+    private makeGetNow(bps: number, base: () => Date): () => Date {
+        if (bps <= 0) return base;
+        return () => {
+            const ms = base().getTime();
+            return new Date(Math.round(ms / 1000 * bps) / bps * 1000);
+        };
+    }
+
+    /** Rebuild the environment for the current time, reusing the persistent
+     *  overridable getNow seam (only the quantizing closure is re-created). */
+    private buildEnv(): Environment {
+        const faceGetNow = this.makeGetNow(this.watch.beatsPerSecond, this.getNow);
+        return createWatchEnvironment(
+            this.watch, this.location.lat, this.location.lon, faceGetNow, this.location.olsonTimezone,
+        );
+    }
+
     /**
      * Set the mock display time and (re)initialize all animation state.
      * This is the primary way to set up a scenario.
@@ -111,67 +123,39 @@ export class TestBench {
         // Set display time via TimeController (stops the clock)
         this.timeController.setTime(date);
 
-        // Create a fresh environment with the mock time source
-        const getNow = () => this.timeController.getDisplayTime();
-        this.env = createWatchEnvironment(
-            this.watch,
-            this.location.lat,
-            this.location.lon,
-            getNow,
-            this.location.olsonTimezone,
-        );
+        // Per-bench overridable getNow seam (unquantized base = display time).
+        const rawGetNow = () => this.timeController.getDisplayTime();
+        const seam = makeOverridableGetNow(rawGetNow);
+        this.getNow = seam.getNow;
+        this.withDisplayTime = seam.withDisplayTime;
 
-        // Initialize hand states
-        this.handStates = initHandStates(
-            this.watch,
-            this.env,
-            this.perfNow,
-            getNow,
-            getNow, // rawGetNow = getNow for testing (time is fully controlled)
-        );
+        this.env = this.buildEnv();
 
-        // Expand terminators
-        this.terminatorLeaves = [];
-        this._collectTerminators(this.watch.parts);
+        // Build the per-face Updater in lightweight mode: hands/wheels/dials/covers
+        // + the day/night ring's masterOffset, but NOT the per-wedge ObsValues,
+        // terminator leaves, or analemma — none of which the snapshot captures (and
+        // analemma's expandAnalemma needs OffscreenCanvas, absent in node). This
+        // matches the legacy HandState bench's scope and keeps the suite fast.
+        this.updater = buildHandValues(this.watch.name, this.watch, this.env, this.perfNow, true);
     }
 
     /**
-     * Rebuild the environment and hand states without changing the time.
-     * Used after TimeController mutations (step, setRate, etc.) to refresh
-     * the environment's time-dependent variable bindings.
+     * Rebuild the environment without changing the time. Used after TimeController
+     * mutations (step, setRate, etc.) to refresh time-dependent bindings. The
+     * Updater + leaves persist (they re-evaluate against this.env on the next tick).
      */
     rebuildEnv(): void {
-        const getNow = () => this.timeController.getDisplayTime();
-
-        // Rebuild the environment (recalculates all time-dependent variables)
-        this.env = createWatchEnvironment(
-            this.watch,
-            this.location.lat,
-            this.location.lon,
-            getNow,
-            this.location.olsonTimezone,
-        );
-
-        // Update getNow/rawGetNow closures on existing hand states
-        // (so expression evaluation uses the new time)
-        for (const hs of this.handStates) {
-            hs.getNow = getNow;
-            hs.rawGetNow = getNow;
-        }
+        this.env = this.buildEnv();
     }
 
     /**
-     * Advance the mocked performance.now() by deltaMs and run one
-     * animation tick across all hands and terminator leaves.
-     *
-     * When playing (playDirection is set), also advances display time
-     * by deltaMs in the play direction, keeping both time bases in sync.
+     * Advance the mocked performance.now() by deltaMs and run one animation frame.
+     * When playing, also advances display time by deltaMs in the play direction.
      */
     advanceRealTime(deltaMs: number): void {
         this.perfNow += deltaMs;
 
         if (this.playDirection !== null) {
-            // Advance display time to simulate 1× play
             const currentMs = this.timeController.getDisplayTime().getTime();
             const newMs = currentMs + deltaMs * this.playDirection;
             this.timeController.setTime(new Date(newMs));
@@ -182,10 +166,7 @@ export class TestBench {
         this._tickAll(null, 0, dir);
     }
 
-    /**
-     * Run one animation frame at the current perfNow.
-     * Uses the given tick parameters for quantized mode.
-     */
+    /** Run one animation frame at the current perfNow (quantized-mode params optional). */
     tick(
         tickIntervalMs: number | null = null,
         displayDeltaPerTickSec: number = 0,
@@ -195,163 +176,128 @@ export class TestBench {
     }
 
     /**
-     * Simulate a single-step tap on a step button.
-     * Mirrors the mousedown handler in engine-entry.ts.
+     * Simulate a single-step tap. Mirrors engine-entry's onTimeStep
+     * (finishAllAnimations → resetAllSchedules) plus the controller step.
      */
     singleStep(unit: TimeUnit, direction: 1 | -1): void {
-        // Stop time and snap in-flight animations
         this.timeController.stop();
-        finishAnimations(this.handStates);
-        finishLeafAnimations(this.terminatorLeaves);
+        this.updater.finish();
 
-        // Step the time controller
         this.timeController.step(unit, direction);
-
-        // Rebuild env with new time
         this.rebuildEnv();
 
-        // One-shot: re-evaluate all hands with natural speed animation
+        // One-shot re-evaluation: reset schedules, then evaluate at the new time.
         this.timeController.beginFrame();
-        resetHandSchedules(this.handStates);
-        resetLeafSchedules(this.terminatorLeaves);
-        tickAnimations(this.handStates, this.env, this.perfNow, null, 0, direction);
-        tickLeafAnimations(this.terminatorLeaves, this.env, this.perfNow, null, 0);
+        this.updater.reset();
+        this._tick(null, 0, direction);
         this.timeController.endFrame();
     }
 
-    /**
-     * Start a hold-to-scrub simulation.
-     * Sets up quantized rate mode at the given unit.
-     */
+    /** Start a hold-to-scrub simulation (quantized rate mode at the given unit). */
     startScrub(unit: TimeUnit, direction: 1 | -1): void {
         this.timeController.setDirection(direction);
-        // Find the rate option matching the unit
         const rateIdx = RATE_OPTIONS.findIndex(r => r.unit === unit);
         if (rateIdx >= 0) {
             this.timeController.setRate(RATE_OPTIONS[rateIdx]);
         }
         this.rebuildEnv();
-        resetHandSchedules(this.handStates);
-        resetLeafSchedules(this.terminatorLeaves);
+        this.updater.reset();
     }
 
-    /**
-     * Advance one scrub tick (100ms real time + one calendar unit).
-     */
+    /** Advance one scrub tick (100ms real time + one calendar unit). */
     scrubTick(): void {
         this.perfNow += TICK_INTERVAL_MS;
 
-        // Advance the time controller's tick
         this.timeController.beginFrame();
         this.timeController.checkTick(this.perfNow);
-
-        // Rebuild env with new time
         this.rebuildEnv();
 
         const rate = this.timeController.currentRate;
-        const tickMs = TICK_INTERVAL_MS;
         const displayDelta = rate ? displaySecondsPerTick(rate.unit) : 0;
         const dir = this.timeController.currentDirection;
-
-        tickAnimations(this.handStates, this.env, this.perfNow, tickMs, displayDelta, dir);
-        tickLeafAnimations(this.terminatorLeaves, this.env, this.perfNow, tickMs, displayDelta);
+        this._tick(TICK_INTERVAL_MS, displayDelta, dir);
         this.timeController.endFrame();
     }
 
-    /**
-     * End a scrub simulation — stop and snap all animations.
-     */
+    /** End a scrub simulation — stop and snap all animations. */
     endScrub(): void {
         this.timeController.stop();
-        finishAnimations(this.handStates);
-        finishLeafAnimations(this.terminatorLeaves);
+        this.updater.finish();
     }
 
     /**
-     * Simulate play at 1× in the given direction.
-     *
-     * Instead of using TimeController's 1×/-1× mode (which relies on
-     * Date.now()), we keep the clock stopped and track the play direction.
-     * advanceRealTime() will advance display time accordingly.
+     * Simulate play at 1× in the given direction. Keeps the clock stopped and
+     * tracks the play direction; advanceRealTime() advances display time.
      */
     play(direction: 1 | -1): void {
         this.playDirection = direction;
-
-        // Unfreeze hand schedules so expressions re-evaluate
-        resetHandSchedules(this.handStates);
-        resetLeafSchedules(this.terminatorLeaves);
+        this.updater.reset();
     }
 
-    /**
-     * Simulate pause — stop and snap animations.
-     */
+    /** Simulate pause — stop and snap animations. */
     pause(): void {
         this.playDirection = null;
         this.timeController.stop();
-        finishAnimations(this.handStates);
-        finishLeafAnimations(this.terminatorLeaves);
+        this.updater.finish();
     }
 
     /**
-     * Run animation frames until all animations complete, or max 5 seconds of sim time.
-     * Advances perfNow in 16.7ms increments (60fps).
+     * Run animation frames until all animations complete (or 5s of sim time),
+     * then snap. Advances perfNow in 16.7ms (60fps) increments.
      */
     finishAllAnimations(): void {
         const maxIterations = 300; // 5s at 60fps
         for (let i = 0; i < maxIterations; i++) {
-            if (!anyAnimating(this.handStates) && !anyLeafAnimating(this.terminatorLeaves)) {
-                break;
-            }
+            if (!this.updater.anyAnimating()) break;
             this.perfNow += 16.7;
             this._tickAll(null, 0, this.timeController.currentDirection);
         }
-        // Final snap
-        finishAnimations(this.handStates);
-        finishLeafAnimations(this.terminatorLeaves);
+        this.updater.finish();
     }
 
     /**
-     * Capture a snapshot of all current part values.
+     * Capture a snapshot of all dynamic part values (same part set as the legacy
+     * collectDynamicParts), read from the parts' ObsValue handles.
      */
     snapshot(): PartValueSnapshot[] {
-        const parts: PartValueSnapshot[] = [];
+        const dyn: WatchPart[] = [];
+        this.collectDynamic(this.watch.parts, dyn);
 
-        for (const hs of this.handStates) {
+        return dyn.map((part): PartValueSnapshot => {
+            // For a day/night ring the legacy "angle" was its masterOffset.
+            const angleObs = part.type === 'QDayNightRing' ? part._obsMasterOffset : part._obsAngle;
+            const offsetObs = part._obsOffsetAngle;
+            const xObs = part._obsXMotion;
+            const yObs = part._obsYMotion;
+            const schedObs = angleObs ?? xObs ?? offsetObs;
+
             const snap: PartValueSnapshot = {
-                partName: hs.part.name,
-                partType: hs.part.type,
-                angle: hs.angle.currentValue,
-                angleAnimating: hs.angle.animating,
-                angleTarget: hs.angle.targetValue,
-                updateIntervalMs: hs.updateIntervalMs,
-                nextUpdateDisplayTime: hs.nextUpdateDisplayTime,
+                partName: part.name,
+                partType: part.type,
+                angle: angleObs ? angleObs.currentValue : 0,
+                angleAnimating: angleObs ? angleObs.anim.animating : false,
+                angleTarget: angleObs ? angleObs.anim.targetValue : 0,
+                nextUpdateDisplayTime: schedObs ? schedObs.nextUpdateDisplayTime : Infinity,
+                updateIntervalMs: schedObs ? schedObs.updateInterval * 1000 : 0,
             };
-
-            if (hs.offsetAngle) {
-                snap.offsetAngle = hs.offsetAngle.currentValue;
-                snap.offsetAngleAnimating = hs.offsetAngle.animating;
-                snap.offsetAngleTarget = hs.offsetAngle.targetValue;
+            if (offsetObs) {
+                snap.offsetAngle = offsetObs.currentValue;
+                snap.offsetAngleAnimating = offsetObs.anim.animating;
+                snap.offsetAngleTarget = offsetObs.anim.targetValue;
             }
-
-            if (hs.xMotion) {
-                snap.xMotion = hs.xMotion.currentValue;
-                snap.xMotionAnimating = hs.xMotion.animating;
+            if (xObs) {
+                snap.xMotion = xObs.currentValue;
+                snap.xMotionAnimating = xObs.anim.animating;
             }
-
-            if (hs.yMotion) {
-                snap.yMotion = hs.yMotion.currentValue;
-                snap.yMotionAnimating = hs.yMotion.animating;
+            if (yObs) {
+                snap.yMotion = yObs.currentValue;
+                snap.yMotionAnimating = yObs.anim.animating;
             }
-
-            parts.push(snap);
-        }
-
-        return parts;
+            return snap;
+        });
     }
 
-    /**
-     * Clean up vitest mocks.
-     */
+    /** Clean up vitest mocks. */
     dispose(): void {
         if (this.perfNowSpy) {
             this.perfNowSpy.mockRestore();
@@ -363,27 +309,42 @@ export class TestBench {
     // Internal helpers
     // ========================================================================
 
+    private _tick(tickIntervalMs: number | null, displayDeltaPerTickSec: number, direction: 1 | -1): void {
+        const ctx: TimingContext = {
+            tickIntervalMs,
+            displayDeltaSec: displayDeltaPerTickSec,
+            direction,
+        };
+        this.updater.tick(this.env, this.perfNow, this.getNow, this.withDisplayTime, ctx);
+    }
+
     private _tickAll(
         tickIntervalMs: number | null,
         displayDeltaPerTickSec: number,
         direction: 1 | -1,
     ): void {
         this.timeController.beginFrame();
-        tickAnimations(this.handStates, this.env, this.perfNow, tickIntervalMs, displayDeltaPerTickSec, direction);
-        tickLeafAnimations(this.terminatorLeaves, this.env, this.perfNow, tickIntervalMs, displayDeltaPerTickSec);
+        this._tick(tickIntervalMs, displayDeltaPerTickSec, direction);
         this.timeController.endFrame();
     }
 
-    private _collectTerminators(parts: import('../watch/types.js').WatchPart[]): void {
+    /** Walk the part tree collecting the dynamic parts (matches collectDynamicParts). */
+    private collectDynamic(parts: WatchPart[], out: WatchPart[]): void {
         for (const part of parts) {
-            if (part.type === 'Terminator') {
-                const leaves = expandTerminatorToLeaves(part as TerminatorPart, this.env);
-                this.terminatorLeaves.push(...leaves);
+            if (part.type === 'QHand' || part.type === 'Wheel' || part.type === 'QWedge') {
+                out.push(part);
+            } else if (part.type === 'QDial' && (part as QDialPart).animSpeed) {
+                out.push(part);
+            } else if (part.type === 'QDayNightRing') {
+                out.push(part);
+            } else if (part.type === 'CalendarRowCover') {
+                out.push(part);
             } else if (part.type === 'Static') {
-                this._collectTerminators(part.children);
+                this.collectDynamic(part.children, out);
             }
         }
     }
+
 }
 
 // ============================================================================
@@ -521,4 +482,3 @@ export function runFaceRegressionSuite(faceName: string): void {
         });
     }
 }
-

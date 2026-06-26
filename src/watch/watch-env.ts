@@ -40,10 +40,32 @@ import {
     registerAstroFunctions,
     computeDayNightLeafAngle,
 } from '../shared/astro-env.js';
+import {
+    timeIntervalFromUTCComponents,
+    daysInMonth as calendarDaysInMonth,
+    weekdayFromTimeInterval,
+} from '../astronomy/es-calendar.js';
+import { terminatorAngle } from './terminator.js';
+import { PATH_SAMPLE_COUNT } from './analemma.js';
+import { dateToDateInterval } from '../astronomy/es-time.js';
+import { fractionOfVernalEquinoxYear, sunSkyOrientationAngle } from '../astronomy/es-astro.js';
 
 // Re-export symbols that other modules import from watch-env.ts
 // (backward compatibility — eventually consumers should import directly from astro-env.ts)
 export { computeTzDeltaMs, evalAttr, evalColor } from '../shared/astro-env.js';
+
+/**
+ * Numeric codes for a CalendarRowCover's `coverType`. The expression language is
+ * numeric, so the cover type is passed to the `calendarCoverOffset(code)` env
+ * function as one of these codes (constructed by buildHandValues). Keep in sync
+ * with the switch in {@link computeCalendarCoverOffsetForEnv}.
+ */
+export const CALENDAR_COVER_CODES: Record<string, number> = {
+    row1Left: 0,
+    row1Right: 1,
+    row6Left: 2,
+    row56Right: 3,
+};
 
 // Default observer location (San Jose, CA): used if geolocation unavailable
 const DEFAULT_LAT_DEG = 37.205;    // degrees N
@@ -342,6 +364,89 @@ export function createWatchEnvironment(
         return wadokeiDNAngles()?.sunriseAngle ?? 0;
     });
 
+    // --- Wadokei day/night ring per-wedge functions (ObsValue expressions) ---
+    // Each wedge's angle/slide is independently computable from astro-cached
+    // scalars (numVis, sunset/sunrise) — no per-frame array cache. Ports the
+    // slide / polar branches of drawQDayNightRing verbatim. Slide mode is
+    // Kyoto-only, where sunsetAngle/sunriseAngle == wadokeiDN*Angle().
+
+    // dayNightWedgeSlideAngle(planet, wedgeIndex, numWedges, slideDistance):
+    // observer-frame angle for one wedge (masterOffset added at draw time).
+    env.functions.set('dayNightWedgeSlideAngle',
+        (_planet: number, wedgeIndex: number, numWedges: number, _slideDistance: number) => {
+            const TWO_PI = 2 * Math.PI;
+            const numVisFn = env.functions.get('wadokeiDNNumVisible');
+            const numVis = numVisFn ? numVisFn(numWedges) : numWedges;
+            const wedgeSpan = (TWO_PI + 0.2) / numWedges;
+
+            if (numVis > 0 && numVis < numWedges) {
+                const a = wadokeiDNAngles();
+                const sunsetAngle = a?.sunsetAngle ?? 0;
+                const sunriseAngle = a?.sunriseAngle ?? 0;
+                let nightArc = sunriseAngle - sunsetAngle;
+                if (nightArc < 0) nightArc += TWO_PI;
+                const adjustedStart = sunsetAngle + wedgeSpan / 2;
+                const adjustedArc = nightArc - wedgeSpan;
+                const step = numVis > 1 ? adjustedArc / (numVis - 1) : 0;
+                if (wedgeIndex < numVis) {
+                    const raw = adjustedStart + step * wedgeIndex;
+                    return ((raw % TWO_PI) + TWO_PI) % TWO_PI;
+                }
+                // Park hidden wedges at the last visible position (sunrise edge).
+                return adjustedStart + step * (numVis - 1);
+            }
+            if (numVis === 0) {
+                // Polar summer: no night — park all at 0 (all slid out anyway).
+                return 0;
+            }
+            // Polar winter (numVis >= numWedges): even full-circle distribution.
+            return TWO_PI * wedgeIndex / numWedges;
+        });
+
+    // dayNightWedgeSlideOffset(wedgeIndex, numWedges, slideDistance):
+    // 0 if the wedge is visible, else slideDistance (slid under the cover disc).
+    env.functions.set('dayNightWedgeSlideOffset',
+        (wedgeIndex: number, numWedges: number, slideDistance: number) => {
+            const numVisFn = env.functions.get('wadokeiDNNumVisible');
+            const numVis = numVisFn ? numVisFn(numWedges) : numWedges;
+            return wedgeIndex < numVis ? 0 : slideDistance;
+        });
+
+    // calendarCoverOffset(coverTypeCode): horizontal slide offset (XML px) for a
+    // CalendarRowCover, by numeric coverType code (see CALENDAR_COVER_CODES). The
+    // CalendarRowCover ObsValue's expression calls this; ported from the legacy
+    // computeCalendarCoverOffset in animation.ts.
+    env.functions.set('calendarCoverOffset', (coverTypeCode: number) => {
+        return computeCalendarCoverOffsetForEnv(env, coverTypeCode);
+    });
+
+    // terminatorLeafAngle(phase, quad, idx, leavesPerQuad, incr): one moon-phase
+    // terminator leaf's rotation angle. Wraps the pure terminatorAngle() and adds
+    // π for the lower quadrants (LowerLeft=1, LowerRight=2), matching the legacy
+    // tickLeafAnimations. Each leaf's angle ObsValue calls this with the part's
+    // shared phase expression and the leaf's own quadrant/index.
+    env.functions.set('terminatorLeafAngle',
+        (phase: number, quad: number, idx: number, leavesPerQuad: number, incr: number) => {
+            let a = terminatorAngle(phase, quad, idx, leavesPerQuad, incr);
+            const isUpper = quad === 0 || quad === 3;  // TerminatorQuadrant: UL=0, UR=3
+            if (!isUpper) a += Math.PI;
+            return a;
+        });
+
+    // analemmaPathParameter(): the Sun's position *along* the analemma figure-eight,
+    // as fraction-of-(vernal-equinox)-year × PATH_SAMPLE_COUNT (a cyclic value with
+    // period PATH_SAMPLE_COUNT). analemmaRotation(): the sky-orientation angle.
+    // These mirror updateAnalemmaValues() exactly; eval-ahead shifts getNow during
+    // look-ahead, so no special handling is needed here.
+    env.functions.set('analemmaPathParameter', () => {
+        const di = dateToDateInterval(getNow());
+        return fractionOfVernalEquinoxYear(di, null) * PATH_SAMPLE_COUNT;
+    });
+    env.functions.set('analemmaRotation', () => {
+        const di = dateToDateInterval(getNow());
+        return sunSkyOrientationAngle(di, OBSERVER_LAT, OBSERVER_LON, null);
+    });
+
     // =========================================================================
     // Terra I — World-time ring functions
     // =========================================================================
@@ -351,6 +456,91 @@ export function createWatchEnvironment(
     releaseCachePool(pool);
 
     return env;
+}
+
+// ============================================================================
+// CalendarRowCover offset
+// ============================================================================
+
+/**
+ * Compute the xOffset (XML px) for a CalendarRowCover, by numeric coverType code.
+ *
+ * Direct port of computeCalendarCoverOffset from animation.ts (iOS
+ * calendarRowCoverOffsetForType / calendarRowUnderlayOffsetForType), switched on
+ * the numeric {@link CALENDAR_COVER_CODES} code instead of a string. Reads
+ * calendar state (month/year/era, weekday start, cell width) from the env, using
+ * the hybrid Julian/Gregorian calendar (es-calendar).
+ */
+function computeCalendarCoverOffsetForEnv(env: Environment, coverTypeCode: number): number {
+    const calendarWeekdayStart = env.functions.get('calendarWeekdayStart')?.() ?? 0;
+    const cellWidth = env.variables.get('calendarCellWidth') ?? 13.3;
+
+    const monthNum = (env.functions.get('monthNumber')?.() ?? 0) + 1;
+    const yearNum = env.functions.get('yearNumber')?.() ?? 2024;
+    const era = env.functions.get('eraNumber')?.() ?? 1;
+    const absYear = yearNum;
+
+    // First of this month: compute weekday via epoch arithmetic
+    const firstOfMonthDI = timeIntervalFromUTCComponents(era, absYear, monthNum, 1, 12, 0, 0);
+    const thisMonthStartCol = (7 + weekdayFromTimeInterval(firstOfMonthDI, 0) - calendarWeekdayStart) % 7;
+
+    // Days in this month and previous month (hybrid calendar)
+    const dim = calendarDaysInMonth(era, absYear, monthNum);
+    // Previous month: handle January → December of prior year
+    let prevEra = era;
+    let prevYear = absYear;
+    let prevMonth = monthNum - 1;
+    if (prevMonth < 1) {
+        prevMonth = 12;
+        if (era === 1 && absYear === 1) {
+            prevEra = 0; prevYear = 1;  // 1 CE - 1 = 1 BCE
+        } else if (era === 0) {
+            prevYear = absYear + 1;      // further into BCE
+        } else {
+            prevYear = absYear - 1;
+        }
+    }
+    const daysInPrevMonth = calendarDaysInMonth(prevEra, prevYear, prevMonth);
+
+    // Next month: compute weekday and start row
+    let nextEra = era;
+    let nextYear = absYear;
+    let nextMonth = monthNum + 1;
+    if (nextMonth > 12) {
+        nextMonth = 1;
+        if (era === 0 && absYear === 1) {
+            nextEra = 1; nextYear = 1;  // 1 BCE + 1 = 1 CE
+        } else if (era === 0) {
+            nextYear = absYear - 1;      // towards CE
+        } else {
+            nextYear = absYear + 1;
+        }
+    }
+    const nextMonthFirstDI = timeIntervalFromUTCComponents(nextEra, nextYear, nextMonth, 1, 12, 0, 0);
+    const nextMonthStartCol = (7 + weekdayFromTimeInterval(nextMonthFirstDI, 0) - calendarWeekdayStart) % 7;
+    const nextMonthStartRow = Math.floor((dim + thisMonthStartCol) / 7);
+
+    let columnMotion = 7;
+
+    if (coverTypeCode === CALENDAR_COVER_CODES.row1Left) {
+        columnMotion = thisMonthStartCol + 22 - daysInPrevMonth;
+        if (columnMotion < -4) columnMotion = -4;
+    } else if (coverTypeCode === CALENDAR_COVER_CODES.row1Right) {
+        columnMotion = thisMonthStartCol + 26 - daysInPrevMonth;
+        if (columnMotion < -5) columnMotion = -5;
+    } else if (coverTypeCode === CALENDAR_COVER_CODES.row56Right) {
+        columnMotion = nextMonthStartRow === 4 ? nextMonthStartCol : 7;
+    } else if (coverTypeCode === CALENDAR_COVER_CODES.row6Left) {
+        if (nextMonthStartRow === 5) {
+            columnMotion = nextMonthStartCol;
+        } else if (nextMonthStartRow === 4) {
+            columnMotion = nextMonthStartCol - 7;
+        } else {
+            columnMotion = 7;
+        }
+    }
+
+    return Math.round(columnMotion * cellWidth);
 }
 
 // ============================================================================

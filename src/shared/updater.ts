@@ -195,10 +195,10 @@ function updateObsValueEvalAhead(
     const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
     if (budgetMs > 0 && isFinite(budgetMs)) {
         // Sweep to the future target over the real-time budget.
-        startAnimationRaw(v.anim, target, perfNow, multiplier, budgetMs, v.linear);
+        startAnimationRaw(v.anim, target, perfNow, multiplier, budgetMs, v.period);
     } else {
         // Budget is now/past — snap.
-        startAnimationRaw(v.anim, target, perfNow, multiplier, undefined, v.linear);
+        startAnimationRaw(v.anim, target, perfNow, multiplier, undefined, v.period);
     }
 }
 
@@ -235,7 +235,7 @@ function updateNaturalSpeedValue(
     if (dtToNextUpdateSec <= 0 || !isFinite(dtToNextUpdateSec)) {
         // Edge case: next update is now or in the past — snap
         startAnimationRaw(v.anim, currentCorrectAngle, perfNow,
-            v.animSpeed / K_ANGLE_ANIM_SPEED, undefined, v.linear);
+            v.animSpeed / K_ANGLE_ANIM_SPEED, undefined, v.period);
         v.pendingSweep = null;
         return;
     }
@@ -261,7 +261,7 @@ function updateNaturalSpeedValue(
         const sweepAngle = effNaturalSpeed * dtToNextUpdateSec;
         const finalTarget = currentCorrectAngle + sweepAngle;
         startAnimationRaw(v.anim, finalTarget, perfNow,
-            v.naturalSpeed / K_ANGLE_ANIM_SPEED, dtToNextUpdateMs, v.linear);
+            v.naturalSpeed / K_ANGLE_ANIM_SPEED, dtToNextUpdateMs, v.period);
         v.pendingSweep = null;
         return;
     }
@@ -275,7 +275,7 @@ function updateNaturalSpeedValue(
         const sweepAngle = effNaturalSpeed * dtToNextUpdateSec;
         const finalTarget = currentCorrectAngle + sweepAngle;
         startAnimationRaw(v.anim, finalTarget, perfNow,
-            v.animSpeed / K_ANGLE_ANIM_SPEED, dtToNextUpdateMs, v.linear);
+            v.animSpeed / K_ANGLE_ANIM_SPEED, dtToNextUpdateMs, v.period);
         v.pendingSweep = null;
         return;
     }
@@ -288,7 +288,7 @@ function updateNaturalSpeedValue(
         const sweepAngle = effNaturalSpeed * dtToNextUpdateSec;
         const finalTarget = currentCorrectAngle + sweepAngle;
         startAnimationRaw(v.anim, finalTarget, perfNow,
-            v.animSpeed / K_ANGLE_ANIM_SPEED, dtToNextUpdateMs, v.linear);
+            v.animSpeed / K_ANGLE_ANIM_SPEED, dtToNextUpdateMs, v.period);
         v.pendingSweep = null;
         return;
     }
@@ -296,7 +296,7 @@ function updateNaturalSpeedValue(
     // Phase 1 target: where the correct position will be when catch-up ends
     const catchUpTarget = currentCorrectAngle + effNaturalSpeed * catchUpSec;
     startAnimationRaw(v.anim, catchUpTarget, perfNow,
-        v.animSpeed / K_ANGLE_ANIM_SPEED, catchUpMs, v.linear);
+        v.animSpeed / K_ANGLE_ANIM_SPEED, catchUpMs, v.period);
 
     // Store Phase 2 for the animate pass to pick up
     const remainingMs = dtToNextUpdateMs - catchUpMs;
@@ -346,15 +346,15 @@ function updateObsValueScrub(
     // Compute natural animation duration
     const speed = v.animSpeed;  // rad/s
     let angleDelta: number;
-    if (v.linear) {
-        // Linear values: straight-line delta (no angular wrapping)
+    if (!isFinite(v.period)) {
+        // Linear values: straight-line delta (no cyclic wrapping)
         angleDelta = Math.abs(newTarget - v.anim.currentValue);
     } else {
-        const TWO_PI = 2 * Math.PI;
-        const normalizedTarget = ((newTarget % TWO_PI) + TWO_PI) % TWO_PI;
-        const normalizedCurrent = ((v.anim.currentValue % TWO_PI) + TWO_PI) % TWO_PI;
+        const P = v.period;
+        const normalizedTarget = ((newTarget % P) + P) % P;
+        const normalizedCurrent = ((v.anim.currentValue % P) + P) % P;
         angleDelta = Math.abs(normalizedTarget - normalizedCurrent);
-        if (angleDelta > Math.PI) angleDelta = TWO_PI - angleDelta;
+        if (angleDelta > P / 2) angleDelta = P - angleDelta;
     }
     const naturalDurationMs = speed > 0 ? (angleDelta / speed) * 1000 : 0;
 
@@ -364,15 +364,15 @@ function updateObsValueScrub(
     if (naturalDurationMs > timeUntilNextUpdateMs) {
         // Too slow — compress to finish before next re-evaluation
         startAnimationRaw(v.anim, newTarget, perfNow, multiplier,
-            timeUntilNextUpdateMs, v.linear);
+            timeUntilNextUpdateMs, v.period);
     } else if (naturalDurationMs < tickIntervalMs) {
         // Too fast — stretch to fill one tick (prevents sub-frame snaps)
         startAnimationRaw(v.anim, newTarget, perfNow, multiplier,
-            tickIntervalMs, v.linear);
+            tickIntervalMs, v.period);
     } else {
         // Natural speed falls between one tick and next update — use as-is
         startAnimationRaw(v.anim, newTarget, perfNow, multiplier,
-            undefined, v.linear);
+            undefined, v.period);
     }
 
     // No pending sweep during scrub — just snap-to-target with compression
@@ -388,7 +388,7 @@ function settleAtNow(v: ObsValue, env: Environment, perfNow: number): void {
     v.nextUpdateTime = perfNow + 100;
     v.pendingSweep = null;
     startAnimationRaw(v.anim, newTarget, perfNow,
-        v.animSpeed / K_ANGLE_ANIM_SPEED, undefined, v.linear);
+        v.animSpeed / K_ANGLE_ANIM_SPEED, undefined, v.period);
 }
 
 /**
@@ -418,7 +418,7 @@ function updateObsValueFixedDuration(
     }
 
     const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
-    startAnimationRaw(v.anim, newTarget, perfNow, multiplier, durationMs, v.linear);
+    startAnimationRaw(v.anim, newTarget, perfNow, multiplier, durationMs, v.period);
 }
 
 /**
@@ -436,7 +436,7 @@ function snapToTargetAtBoundary(
     v.nextUpdateTime = displayTimeToPerfNow(nextDisplayMs, getNow);
     v.pendingSweep = null;
     startAnimationRaw(v.anim, newTarget, perfNow,
-        v.animSpeed / K_ANGLE_ANIM_SPEED, undefined, v.linear);
+        v.animSpeed / K_ANGLE_ANIM_SPEED, undefined, v.period);
 }
 
 // ============================================================================
@@ -526,7 +526,7 @@ export function animateObsValue(v: ObsValue, perfNow: number): void {
         v.pendingSweep = null;
         const sweepMultiplier = v.naturalSpeed / K_ANGLE_ANIM_SPEED;
         startAnimationRaw(v.anim, sweep.target, perfNow,
-            sweepMultiplier, sweep.durationMs, v.linear);
+            sweepMultiplier, sweep.durationMs, v.period);
         // Re-interpolate to pick up the new animation immediately
         v.currentValue = interpolateValue(v.anim, perfNow);
     }
@@ -635,6 +635,48 @@ export class Updater<K extends string = string> {
      * "react to transitions" without computing how the controller affects values.
      */
     reset(): void { resetObsValueSchedules(this.values); }
+
+    /**
+     * Snap every in-flight animation to its target and freeze schedules.
+     *
+     * For each value: clear any pending Phase-2 sweep, set the animation (and the
+     * displayed `currentValue`) to the target — wrapped to `[0, period)` for cyclic
+     * values, left as-is for linear ones — stop animating, and freeze the schedule
+     * (`nextUpdateTime = Infinity`) so nothing re-evaluates until `reset()`.
+     *
+     * Used for step / transport / scrub-end transitions where the system must
+     * settle immediately, and (with the freeze) to hold the stopped-clock state
+     * idle. Generalizes the legacy `finishAnimations`/`finishLeafAnimations` to the
+     * ObsValue fields and the `period` wrap.
+     */
+    finish(): void {
+        for (const v of this.values) {
+            v.pendingSweep = null;
+            let target = v.anim.targetValue;
+            if (isFinite(v.period)) {
+                target = ((target % v.period) + v.period) % v.period;
+            }
+            v.anim.currentValue = target;
+            v.anim.targetValue = target;
+            v.anim.animating = false;
+            v.currentValue = target;
+            v.nextUpdateDisplayTime = Infinity;
+            v.nextUpdateTime = Infinity;
+        }
+    }
+
+    /**
+     * Earliest `performance.now()` at which any value is scheduled to re-evaluate
+     * (`Infinity` if all are frozen). The idle scheduler uses this to set a precise
+     * wakeup `setTimeout`. Generalizes the legacy `nextWakeupTime(states)`.
+     */
+    nextWakeupTime(): number {
+        let earliest = Infinity;
+        for (const v of this.values) {
+            if (v.nextUpdateTime < earliest) earliest = v.nextUpdateTime;
+        }
+        return earliest;
+    }
 
     /**
      * Like `tick()`, but forces every value to animate over exactly

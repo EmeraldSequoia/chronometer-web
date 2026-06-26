@@ -29,16 +29,18 @@ import { createWatchEnvironment, computeTzDeltaMs, GAIA_SUBDIAL_DEFAULTS } from 
 import type { TerraSlot } from './watch/watch-env.js';
 import { TERRA_RING_DEFAULTS } from './watch/watch-env.js';
 import { validSlotsForTz, formatSlotOffset, getStandardOffsetMinutes, olsonIdToCityName } from './watch/terra-slots.js';
-import { buildStaticBlockCaches, renderFrame, invalidateDayNightCaches, buildHandShadowCaches, BEZEL_THICKNESS_XML } from './watch/renderer.js';
+import { buildStaticBlockCaches, renderFrame, buildHandShadowCaches, BEZEL_THICKNESS_XML } from './watch/renderer.js';
 import type { LoadedImage } from './watch/image-loader.js';
-import { initHandStates, tickAnimations, nextWakeupTime, anyAnimating, finishAnimations, resetHandSchedules, makeAnimatingValue, startAnimationRaw, interpolateValue, SCHEDULER_LOOKAHEAD_MS, finishDayNightSlides, resetDayNightSlides } from './shared/animation.js';
-import type { HandState } from './shared/animation.js';
-import type { Watch, QDayNightRingPart } from './watch/types.js';
+import { SCHEDULER_LOOKAHEAD_MS } from './shared/animation.js';
+import { Updater, makeOverridableGetNow, timingContextForFrame, type WithDisplayTime } from './shared/updater.js';
+import { buildHandValues } from './watch/hand-values.js';
+import type { Watch } from './watch/types.js';
 import type { Environment } from './expr/evaluator.js';
 import type { TerminatorLeafState } from './watch/terminator.js';
-import { expandTerminatorToLeaves, updateLeafAngles, tickLeafAnimations, finishLeafAnimations, resetLeafSchedules, anyLeafAnimating } from './watch/terminator.js';
+import { expandTerminatorToLeaves, updateLeafAngles } from './watch/terminator.js';
+import { buildTerminatorValues, buildAnalemmaValues } from './watch/hand-values.js';
 import type { AnalemmaState } from './watch/analemma.js';
-import { expandAnalemma, tickAnalemma, resetAnalemmaSchedule } from './watch/analemma.js';
+import { expandAnalemma } from './watch/analemma.js';
 import { evalAttr } from './watch/watch-env.js';
 import { TimeController, TICK_INTERVAL_MS, displaySecondsPerTick } from './shared/time-controller.js';
 
@@ -180,7 +182,13 @@ interface FaceInstance {
     watch: Watch;
     env: Environment;
     cachesBuilt: boolean;
-    handStates: HandState[];
+    /** Per-face ObsValue collection driven each frame (replaces handStates). */
+    updater: Updater;
+    /** Per-face overridable (unquantized) display-time source — base of the env's
+     *  quantized getNow and of the Updater's eval-ahead time shift. */
+    getNow: () => Date;
+    /** Eval-ahead time-shift helper paired with {@link getNow}. */
+    withDisplayTime: WithDisplayTime;
     canvas: HTMLCanvasElement;
     ctx: CanvasRenderingContext2D;
     sizePx: number;
@@ -189,7 +197,6 @@ interface FaceInstance {
     scale: number;
     terminatorLeaves: TerminatorLeafState[];
     analemmaState: AnalemmaState | null;
-    lastTerminatorRebuild: number;
     faceDataIndex: number;
     /** Per-face slot overrides for Terra/Gaia world-clock faces. */
     terraSlotOverrides?: Record<number, TerraSlot>;
@@ -524,11 +531,16 @@ async function main() {
      * With bps=0, no quantization (continuous sweep).
      * With bps=1, snap to whole seconds (tick-tick).
      * With bps=10, snap to 0.1s (smooth 10 Hz sweep).
+     *
+     * `base` is the unquantized display-time source the quantizer reads through.
+     * It is the face's *overridable* getNow (see makeOverridableGetNow), so the
+     * Updater's eval-ahead `withDisplayTime` shift propagates into the env's
+     * quantized time. Defaults to the global rawGetNow.
      */
-    function makeGetNow(bps: number): () => Date {
-        if (bps <= 0) return rawGetNow;
+    function makeGetNow(bps: number, base: () => Date = rawGetNow): () => Date {
+        if (bps <= 0) return base;
         return () => {
-            const d = rawGetNow();
+            const d = base();
             const ms = d.getTime();
             const quantizedMs = Math.round(ms / 1000 * bps) / bps * 1000;
             return new Date(quantizedMs);
@@ -701,14 +713,20 @@ async function main() {
         const watch = parsedWatches[i];
         const slotResult = buildSlotOverrides(watch);
         const faceOverrides = slotResult?.overrides;
-        const faceGetNow = makeGetNow(watch.beatsPerSecond);
+        // Per-face overridable time seam: the quantized env getNow and the
+        // Updater's eval-ahead shift both read through this same base, so
+        // withDisplayTime() shifts the env's evaluation time (see makeGetNow).
+        const { getNow: faceRawGetNow, withDisplayTime } = makeOverridableGetNow(rawGetNow);
+        const faceGetNow = makeGetNow(watch.beatsPerSecond, faceRawGetNow);
         const env = createWatchEnvironment(watch, lat, lon, faceGetNow, locationTimezone, faceOverrides, slotResult?.globalLocationSlot);
 
         const face: FaceInstance = {
             watch,
             env,
             cachesBuilt: false,
-            handStates: [],
+            updater: new Updater(),
+            getNow: faceRawGetNow,
+            withDisplayTime,
             canvas,
             ctx,
             sizePx: 0,
@@ -717,7 +735,6 @@ async function main() {
             scale: 1,
             terminatorLeaves: [],
             analemmaState: null,
-            lastTerminatorRebuild: 0,
             faceDataIndex: i,
             terraSlotOverrides: faceOverrides,
             globalLocationSlot: slotResult?.globalLocationSlot,
@@ -784,7 +801,9 @@ async function main() {
                 break;  // Only one analemma per face
             }
         }
-        face.handStates = initHandStates(watch, env, performance.now(), makeGetNow(watch.beatsPerSecond), rawGetNow);
+        face.updater = buildHandValues(watch.name, watch, env, performance.now());
+        buildTerminatorValues(face.updater, watch.name, face.terminatorLeaves, env, performance.now());
+        if (face.analemmaState) buildAnalemmaValues(face.updater, watch.name, face.analemmaState, env, performance.now());
     }
 
     function buildAllCachesSequentially(facesToBuild: FaceInstance[], onDone: () => void) {
@@ -824,29 +843,23 @@ async function main() {
             const oldTzOffset = face.env.tzOffsetSec;
 
             // Rebuild the environment but keep the same watch/parts
-            face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+            face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
                     restoreKyotoState(face);
             if (oldKnockout) (face.env as any)._terraCityKnockout = oldKnockout;
             // Invalidate QDayNightRing render caches so astronomy values
             // are recomputed immediately for the new time.
-            invalidateDayNightCaches(face.watch);
-            // Preserve terminator leaves — their expressions are evaluated
-            // against the env each frame by tickLeafAnimations, so they
+            // Preserve terminator leaves — their angle/rotation ObsValues are
+            // evaluated against the (live) env each frame by updater.tick, so they
             // don't need recreating. Recreating them would destroy animation state.
-            // Just update the static caches with current leaf positions.
             const { canvas, watch, env, images, scale } = face;
             buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
             // Force analemma to recompute on the next frame
-            if (face.analemmaState) resetAnalemmaSchedule(face.analemmaState);
 
             // If the timezone offset changed (e.g. DST transition), reset schedules to force immediate hand re-evaluation
             if (oldTzOffset !== undefined && face.env.tzOffsetSec !== oldTzOffset) {
                 console.log(`[rebuildEnvironments] DST transition detected (offset ${oldTzOffset} -> ${face.env.tzOffsetSec}) - resetting schedules`);
                 tzOffsetChanged = true;
-                resetHandSchedules(face.handStates);
-                resetLeafSchedules(face.terminatorLeaves);
-                resetDayNightSlides(face.watch);
-                if (face.analemmaState) resetAnalemmaSchedule(face.analemmaState);
+                face.updater.reset();
             }
         }
 
@@ -1055,7 +1068,6 @@ async function main() {
         const rate = timeController.currentRate;
         const tickMs = rate !== null ? TICK_INTERVAL_MS : null;
         const deltaSec = rate !== null ? displaySecondsPerTick(rate.unit) : 0;
-        const timeDir = timeController.currentDirection;
 
         let renderMs = 0;
         let animatingFaceCount = 0;
@@ -1063,55 +1075,22 @@ async function main() {
         const isPureAnimFrame = isScrubbing && !willTick;
         const animStart = isPureAnimFrame ? performance.now() : 0;
 
+        // Per-frame timing seam (scrub tick rate / display delta / direction;
+        // direction is 0 when stopped so continuous values settle).
+        const timingCtx = timingContextForFrame(timeController);
+
         for (const face of faces) {
             if (!face.enabled || !face.cachesBuilt) continue;
-            tickAnimations(face.handStates, face.env, now, tickMs, deltaSec, timeDir);
-            // Tick any in-flight QDayNightRing toggle animations
-            for (const part of face.watch.parts) {
-                if (part.type === 'QDayNightRing' && part._masterOffsetAnim && part._masterOffsetAnim.animating) {
-                    interpolateValue(part._masterOffsetAnim, now);
-                    part._cachedAngles = undefined; // force re-draw with new offset
-                }
-            }
-            if (face.terminatorLeaves.length > 0) {
-                // Animate leaf angles and rotations using the same system
-                // as hands/wheels (adaptive duration, interpolation at 240fps)
-                tickLeafAnimations(face.terminatorLeaves, face.env, now, tickMs, deltaSec);
-
-                // Rebuild static caches periodically (they include terminator
-                // for the background layer). In quantized mode, rebuild every tick.
-                // In 1× mode, use the part's own update interval.
-                const cacheIntervalMs = tickMs !== null
-                    ? tickMs
-                    : Math.min(...face.terminatorLeaves.map(l => l.updateIntervalSec)) * 1000;
-                if (now - face.lastTerminatorRebuild > cacheIntervalMs) {
-                    buildStaticBlockCaches(
-                        face.watch, face.env, face.canvas.width, face.canvas.height,
-                        face.scale, face.images, face.terminatorLeaves
-                    );
-                    face.lastTerminatorRebuild = now;
-                }
-            }
-
-            // Tick analemma — in accelerated mode, force update every frame
-            if (face.analemmaState) {
-                if (tickMs !== null) resetAnalemmaSchedule(face.analemmaState);
-                tickAnalemma(face.analemmaState, face.env, now);
-            }
+            // Drive all ObsValues for this face — hands, wheels, dials, wedges,
+            // masterOffset, and the terminator leaves (all on the per-face Updater).
+            face.updater.tick(face.env, now, face.getNow, face.withDisplayTime, timingCtx);
 
             const renderStart = performance.now();
             renderFrame(face.ctx, face.watch, face.env, face.scale, face.images, face.terminatorLeaves, face.analemmaState);
 
             renderMs += performance.now() - renderStart;
 
-            const ringAnimating = face.watch.parts.some(p =>
-                p.type === 'QDayNightRing' && (
-                    p._masterOffsetAnim?.animating ||
-                    p._wedgeSlides?.some(s => s.animating) ||
-                    p._wedgeAngleAnims?.some(a => a.animating)
-                )
-            );
-            const faceAnimating = anyAnimating(face.handStates) || anyLeafAnimating(face.terminatorLeaves) || ringAnimating;
+            const faceAnimating = face.updater.anyAnimating();
             if (faceAnimating) {
                 stillAnimating = true;
                 animatingFaceCount++;
@@ -1176,8 +1155,8 @@ async function main() {
         if (timeController.isStopped) return;
         let earliest = Infinity;
         for (const face of faces) {
-            if (!face.enabled || face.handStates.length === 0) continue;
-            const t = nextWakeupTime(face.handStates);
+            if (!face.enabled) continue;
+            const t = face.updater.nextWakeupTime();
             if (t < earliest) earliest = t;
         }
         if (earliest === Infinity) return;
@@ -1224,19 +1203,15 @@ async function main() {
         for (const face of faces) {
             if (!face.enabled) continue;
             const oldKnockout = (face.env as any)._terraCityKnockout;
-            face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+            face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
                     restoreKyotoState(face);
             if (oldKnockout) (face.env as any)._terraCityKnockout = oldKnockout;
-            invalidateDayNightCaches(face.watch);
             if (face.terminatorLeaves.length > 0) {
                 updateLeafAngles(face.terminatorLeaves, face.env);
-                resetLeafSchedules(face.terminatorLeaves);
-                face.lastTerminatorRebuild = 0;
             }
-            if (face.analemmaState) resetAnalemmaSchedule(face.analemmaState);
             const { canvas, watch, env, images, scale } = face;
             buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-            resetHandSchedules(face.handStates);
+            face.updater.reset();
         }
 
         timeUI?.updateTimezoneDisplay();
@@ -1818,23 +1793,17 @@ async function main() {
                 };
             }
             // Fresh environment with new lat/lon/tz — same watch/parts
-            face.env = createWatchEnvironment(face.watch, newLat, newLon, makeGetNow(face.watch.beatsPerSecond), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+            face.env = createWatchEnvironment(face.watch, newLat, newLon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
             restoreKyotoState(face);
             // Update terminator leaves (preserve for animation interpolation)
             if (face.terminatorLeaves.length > 0) {
                 updateLeafAngles(face.terminatorLeaves, face.env);
-                resetLeafSchedules(face.terminatorLeaves);
-                face.lastTerminatorRebuild = 0;
             }
-            if (face.analemmaState) resetAnalemmaSchedule(face.analemmaState);
             // Rebuild static caches (day/night rings, sunrise marks, etc.)
-            invalidateDayNightCaches(face.watch);
             const { canvas, watch, env, images, scale } = face;
             buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
             // Reset hand schedules so they re-evaluate immediately and animate to new targets
-            for (const hs of face.handStates) {
-                hs.nextUpdateTime = 0;
-            }
+            face.updater.reset();
         }
         updateLocationDisplay();
         timeUI?.updateTimezoneDisplay();
@@ -2277,23 +2246,17 @@ async function main() {
     // Time Controller UI (shared module)
     // =========================================================================
 
-    /** Snap all in-flight hand animations to their targets across all faces. */
+    /** Snap all in-flight animations to their targets and freeze, across all faces. */
     function finishAllAnimations() {
         for (const face of faces) {
-            finishAnimations(face.handStates);
-            finishLeafAnimations(face.terminatorLeaves);
-            finishDayNightSlides(face.watch);
-            if (face.analemmaState) resetAnalemmaSchedule(face.analemmaState);
+            face.updater.finish();
         }
     }
 
-    /** Unfreeze hand schedules on all faces after a pause. */
+    /** Unfreeze all schedules on all faces after a pause. */
     function resetAllSchedules() {
         for (const face of faces) {
-            resetHandSchedules(face.handStates);
-            resetLeafSchedules(face.terminatorLeaves);
-            resetDayNightSlides(face.watch);
-            if (face.analemmaState) resetAnalemmaSchedule(face.analemmaState);
+            face.updater.reset();
         }
     }
 
@@ -2627,23 +2590,18 @@ async function main() {
                 for (const face of faces) {
                     if (!face.enabled) continue;
                     // Rebuild environment (picks up new body URL param)
-                    face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+                    face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
                     restoreKyotoState(face);
                     // Update terminator leaf angles for the new planet's phase
                     // (keep existing leaves so the animation system can interpolate)
                     if (face.terminatorLeaves.length > 0) {
                         updateLeafAngles(face.terminatorLeaves, face.env);
-                        resetLeafSchedules(face.terminatorLeaves);
-                        face.lastTerminatorRebuild = 0;  // force static cache rebuild
                     }
-                    if (face.analemmaState) resetAnalemmaSchedule(face.analemmaState);
                     // Rebuild static caches (background, marks, windows)
                     const { canvas, watch, env, images, scale } = face;
                     buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
                     // Force all hands to re-evaluate immediately (reset update timers)
-                    for (const hs of face.handStates) {
-                        hs.nextUpdateTime = 0;
-                    }
+                    face.updater.reset();
                 }
                 // Kick the scheduler immediately so animations start without delay
                 stopScheduler();
@@ -2685,41 +2643,23 @@ async function main() {
             function setNoonOnTop(noonOnTop: boolean) {
                 const val = noonOnTop ? 1 : 0;
                 const targetFlip = noonOnTop ? Math.PI : 0;
-                const now = performance.now();
 
                 // 1. Update discrete state immediately
                 viennaFace!.env.variables.set('noonOnTop', val);
                 viennaFace!.env.variables.set('dialFlip', targetFlip);
 
                 // 2. Rebuild static cache
-                invalidateDayNightCaches(viennaFace!.watch);
                 const { canvas, watch, env, images, scale } = viennaFace!;
                 buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, viennaFace!.terminatorLeaves);
 
-                // 3. Reset hand/dial schedules so the animation system re-evaluates
-                //    angle expressions (including dialFlip) and smoothly interpolates
-                for (const hs of viennaFace!.handStates) {
-                    hs.nextUpdateTime = 0;
-                }
+                // 3. Re-evaluate all ObsValues (hands, dials, and the ring's
+                //    masterOffset) against the new dialFlip; they animate to the
+                //    flipped position via the Updater.
+                viennaFace!.updater.reset();
 
-                // 4. Start masterOffset animation on day/night ring
-                const previousFlip = noonOnTop ? 0 : Math.PI;
-                for (const part of viennaFace!.watch.parts) {
-                    if (part.type === 'QDayNightRing') {
-                        if (!part._masterOffsetAnim) {
-                            part._masterOffsetAnim = makeAnimatingValue(previousFlip, now);
-                        }
-                        // Invalidate wedge angle cache so ring re-draws each frame
-                        part._cachedAngles = undefined;
-                        startAnimationRaw(part._masterOffsetAnim, targetFlip, now, 1.0);
-                    }
-                }
-
-                // 6. Reset terminator leaves for the new dialFlip
+                // 4. Reset terminator leaves for the new dialFlip
                 if (viennaFace!.terminatorLeaves.length > 0) {
                     updateLeafAngles(viennaFace!.terminatorLeaves, viennaFace!.env);
-                    resetLeafSchedules(viennaFace!.terminatorLeaves);
-                    viennaFace!.lastTerminatorRebuild = 0;
                 }
 
 
@@ -2796,19 +2736,6 @@ async function main() {
 
         const setKyotoState = (handMode: number | null, rateMode: number | null) => {
             const env = getEnv();
-            const now = performance.now();
-
-            // Capture the old masterOffset for each day/night ring part
-            // BEFORE changing kyMode/kyHandMode (which alter the expression result).
-            const oldMasterOffsets = new Map<QDayNightRingPart, number>();
-            for (const part of kyotoFace.watch.parts) {
-                if (part.type === 'QDayNightRing') {
-                    const oldVal = (part._masterOffsetAnim && part._masterOffsetAnim.animating)
-                        ? interpolateValue(part._masterOffsetAnim, now)
-                        : evalAttr(part.masterOffset, env);
-                    oldMasterOffsets.set(part, oldVal);
-                }
-            }
 
             let changed = false;
             if (handMode !== null && env.kyHandMode !== handMode) {
@@ -2823,33 +2750,13 @@ async function main() {
             }
 
             if (changed) {
-                // Snap all in-flight animations to their current targets
-                // before re-evaluating with the new mode.  Without this,
-                // the animation system may interpolate through the wrong
-                // direction when kyotoMasterRotation() jumps.
-                finishAnimations(kyotoFace.handStates);
-                finishDayNightSlides(kyotoFace.watch);
-                // Force immediate re-evaluation for all dial pieces
-                for (const hs of kyotoFace.handStates) {
-                    hs.nextUpdateTime = 0;
-                }
-
-                // Start masterOffset animation on day/night ring parts
-                // (env now reflects the new kyMode, so masterOffset evaluates
-                // to the new target; animate from the captured old value)
-                for (const part of kyotoFace.watch.parts) {
-                    if (part.type === 'QDayNightRing') {
-                        const oldVal = oldMasterOffsets.get(part) ?? 0;
-                        const newVal = evalAttr(part.masterOffset, env);
-                        if (!part._masterOffsetAnim) {
-                            part._masterOffsetAnim = makeAnimatingValue(oldVal, now);
-                        } else {
-                            part._masterOffsetAnim.currentValue = oldVal;
-                            part._masterOffsetAnim.animating = false;
-                        }
-                        startAnimationRaw(part._masterOffsetAnim, newVal, now, 1.0);
-                    }
-                }
+                // Snap all in-flight animations to their current targets, then
+                // re-evaluate against the new mode and animate to the new
+                // positions. finish() before reset() prevents interpolating the
+                // wrong way when kyotoMasterRotation() jumps (masterOffset,
+                // japan-hour spokes and wedges all settle then re-sweep together).
+                kyotoFace.updater.finish();
+                kyotoFace.updater.reset();
 
                 updateUI();
                 // Trigger re-draw
@@ -2964,20 +2871,15 @@ async function main() {
                 }
                 for (const face of faces) {
                     if (!face.enabled) continue;
-                    face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+                    face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
                     restoreKyotoState(face);
                     if (face.terminatorLeaves.length > 0) {
                         updateLeafAngles(face.terminatorLeaves, face.env);
-                        resetLeafSchedules(face.terminatorLeaves);
-                        face.lastTerminatorRebuild = 0;
                     }
-                    if (face.analemmaState) resetAnalemmaSchedule(face.analemmaState);
                     (face.env as any)._terraCityKnockout = null;
                     const { canvas, watch, env, images, scale } = face;
                     buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-                    for (const hs of face.handStates) {
-                        hs.nextUpdateTime = 0;
-                    }
+                    face.updater.reset();
                 }
                 stopScheduler();
                 startScheduler();
@@ -3275,19 +3177,14 @@ async function main() {
             function rebuildGaiaForSlotChange() {
                 for (const face of faces) {
                     if (!face.enabled) continue;
-                    face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+                    face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
                     restoreKyotoState(face);
                     if (face.terminatorLeaves.length > 0) {
                         updateLeafAngles(face.terminatorLeaves, face.env);
-                        resetLeafSchedules(face.terminatorLeaves);
-                        face.lastTerminatorRebuild = 0;
                     }
-                    if (face.analemmaState) resetAnalemmaSchedule(face.analemmaState);
                     const { canvas, watch, env, images, scale } = face;
                     buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-                    for (const hs of face.handStates) {
-                        hs.nextUpdateTime = 0;
-                    }
+                    face.updater.reset();
                 }
                 stopScheduler();
                 startScheduler();

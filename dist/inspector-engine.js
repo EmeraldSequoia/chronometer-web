@@ -11229,10 +11229,11 @@
     val.lastAnimationTime = now;
     return val.currentValue;
   }
-  function startAnimationRaw(val, newTarget, now, animSpeed = 1, durationOverrideMs, linear) {
+  function startAnimationRaw(val, newTarget, now, animSpeed = 1, durationOverrideMs, period = 2 * Math.PI) {
     const speed = kECGLAngleAnimationSpeed * animSpeed;
-    if (!linear) {
-      newTarget = fmod2(newTarget, 2 * Math.PI);
+    const wraps = isFinite(period);
+    if (wraps) {
+      newTarget = fmod2(newTarget, period);
     }
     if (isNaN(newTarget) || isNaN(val.currentValue)) {
       val.currentValue = newTarget;
@@ -11254,10 +11255,9 @@
       val.animating = false;
       return;
     }
-    if (!linear) {
-      const TWO_PI6 = 2 * Math.PI;
+    if (wraps) {
       let delta = newTarget - val.currentValue;
-      delta = delta - TWO_PI6 * Math.round(delta / TWO_PI6);
+      delta = delta - period * Math.round(delta / period);
       val.currentValue = newTarget - delta;
     }
     startValueAnimation(val, newTarget, now, speed, durationOverrideMs);
@@ -13511,11 +13511,16 @@
 
   // src/shared/obs-value.ts
   var JUMP = Infinity;
-  function createObsValue(def, env2, perfNow, _getNow) {
-    const expr = parse(def.expr);
+  function createObsValue(def, env2, perfNow, getNow2) {
+    return createObsValueFromAST({ ...def, expr: parse(def.expr) }, env2, perfNow, getNow2);
+  }
+  function createObsValueFromAST(def, env2, perfNow, _getNow) {
+    const expr = def.expr;
     const initialValue = evalAttr(expr, env2);
     const animSpeed = def.animSpeed ?? 2;
     const naturalSpeed = def.naturalSpeed ?? 0;
+    const linear = def.linear ?? false;
+    const period = linear ? Infinity : def.period ?? 2 * Math.PI;
     return {
       name: def.name,
       expr,
@@ -13528,7 +13533,8 @@
       nextUpdateDisplayTime: 0,
       nextUpdateTime: 0,
       pendingSweep: null,
-      linear: def.linear ?? false,
+      linear,
+      period,
       evalAhead: def.evalAhead ?? false,
       discrete: def.discrete ?? false
     };
@@ -14010,9 +14016,9 @@
     v.pendingSweep = null;
     const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
     if (budgetMs > 0 && isFinite(budgetMs)) {
-      startAnimationRaw(v.anim, target, perfNow, multiplier, budgetMs, v.linear);
+      startAnimationRaw(v.anim, target, perfNow, multiplier, budgetMs, v.period);
     } else {
-      startAnimationRaw(v.anim, target, perfNow, multiplier, void 0, v.linear);
+      startAnimationRaw(v.anim, target, perfNow, multiplier, void 0, v.period);
     }
   }
   function updateNaturalSpeedValue(v, env2, perfNow, getNow2, timeDirection) {
@@ -14034,7 +14040,7 @@
         perfNow,
         v.animSpeed / K_ANGLE_ANIM_SPEED,
         void 0,
-        v.linear
+        v.period
       );
       v.pendingSweep = null;
       return;
@@ -14058,7 +14064,7 @@
         perfNow,
         v.naturalSpeed / K_ANGLE_ANIM_SPEED,
         dtToNextUpdateMs,
-        v.linear
+        v.period
       );
       v.pendingSweep = null;
       return;
@@ -14073,7 +14079,7 @@
         perfNow,
         v.animSpeed / K_ANGLE_ANIM_SPEED,
         dtToNextUpdateMs,
-        v.linear
+        v.period
       );
       v.pendingSweep = null;
       return;
@@ -14089,7 +14095,7 @@
         perfNow,
         v.animSpeed / K_ANGLE_ANIM_SPEED,
         dtToNextUpdateMs,
-        v.linear
+        v.period
       );
       v.pendingSweep = null;
       return;
@@ -14101,7 +14107,7 @@
       perfNow,
       v.animSpeed / K_ANGLE_ANIM_SPEED,
       catchUpMs,
-      v.linear
+      v.period
     );
     const remainingMs = dtToNextUpdateMs - catchUpMs;
     const sweepAngle = effNaturalSpeed * (remainingMs / 1e3);
@@ -14127,14 +14133,14 @@
     v.nextUpdateTime = perfNow + timeUntilNextUpdateMs;
     const speed = v.animSpeed;
     let angleDelta;
-    if (v.linear) {
+    if (!isFinite(v.period)) {
       angleDelta = Math.abs(newTarget - v.anim.currentValue);
     } else {
-      const TWO_PI6 = 2 * Math.PI;
-      const normalizedTarget = (newTarget % TWO_PI6 + TWO_PI6) % TWO_PI6;
-      const normalizedCurrent = (v.anim.currentValue % TWO_PI6 + TWO_PI6) % TWO_PI6;
+      const P = v.period;
+      const normalizedTarget = (newTarget % P + P) % P;
+      const normalizedCurrent = (v.anim.currentValue % P + P) % P;
       angleDelta = Math.abs(normalizedTarget - normalizedCurrent);
-      if (angleDelta > Math.PI) angleDelta = TWO_PI6 - angleDelta;
+      if (angleDelta > P / 2) angleDelta = P - angleDelta;
     }
     const naturalDurationMs = speed > 0 ? angleDelta / speed * 1e3 : 0;
     const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
@@ -14145,7 +14151,7 @@
         perfNow,
         multiplier,
         timeUntilNextUpdateMs,
-        v.linear
+        v.period
       );
     } else if (naturalDurationMs < tickIntervalMs) {
       startAnimationRaw(
@@ -14154,7 +14160,7 @@
         perfNow,
         multiplier,
         tickIntervalMs,
-        v.linear
+        v.period
       );
     } else {
       startAnimationRaw(
@@ -14163,7 +14169,7 @@
         perfNow,
         multiplier,
         void 0,
-        v.linear
+        v.period
       );
     }
     v.pendingSweep = null;
@@ -14178,7 +14184,7 @@
       perfNow,
       v.animSpeed / K_ANGLE_ANIM_SPEED,
       void 0,
-      v.linear
+      v.period
     );
   }
   function updateObsValueFixedDuration(v, env2, perfNow, durationMs) {
@@ -14192,7 +14198,7 @@
       return;
     }
     const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
-    startAnimationRaw(v.anim, newTarget, perfNow, multiplier, durationMs, v.linear);
+    startAnimationRaw(v.anim, newTarget, perfNow, multiplier, durationMs, v.period);
   }
   function snapToTargetAtBoundary(v, env2, perfNow, getNow2, timeDirection) {
     const newTarget = evalAttr(v.expr, env2);
@@ -14206,7 +14212,7 @@
       perfNow,
       v.animSpeed / K_ANGLE_ANIM_SPEED,
       void 0,
-      v.linear
+      v.period
     );
   }
   function updateObsValue(v, env2, perfNow, getNow2, tickIntervalMs, displayDeltaPerTickSec, timeDirection, withDisplayTime2) {
@@ -14269,7 +14275,7 @@
         perfNow,
         sweepMultiplier,
         sweep.durationMs,
-        v.linear
+        v.period
       );
       v.currentValue = interpolateValue(v.anim, perfNow);
     }
@@ -14352,6 +14358,46 @@
      */
     reset() {
       resetObsValueSchedules(this.values);
+    }
+    /**
+     * Snap every in-flight animation to its target and freeze schedules.
+     *
+     * For each value: clear any pending Phase-2 sweep, set the animation (and the
+     * displayed `currentValue`) to the target — wrapped to `[0, period)` for cyclic
+     * values, left as-is for linear ones — stop animating, and freeze the schedule
+     * (`nextUpdateTime = Infinity`) so nothing re-evaluates until `reset()`.
+     *
+     * Used for step / transport / scrub-end transitions where the system must
+     * settle immediately, and (with the freeze) to hold the stopped-clock state
+     * idle. Generalizes the legacy `finishAnimations`/`finishLeafAnimations` to the
+     * ObsValue fields and the `period` wrap.
+     */
+    finish() {
+      for (const v of this.values) {
+        v.pendingSweep = null;
+        let target = v.anim.targetValue;
+        if (isFinite(v.period)) {
+          target = (target % v.period + v.period) % v.period;
+        }
+        v.anim.currentValue = target;
+        v.anim.targetValue = target;
+        v.anim.animating = false;
+        v.currentValue = target;
+        v.nextUpdateDisplayTime = Infinity;
+        v.nextUpdateTime = Infinity;
+      }
+    }
+    /**
+     * Earliest `performance.now()` at which any value is scheduled to re-evaluate
+     * (`Infinity` if all are frozen). The idle scheduler uses this to set a precise
+     * wakeup `setTimeout`. Generalizes the legacy `nextWakeupTime(states)`.
+     */
+    nextWakeupTime() {
+      let earliest = Infinity;
+      for (const v of this.values) {
+        if (v.nextUpdateTime < earliest) earliest = v.nextUpdateTime;
+      }
+      return earliest;
     }
     /**
      * Like `tick()`, but forces every value to animate over exactly

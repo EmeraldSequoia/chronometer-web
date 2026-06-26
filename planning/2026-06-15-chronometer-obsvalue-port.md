@@ -1,7 +1,57 @@
 # Port Chronometer to the ObsValue System
 
 **Date:** 2026-06-15
-**Status:** Draft — awaiting review (revision 4).
+**Status:** ✅ **Implemented** (2026-06-26). All 8 phases landed. Notable
+deviation from the draft: **eval-ahead is OFF for Chronometer**
+(`EVAL_AHEAD = false` in `hand-values.ts`) — it turned ticking watches into
+continuous sweeps, kept the 1× loop from idling, and thrashed the astro cache
+during scrub (evaluating a full interval ahead while terminator/static evaluate at
+`now`). The non-eval-ahead branches (snap-at-boundary / scrub-compression) are
+modeled on the legacy `tickAnimations` and restore ticks, 1× idle, and single-time
+astronomy. A future "do eval-ahead properly" (on-beat scheduling + worker pipeline)
+is captured separately in
+[2026-06-26-worker-eval-ahead-pipeline.md](2026-06-26-worker-eval-ahead-pipeline.md).
+The regression test-bench was migrated to the Updater path and goldens re-captured.
+
+> **Revision 5 (code-grounded review).** Reconciled the plan with the current
+> source. Material changes:
+> 1. **`beatsPerSecond` + eval-ahead wiring corrected** — the Chronometer env
+>    currently captures `makeGetNow(bps)` built directly on `rawGetNow`, *not* on
+>    an overridable seam, so eval-ahead could not shift the env's evaluation time
+>    as written. The fix (per-face overridable base, with the quantizer layered on
+>    top) is now spelled out. See *“`beatsPerSecond` quantization + eval-ahead
+>    seam”*.
+> 2. **QDayNightRing wedge angles** — the renderer's wedge-angle computation is
+>    *collective* (depends on `numVis`, the night-arc distribution, parking, and
+>    polar special-cases), not a set of independent per-wedge functions. The env
+>    function therefore computes the whole distribution once and memoizes it per
+>    display-time so the 24 same-schedule ObsValues don't each redo it. See
+>    *“QDayNightRing — collective wedge computation”*.
+> 3. **Transition callbacks vs. the stopped-clock freeze** — Chronometer cannot
+>    use the generic `initTimeControls({ updater })` auto-reset seam unconditionally:
+>    several transitions must `finish()` then **conditionally** `reset()` (skipping
+>    reset while stopped) to preserve the stopped-clock freeze (§6 /
+>    `planning/2026-06-03-stopped-clock-rendering.md`). The plan keeps explicit
+>    callbacks. See *“Transition handling — finish + conditional reset”*.
+> 4. **Analemma prerequisite is DONE** — `analemma.ts` is already parametric
+>    (`currentPathParameter` + `currentRotation`), so Phase 8 is unblocked and is
+>    updated to match the implemented field names.
+> 5. **Terminator is drawn live — remove its static-cache rebuild.** Verified on
+>    every face that `<terminator>`/`<analemma>` are top-level parts *outside* any
+>    `<static>` block, so they render live each frame. The periodic
+>    `buildStaticBlockCaches` rebuild gated on terminator presence is wasted work
+>    and is removed along with `tickLeafAnimations`. No new render cache is added.
+>    (Corrects an earlier revision-5 draft that wrongly kept the rebuild.)
+> 6. **bps=1 eval-ahead timing change accepted** (owner sign-off): hands arrive on
+>    the beat. This is the one intended visible change.
+> 7. **No non-astro value caches** — audited every cache; the port deletes all
+>    per-frame value caches (QDayNightRing wedge angles independently recompute over
+>    astro-cached scalars). Only init-time-constant bitmaps and the `<static>`
+>    layer cache remain. See *“No non-astro value caches”*.
+> 8. **Cyclic shortest-path generalized** — the `linear` boolean becomes a
+>    `period` (`2π` = angle, `Infinity` = linear, `PATH_SAMPLE_COUNT` = analemma),
+>    so the equinox wrap reuses the angle seam logic. CalendarRowCover slides
+>    (`linear`, **not** `discrete`). See *“Cyclic values …”*.
 
 > **Scope.** Replace Chronometer's per-part `HandState` / `tickAnimations`
 > animation system with `ObsValue`s driven by the shared `Updater`, including
@@ -69,16 +119,57 @@ Transition handling lives in `engine-entry.ts` as hand-rolled
   `anyAnimating()` for idle decisions.
 
 The Updater integrates with the time controller via `initTimeControls({ updater })`
-— the shared UI auto-calls `updater.reset()` on every transition, eliminating
-hand-rolled transition callbacks for the generic work.
+— the shared UI auto-calls `updater.reset()` on every transition. **For
+Chronometer this is necessary but not sufficient** (see *“Transition handling —
+finish + conditional reset”*): several Chronometer transitions must `finish()`
+(snap + freeze) and then *conditionally* `reset()` to preserve the stopped-clock
+freeze, so Chronometer keeps explicit transition callbacks rather than relying on
+the generic auto-reset alone.
 
 ## Design Decisions (resolved)
 
+### Cyclic values — generalize the angular shortest-path
+
+> [!NOTE]
+> **Revision 5 (added in review).** The analemma path parameter is **cyclic**
+> (period `PATH_SAMPLE_COUNT`), not linear — the equinox rollover 999→0 is the
+> same "wrong way around" problem as a hand sweeping 359°→0°. Rather than
+> special-case it, generalize the angular shortest-path logic to an arbitrary
+> period.
+
+Today the animation core branches on a boolean `linear`
+([animation.ts:765-811](../src/shared/animation.ts)): angles (`linear` false)
+unwrap to the shortest path mod `2π`; linear values (`linear` true) interpolate
+straight. Replace the boolean with a **`period`**:
+
+| `period` | behavior | maps from |
+|----------|----------|-----------|
+| `2π` | angle (shortest path mod 2π) | `linear: false` |
+| `Infinity` (or undefined) | straight-line, no wrap | `linear: true` |
+| `PATH_SAMPLE_COUNT` | analemma path param | (new) |
+
+Each `2π` literal becomes `period`: the unwrap
+(`delta -= period · round(delta / period)`), the on-completion wrap
+(`fmod(result, period)`), and the scrub shortest-path delta (normalize mod
+`period`, shortest ≤ `period/2`). **`period = 2π` reproduces today's angle math
+bit-for-bit**, so Observatory/Inspector behavior is unchanged.
+
+- **Scope.** This touches the *shared* `animation.ts` / `updater.ts`, used by all
+  three apps. Keep the public `ObsValue.linear` flag (maps to `period: Infinity`);
+  add an optional `ObsValue.period?: number` (default `2π` when not linear) so
+  only the analemma `pathParam` sets a non-2π period.
+- **Test.** Add a unit test asserting an angle value animates the short way across
+  the 0/2π seam (guards the `period = 2π` equivalence), and one for a cyclic value
+  with a non-2π period crossing its seam.
+- **Lands with Phase 5** (the other shared-core change), before Phase 8 needs it.
+
 ### Eval-ahead for all values
 
-All Chronometer ObsValues use `evalAhead: true`, with CalendarRowCover using
-`discrete: true`. This is the forward-looking mechanism and subsumes the legacy
-snap-to-target and scrub-compression branches.
+All Chronometer ObsValues use `evalAhead: true`. This is the forward-looking
+mechanism and subsumes the legacy snap-to-target and scrub-compression branches.
+**No Chronometer value is `discrete`** — every quantity animates (including
+CalendarRowCover, which slides; see below). `discrete` is an Inspector-only
+text-readout policy.
 
 > [!NOTE]
 > **Behavioral improvement for bps=1 faces.** Faces with `beatsPerSecond=1`
@@ -136,6 +227,30 @@ Key implications for this plan:
   state (location, time). The env rebuild + `updater.reset()` pattern handles
   this correctly — same as any location change.
 
+### No non-astro value caches
+
+**Principle (owner-confirmed):** the only expensive computations are in the
+astronomy code, which already caches via the `AstroCachePool`. Nothing in the
+Chronometer layer should cache *computed values*. If a hot astronomy quantity
+isn't cached, the fix is a new astro-cache slot, never a value cache in the env,
+renderer, or part.
+
+Audit of every current non-astro cache and its disposition after the port:
+
+| Cache | Kind | Disposition |
+|-------|------|-------------|
+| `_cachedAngles` / `_cacheStart` / `_cacheNextUpdate` (QDayNightRing) | per-frame **value** cache of wedge angles | **Deleted.** Wedge angles recompute over astro-cached scalars (see *“independent per-wedge angles”*). |
+| `_masterOffsetAnim` / `_wedgeAngleAnims` / `_wedgeSlides` | per-part animation state | **Replaced** by ObsValues. |
+| Periodic terminator `buildStaticBlockCaches` rebuild | wasted (terminator is live) | **Removed.** |
+| `_cacheNumVis` (QDayNightRing) | part of the angle cache | **Deleted** with `_cachedAngles`. |
+| `<static>` block bitmaps (`part.cachedCanvas`) | render-layer bitmap of *static* content | **Kept.** Web analog of iOS's retained CALayer backing store; holds only non-animated content (numerals, decals, baked window cutouts), rebuilt on mode/date/tz/resize — not per frame, not a value cache. |
+| Hand-shadow bitmaps (`buildHandShadowCaches`) | init/resize-only constant bitmaps | **Kept.** Time-independent. |
+| Analemma `channel`/`bg`/`sun` bitmaps | init-time constant bitmaps | **Kept.** Time-independent. |
+
+Net: the port **removes** every per-frame value cache; the only caches left are
+init-time-constant bitmaps and the structural `<static>` layer cache, none of
+which recompute astronomy.
+
 ### One `Updater` per face
 
 Each face has its own `beatsPerSecond` quantization, environment, and part set.
@@ -150,6 +265,39 @@ const allUpdaters = {
     anyAnimating() { return faces.some(f => f.updater.anyAnimating()); },
 };
 ```
+
+### Transition handling — finish + conditional reset
+
+> [!IMPORTANT]
+> **Revision 5 correction.** The draft implied the generic `updater` seam
+> replaces the transition callbacks. It cannot, because Chronometer's current
+> callbacks ([engine-entry.ts:2332-2364](../src/engine-entry.ts)) do two things
+> the generic seam does not:
+> 1. **`finish()` before `reset()`** on step / now / transport / scrub-end, so
+>    hands snap to their final positions instead of freezing mid-sweep.
+> 2. **Skip `reset()` while stopped.** `onScrubEnd` / `onTransportChange` re-arm
+>    schedules *only* when `!timeController.isStopped`; otherwise the freeze from
+>    `finish()` must stay, or hands re-evaluate every frame while stopped (the
+>    stopped-clock idle regression — `planning/2026-06-03-stopped-clock-rendering.md`,
+>    Development Rule §6).
+
+**Decision.** Keep explicit per-transition callbacks; map them onto the Updater:
+
+| Callback | Today | After port |
+|----------|-------|-----------|
+| `onTimeStep` | `finishAllAnimations(); resetAllSchedules()` | `forEachFace(finish); forEachFace(reset)` |
+| `onScrubStart` | `resetAllSchedules()` | `forEachFace(reset)` |
+| `onScrubEnd` | `rebuildEnvironments(); finish; if(!stopped) reset` | same, via Updater |
+| `onNowClicked` | `finish; reset; restart scheduler` | same, via Updater |
+| `onTransportChange` | `rebuildEnvironments(); finish; if(!stopped) reset` | same, via Updater |
+
+where `finish`/`reset` call `face.updater.finish()` / `face.updater.reset()`.
+Whether to *also* pass the generic `updater` field to `initTimeControls` is an
+open call: if the shared UI's auto-`reset()` fires unconditionally it would
+re-arm while stopped and defeat the freeze, so the safe default is **not** to pass
+it and to drive everything from the explicit callbacks. Confirm during Phase 4 by
+checking each `updater?.reset()` call site in `time-controls-ui.ts` against the
+stopped state.
 
 ### Named keys — single source of truth
 
@@ -225,6 +373,47 @@ The same pattern applies to the slide visibility expressions:
 `"dayNightWedgeSlide(3, 24, 15)"` returns 0 (visible) or `slideDistance`
 (hidden) based on `wadokeiDNNumVisible(numWedges)` internally.
 
+### QDayNightRing — independent per-wedge angles (no array cache)
+
+> [!NOTE]
+> **Revision 5 (corrected after review).** An earlier draft of this section
+> proposed memoizing the whole wedge-angle array. That is unnecessary — wedge `i`'s
+> angle is independently computable, and everything expensive is already in the
+> astro cache. **No per-frame array cache is introduced; the existing
+> `_cachedAngles` / `_cacheStart` / `_cacheNextUpdate` value cache is deleted.**
+
+Wedge `i`'s angle is `dayNightWedgeAngle(planetNumber, i, numWedges)`:
+
+- **Normal mode** (Mauna Kea, Vienna): `leafAngleFn(planet, i, numWedges)` —
+  a pure function of `i`, `numWedges`, and observer astronomy. The astronomy is
+  cached: `dayNightLeafAngle` routes through `getPlanetRiseSetCache` /
+  `computeDayNightLeafAngle` with the astro `pool`
+  ([astro-env.ts:1714](../src/shared/astro-env.ts)).
+- **Slide mode** (Kyoto): the renderer's distribution
+  ([renderer.ts:2731-2788](../src/watch/renderer.ts)) depends on the set **only**
+  through three shared scalars — `numVis` (`wadokeiDNNumVisible`), `sunsetAngle`,
+  `sunriseAngle` (`wadokeiDNSunsetAngle/SunriseAngle`) — each of which bottoms out
+  in the astro-cached `dayNightLeafAngle`. Given those scalars, wedge `i` is O(1)
+  arithmetic (`adjustedStart + step·i`, parked wedges at the sunrise edge). So the
+  function recomputes the scalars (astro-cache hits — all `numWedges` calls in a
+  tick share one display instant) and returns element `i`. The slide / polar /
+  normal branches move **verbatim** into the env function (Development Rule §2 —
+  no simplification of the math).
+
+`dayNightWedgeSlide(wedgeIndex, numWedges, slideDistance)` likewise reads `numVis`
+from the same astro-cached scalars and returns `wedgeIndex < numVis ? 0 : slideDistance`.
+
+- Angle ObsValues: `evalAhead: true, linear: false`. Slide ObsValues:
+  `linear: true` (**not** `discrete` — they slide smoothly).
+- **`masterOffset` stays a separate ObsValue** and is **not** folded into the
+  wedge angles — the renderer keeps adding `masterOffset + wedgeAngle[i]` at draw
+  time (wedge ObsValues are observer-frame angles).
+
+> [!NOTE]
+> If profiling ever shows the per-wedge scalar recomputation is hot (it shouldn't
+> be — astro-cache hits + arithmetic), the fix is an **astro** cache slot for the
+> missing quantity, never a new value cache in the env or renderer.
+
 ### CalendarRowCover — env function
 
 `computeCalendarCoverOffset` (currently a TypeScript function in `animation.ts`)
@@ -238,19 +427,59 @@ This requires:
    `createWatchEnvironment`.
 2. The function reads calendar state from the env (month, year, weekday start)
    and returns the integer pixel offset.
-3. The ObsValue uses `discrete: true, linear: true`.
+3. The ObsValue uses `evalAhead: true, linear: true` (**not** `discrete`). The
+   cover must **slide** smoothly into place across a month transition, matching
+   today's `startLinearAnimation` behavior ([animation.ts:1257-1260](../src/shared/animation.ts));
+   `discrete` would snap it. `linear: true` skips angular wrapping (it's a pixel
+   offset). `evalAhead` lets it animate to the new offset over the budget when the
+   month rolls over (including during scrub).
 
-### `beatsPerSecond` quantization
+### `beatsPerSecond` quantization + eval-ahead seam
 
-`makeOverridableGetNow(rawGetNow)` produces the overridable wrapper. The
-env's function closures already capture the quantized `getNow`, so expression
-evaluation through the env always sees quantized time. The Updater's `getNow`
-(the overridable wrapper) uses `rawGetNow` as its base, which is correct for
-scheduling (`computeNextBoundary`). The `withDisplayTime` override temporarily
-shifts `rawGetNow` for eval-ahead — the env closures then see the shifted
-(but still unquantized) time, which is correct because `withDisplayTime` is
-only used for computing the *target* value at a future boundary, and the
-quantization semantics are captured in the env functions themselves.
+> [!IMPORTANT]
+> **This is the central wiring correction in revision 5.** For eval-ahead to
+> work, `withDisplayTime(future, …)` must shift the *same* time source the env's
+> astro functions read through. Observatory gets this for free because its env
+> captures the overridable `getNow` directly
+> ([observatory-entry.ts:144-145](../src/observatory/observatory-entry.ts)).
+> Chronometer does **not**: today each face's env captures
+> `makeGetNow(bps)`, which quantizes `rawGetNow = timeController.getDisplayTime`
+> *directly* ([engine-entry.ts:528-536, 705](../src/engine-entry.ts)). A
+> separate overridable wrapper would not be seen by the env, so eval-ahead would
+> silently no-op.
+
+**The fix — layer the quantizer on top of the overridable base, per face:**
+
+```ts
+// Per face, at Updater construction (in buildHandValues):
+const { getNow: rawOverridable, withDisplayTime } =
+    makeOverridableGetNow(rawGetNow);            // base = timeController.getDisplayTime
+const faceGetNow = quantize(rawOverridable, bps); // the env captures THIS
+```
+
+- The **env** captures `faceGetNow` (quantized) — every astro/angle function sees
+  quantized display time, exactly as today.
+- The **Updater** receives `getNow = rawOverridable` (unquantized) for
+  *scheduling* — `computeNextBoundary` must use unquantized time, matching iOS
+  (boundaries in iPhone time, not latched watch time). It also receives
+  `withDisplayTime`.
+- When the eval-ahead pass calls `withDisplayTime(futureMs, () => evalAttr(expr, env))`,
+  `rawOverridable` returns the future instant, `faceGetNow` quantizes it, and the
+  env evaluates the target at the **quantized future boundary** — correct.
+
+There is one `makeOverridableGetNow` (hence one `withDisplayTime`) **per face**,
+which is natural since there is one `Updater` per face. The existing
+`makeGetNow(bps)` quantizer logic is reused; only its *base* changes from
+`rawGetNow` to the per-face `rawOverridable`.
+
+> [!NOTE]
+> `rebuildEnvironments()` / `handleDstTransition()` recreate `face.env` via
+> `createWatchEnvironment(... makeGetNow(bps) ...)`. After the port these must
+> pass the face's `faceGetNow` (built on the persistent `rawOverridable`), and
+> must **not** allocate a fresh overridable seam — otherwise the Updater's
+> `withDisplayTime` and the new env would diverge. The `rawOverridable` /
+> `withDisplayTime` pair is owned by the face for its lifetime; only the
+> quantizing env closure is rebuilt.
 
 ## Per-value mapping
 
@@ -263,7 +492,7 @@ Each Chronometer dynamic part produces these ObsValues:
 | **QWedge** | `angle`, optional `offsetAngle` | `evalAhead` |
 | **QDial** (animated) | `angle` | `evalAhead` |
 | **QDayNightRing** | `masterOffset` + per-wedge `wedgeAngle.<N>` + per-wedge `wedgeSlide.<N>` | `evalAhead` for angles, `linear` for slides |
-| **CalendarRowCover** | `xMotion` | `discrete: true, linear: true` |
+| **CalendarRowCover** | `xMotion` | `evalAhead: true, linear: true` (slides smoothly; **not** discrete) |
 
 ---
 
@@ -470,11 +699,33 @@ eval-ahead.
 Add:
 
 1. **`Updater.finish()`** — Snap all in-flight animations to their targets and
-   freeze schedules (`nextUpdateTime = Infinity`). Used for step events and
-   transport transitions where the system must settle immediately.
+   freeze schedules. For each value: clear `pendingSweep`; set
+   `anim.currentValue = anim.targetValue` (wrapped via `fmod(…, period)` when the
+   value is cyclic, matching `finishAnimations`); set `anim.animating = false`;
+   **also write `v.currentValue`** so the renderer reads the settled value; set
+   `nextUpdateDisplayTime = nextUpdateTime = Infinity`. Used for step events and
+   transport transitions where the system must settle immediately. (Mirrors the
+   existing `finishAnimations` in `animation.ts`, generalized to `period` and the
+   `pendingSweep`/`currentValue` fields ObsValue adds.)
 
 2. **`Updater.nextWakeupTime(): number`** — Return the minimum `nextUpdateTime`
-   across all values. Used by the idle scheduler to set a precise `setTimeout`.
+   across all values (`Infinity` if none). Used by the idle scheduler to set a
+   precise `setTimeout`. Equivalent to the existing `nextWakeupTime(states)`.
+
+> [!NOTE]
+> Both are thin wrappers over the existing module-level helpers' logic, kept on
+> the `Updater` class so Chronometer reads them per-face. Observatory/Inspector do
+> not call them today, so adding them is additive (no behavior change there).
+
+#### [MODIFY] `src/shared/animation.ts` + `src/shared/obs-value.ts`
+
+Generalize the `linear` boolean to a **`period`** (see *“Cyclic values —
+generalize the angular shortest-path”*): `2π` = angle, `Infinity` = linear,
+arbitrary = cyclic. `startAnimationRaw`, the completion wrap, and the scrub
+shortest-path delta parameterize on `period`; `period = 2π` is bit-identical to
+today. `ObsValue` keeps `linear` (→ `period: Infinity`) and gains optional
+`period?: number` (default `2π`). Only the analemma `pathParam` sets a non-2π
+period. Add the two seam-crossing unit tests noted in the design decision.
 
 ---
 
@@ -552,6 +803,21 @@ quadrant/index to compute its individual angle target.
 5. **`updateLeafAngles` stays** (used for static cache building at init time,
    before the Updater exists). It sets `currentAngle`/`currentRotation` directly.
 
+6. **Remove the periodic static-cache rebuild for the terminator.** Verified
+   across all faces: every `<terminator>` is a **top-level part outside any
+   `<static>` block** (geneva, chandra, venezia, babylon, gaia, hana, selene), so
+   it is drawn **live** each frame via `renderPartsDocumentOrder`
+   ([renderer.ts:701-703](../src/watch/renderer.ts)) — never baked into a static
+   cache. The `terminatorLeaves` argument to `buildStaticBlockCaches` only draws
+   when a terminator sits *inside* a `<static>` block, which no face does. The
+   per-frame rebuild gated on `terminatorLeaves.length > 0`
+   ([engine-entry.ts:1076-1094](../src/engine-entry.ts)) therefore rebuilds caches
+   that don't contain the terminator — wasted work. After the port the leaves draw
+   live from their ObsValue `currentValue`, and **both** `tickLeafAnimations`
+   **and** the periodic `buildStaticBlockCaches` rebuild are removed. (The
+   `terminatorLeaves` param to `buildStaticBlockCaches` can stay for the
+   theoretical in-static case but is a no-op on every shipping face.)
+
 #### [MODIFY] `src/watch/watch-env.ts`
 
 Register `terminatorLeafAngle(phase, quad, idx, lpq, incr)` — wraps
@@ -584,20 +850,32 @@ In `drawTerminator`, read leaf angles from ObsValue refs:
 Remove per-frame `tickLeafAnimations` calls (covered by `updater.tick`).
 Remove `finishLeafAnimations` / `resetLeafSchedules` / `anyLeafAnimating` calls
 (covered by `updater.finish` / `updater.reset` / `updater.anyAnimating`).
+**Also remove the periodic `buildStaticBlockCaches(..., terminatorLeaves)` rebuild
+and `face.lastTerminatorRebuild` bookkeeping** ([engine-entry.ts:1076-1094](../src/engine-entry.ts)):
+the terminator is drawn live (it is never inside a `<static>` block on any face),
+so the rebuild does nothing useful. The `updateLeafAngles` static-path call in
+`buildCache` / `handleDstTransition` stays (it feeds the live draw's initial
+positions before the Updater's first tick).
 
 ---
 
 ### Phase 8: Analemma → ObsValues
 
-> [!IMPORTANT]
-> **Prerequisite.** Before this phase, the analemma renderer will be refactored
-> (in a separate task) to accept a **parametric path parameter** instead of
-> pre-computed (x, y) coordinates. This plan only describes the env functions
-> and ObsValues; the renderer refactoring is out of scope.
+> [!NOTE]
+> **Prerequisite DONE (revision 5).** The analemma renderer has already been
+> refactored to the parametric form. `analemma.ts` now stores
+> `currentPathParameter` (fraction-of-year × `PATH_SAMPLE_COUNT`, range
+> `[0, PATH_SAMPLE_COUNT)`) and `currentRotation`, and `drawAnalemma` derives the
+> Sun (x, y) at draw time via `pathParamToXY(state.pathScaled, currentPathParameter)`
+> ([analemma.ts:584-604, 754-764](../src/watch/analemma.ts)). Phase 8 is therefore
+> unblocked — it only needs the two env functions + two ObsValues + ObsValue-ref
+> reads in the renderer.
 
-The current analemma computes three values per update: `currentSunX`,
-`currentSunY` (Sun's position on the figure-eight path in XML coords), and
-`currentRotation` (sky orientation angle). These snap directly (no animation).
+The analemma currently computes two values per update (`tickAnalemma` →
+`updateAnalemmaValues`): `currentPathParameter` (Sun's position *along* the
+figure-eight, from `fractionOfVernalEquinoxYear(di) * PATH_SAMPLE_COUNT`) and
+`currentRotation` (sky orientation, from `sunSkyOrientationAngle`). Both snap
+directly today; the ObsValue port makes them animate.
 
 #### Parametric approach
 
@@ -630,10 +908,23 @@ Benefits:
 
 #### ObsValues
 
-- `<face>.analemma.pathParam` — `evalAhead: true`, expression
-  `"analemmaPathParameter()"`. Continuous, animatable.
-- `<face>.analemma.rotation` — `evalAhead: true`, expression
-  `"analemmaRotation()"`. Continuous, animatable.
+- `<face>.analemma.pathParam` — `evalAhead: true`, **cyclic with
+  `period: PATH_SAMPLE_COUNT`** (see *“Cyclic values — generalize the angular
+  shortest-path”*), expression `"analemmaPathParameter()"`. Continuous, animatable.
+- `<face>.analemma.rotation` — `evalAhead: true` (angle, `period: 2π`),
+  expression `"analemmaRotation()"`. Continuous, animatable.
+
+The renderer reads `state._obsPathParam.currentValue` /
+`state._obsRotation.currentValue` instead of `state.currentPathParameter` /
+`state.currentRotation`. `pathParamToXY` already mods by the path length, so it
+tolerates an unwrapped `currentValue` mid-animation.
+
+> [!NOTE]
+> **Year-boundary wrap is handled by `period`, not a special-case.** The path
+> parameter is cyclic with period `PATH_SAMPLE_COUNT`, exactly analogous to an
+> angle's `2π`. With the generalized animation (below) the equinox rollover
+> 999→0 takes the short way forward, just like 359°→0° on a hand — no snap, no
+> bespoke edge handling.
 
 #### Renderer (after prerequisite refactoring)
 
@@ -647,18 +938,37 @@ the renderer.
 
 ##### [MODIFY] `src/shared/astro-env.ts` (or `src/watch/watch-env.ts`)
 
-Register `analemmaPathParameter()` and `analemmaRotation()` as env functions.
-`analemmaPathParameter` computes `(noonDI - REF_EPOCH_SECONDS) / 86400 mod 365`
-where `noonDI` is 12:00 UT on the current date. `analemmaRotation` wraps
-`sunSkyOrientationAngle`.
+Register `analemmaPathParameter()` and `analemmaRotation()` as env functions,
+reusing the **exact** math already in `updateAnalemmaValues`
+([analemma.ts:584-604](../src/watch/analemma.ts)) so values match bit-for-bit:
+- `analemmaPathParameter()` = `fractionOfVernalEquinoxYear(di, null) * PATH_SAMPLE_COUNT`,
+  where `di = dateToDateInterval(getNow())`. (`PATH_SAMPLE_COUNT` must be shared,
+  not re-hardcoded — export it from `analemma.ts`.)
+- `analemmaRotation()` = `sunSkyOrientationAngle(di, obsLat, obsLon, null)`.
+
+During eval-ahead, `getNow()` inside `withDisplayTime` already shifts `di` to the
+future instant — no special handling needed.
+
+##### [MODIFY] `src/watch/analemma.ts`
+
+Add optional `_obsPathParam?: ObsValue` / `_obsRotation?: ObsValue` refs to
+`AnalemmaState`. `drawAnalemma` reads `currentValue` from them when present,
+falling back to `state.currentPathParameter` / `state.currentRotation` for the
+static/init path (before the Updater exists). `expandAnalemma`'s initial
+`updateAnalemmaValues` call stays (seeds the first frame). Export
+`PATH_SAMPLE_COUNT`.
 
 ##### [MODIFY] `src/watch/hand-values.ts`
 
-Create two ObsValues for the analemma (pathParam + rotation).
+Create two ObsValues for the analemma (pathParam + rotation), store the refs on
+`AnalemmaState`. Keyed `<face>.analemma.pathParam` / `<face>.analemma.rotation`.
 
 ##### [MODIFY] `src/engine-entry.ts`
 
-Remove `tickAnalemma` / `resetAnalemmaSchedule` calls (covered by Updater).
+Remove `tickAnalemma` / `resetAnalemmaSchedule` calls (covered by `updater.tick`
+/ `updater.reset`). Note the existing per-frame `if (tickMs !== null)
+resetAnalemmaSchedule(...)` forced-update hack ([engine-entry.ts:1097-1100])
+disappears — eval-ahead handles scrub natively.
 
 ---
 
@@ -680,7 +990,42 @@ Remove `tickAnalemma` / `resetAnalemmaSchedule` calls (covered by Updater).
 
 ## Open Questions
 
-All design questions have been resolved — see the Design Decisions section above.
+Most design questions are resolved (Design Decisions above). Revision 5 leaves
+one small item to confirm **during implementation**, not blocking:
+
+1. **Generic `updater` seam vs. stopped freeze** — the shared UI calls
+   `updater.reset()` immediately before each transition callback (~9 sites). Since
+   Chronometer's callbacks run last and call `finish()`, passing `updater` is
+   *redundant* rather than broken — but the safe default is **not** to pass it and
+   to drive reset/finish purely from the explicit callbacks (see *“Transition
+   handling — finish + conditional reset”*). Confirm by eyeballing each
+   `updater?.reset()` site in `time-controls-ui.ts` during Phase 4.
+
+Resolved in review:
+- QDayNightRing wedge angles need **no** memo/array cache — each wedge is
+  independently computable over astro-cached scalars (*“QDayNightRing — independent
+  per-wedge angles”*).
+- The analemma equinox wrap is handled by the generalized **`period`** (cyclic
+  shortest-path), not a special-case (*“Cyclic values — generalize the angular
+  shortest-path”*).
+
+## Suggested sequencing
+
+Phases are ordered so the build stays green and each phase is independently
+verifiable:
+
+- **Phase 1** (CalendarRowCover env fn) and **Phase 5** (`Updater.finish` /
+  `nextWakeupTime`) are self-contained and can land first.
+- **Phases 2–4** are the core swap (build values → renderer reads ObsValue refs →
+  engine drives `updater.tick`); they must land together since they retire
+  `dynamicState`. The **`beatsPerSecond` seam** rewiring is the riskiest single
+  step — do it first within Phase 2 and verify a simple bps=1 face (e.g. a plain
+  hands face) before touching QDayNightRing.
+- **QDayNightRing** (within 2–4) is the hardest; verify Vienna (masterOffset
+  toggle) and Kyoto (slide/polar) explicitly.
+- **Phase 7** (terminator) and **Phase 8** (analemma) are additive subsystems;
+  land each after the core is stable.
+- **Phase 6** (delete dead code) is last.
 
 ## Verification Plan
 

@@ -73,27 +73,21 @@ export type WatchPart =
  * Runtime animation state, separate from parsed XML data.
  * Populated by the animation system; read by the renderer.
  */
-export interface DynamicState {
-    /** Current interpolated angle (radians), set by the animation system. */
-    currentAngle: number;
-    /** Current interpolated offsetAngle (radians), for offset-orbit hands like the Moon. */
-    currentOffsetAngle?: number;
-    /** Current xMotion translation (pixels), for calendar day-indicator wires. */
-    currentXMotion?: number;
-    /** Current yMotion translation (pixels), for calendar day-indicator wires. */
-    currentYMotion?: number;
-}
-
 export interface PartBase {
     name: string;
     x?: ASTNode;
     y?: ASTNode;
     modes?: string;
-    /** Runtime animation state — populated by the animation system, not by XML parsing. */
-    dynamicState?: DynamicState;
     special?: string;
     specialParam?: ASTNode;
     envSlot?: ASTNode;
+    /** ObsValue handles for the animation values driven by the per-face Updater
+     *  (the renderer reads `.currentValue` directly). Populated by buildHandValues,
+     *  not by XML parsing. */
+    _obsAngle?: import('../shared/obs-value.js').ObsValue;
+    _obsOffsetAngle?: import('../shared/obs-value.js').ObsValue;
+    _obsXMotion?: import('../shared/obs-value.js').ObsValue;
+    _obsYMotion?: import('../shared/obs-value.js').ObsValue;
 }
 
 // ============================================================================
@@ -403,19 +397,13 @@ export interface QDayNightRingPart extends PartBase {
     slideDistance?: ASTNode;
     /** Wadokei slide: animation speed multiplier (default 1.0 = kECGLLinearAnimationSpeed). */
     slideAnimSpeed?: ASTNode;
-    // --- Render-level cache (not from XML) ---
-    /** Cached wedge angles from last computation; avoids per-frame astronomy calls. */
-    _cachedAngles?: number[];
-    /** Display-time (ms since epoch) when the cached angles were computed. */
-    _cacheStart?: number;
-    /** Display-time (ms since epoch) when the cached angles expire. */
-    _cacheNextUpdate?: number;
-    /** Optional animation state for masterOffset (used by Vienna noon/midnight toggle). */
-    _masterOffsetAnim?: import('../shared/animation.js').AnimatingValue;
-    /** Per-wedge slide animation state (wadokei day/night ring). */
-    _wedgeSlides?: import('../shared/animation.js').AnimatingValue[];
-    /** Per-wedge angle animation state (smooth angular transitions). */
-    _wedgeAngleAnims?: import('../shared/animation.js').AnimatingValue[];
+    // --- ObsValue handles (driven by the per-face Updater; renderer reads .currentValue) ---
+    /** masterOffset ObsValue (ring rotation; Vienna noon/midnight, Kyoto mode). */
+    _obsMasterOffset?: import('../shared/obs-value.js').ObsValue;
+    /** Per-wedge angle ObsValues (one per wedge). */
+    _obsWedgeAngles?: import('../shared/obs-value.js').ObsValue[];
+    /** Per-wedge slide ObsValues (wadokei only; one per wedge). */
+    _obsWedgeSlides?: import('../shared/obs-value.js').ObsValue[];
 }
 
 // ============================================================================

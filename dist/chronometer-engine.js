@@ -1458,293 +1458,6 @@
     return new Date((dateInterval + 978307200) * 1e3);
   }
 
-  // src/astronomy/es-calendar.ts
-  var kECJulianDayOf1990Epoch = 24478915e-1;
-  var kEC1990Epoch2 = -347241600;
-  var kECAverageDaysInGregorianYear = 365.2425;
-  var kECDaysInGregorianCycle = kECAverageDaysInGregorianYear * 400;
-  var kECDaysInJulianCycle = 365.25 * 4;
-  var kECDaysInNonLeapCentury = 36525;
-  var kECJulianGregorianSwitchoverTimeInterval = -131976e5;
-  function utcComponentsFromTimeInterval(timeInterval) {
-    let xRemainder;
-    let signedYear;
-    let x0;
-    if (timeInterval < kECJulianGregorianSwitchoverTimeInterval) {
-      const x1F = 730793 + timeInterval / (24 * 3600);
-      const x1 = Math.floor(x1F);
-      xRemainder = x1F - x1;
-      signedYear = Math.floor((4 * x1 + 3) / kECDaysInJulianCycle);
-      x0 = x1 - Math.floor(kECDaysInJulianCycle * signedYear / 4);
-    } else {
-      const x2F = 730791 + timeInterval / (24 * 3600);
-      const x2 = Math.floor(x2F);
-      xRemainder = x2F - x2;
-      const century = Math.floor((4 * x2 + 3) / kECDaysInGregorianCycle);
-      const x1 = x2 - Math.floor(kECDaysInGregorianCycle * century / 4);
-      const yearWithinCentury = Math.floor((100 * x1 + 99) / kECDaysInNonLeapCentury);
-      signedYear = 100 * century + yearWithinCentury;
-      x0 = x1 - Math.floor(kECDaysInNonLeapCentury * yearWithinCentury / 100);
-    }
-    let monthI = Math.floor((5 * x0 + 461) / 153);
-    let month;
-    if (monthI > 12) {
-      month = monthI - 12;
-      signedYear++;
-    } else {
-      month = monthI;
-    }
-    let era;
-    let year;
-    if (signedYear <= 0) {
-      era = 0;
-      year = 1 - signedYear;
-    } else {
-      era = 1;
-      year = signedYear;
-    }
-    const dayF = x0 - Math.floor((153 * monthI - 457) / 5) + 1;
-    const day = Math.round(dayF);
-    const hoursF = xRemainder * 24;
-    const hoursI = Math.floor(hoursF);
-    const minutesF = (hoursF - hoursI) * 60;
-    const minutesI = Math.floor(minutesF);
-    const seconds = (minutesF - minutesI) * 60;
-    return { era, year, month, day, hour: hoursI, minute: minutesI, seconds };
-  }
-  function timeIntervalFromUTCComponents(era, year, month, day, hour, minute, seconds) {
-    let signedYear = era === 0 ? 1 - year : year;
-    let monthI;
-    if (month < 3) {
-      monthI = month + 12;
-      signedYear--;
-    } else {
-      monthI = month;
-    }
-    let J;
-    if (era === 0 || year < 1582 || year === 1582 && (month < 10 || month === 10 && day < 15)) {
-      J = 17211165e-1 + Math.floor(1461 * signedYear / 4);
-    } else {
-      const c = Math.floor(signedYear / 100);
-      const x = signedYear - 100 * c;
-      J = 17211185e-1 + Math.floor(146097 * c / 4) + Math.floor(36525 * x / 100);
-    }
-    J += Math.floor((153 * monthI - 457) / 5) + day;
-    return (J - kECJulianDayOf1990Epoch) * 24 * 3600 + kEC1990Epoch2 + hour * 3600 + minute * 60 + seconds;
-  }
-  function daysInMonth(eraNumber, yearNumber, monthNumber) {
-    switch (monthNumber) {
-      case 1:
-        return 31;
-      // Jan
-      case 2: {
-        const firstOfFeb = timeIntervalFromUTCComponents(eraNumber, yearNumber, 2, 1, 0, 0, 0);
-        const firstOfMar = timeIntervalFromUTCComponents(eraNumber, yearNumber, 3, 1, 0, 0, 0);
-        return Math.round((firstOfMar - firstOfFeb) / (24 * 3600));
-      }
-      case 3:
-        return 31;
-      case 4:
-        return 30;
-      case 5:
-        return 31;
-      case 6:
-        return 30;
-      case 7:
-        return 31;
-      case 8:
-        return 31;
-      case 9:
-        return 30;
-      case 10:
-        return 31;
-      case 11:
-        return 30;
-      case 12:
-        return 31;
-      default:
-        return 0;
-    }
-  }
-  function localComponentsFromTimeInterval(timeInterval, tzOffsetSeconds) {
-    return utcComponentsFromTimeInterval(timeInterval + tzOffsetSeconds);
-  }
-  function timeIntervalFromLocalComponents(tzOffsetSeconds, era, year, month, day, hour, minute, seconds) {
-    const localT = timeIntervalFromUTCComponents(era, year, month, day, hour, minute, seconds);
-    return localT - tzOffsetSeconds;
-  }
-  function weekdayFromTimeInterval(dateInterval, tzOffsetSeconds) {
-    const localNow = dateInterval + tzOffsetSeconds;
-    const localNowDays = localNow / (24 * 3600);
-    const weekday = ((localNowDays + 1) % 7 + 7) % 7;
-    return Math.floor(weekday);
-  }
-  function addMonthsToTimeInterval(now, tzOffsetSeconds, months) {
-    const cs = localComponentsFromTimeInterval(now, tzOffsetSeconds);
-    const signedYearNow = cs.era === 0 ? 1 - cs.year : cs.year;
-    const zeroMonthNow = cs.month - 1;
-    const yearMonthThen = signedYearNow + (zeroMonthNow + months) / 12;
-    const signedYearThen = Math.floor(yearMonthThen);
-    const zeroMonthThen = Math.round((yearMonthThen - signedYearThen) * 12);
-    const monthThen = zeroMonthThen + 1;
-    let eraThen;
-    let yearThen;
-    if (signedYearThen <= 0) {
-      eraThen = 0;
-      yearThen = 1 - signedYearThen;
-    } else {
-      eraThen = 1;
-      yearThen = signedYearThen;
-    }
-    const daysInMonthThen = daysInMonth(eraThen, yearThen, monthThen);
-    const dayThen = Math.min(cs.day, daysInMonthThen);
-    return timeIntervalFromLocalComponents(
-      tzOffsetSeconds,
-      eraThen,
-      yearThen,
-      monthThen,
-      dayThen,
-      cs.hour,
-      cs.minute,
-      cs.seconds
-    );
-  }
-  function addYearsToTimeInterval(now, tzOffsetSeconds, years) {
-    const cs = localComponentsFromTimeInterval(now, tzOffsetSeconds);
-    const signedYearNow = cs.era === 0 ? 1 - cs.year : cs.year;
-    const signedYearThen = signedYearNow + years;
-    let eraThen;
-    let yearThen;
-    if (signedYearThen <= 0) {
-      eraThen = 0;
-      yearThen = 1 - signedYearThen;
-    } else {
-      eraThen = 1;
-      yearThen = signedYearThen;
-    }
-    const daysInTargetMonth = daysInMonth(eraThen, yearThen, cs.month);
-    const dayThen = Math.min(cs.day, daysInTargetMonth);
-    return timeIntervalFromLocalComponents(
-      tzOffsetSeconds,
-      eraThen,
-      yearThen,
-      cs.month,
-      dayThen,
-      cs.hour,
-      cs.minute,
-      cs.seconds
-    );
-  }
-
-  // src/astronomy/es-sidereal.ts
-  var TWO_PI = Math.PI * 2;
-  function convertLSTtoGST(lst, observerLongitude) {
-    let gst = lst - observerLongitude;
-    let dayOffset = 0;
-    if (gst < 0) {
-      gst += TWO_PI;
-      dayOffset = -1;
-    } else if (gst > TWO_PI) {
-      gst -= TWO_PI;
-      dayOffset = 1;
-    }
-    return { gst, dayOffset };
-  }
-  function convertGSTtoLST(gst, observerLongitude) {
-    let lst = gst + observerLongitude;
-    if (lst < 0) {
-      lst += TWO_PI;
-    } else if (lst > TWO_PI) {
-      lst -= TWO_PI;
-    }
-    return lst;
-  }
-  function convertUTToGSTP03x(centuriesSinceEpochTDT, deltaTSeconds, utSinceMidnightRadians, _priorUTMidnight) {
-    const t = centuriesSinceEpochTDT;
-    const tu = t - deltaTSeconds / (24 * 3600 * 36525);
-    const t2 = t * t;
-    const t3 = t2 * t;
-    const t4 = t2 * t2;
-    const t5 = t3 * t2;
-    let gmst = 24110.5493771 + 864018479447825e-8 * tu + 307.4771013 * (t - tu) + 0.09277211 * t2 - 2926e-10 * t3 - 199708e-11 * t4 - 2454e-12 * t5;
-    gmst *= Math.PI / (12 * 3600);
-    gmst += utSinceMidnightRadians;
-    gmst = fmod(gmst, TWO_PI);
-    if (gmst < 0) {
-      gmst += TWO_PI;
-    }
-    return gmst;
-  }
-  function convertUTToGSTP03(calculationDate, cache) {
-    const { julianCenturiesSince2000Epoch, deltaT } = julianCenturiesSince2000EpochForDateInterval(calculationDate, cache);
-    const priorUTMidnightD = priorUTMidnightForDateInterval(calculationDate, cache);
-    const utRadiansSinceMidnight = (calculationDate - priorUTMidnightD) * Math.PI / (12 * 3600);
-    return convertUTToGSTP03x(julianCenturiesSince2000Epoch, deltaT, utRadiansSinceMidnight, priorUTMidnightD);
-  }
-  function convertGSTtoUT(gst, priorUTMidnight, cachePool) {
-    let priorCache = null;
-    if (cachePool) {
-      priorCache = pushECAstroCacheInPool(cachePool, cachePool.midnightCache, priorUTMidnight);
-    }
-    const { julianCenturiesSince2000Epoch, deltaT } = julianCenturiesSince2000EpochForDateInterval(
-      priorUTMidnight,
-      cachePool ? cachePool.currentCache : null
-    );
-    const T0 = convertUTToGSTP03x(julianCenturiesSince2000Epoch, deltaT, 0, priorUTMidnight);
-    if (cachePool && priorCache !== void 0) {
-      popECAstroCacheToInPool(cachePool, priorCache);
-    }
-    let ut = gst - T0;
-    if (ut < 0) {
-      ut += TWO_PI;
-    } else if (ut > TWO_PI) {
-      ut -= TWO_PI;
-    }
-    ut *= kECUTUnitsPerGSTUnit;
-    let ut2 = ut + kECUTUnitsPerGSTUnit * TWO_PI;
-    if (ut2 > TWO_PI) {
-      ut2 = -1;
-    }
-    return { ut, ut2 };
-  }
-  function convertGSTtoUTclosest(gst, closestToThisDate, cachePool) {
-    let priorUTMidnightD = priorUTMidnightForDateInterval(
-      closestToThisDate,
-      cachePool ? cachePool.currentCache : null
-    );
-    let { ut: ut0, ut2: ut0_2 } = convertGSTtoUT(gst, priorUTMidnightD, cachePool);
-    let utSecondsSinceMidnight = ut0 * (12 * 3600) / Math.PI;
-    let utD = priorUTMidnightD + utSecondsSinceMidnight;
-    if (utD < closestToThisDate - 12 * 3600 * kECUTUnitsPerGSTUnit) {
-      if (ut0_2 > 0) {
-        ut0 = ut0_2;
-        utSecondsSinceMidnight = ut0 * (12 * 3600) / Math.PI;
-        utD = priorUTMidnightD + utSecondsSinceMidnight;
-      } else {
-        priorUTMidnightD += 24 * 3600;
-        ({ ut: ut0, ut2: ut0_2 } = convertGSTtoUT(gst, priorUTMidnightD, cachePool));
-        utSecondsSinceMidnight = ut0 * (12 * 3600) / Math.PI;
-        utD = priorUTMidnightD + utSecondsSinceMidnight;
-      }
-    } else if (utD > closestToThisDate + 12 * 3600 * kECUTUnitsPerGSTUnit) {
-      priorUTMidnightD -= 24 * 3600;
-      ({ ut: ut0, ut2: ut0_2 } = convertGSTtoUT(gst, priorUTMidnightD, cachePool));
-      if (ut0_2 > 0) {
-        ut0 = ut0_2;
-      }
-      utSecondsSinceMidnight = ut0 * (12 * 3600) / Math.PI;
-      utD = priorUTMidnightD + utSecondsSinceMidnight;
-    }
-    return utD;
-  }
-  function GSTDifferenceForDate(dateInterval, cache) {
-    const { julianCenturiesSince2000Epoch, deltaT } = julianCenturiesSince2000EpochForDateInterval(dateInterval, cache);
-    const priorUTMidnightD = priorUTMidnightForDateInterval(dateInterval, cache);
-    const utRadiansSinceMidnight = (dateInterval - priorUTMidnightD) * Math.PI / (12 * 3600);
-    const gst = convertUTToGSTP03x(julianCenturiesSince2000Epoch, deltaT, utRadiansSinceMidnight, priorUTMidnightD);
-    return gst - utRadiansSinceMidnight;
-  }
-
   // src/astronomy/planet-tables.ts
   var sunData = [
     { li: 403406, ali: 4.721964, bli: 1.621043, ri: 0 },
@@ -10210,7 +9923,7 @@
   }
 
   // src/astronomy/es-coordinates.ts
-  var TWO_PI2 = Math.PI * 2;
+  var TWO_PI = Math.PI * 2;
   function raAndDeclO(eclipticLatitude, eclipticLongitude, obliquity) {
     const sinDelta = Math.sin(eclipticLatitude) * Math.cos(obliquity) + Math.cos(eclipticLatitude) * Math.sin(obliquity) * Math.sin(eclipticLongitude);
     const declination = Math.asin(sinDelta);
@@ -10232,7 +9945,7 @@
     const q = Math.sqrt(A * A + B * B + C * C);
     let Hprime = Math.atan2(A, B);
     if (Hprime < 0) {
-      Hprime += TWO_PI2;
+      Hprime += TWO_PI;
     }
     const declPrime = Math.asin(C / q);
     return { Hprime, declPrime };
@@ -10327,6 +10040,115 @@
     const dist = distanceOfPlanetInAU(planetNumber, julianCenturiesSince2000Epoch, cache, moonPrecision);
     const { angularSize: angularDiameter, parallax } = planetSizeAndParallax(planetNumber, dist);
     return (wantGeocentricAltitude ? parallax : 0) - kECRefractionAtHorizonX - angularDiameter / 2;
+  }
+
+  // src/astronomy/es-sidereal.ts
+  var TWO_PI2 = Math.PI * 2;
+  function convertLSTtoGST(lst, observerLongitude) {
+    let gst = lst - observerLongitude;
+    let dayOffset = 0;
+    if (gst < 0) {
+      gst += TWO_PI2;
+      dayOffset = -1;
+    } else if (gst > TWO_PI2) {
+      gst -= TWO_PI2;
+      dayOffset = 1;
+    }
+    return { gst, dayOffset };
+  }
+  function convertGSTtoLST(gst, observerLongitude) {
+    let lst = gst + observerLongitude;
+    if (lst < 0) {
+      lst += TWO_PI2;
+    } else if (lst > TWO_PI2) {
+      lst -= TWO_PI2;
+    }
+    return lst;
+  }
+  function convertUTToGSTP03x(centuriesSinceEpochTDT, deltaTSeconds, utSinceMidnightRadians, _priorUTMidnight) {
+    const t = centuriesSinceEpochTDT;
+    const tu = t - deltaTSeconds / (24 * 3600 * 36525);
+    const t2 = t * t;
+    const t3 = t2 * t;
+    const t4 = t2 * t2;
+    const t5 = t3 * t2;
+    let gmst = 24110.5493771 + 864018479447825e-8 * tu + 307.4771013 * (t - tu) + 0.09277211 * t2 - 2926e-10 * t3 - 199708e-11 * t4 - 2454e-12 * t5;
+    gmst *= Math.PI / (12 * 3600);
+    gmst += utSinceMidnightRadians;
+    gmst = fmod(gmst, TWO_PI2);
+    if (gmst < 0) {
+      gmst += TWO_PI2;
+    }
+    return gmst;
+  }
+  function convertUTToGSTP03(calculationDate, cache) {
+    const { julianCenturiesSince2000Epoch, deltaT } = julianCenturiesSince2000EpochForDateInterval(calculationDate, cache);
+    const priorUTMidnightD = priorUTMidnightForDateInterval(calculationDate, cache);
+    const utRadiansSinceMidnight = (calculationDate - priorUTMidnightD) * Math.PI / (12 * 3600);
+    return convertUTToGSTP03x(julianCenturiesSince2000Epoch, deltaT, utRadiansSinceMidnight, priorUTMidnightD);
+  }
+  function convertGSTtoUT(gst, priorUTMidnight, cachePool) {
+    let priorCache = null;
+    if (cachePool) {
+      priorCache = pushECAstroCacheInPool(cachePool, cachePool.midnightCache, priorUTMidnight);
+    }
+    const { julianCenturiesSince2000Epoch, deltaT } = julianCenturiesSince2000EpochForDateInterval(
+      priorUTMidnight,
+      cachePool ? cachePool.currentCache : null
+    );
+    const T0 = convertUTToGSTP03x(julianCenturiesSince2000Epoch, deltaT, 0, priorUTMidnight);
+    if (cachePool && priorCache !== void 0) {
+      popECAstroCacheToInPool(cachePool, priorCache);
+    }
+    let ut = gst - T0;
+    if (ut < 0) {
+      ut += TWO_PI2;
+    } else if (ut > TWO_PI2) {
+      ut -= TWO_PI2;
+    }
+    ut *= kECUTUnitsPerGSTUnit;
+    let ut2 = ut + kECUTUnitsPerGSTUnit * TWO_PI2;
+    if (ut2 > TWO_PI2) {
+      ut2 = -1;
+    }
+    return { ut, ut2 };
+  }
+  function convertGSTtoUTclosest(gst, closestToThisDate, cachePool) {
+    let priorUTMidnightD = priorUTMidnightForDateInterval(
+      closestToThisDate,
+      cachePool ? cachePool.currentCache : null
+    );
+    let { ut: ut0, ut2: ut0_2 } = convertGSTtoUT(gst, priorUTMidnightD, cachePool);
+    let utSecondsSinceMidnight = ut0 * (12 * 3600) / Math.PI;
+    let utD = priorUTMidnightD + utSecondsSinceMidnight;
+    if (utD < closestToThisDate - 12 * 3600 * kECUTUnitsPerGSTUnit) {
+      if (ut0_2 > 0) {
+        ut0 = ut0_2;
+        utSecondsSinceMidnight = ut0 * (12 * 3600) / Math.PI;
+        utD = priorUTMidnightD + utSecondsSinceMidnight;
+      } else {
+        priorUTMidnightD += 24 * 3600;
+        ({ ut: ut0, ut2: ut0_2 } = convertGSTtoUT(gst, priorUTMidnightD, cachePool));
+        utSecondsSinceMidnight = ut0 * (12 * 3600) / Math.PI;
+        utD = priorUTMidnightD + utSecondsSinceMidnight;
+      }
+    } else if (utD > closestToThisDate + 12 * 3600 * kECUTUnitsPerGSTUnit) {
+      priorUTMidnightD -= 24 * 3600;
+      ({ ut: ut0, ut2: ut0_2 } = convertGSTtoUT(gst, priorUTMidnightD, cachePool));
+      if (ut0_2 > 0) {
+        ut0 = ut0_2;
+      }
+      utSecondsSinceMidnight = ut0 * (12 * 3600) / Math.PI;
+      utD = priorUTMidnightD + utSecondsSinceMidnight;
+    }
+    return utD;
+  }
+  function GSTDifferenceForDate(dateInterval, cache) {
+    const { julianCenturiesSince2000Epoch, deltaT } = julianCenturiesSince2000EpochForDateInterval(dateInterval, cache);
+    const priorUTMidnightD = priorUTMidnightForDateInterval(dateInterval, cache);
+    const utRadiansSinceMidnight = (dateInterval - priorUTMidnightD) * Math.PI / (12 * 3600);
+    const gst = convertUTToGSTP03x(julianCenturiesSince2000Epoch, deltaT, utRadiansSinceMidnight, priorUTMidnightD);
+    return gst - utRadiansSinceMidnight;
   }
 
   // src/astronomy/wb-planets.ts
@@ -11713,6 +11535,1411 @@
     return tryDate;
   }
 
+  // src/shared/animation.ts
+  var SCHEDULER_LOOKAHEAD_MS = 50;
+  var kECGLAngleAnimationSpeed = 2;
+  var kECGLFrameRate = 1 / 240;
+  var EC_UPDATE_NEXT_SUNRISE = -1001;
+  var EC_UPDATE_NEXT_SUNSET = -1002;
+  var EC_UPDATE_NEXT_MOONRISE = -1003;
+  var EC_UPDATE_NEXT_MOONSET = -1004;
+  var EC_UPDATE_NEXT_SUNRISE_OR_MIDNIGHT = -1005;
+  var EC_UPDATE_NEXT_SUNSET_OR_MIDNIGHT = -1006;
+  var EC_UPDATE_NEXT_MOONRISE_OR_MIDNIGHT = -1007;
+  var EC_UPDATE_NEXT_MOONSET_OR_MIDNIGHT = -1008;
+  var EC_UPDATE_ENV_CHANGE_ONLY = -1013;
+  var EC_UPDATE_NEXT_SUNRISE_OR_SUNSET = -1016;
+  var EC_UPDATE_NEXT_MOONRISE_OR_MOONSET = -1017;
+  var EC_UPDATE_NEXT_SSLAT_CHANGE = -1018;
+  var EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION = -1019;
+  var PLANET_SENTINEL_BASE = -2e3;
+  function isPlanetRiseSetSentinel(sentinel) {
+    return sentinel <= PLANET_SENTINEL_BASE;
+  }
+  function decodePlanetSentinel(sentinel) {
+    const offset = -sentinel + PLANET_SENTINEL_BASE;
+    return { planet: offset >> 1, isRise: (offset & 1) === 0 };
+  }
+  function makeAnimatingValue(initial, now) {
+    return {
+      currentValue: initial,
+      targetValue: initial,
+      lastAnimationTime: now,
+      animationStopTime: now,
+      animating: false
+    };
+  }
+  function startValueAnimation(val, newTarget, now, speed, durationOverrideMs) {
+    if (speed === 0) {
+      val.currentValue = newTarget;
+      val.targetValue = newTarget;
+      val.animating = false;
+      return;
+    }
+    if (val.animating && val.targetValue === newTarget) return;
+    if (val.animating) {
+      interpolateValue(val, now);
+    }
+    if (val.currentValue === newTarget) {
+      val.animating = false;
+      return;
+    }
+    val.targetValue = newTarget;
+    const delta = Math.abs(newTarget - val.currentValue);
+    const durationMs = durationOverrideMs ?? delta / speed * 1e3;
+    if (durationMs < kECGLFrameRate * 1e3) {
+      val.currentValue = newTarget;
+      val.animating = false;
+      return;
+    }
+    val.lastAnimationTime = now;
+    val.animating = true;
+    val.animationStopTime = now + durationMs;
+  }
+  function interpolateValue(val, now) {
+    if (!val.animating) {
+      return val.currentValue;
+    }
+    if (now >= val.animationStopTime) {
+      val.animating = false;
+      val.currentValue = val.targetValue;
+      return val.currentValue;
+    }
+    const fraction = (now - val.lastAnimationTime) / (val.animationStopTime - val.lastAnimationTime);
+    val.currentValue += (val.targetValue - val.currentValue) * fraction;
+    val.lastAnimationTime = now;
+    return val.currentValue;
+  }
+  function startAnimationRaw(val, newTarget, now, animSpeed = 1, durationOverrideMs, period = 2 * Math.PI) {
+    const speed = kECGLAngleAnimationSpeed * animSpeed;
+    const wraps = isFinite(period);
+    if (wraps) {
+      newTarget = fmod2(newTarget, period);
+    }
+    if (isNaN(newTarget) || isNaN(val.currentValue)) {
+      val.currentValue = newTarget;
+      val.targetValue = newTarget;
+      val.animating = false;
+      return;
+    }
+    if (speed === 0) {
+      val.currentValue = newTarget;
+      val.targetValue = newTarget;
+      val.animating = false;
+      return;
+    }
+    if (val.animating && val.targetValue === newTarget) return;
+    if (val.animating) {
+      interpolateValue(val, now);
+    }
+    if (val.currentValue === newTarget) {
+      val.animating = false;
+      return;
+    }
+    if (wraps) {
+      let delta = newTarget - val.currentValue;
+      delta = delta - period * Math.round(delta / period);
+      val.currentValue = newTarget - delta;
+    }
+    startValueAnimation(val, newTarget, now, speed, durationOverrideMs);
+  }
+  function computeNextBoundary(updateIntervalMs, getNow, timeDirection, env) {
+    if (updateIntervalMs > 0) {
+      const tzOffsetMs = (env.tzOffsetSec ?? 0) * 1e3;
+      const displayNowMs = getNow().getTime();
+      const localNowMs = displayNowMs + tzOffsetMs;
+      if (timeDirection === -1) {
+        const localBoundary = Math.floor(localNowMs / updateIntervalMs) * updateIntervalMs;
+        const boundary = (localBoundary === localNowMs ? localBoundary - updateIntervalMs : localBoundary) - tzOffsetMs;
+        return boundary;
+      } else {
+        const localBoundary = Math.ceil(localNowMs / updateIntervalMs) * updateIntervalMs;
+        return localBoundary - tzOffsetMs;
+      }
+    }
+    const sentinel = updateIntervalMs / 1e3;
+    const eventDI = resolveSentinel(sentinel, getNow, env, timeDirection);
+    if (!isFinite(eventDI)) {
+      return Infinity;
+    }
+    return (eventDI + 978307200) * 1e3;
+  }
+  function displayTimeToPerfNow(displayTimeMs, getNow) {
+    if (!isFinite(displayTimeMs)) return Infinity;
+    const deltaMs = Math.abs(displayTimeMs - getNow().getTime());
+    return performance.now() + deltaMs;
+  }
+  var SENTINEL_FUDGE_SECONDS = 5;
+  var SENTINEL_LOOKAHEAD_SECONDS = 3600 * 13.2;
+  function nextPlanetRiseSet(riseNotSet, planetNumber, getNow, lat, lon, timeDirection) {
+    const calculationDI = dateToDateInterval(getNow());
+    const searchForward = timeDirection === 1;
+    const fudge = searchForward ? SENTINEL_FUDGE_SECONDS : -SENTINEL_FUDGE_SECONDS;
+    const lookahead = searchForward ? SENTINEL_LOOKAHEAD_SECONDS : -SENTINEL_LOOKAHEAD_SECONDS;
+    const fudgeDate = calculationDI + fudge;
+    const pool = new AstroCachePool();
+    initializeCachePool(pool, fudgeDate, lat, lon, !searchForward);
+    try {
+      const result = planetaryRiseSetTimeRefined(
+        fudgeDate,
+        lat,
+        lon,
+        riseNotSet,
+        planetNumber,
+        NaN,
+        pool
+      );
+      if (isNoRiseSet(result.riseSetTime)) {
+        return NaN;
+      }
+      const inRightDirection = searchForward ? result.transitTime >= fudgeDate : result.transitTime < fudgeDate;
+      if (inRightDirection) {
+        return result.riseSetTime;
+      }
+      const tryDate = fudgeDate + lookahead;
+      releaseCachePool(pool);
+      initializeCachePool(pool, tryDate, lat, lon, !searchForward);
+      const result2 = planetaryRiseSetTimeRefined(
+        tryDate,
+        lat,
+        lon,
+        riseNotSet,
+        planetNumber,
+        NaN,
+        pool
+      );
+      if (isNoRiseSet(result2.riseSetTime)) {
+        return NaN;
+      }
+      return result2.riseSetTime;
+    } finally {
+      releaseCachePool(pool);
+    }
+  }
+  function nextOrMidnight(eventDI, getNow, tzOffsetSec, timeDirection) {
+    if (isNaN(eventDI)) {
+      return nextMidnightDI(getNow, tzOffsetSec, timeDirection);
+    }
+    const nowDI = dateToDateInterval(getNow());
+    const localNowSec = nowDI + tzOffsetSec;
+    const dayStartLocal = Math.floor(localNowSec / 86400) * 86400;
+    const todayMidnightDI = dayStartLocal - tzOffsetSec;
+    if (timeDirection === -1) {
+      if (eventDI < todayMidnightDI) {
+        return todayMidnightDI;
+      }
+    } else {
+      const tomorrowMidnightDI = todayMidnightDI + 86400;
+      if (eventDI > tomorrowMidnightDI) {
+        return tomorrowMidnightDI;
+      }
+    }
+    return eventDI;
+  }
+  function nextMidnightDI(getNow, tzOffsetSec, timeDirection) {
+    const nowDI = dateToDateInterval(getNow());
+    const localNowSec = nowDI + tzOffsetSec;
+    const dayStartLocal = Math.floor(localNowSec / 86400) * 86400;
+    const todayMidnightDI = dayStartLocal - tzOffsetSec;
+    if (timeDirection === -1) {
+      return todayMidnightDI;
+    } else {
+      return todayMidnightDI + 86400;
+    }
+  }
+  var SSLAT_THRESHOLD = 0.1 * Math.PI / 180;
+  var SSLAT_SEARCH_RANGE = 2 * 86400;
+  var SSLAT_SEARCH_GRANULARITY = 3600;
+  function nextSslatChange(getNow, timeDirection) {
+    const nowDI = dateToDateInterval(getNow());
+    const currentDecl = sunRAandDecl(nowDI, null).declination;
+    const boundaryDI = nowDI + timeDirection * SSLAT_SEARCH_RANGE;
+    const boundaryDecl = sunRAandDecl(boundaryDI, null).declination;
+    if (Math.abs(boundaryDecl - currentDecl) < SSLAT_THRESHOLD) {
+      return boundaryDI;
+    }
+    let loDI = nowDI;
+    let hiDI = boundaryDI;
+    while (Math.abs(hiDI - loDI) > SSLAT_SEARCH_GRANULARITY) {
+      const midDI = (loDI + hiDI) / 2;
+      const midDecl = sunRAandDecl(midDI, null).declination;
+      if (Math.abs(midDecl - currentDecl) >= SSLAT_THRESHOLD) {
+        hiDI = midDI;
+      } else {
+        loDI = midDI;
+      }
+    }
+    return hiDI;
+  }
+  var ECLIPSE_THRESHOLD = Math.PI / 18;
+  var ECLIPSE_MAX_CLOSING_RATE = Math.PI / 180 / 3600;
+  var ECLIPSE_MAX_INTERVAL = 3600;
+  function nextInterestingEclipseMotion(getNow, lat, lon, timeDirection) {
+    const nowDI = dateToDateInterval(getNow());
+    const sep = calculateEclipse(nowDI, lat, lon, null).angularSeparation;
+    let intervalSec = (sep - ECLIPSE_THRESHOLD) / ECLIPSE_MAX_CLOSING_RATE;
+    if (intervalSec < 1) intervalSec = 1;
+    if (intervalSec > ECLIPSE_MAX_INTERVAL) intervalSec = ECLIPSE_MAX_INTERVAL;
+    return nowDI + timeDirection * intervalSec;
+  }
+  function resolveSentinel(sentinel, getNow, env, timeDirection) {
+    const lat = env.observerLatRad ?? 0;
+    const lon = env.observerLonRad ?? 0;
+    const tzOff = env.tzOffsetSec ?? 0;
+    switch (sentinel) {
+      // Bare rise/set (no midnight clamp)
+      case EC_UPDATE_NEXT_SUNRISE:
+        return nextPlanetRiseSet(true, 0 /* Sun */, getNow, lat, lon, timeDirection);
+      case EC_UPDATE_NEXT_SUNSET:
+        return nextPlanetRiseSet(false, 0 /* Sun */, getNow, lat, lon, timeDirection);
+      case EC_UPDATE_NEXT_MOONRISE:
+        return nextPlanetRiseSet(true, 1 /* Moon */, getNow, lat, lon, timeDirection);
+      case EC_UPDATE_NEXT_MOONSET:
+        return nextPlanetRiseSet(false, 1 /* Moon */, getNow, lat, lon, timeDirection);
+      // Rise/set clamped to midnight
+      case EC_UPDATE_NEXT_SUNRISE_OR_MIDNIGHT:
+        return nextOrMidnight(
+          nextPlanetRiseSet(true, 0 /* Sun */, getNow, lat, lon, timeDirection),
+          getNow,
+          tzOff,
+          timeDirection
+        );
+      case EC_UPDATE_NEXT_SUNSET_OR_MIDNIGHT:
+        return nextOrMidnight(
+          nextPlanetRiseSet(false, 0 /* Sun */, getNow, lat, lon, timeDirection),
+          getNow,
+          tzOff,
+          timeDirection
+        );
+      case EC_UPDATE_NEXT_MOONRISE_OR_MIDNIGHT:
+        return nextOrMidnight(
+          nextPlanetRiseSet(true, 1 /* Moon */, getNow, lat, lon, timeDirection),
+          getNow,
+          tzOff,
+          timeDirection
+        );
+      case EC_UPDATE_NEXT_MOONSET_OR_MIDNIGHT:
+        return nextOrMidnight(
+          nextPlanetRiseSet(false, 1 /* Moon */, getNow, lat, lon, timeDirection),
+          getNow,
+          tzOff,
+          timeDirection
+        );
+      // Combined: whichever comes first in the direction of flow
+      case EC_UPDATE_NEXT_SUNRISE_OR_SUNSET: {
+        const rise = nextPlanetRiseSet(true, 0 /* Sun */, getNow, lat, lon, timeDirection);
+        const set = nextPlanetRiseSet(false, 0 /* Sun */, getNow, lat, lon, timeDirection);
+        return closerInTimeDirection(rise, set, timeDirection);
+      }
+      case EC_UPDATE_NEXT_MOONRISE_OR_MOONSET: {
+        const rise = nextPlanetRiseSet(true, 1 /* Moon */, getNow, lat, lon, timeDirection);
+        const set = nextPlanetRiseSet(false, 1 /* Moon */, getNow, lat, lon, timeDirection);
+        return closerInTimeDirection(rise, set, timeDirection);
+      }
+      // Adaptive sslat (sun declination) change sentinel for earth view
+      case EC_UPDATE_NEXT_SSLAT_CHANGE:
+        return nextSslatChange(getNow, timeDirection);
+      // Adaptive eclipse-simulator cadence: ~1 s while the disc is drawn,
+      // capped at 1 h while only the caption shows.
+      case EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION:
+        return nextInterestingEclipseMotion(getNow, lat, lon, timeDirection);
+      // Environment change only — effectively never (only explicit reset)
+      case 0:
+      case EC_UPDATE_ENV_CHANGE_ONLY:
+        return Infinity;
+      default:
+        if (isPlanetRiseSetSentinel(sentinel)) {
+          const { planet, isRise } = decodePlanetSentinel(sentinel);
+          return nextPlanetRiseSet(isRise, planet, getNow, lat, lon, timeDirection);
+        }
+        console.warn(`Unknown update sentinel: ${sentinel}, defaulting to daily`);
+        return nextMidnightDI(getNow, tzOff, timeDirection);
+    }
+  }
+  function closerInTimeDirection(a, b, timeDirection) {
+    if (isNaN(a)) return b;
+    if (isNaN(b)) return a;
+    return timeDirection === 1 ? Math.min(a, b) : Math.max(a, b);
+  }
+  function fmod2(value, modulus) {
+    const result = value % modulus;
+    return result < 0 ? result + modulus : result;
+  }
+
+  // src/shared/url-state.ts
+  function readUrlState() {
+    const params = new URLSearchParams(window.location.search);
+    const latStr = params.get("lat");
+    const lonStr = params.get("lon") || params.get("long");
+    const lat = latStr !== null ? parseFloat(latStr) : NaN;
+    const lon = lonStr !== null ? parseFloat(lonStr) : NaN;
+    const city = params.get("city");
+    const blocStr = params.get("bloc");
+    const tcStr = params.get("tc");
+    const tStr = params.get("t");
+    const offStr = params.get("off");
+    const dirStr = params.get("dir");
+    let dir = 1;
+    if (dirStr === "-1") dir = -1;
+    else if (dirStr === "0") dir = 0;
+    return {
+      lat: !isNaN(lat) ? lat : null,
+      lon: !isNaN(lon) ? lon : null,
+      city: city || null,
+      bloc: blocStr === "1",
+      tc: tcStr === "1",
+      t: tStr !== null ? parseInt(tStr, 10) : null,
+      off: offStr !== null ? parseInt(offStr, 10) : null,
+      dir,
+      tz: params.get("tz") || null,
+      picks: params.get("picks") || null,
+      tp: params.get("tp") === "a" ? "a" : "d",
+      embed: params.get("embed") === "1",
+      fps: params.has("fps"),
+      kyhand: params.get("kyhand"),
+      kmode: params.get("kmode"),
+      op: (() => {
+        const s = params.get("op");
+        const n = s !== null ? parseInt(s, 10) : NaN;
+        return Number.isFinite(n) ? n : null;
+      })(),
+      onoon: params.get("onoon") === "1",
+      body: params.get("body") || null,
+      vnoon: params.get("vnoon") === "1"
+    };
+  }
+  function writeUrlState(changes) {
+    const params = new URLSearchParams(window.location.search);
+    if ("lat" in changes) {
+      if (changes.lat !== null && changes.lat !== void 0) {
+        params.set("lat", changes.lat.toFixed(3));
+      } else {
+        params.delete("lat");
+      }
+    }
+    if ("lon" in changes) {
+      if (changes.lon !== null && changes.lon !== void 0) {
+        params.set("lon", changes.lon.toFixed(3));
+      } else {
+        params.delete("lon");
+      }
+    }
+    if ("picks" in changes) {
+      if (changes.picks) params.set("picks", changes.picks);
+      else params.delete("picks");
+    }
+    if ("kyhand" in changes) {
+      if (changes.kyhand) params.set("kyhand", changes.kyhand);
+      else params.delete("kyhand");
+    }
+    if ("kmode" in changes) {
+      if (changes.kmode) params.set("kmode", changes.kmode);
+      else params.delete("kmode");
+    }
+    if ("city" in changes) {
+      if (changes.city) {
+        params.set("city", changes.city);
+      } else {
+        params.delete("city");
+      }
+    }
+    if ("bloc" in changes) {
+      if (changes.bloc) {
+        params.set("bloc", "1");
+      } else {
+        params.delete("bloc");
+      }
+    }
+    if ("tc" in changes) {
+      if (changes.tc) {
+        params.set("tc", "1");
+      } else {
+        params.delete("tc");
+      }
+    }
+    if ("t" in changes) {
+      if (changes.t !== null && changes.t !== void 0) {
+        params.set("t", changes.t.toString());
+      } else {
+        params.delete("t");
+      }
+    }
+    if ("off" in changes) {
+      if (changes.off !== null && changes.off !== void 0) {
+        params.set("off", changes.off.toString());
+      } else {
+        params.delete("off");
+      }
+    }
+    if ("dir" in changes) {
+      if (changes.dir !== void 0 && changes.dir !== 1) {
+        params.set("dir", changes.dir.toString());
+      } else {
+        params.delete("dir");
+      }
+    }
+    if ("tz" in changes) {
+      if (changes.tz) {
+        params.set("tz", changes.tz);
+      } else {
+        params.delete("tz");
+      }
+    }
+    if ("tp" in changes) {
+      if (changes.tp === "a") {
+        params.set("tp", "a");
+      } else {
+        params.delete("tp");
+      }
+    }
+    if ("op" in changes) {
+      if (changes.op !== null && changes.op !== void 0 && changes.op !== 0) {
+        params.set("op", changes.op.toString());
+      } else {
+        params.delete("op");
+      }
+    }
+    if ("onoon" in changes) {
+      if (changes.onoon) {
+        params.set("onoon", "1");
+      } else {
+        params.delete("onoon");
+      }
+    }
+    if ("body" in changes) {
+      if (changes.body) params.set("body", changes.body);
+      else params.delete("body");
+    }
+    if ("vnoon" in changes) {
+      if (changes.vnoon) params.set("vnoon", "1");
+      else params.delete("vnoon");
+    }
+    params.delete("long");
+    params.delete("loc");
+    const qs = params.toString();
+    const newUrl = window.location.pathname + (qs ? "?" + qs : "");
+    history.replaceState(null, "", newUrl);
+    updateNavigationLinks();
+  }
+  function buildShareUrl(state, options = {}) {
+    const url = new URL(options.baseUrl ?? window.location.origin + window.location.pathname);
+    const p = url.searchParams;
+    if (state.lat !== null && state.lat !== void 0) p.set("lat", state.lat.toFixed(3));
+    if (state.lon !== null && state.lon !== void 0) p.set("lon", state.lon.toFixed(3));
+    if (state.city) p.set("city", state.city);
+    if (state.tz) p.set("tz", state.tz);
+    if (state.bloc) p.set("bloc", "1");
+    if (state.off !== null && state.off !== void 0) p.set("off", state.off.toString());
+    if (state.t !== null && state.t !== void 0) p.set("t", state.t.toString());
+    if (state.dir !== 1) p.set("dir", state.dir.toString());
+    if (state.picks) p.set("picks", state.picks);
+    if (state.kyhand) p.set("kyhand", state.kyhand);
+    if (state.kmode) p.set("kmode", state.kmode);
+    if (state.op !== null && state.op !== void 0 && state.op !== 0) p.set("op", state.op.toString());
+    if (state.onoon) p.set("onoon", "1");
+    if (state.body) p.set("body", state.body);
+    if (state.vnoon) p.set("vnoon", "1");
+    if (state.tp === "a") p.set("tp", "a");
+    if (options.slots) {
+      for (const [k, v] of Object.entries(options.slots)) p.set(k, v);
+    }
+    return url.toString();
+  }
+  var picksProvider = () => new URLSearchParams(window.location.search).get("picks");
+  function setPicksProvider(fn) {
+    picksProvider = fn;
+  }
+  function updateNavigationLinks() {
+    const search = window.location.search;
+    const backLink = document.getElementById("back-link");
+    if (backLink) {
+      const url = new URL(backLink.getAttribute("data-base-href") || "index.html", window.location.href);
+      url.search = search;
+      backLink.href = url.toString();
+    }
+    const allFacesLink = document.getElementById("all-faces-link");
+    if (allFacesLink) {
+      const url = new URL(allFacesLink.getAttribute("data-base-href") || "all.html", window.location.href);
+      url.search = search;
+      allFacesLink.href = url.toString();
+    }
+    const selectedLink = document.getElementById("selected-faces-link");
+    if (selectedLink) {
+      const hasPicks = !!picksProvider();
+      const baseHref = hasPicks ? "selected.html" : "pick.html";
+      const url = new URL(baseHref, window.location.href);
+      url.search = search;
+      selectedLink.href = url.toString();
+      selectedLink.title = hasPicks ? "Selected Faces" : "Pick Faces";
+    }
+    const editPicksLink = document.getElementById("edit-picks-link");
+    if (editPicksLink) {
+      const url = new URL("pick.html", window.location.href);
+      url.search = search;
+      editPicksLink.href = url.toString();
+    }
+    document.querySelectorAll("a.face-card").forEach((a) => {
+      const anchor = a;
+      const url = new URL(anchor.getAttribute("data-base-href") || anchor.getAttribute("href"), window.location.href);
+      url.search = search;
+      anchor.href = url.toString();
+    });
+  }
+  function initNavigationLinks() {
+    const backLink = document.getElementById("back-link");
+    if (backLink && !backLink.hasAttribute("data-base-href")) {
+      backLink.setAttribute("data-base-href", backLink.getAttribute("href") || "index.html");
+    }
+    const allFacesLink = document.getElementById("all-faces-link");
+    if (allFacesLink && !allFacesLink.hasAttribute("data-base-href")) {
+      allFacesLink.setAttribute("data-base-href", allFacesLink.getAttribute("href") || "all.html");
+    }
+    document.querySelectorAll("a.face-card").forEach((a) => {
+      const anchor = a;
+      if (!anchor.hasAttribute("data-base-href")) {
+        anchor.setAttribute("data-base-href", anchor.getAttribute("href"));
+      }
+    });
+    updateNavigationLinks();
+  }
+
+  // src/shared/incoming-settings-dialog.ts
+  var STYLE_ID = "ec-settings-dialog-style";
+  var CSS = `
+.ec-modal-backdrop {
+    position: fixed; inset: 0; z-index: 1000;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px 16px;
+    background: rgba(0, 0, 0, 0.5);
+}
+.ec-modal {
+    position: relative;
+    background: rgba(26, 26, 46, 0.98);
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border: 1px solid #3a3a5e; border-radius: 14px;
+    padding: 26px 30px; min-width: 300px; max-width: 400px; width: 100%;
+    box-shadow: 0 8px 48px rgba(0, 0, 0, 0.6);
+    text-align: center;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.ec-modal-title {
+    font-size: 16px; color: #e0d8c8; margin: 0 0 10px; font-weight: 400;
+}
+.ec-modal-text {
+    font-size: 13px; color: #aab; line-height: 1.5; margin: 0 0 20px;
+}
+.ec-modal-buttons { display: flex; flex-direction: column; gap: 8px; }
+.ec-modal-btn {
+    border-radius: 6px; font-size: 13px; padding: 9px 16px;
+    cursor: pointer; transition: background 0.15s, color 0.15s;
+    background: #2a2a4e; border: 1px solid #3a3a5e; color: #aac;
+}
+.ec-modal-btn:hover { background: #3a3a6e; color: #ddf; }
+.ec-modal-btn.ec-primary {
+    background: #34507a; border-color: #4a6fa5; color: #dde9ff;
+}
+.ec-modal-btn.ec-primary:hover { background: #3f5f92; color: #fff; }
+
+.ec-toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    z-index: 1001; max-width: 340px;
+    background: rgba(26, 26, 46, 0.98); border: 1px solid #3a3a5e;
+    border-radius: 10px; padding: 12px 16px;
+    box-shadow: 0 6px 32px rgba(0, 0, 0, 0.5);
+    color: #ccd; font-size: 12.5px; line-height: 1.45;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    display: flex; align-items: center; gap: 12px;
+}
+.ec-toast-close {
+    background: none; border: none; color: #889; font-size: 18px;
+    cursor: pointer; padding: 0 2px; line-height: 1;
+}
+.ec-toast-close:hover { color: #ccd; }
+
+.ec-modal-input {
+    width: 100%; box-sizing: border-box;
+    background: #1d1d30; border: 1px solid #3a3a5e; border-radius: 6px;
+    color: #cdd; font-size: 12px; font-family: monospace;
+    padding: 8px 10px; margin: 0 0 14px;
+    text-align: left;
+}
+
+.ec-url-badge {
+    position: fixed; left: 10px; bottom: 8px; z-index: 999;
+    font-size: 11px; color: #99a; opacity: 0.7;
+    background: rgba(0, 0, 0, 0.3); padding: 2px 8px; border-radius: 6px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    pointer-events: none; user-select: none;
+}
+`;
+  function ensureModalStyles() {
+    if (document.getElementById(STYLE_ID)) return;
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = CSS;
+    document.head.appendChild(style);
+  }
+  var COPY = {
+    incoming: {
+      title: "Use these shared settings?",
+      text: "This link includes a saved time, location, or configuration. Save them as your default on this device, or use them just for this visit?",
+      save: "Save as my default",
+      session: "Use for this visit only"
+    },
+    reprompt: {
+      title: "Save your changes?",
+      text: "You changed a setting while viewing shared settings. Save your current settings as the default on this device, or keep them only for this visit?",
+      save: "Save as my default",
+      session: "Keep for this visit only"
+    }
+  };
+  function showIncomingSettingsDialog(options) {
+    ensureModalStyles();
+    const copy = COPY[options.mode];
+    return new Promise((resolve) => {
+      const backdrop = document.createElement("div");
+      backdrop.className = "ec-modal-backdrop";
+      const modal = document.createElement("div");
+      modal.className = "ec-modal";
+      modal.setAttribute("role", "dialog");
+      modal.setAttribute("aria-modal", "true");
+      const title = document.createElement("h2");
+      title.className = "ec-modal-title";
+      title.textContent = copy.title;
+      const text = document.createElement("p");
+      text.className = "ec-modal-text";
+      text.textContent = copy.text;
+      const buttons = document.createElement("div");
+      buttons.className = "ec-modal-buttons";
+      const saveBtn = document.createElement("button");
+      saveBtn.className = "ec-modal-btn ec-primary";
+      saveBtn.textContent = copy.save;
+      const sessionBtn = document.createElement("button");
+      sessionBtn.className = "ec-modal-btn";
+      sessionBtn.textContent = copy.session;
+      buttons.append(saveBtn, sessionBtn);
+      modal.append(title, text, buttons);
+      backdrop.append(modal);
+      document.body.appendChild(backdrop);
+      let done = false;
+      const finish = (choice) => {
+        if (done) return;
+        done = true;
+        document.removeEventListener("keydown", onKey);
+        backdrop.remove();
+        resolve(choice);
+      };
+      const onKey = (e) => {
+        if (e.key === "Escape") finish("session");
+      };
+      saveBtn.addEventListener("click", () => finish("save"));
+      sessionBtn.addEventListener("click", () => finish("session"));
+      backdrop.addEventListener("click", (e) => {
+        if (e.target === backdrop) finish("session");
+      });
+      document.addEventListener("keydown", onKey);
+      saveBtn.focus();
+    });
+  }
+  function showStorageWarning(message) {
+    ensureModalStyles();
+    const toast = document.createElement("div");
+    toast.className = "ec-toast";
+    const span = document.createElement("span");
+    span.textContent = message;
+    const close = document.createElement("button");
+    close.className = "ec-toast-close";
+    close.setAttribute("aria-label", "Dismiss");
+    close.textContent = "\xD7";
+    close.addEventListener("click", () => toast.remove());
+    toast.append(span, close);
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 12e3);
+  }
+  function showParadigmNotice() {
+    ensureModalStyles();
+    const toast = document.createElement("div");
+    toast.className = "ec-toast";
+    const span = document.createElement("span");
+    span.textContent = "Your settings now save in this browser instead of the URL. Use the Share button to copy a link to a view; local storage can be cleared along with your browser history.";
+    const close = document.createElement("button");
+    close.className = "ec-toast-close";
+    close.setAttribute("aria-label", "Dismiss");
+    close.textContent = "\xD7";
+    close.addEventListener("click", () => toast.remove());
+    toast.append(span, close);
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 16e3);
+  }
+  function showUrlModeBadge() {
+    ensureModalStyles();
+    if (document.getElementById("ec-url-badge")) return;
+    const badge = document.createElement("div");
+    badge.id = "ec-url-badge";
+    badge.className = "ec-url-badge";
+    badge.textContent = "(URL)";
+    badge.title = "Local storage is unavailable here, so settings are kept in the URL.";
+    document.body.appendChild(badge);
+  }
+
+  // src/shared/app-state.ts
+  var LOCALSTORAGE_ENABLED = true;
+  var SCHEMA_VERSION = 1;
+  var STORAGE_KEY_PREFIX = "ec:";
+  var SHARED_FIELDS = /* @__PURE__ */ new Set([
+    "lat",
+    "lon",
+    "city",
+    "tz",
+    "bloc",
+    "t",
+    "off",
+    "dir"
+  ]);
+  var URL_ONLY_FIELDS = /* @__PURE__ */ new Set([
+    "embed",
+    "fps",
+    "tc"
+  ]);
+  function namespaceOf(field, app) {
+    if (URL_ONLY_FIELDS.has(field)) return null;
+    if (SHARED_FIELDS.has(field)) return "shared";
+    switch (field) {
+      case "picks":
+      case "kyhand":
+      case "kmode":
+      case "body":
+      case "vnoon":
+        return "chronometer";
+      case "op":
+      case "onoon":
+        return "observatory";
+      case "tp":
+        return app === "index" || app === "pick" ? null : app;
+      default:
+        return null;
+    }
+  }
+  function defaultState() {
+    return {
+      lat: null,
+      lon: null,
+      city: null,
+      bloc: false,
+      tc: false,
+      t: null,
+      off: null,
+      dir: 1,
+      tz: null,
+      picks: null,
+      tp: "d",
+      embed: false,
+      fps: false,
+      kyhand: null,
+      kmode: null,
+      op: null,
+      onoon: false,
+      body: null,
+      vnoon: false
+    };
+  }
+  function isDefaultValue(field, value) {
+    if (value === null || value === void 0) return true;
+    switch (field) {
+      case "dir":
+        return value === 1;
+      case "tp":
+        return value === "d";
+      case "bloc":
+      case "tc":
+      case "embed":
+      case "fps":
+      case "onoon":
+      case "vnoon":
+        return value === false;
+      case "op":
+        return value === 0;
+      default:
+        return false;
+    }
+  }
+  var UrlBackend = class {
+    read() {
+      return readUrlState();
+    }
+    write(changes) {
+      writeUrlState(changes);
+    }
+  };
+  var LocalStorageBackend = class {
+    constructor(app) {
+      this.app = app;
+    }
+    read() {
+      const state = defaultState();
+      Object.assign(state, readNamespace("shared"));
+      const appNs = appNamespace(this.app);
+      if (appNs) Object.assign(state, readNamespace(appNs));
+      const url = readUrlState();
+      for (const field of URL_ONLY_FIELDS) {
+        state[field] = url[field];
+      }
+      return state;
+    }
+    write(changes) {
+      const buckets = /* @__PURE__ */ new Map();
+      for (const key of Object.keys(changes)) {
+        const ns = namespaceOf(key, this.app);
+        if (!ns) continue;
+        let bucket = buckets.get(ns);
+        if (!bucket) {
+          bucket = {};
+          buckets.set(ns, bucket);
+        }
+        bucket[key] = changes[key];
+      }
+      for (const [ns, bucket] of buckets) {
+        mergeNamespace(ns, bucket);
+      }
+    }
+  };
+  function appNamespace(app) {
+    switch (app) {
+      case "chronometer":
+        return "chronometer";
+      case "observatory":
+        return "observatory";
+      case "inspector":
+        return "inspector";
+      // The home and pick pages both surface the chronometer face set (the
+      // pick-card / selected-faces routing reads `picks`), so they read the
+      // chronometer namespace too.
+      case "pick":
+        return "chronometer";
+      case "index":
+        return "chronometer";
+    }
+  }
+  function readNamespace(ns) {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_PREFIX + ns);
+      if (!raw) return {};
+      const obj = JSON.parse(raw);
+      delete obj.v;
+      return obj;
+    } catch {
+      return {};
+    }
+  }
+  function mergeNamespace(ns, changes) {
+    const key = STORAGE_KEY_PREFIX + ns;
+    let current;
+    try {
+      current = JSON.parse(localStorage.getItem(key) || "{}");
+    } catch {
+      current = {};
+    }
+    for (const field of Object.keys(changes)) {
+      const value = changes[field];
+      if (isDefaultValue(field, value)) {
+        delete current[field];
+      } else {
+        current[field] = value;
+      }
+    }
+    delete current.v;
+    if (Object.keys(current).length === 0) {
+      localStorage.removeItem(key);
+    } else {
+      current.v = SCHEMA_VERSION;
+      localStorage.setItem(key, JSON.stringify(current));
+    }
+  }
+  var InMemoryBackend = class {
+    constructor(seed) {
+      this.state = { ...defaultState(), ...seed || {} };
+    }
+    read() {
+      const url = readUrlState();
+      const state = { ...this.state };
+      for (const field of URL_ONLY_FIELDS) {
+        state[field] = url[field];
+      }
+      return state;
+    }
+    write(changes) {
+      for (const key of Object.keys(changes)) {
+        if (URL_ONLY_FIELDS.has(key)) continue;
+        this.state[key] = changes[key];
+      }
+    }
+  };
+  function storageWorks() {
+    try {
+      const k = STORAGE_KEY_PREFIX + "__probe__";
+      localStorage.setItem(k, "1");
+      const ok = localStorage.getItem(k) === "1";
+      localStorage.removeItem(k);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+  var TIME_FIELDS = /* @__PURE__ */ new Set(["t", "off", "dir"]);
+  var SHAREABLE_FIELDS = [
+    "lat",
+    "lon",
+    "city",
+    "tz",
+    "bloc",
+    "t",
+    "off",
+    "dir",
+    "picks",
+    "kyhand",
+    "kmode",
+    "op",
+    "onoon",
+    "body",
+    "vnoon",
+    "tp"
+  ];
+  var SHAREABLE_URL_KEYS = [
+    "lat",
+    "lon",
+    "long",
+    "city",
+    "loc",
+    "tz",
+    "bloc",
+    "t",
+    "off",
+    "dir",
+    "picks",
+    "kyhand",
+    "kmode",
+    "op",
+    "onoon",
+    "body",
+    "vnoon",
+    "tp"
+  ];
+  var CLEARED_URL_KEYS = [...SHAREABLE_URL_KEYS, "tc"];
+  var SLOT_STORAGE_KEY = STORAGE_KEY_PREFIX + "slots";
+  var SLOT_KEY_RE = /^[rd]\d+(tz|lat|lon)?$/;
+  function urlSlotMap() {
+    const out = {};
+    for (const [k, v] of new URLSearchParams(window.location.search)) {
+      if (SLOT_KEY_RE.test(k)) out[k] = v;
+    }
+    return out;
+  }
+  function storedSlotMap() {
+    try {
+      const obj = JSON.parse(localStorage.getItem(SLOT_STORAGE_KEY) || "{}");
+      delete obj.v;
+      return obj;
+    } catch {
+      return {};
+    }
+  }
+  function urlHasSlotParams() {
+    for (const k of new URLSearchParams(window.location.search).keys()) {
+      if (SLOT_KEY_RE.test(k)) return true;
+    }
+    return false;
+  }
+  function hasShareableParamsInUrl() {
+    const params = new URLSearchParams(window.location.search);
+    return SHAREABLE_URL_KEYS.some((k) => params.has(k)) || urlHasSlotParams();
+  }
+  function shareableUrlEqualsStored(ls) {
+    const url = readUrlState();
+    const stored = ls.read();
+    if (!SHAREABLE_FIELDS.every((f) => url[f] === stored[f])) return false;
+    const u = urlSlotMap();
+    const s = storedSlotMap();
+    const keys = /* @__PURE__ */ new Set([...Object.keys(u), ...Object.keys(s)]);
+    for (const k of keys) if (u[k] !== s[k]) return false;
+    return true;
+  }
+  function urlScalarOverrides() {
+    const params = new URLSearchParams(window.location.search);
+    const url = readUrlState();
+    const out = {};
+    const has = (...keys) => keys.some((k) => params.has(k));
+    if (has("lat")) out.lat = url.lat;
+    if (has("lon", "long")) out.lon = url.lon;
+    if (has("city")) out.city = url.city;
+    if (has("tz")) out.tz = url.tz;
+    if (has("bloc")) out.bloc = url.bloc;
+    if (has("t")) out.t = url.t;
+    if (has("off")) out.off = url.off;
+    if (has("dir")) out.dir = url.dir;
+    if (has("picks")) out.picks = url.picks;
+    if (has("kyhand")) out.kyhand = url.kyhand;
+    if (has("kmode")) out.kmode = url.kmode;
+    if (has("op")) out.op = url.op;
+    if (has("onoon")) out.onoon = url.onoon;
+    if (has("body")) out.body = url.body;
+    if (has("vnoon")) out.vnoon = url.vnoon;
+    if (has("tp")) out.tp = url.tp;
+    return out;
+  }
+  function clearShareableParamsFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    for (const k of CLEARED_URL_KEYS) params.delete(k);
+    for (const k of [...params.keys()]) if (SLOT_KEY_RE.test(k)) params.delete(k);
+    const qs = params.toString();
+    history.replaceState(null, "", window.location.pathname + (qs ? "?" + qs : ""));
+  }
+  var activeBackend = null;
+  var appName = "index";
+  var sessionRePromptArmed = false;
+  var warnedNoPersistence = false;
+  var inMemorySlots = {};
+  function initAppState(options) {
+    appName = options.app;
+    setPicksProvider(() => getState().picks);
+    if (!LOCALSTORAGE_ENABLED) {
+      activeBackend = new UrlBackend();
+      return;
+    }
+    if (readUrlState().embed) {
+      activeBackend = new UrlBackend();
+      return;
+    }
+    if (!storageWorks()) {
+      if (window.location.protocol === "file:") {
+        activeBackend = new UrlBackend();
+        showUrlModeBadge();
+      } else {
+        activeBackend = new InMemoryBackend(readUrlState());
+        warnNoPersistence();
+      }
+      return;
+    }
+    const ls = new LocalStorageBackend(appName);
+    if (!hasShareableParamsInUrl()) {
+      activeBackend = ls;
+      maybeShowParadigmNotice();
+      return;
+    }
+    if (shareableUrlEqualsStored(ls)) {
+      clearShareableParamsFromUrl();
+      activeBackend = ls;
+      maybeShowParadigmNotice();
+      return;
+    }
+    activeBackend = new UrlBackend();
+    void promptIncomingSettings(ls);
+  }
+  async function promptIncomingSettings(ls) {
+    const choice = await showIncomingSettingsDialog({ mode: "incoming" });
+    if (choice === "save") {
+      adoptCurrentStateAsDefault(ls);
+    } else {
+      sessionRePromptArmed = true;
+    }
+  }
+  function adoptCurrentStateAsDefault(ls) {
+    const overrides = urlScalarOverrides();
+    const slots = urlSlotMap();
+    activeBackend = ls;
+    ls.write(overrides);
+    if (Object.keys(slots).length > 0) setSlotOverrides(slots);
+    clearShareableParamsFromUrl();
+    sessionRePromptArmed = false;
+  }
+  function warnNoPersistence() {
+    if (warnedNoPersistence) return;
+    warnedNoPersistence = true;
+    showStorageWarning("Your settings can't be saved in this browser and won't persist after you reload.");
+  }
+  function maybeShowParadigmNotice() {
+    let meta = {};
+    try {
+      meta = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + "meta") || "{}");
+    } catch {
+    }
+    if (meta.noticeSeen) return;
+    try {
+      localStorage.setItem(STORAGE_KEY_PREFIX + "meta", JSON.stringify({ ...meta, noticeSeen: true, v: SCHEMA_VERSION }));
+    } catch {
+    }
+    showParadigmNotice();
+  }
+  function downgradeToInMemory() {
+    if (activeBackend instanceof InMemoryBackend) return;
+    const seed = activeBackend ? activeBackend.read() : void 0;
+    inMemorySlots = getSlotOverrides();
+    activeBackend = new InMemoryBackend(seed);
+    warnNoPersistence();
+  }
+  function backend() {
+    if (!activeBackend) activeBackend = new UrlBackend();
+    return activeBackend;
+  }
+  function hasNonTimePersistableChange(changes) {
+    return Object.keys(changes).some(
+      (k) => !TIME_FIELDS.has(k) && namespaceOf(k, appName) !== null
+    );
+  }
+  function getState() {
+    return backend().read();
+  }
+  function setState(changes) {
+    try {
+      backend().write(changes);
+    } catch {
+      downgradeToInMemory();
+      backend().write(changes);
+    }
+    if (sessionRePromptArmed && hasNonTimePersistableChange(changes)) {
+      sessionRePromptArmed = false;
+      void promptSessionReprompt();
+    }
+  }
+  function isPersistentMode() {
+    return backend() instanceof LocalStorageBackend;
+  }
+  function getSlotOverrides() {
+    const b = backend();
+    if (b instanceof LocalStorageBackend) return storedSlotMap();
+    if (b instanceof InMemoryBackend) return { ...inMemorySlots };
+    return urlSlotMap();
+  }
+  function setSlotOverrides(changes) {
+    const b = backend();
+    if (b instanceof InMemoryBackend) {
+      for (const [k, v] of Object.entries(changes)) {
+        if (v == null) delete inMemorySlots[k];
+        else inMemorySlots[k] = v;
+      }
+      return;
+    }
+    if (b instanceof LocalStorageBackend) {
+      const cur = storedSlotMap();
+      for (const [k, v] of Object.entries(changes)) {
+        if (v == null) delete cur[k];
+        else cur[k] = v;
+      }
+      delete cur.v;
+      try {
+        if (Object.keys(cur).length === 0) {
+          localStorage.removeItem(SLOT_STORAGE_KEY);
+        } else {
+          cur.v = SCHEMA_VERSION;
+          localStorage.setItem(SLOT_STORAGE_KEY, JSON.stringify(cur));
+        }
+      } catch {
+        downgradeToInMemory();
+        setSlotOverrides(changes);
+      }
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    for (const [k, v] of Object.entries(changes)) {
+      if (v == null) params.delete(k);
+      else params.set(k, v);
+    }
+    const qs = params.toString();
+    history.replaceState(null, "", window.location.pathname + (qs ? "?" + qs : ""));
+  }
+  async function promptSessionReprompt() {
+    const choice = await showIncomingSettingsDialog({ mode: "reprompt" });
+    if (choice === "save") {
+      adoptCurrentStateAsDefault(new LocalStorageBackend(appName));
+    }
+  }
+  function onSharedChange(callback) {
+    const handler = (e) => {
+      if (!(activeBackend instanceof LocalStorageBackend)) return;
+      if (e.key !== null && !e.key.startsWith(STORAGE_KEY_PREFIX)) return;
+      callback(getState());
+    };
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
+  }
+
+  // src/astronomy/es-calendar.ts
+  var kECJulianDayOf1990Epoch = 24478915e-1;
+  var kEC1990Epoch2 = -347241600;
+  var kECAverageDaysInGregorianYear = 365.2425;
+  var kECDaysInGregorianCycle = kECAverageDaysInGregorianYear * 400;
+  var kECDaysInJulianCycle = 365.25 * 4;
+  var kECDaysInNonLeapCentury = 36525;
+  var kECJulianGregorianSwitchoverTimeInterval = -131976e5;
+  function utcComponentsFromTimeInterval(timeInterval) {
+    let xRemainder;
+    let signedYear;
+    let x0;
+    if (timeInterval < kECJulianGregorianSwitchoverTimeInterval) {
+      const x1F = 730793 + timeInterval / (24 * 3600);
+      const x1 = Math.floor(x1F);
+      xRemainder = x1F - x1;
+      signedYear = Math.floor((4 * x1 + 3) / kECDaysInJulianCycle);
+      x0 = x1 - Math.floor(kECDaysInJulianCycle * signedYear / 4);
+    } else {
+      const x2F = 730791 + timeInterval / (24 * 3600);
+      const x2 = Math.floor(x2F);
+      xRemainder = x2F - x2;
+      const century = Math.floor((4 * x2 + 3) / kECDaysInGregorianCycle);
+      const x1 = x2 - Math.floor(kECDaysInGregorianCycle * century / 4);
+      const yearWithinCentury = Math.floor((100 * x1 + 99) / kECDaysInNonLeapCentury);
+      signedYear = 100 * century + yearWithinCentury;
+      x0 = x1 - Math.floor(kECDaysInNonLeapCentury * yearWithinCentury / 100);
+    }
+    let monthI = Math.floor((5 * x0 + 461) / 153);
+    let month;
+    if (monthI > 12) {
+      month = monthI - 12;
+      signedYear++;
+    } else {
+      month = monthI;
+    }
+    let era;
+    let year;
+    if (signedYear <= 0) {
+      era = 0;
+      year = 1 - signedYear;
+    } else {
+      era = 1;
+      year = signedYear;
+    }
+    const dayF = x0 - Math.floor((153 * monthI - 457) / 5) + 1;
+    const day = Math.round(dayF);
+    const hoursF = xRemainder * 24;
+    const hoursI = Math.floor(hoursF);
+    const minutesF = (hoursF - hoursI) * 60;
+    const minutesI = Math.floor(minutesF);
+    const seconds = (minutesF - minutesI) * 60;
+    return { era, year, month, day, hour: hoursI, minute: minutesI, seconds };
+  }
+  function timeIntervalFromUTCComponents(era, year, month, day, hour, minute, seconds) {
+    let signedYear = era === 0 ? 1 - year : year;
+    let monthI;
+    if (month < 3) {
+      monthI = month + 12;
+      signedYear--;
+    } else {
+      monthI = month;
+    }
+    let J;
+    if (era === 0 || year < 1582 || year === 1582 && (month < 10 || month === 10 && day < 15)) {
+      J = 17211165e-1 + Math.floor(1461 * signedYear / 4);
+    } else {
+      const c = Math.floor(signedYear / 100);
+      const x = signedYear - 100 * c;
+      J = 17211185e-1 + Math.floor(146097 * c / 4) + Math.floor(36525 * x / 100);
+    }
+    J += Math.floor((153 * monthI - 457) / 5) + day;
+    return (J - kECJulianDayOf1990Epoch) * 24 * 3600 + kEC1990Epoch2 + hour * 3600 + minute * 60 + seconds;
+  }
+  function daysInMonth(eraNumber, yearNumber, monthNumber) {
+    switch (monthNumber) {
+      case 1:
+        return 31;
+      // Jan
+      case 2: {
+        const firstOfFeb = timeIntervalFromUTCComponents(eraNumber, yearNumber, 2, 1, 0, 0, 0);
+        const firstOfMar = timeIntervalFromUTCComponents(eraNumber, yearNumber, 3, 1, 0, 0, 0);
+        return Math.round((firstOfMar - firstOfFeb) / (24 * 3600));
+      }
+      case 3:
+        return 31;
+      case 4:
+        return 30;
+      case 5:
+        return 31;
+      case 6:
+        return 30;
+      case 7:
+        return 31;
+      case 8:
+        return 31;
+      case 9:
+        return 30;
+      case 10:
+        return 31;
+      case 11:
+        return 30;
+      case 12:
+        return 31;
+      default:
+        return 0;
+    }
+  }
+  function localComponentsFromTimeInterval(timeInterval, tzOffsetSeconds) {
+    return utcComponentsFromTimeInterval(timeInterval + tzOffsetSeconds);
+  }
+  function timeIntervalFromLocalComponents(tzOffsetSeconds, era, year, month, day, hour, minute, seconds) {
+    const localT = timeIntervalFromUTCComponents(era, year, month, day, hour, minute, seconds);
+    return localT - tzOffsetSeconds;
+  }
+  function weekdayFromTimeInterval(dateInterval, tzOffsetSeconds) {
+    const localNow = dateInterval + tzOffsetSeconds;
+    const localNowDays = localNow / (24 * 3600);
+    const weekday = ((localNowDays + 1) % 7 + 7) % 7;
+    return Math.floor(weekday);
+  }
+  function addMonthsToTimeInterval(now, tzOffsetSeconds, months) {
+    const cs = localComponentsFromTimeInterval(now, tzOffsetSeconds);
+    const signedYearNow = cs.era === 0 ? 1 - cs.year : cs.year;
+    const zeroMonthNow = cs.month - 1;
+    const yearMonthThen = signedYearNow + (zeroMonthNow + months) / 12;
+    const signedYearThen = Math.floor(yearMonthThen);
+    const zeroMonthThen = Math.round((yearMonthThen - signedYearThen) * 12);
+    const monthThen = zeroMonthThen + 1;
+    let eraThen;
+    let yearThen;
+    if (signedYearThen <= 0) {
+      eraThen = 0;
+      yearThen = 1 - signedYearThen;
+    } else {
+      eraThen = 1;
+      yearThen = signedYearThen;
+    }
+    const daysInMonthThen = daysInMonth(eraThen, yearThen, monthThen);
+    const dayThen = Math.min(cs.day, daysInMonthThen);
+    return timeIntervalFromLocalComponents(
+      tzOffsetSeconds,
+      eraThen,
+      yearThen,
+      monthThen,
+      dayThen,
+      cs.hour,
+      cs.minute,
+      cs.seconds
+    );
+  }
+  function addYearsToTimeInterval(now, tzOffsetSeconds, years) {
+    const cs = localComponentsFromTimeInterval(now, tzOffsetSeconds);
+    const signedYearNow = cs.era === 0 ? 1 - cs.year : cs.year;
+    const signedYearThen = signedYearNow + years;
+    let eraThen;
+    let yearThen;
+    if (signedYearThen <= 0) {
+      eraThen = 0;
+      yearThen = 1 - signedYearThen;
+    } else {
+      eraThen = 1;
+      yearThen = signedYearThen;
+    }
+    const daysInTargetMonth = daysInMonth(eraThen, yearThen, cs.month);
+    const dayThen = Math.min(cs.day, daysInTargetMonth);
+    return timeIntervalFromLocalComponents(
+      tzOffsetSeconds,
+      eraThen,
+      yearThen,
+      cs.month,
+      dayThen,
+      cs.hour,
+      cs.minute,
+      cs.seconds
+    );
+  }
+
   // src/watch/terminator.ts
   function isLeft(q) {
     return q === 0 /* UpperLeft */ || q === 1 /* LowerLeft */;
@@ -11752,7 +12979,7 @@
       return 0 + indexWithinQuadrant / leavesPerQuadrant * (Math.PI / 2);
     }
   }
-  function fmod2(a, b) {
+  function fmod3(a, b) {
     return (a % b + b) % b;
   }
   function terminatorAngle(phase, quad, indexWithinQuad, leavesPerQuad, incr) {
@@ -11760,7 +12987,7 @@
     const indexWithinQuadrant = indexWithinQuad;
     const leavesPerQuadrant = leavesPerQuad;
     const incremental = incr;
-    phase = fmod2(phase, Math.PI * 2);
+    phase = fmod3(phase, Math.PI * 2);
     const halfLeafSpan = 0.5 / leavesPerQuadrant * (Math.PI / 2);
     if (phase > Math.PI) {
       phase -= halfLeafSpan;
@@ -11825,7 +13052,7 @@
     const centerX = part.x ? evaluate(part.x, env) : 0;
     const centerY = part.y ? evaluate(part.y, env) : 0;
     const offsetRadius = radius + anchorEdgeRadius;
-    const updateIntervalSec = part.update ? evaluate(part.update, env) : 60;
+    const updateIntervalSec2 = part.update ? evaluate(part.update, env) : 60;
     const leaves = [];
     for (let i = 0; i < leavesPerQuadrant; i++) {
       for (let q = 0; q < 4; q++) {
@@ -11841,7 +13068,6 @@
           incremental ? 1 : 0
         );
         if (!isUpper(quadrant)) initialAngle += Math.PI;
-        const now = performance.now();
         leaves.push({
           quadrant,
           indexWithinQuadrant: i,
@@ -11859,9 +13085,7 @@
           currentRotation: initialRotation,
           phaseExpr: part.phaseAngle,
           rotationExpr: part.rotation,
-          updateIntervalSec,
-          angleAnim: makeAnimatingValue(initialAngle, now),
-          rotationAnim: makeAnimatingValue(initialRotation, now),
+          updateIntervalSec: updateIntervalSec2,
           nextUpdateTime: 0
           // Force immediate evaluation on first frame
         });
@@ -11887,90 +13111,6 @@
       leaf.currentAngle = angle;
       leaf.currentRotation = rotation;
     }
-  }
-  var kECGLAngleAnimationSpeed = 2;
-  function tickLeafAnimations(leaves, env, now, tickIntervalMs = null, displayDeltaPerTickSec = 0) {
-    if (leaves.length === 0) return;
-    let phase = null;
-    let rotation = null;
-    for (const leaf of leaves) {
-      if (now >= leaf.nextUpdateTime) {
-        if (phase === null) {
-          phase = leaf.phaseExpr ? evaluate(leaf.phaseExpr, env) : 0;
-          rotation = leaf.rotationExpr ? evaluate(leaf.rotationExpr, env) : 0;
-        }
-        let newAngle = terminatorAngle(
-          phase,
-          leaf.quadrant,
-          leaf.indexWithinQuadrant,
-          leaf.leavesPerQuadrant,
-          leaf.incremental ? 1 : 0
-        );
-        if (!isUpper(leaf.quadrant)) newAngle += Math.PI;
-        const newRotation = rotation;
-        if (tickIntervalMs !== null && tickIntervalMs > 0) {
-          let ticksUntilUpdate = 1;
-          if (displayDeltaPerTickSec > 0 && leaf.updateIntervalSec > 0) {
-            ticksUntilUpdate = Math.max(1, Math.ceil(leaf.updateIntervalSec / displayDeltaPerTickSec));
-          }
-          const timeUntilNextUpdateMs = ticksUntilUpdate * tickIntervalMs;
-          const angleDelta = shortestPathDelta(leaf.angleAnim.currentValue, newAngle);
-          const angleNormalDur = angleDelta / kECGLAngleAnimationSpeed * 1e3;
-          if (angleNormalDur > timeUntilNextUpdateMs) {
-            startAnimationRaw(leaf.angleAnim, newAngle, now, 1, timeUntilNextUpdateMs);
-          } else {
-            startAnimationRaw(leaf.angleAnim, newAngle, now);
-          }
-          const rotDelta = shortestPathDelta(leaf.rotationAnim.currentValue, newRotation);
-          const rotNormalDur = rotDelta / kECGLAngleAnimationSpeed * 1e3;
-          if (rotNormalDur > timeUntilNextUpdateMs) {
-            startAnimationRaw(leaf.rotationAnim, newRotation, now, 1, timeUntilNextUpdateMs);
-          } else {
-            startAnimationRaw(leaf.rotationAnim, newRotation, now);
-          }
-          leaf.nextUpdateTime = now + timeUntilNextUpdateMs;
-        } else {
-          startAnimationRaw(leaf.angleAnim, newAngle, now);
-          startAnimationRaw(leaf.rotationAnim, newRotation, now);
-          leaf.nextUpdateTime = now + leaf.updateIntervalSec * 1e3;
-        }
-      }
-      leaf.currentAngle = interpolateRaw(leaf.angleAnim, now);
-      leaf.currentRotation = interpolateRaw(leaf.rotationAnim, now);
-    }
-  }
-  function shortestPathDelta(current, target) {
-    const a = fmod2(current, 2 * Math.PI);
-    const b = fmod2(target, 2 * Math.PI);
-    let d = Math.abs(b - a);
-    if (d > Math.PI) d = 2 * Math.PI - d;
-    return d;
-  }
-  function finishLeafAnimations(leaves) {
-    for (const leaf of leaves) {
-      if (leaf.angleAnim.animating) {
-        leaf.angleAnim.currentValue = fmod2(leaf.angleAnim.targetValue, 2 * Math.PI);
-        leaf.angleAnim.animating = false;
-      }
-      if (leaf.rotationAnim.animating) {
-        leaf.rotationAnim.currentValue = fmod2(leaf.rotationAnim.targetValue, 2 * Math.PI);
-        leaf.rotationAnim.animating = false;
-      }
-      leaf.currentAngle = leaf.angleAnim.currentValue;
-      leaf.currentRotation = leaf.rotationAnim.currentValue;
-      leaf.nextUpdateTime = Infinity;
-    }
-  }
-  function resetLeafSchedules(leaves) {
-    for (const leaf of leaves) {
-      leaf.nextUpdateTime = 0;
-    }
-  }
-  function anyLeafAnimating(leaves) {
-    for (const leaf of leaves) {
-      if (leaf.angleAnim.animating || leaf.rotationAnim.animating) return true;
-    }
-    return false;
   }
   function terminatorArcPoint(i, n, xsign, ysign, xcenter, ycenter, radius, phase) {
     const th = Math.PI / 2 * (i / n);
@@ -12014,8 +13154,8 @@
         clockwiseEndArc = true;
         break;
     }
-    const paInner = fmod2(phaseAngleForInnerEdge(false, quadrant, indexWithinQuadrant, leavesPerQuadrant), 2 * Math.PI);
-    const paOuter = fmod2(phaseAngleForOuterEdge(false, quadrant, indexWithinQuadrant, leavesPerQuadrant), 2 * Math.PI);
+    const paInner = fmod3(phaseAngleForInnerEdge(false, quadrant, indexWithinQuadrant, leavesPerQuadrant), 2 * Math.PI);
+    const paOuter = fmod3(phaseAngleForOuterEdge(false, quadrant, indexWithinQuadrant, leavesPerQuadrant), 2 * Math.PI);
     const n = 30;
     const overlap = leaf.incremental ? 1 : 0;
     ctx.beginPath();
@@ -12045,13 +13185,15 @@
   function drawTerminator(ctx, leaves, scale = 1) {
     if (leaves.length === 0) return;
     for (const leaf of leaves) {
+      const rotation = leaf._obsRotation ? leaf._obsRotation.currentValue : leaf.currentRotation;
+      const leafAngle = leaf._obsAngle ? leaf._obsAngle.currentValue : leaf.currentAngle;
       ctx.save();
       ctx.translate(leaf.centerX * scale, -leaf.centerY * scale);
-      const offsetAngle = leaf.baseOffsetAngle + leaf.currentRotation;
+      const offsetAngle = leaf.baseOffsetAngle + rotation;
       const xoff = leaf.offsetRadius * Math.sin(offsetAngle) * scale;
       const yoff = -leaf.offsetRadius * Math.cos(offsetAngle) * scale;
       ctx.translate(xoff, yoff);
-      const angleValue = offsetAngle + leaf.currentAngle;
+      const angleValue = offsetAngle + leafAngle;
       ctx.rotate(angleValue);
       ctx.scale(scale, -scale);
       drawTerminatorLeaf(ctx, leaf);
@@ -13966,1614 +15108,382 @@
     return leafCenterAngle;
   }
 
-  // src/shared/animation.ts
-  var SCHEDULER_LOOKAHEAD_MS = 50;
-  var kECGLAngleAnimationSpeed2 = 2;
-  var kECGLFrameRate = 1 / 240;
-  var kECGLLinearAnimationSpeed = 60;
-  var EC_UPDATE_NEXT_SUNRISE = -1001;
-  var EC_UPDATE_NEXT_SUNSET = -1002;
-  var EC_UPDATE_NEXT_MOONRISE = -1003;
-  var EC_UPDATE_NEXT_MOONSET = -1004;
-  var EC_UPDATE_NEXT_SUNRISE_OR_MIDNIGHT = -1005;
-  var EC_UPDATE_NEXT_SUNSET_OR_MIDNIGHT = -1006;
-  var EC_UPDATE_NEXT_MOONRISE_OR_MIDNIGHT = -1007;
-  var EC_UPDATE_NEXT_MOONSET_OR_MIDNIGHT = -1008;
-  var EC_UPDATE_ENV_CHANGE_ONLY = -1013;
-  var EC_UPDATE_NEXT_SUNRISE_OR_SUNSET = -1016;
-  var EC_UPDATE_NEXT_MOONRISE_OR_MOONSET = -1017;
-  var EC_UPDATE_NEXT_SSLAT_CHANGE = -1018;
-  var EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION = -1019;
-  var PLANET_SENTINEL_BASE = -2e3;
-  function isPlanetRiseSetSentinel(sentinel) {
-    return sentinel <= PLANET_SENTINEL_BASE;
-  }
-  function decodePlanetSentinel(sentinel) {
-    const offset = -sentinel + PLANET_SENTINEL_BASE;
-    return { planet: offset >> 1, isRise: (offset & 1) === 0 };
-  }
-  function makeAnimatingValue(initial, now) {
-    return {
-      currentValue: initial,
-      targetValue: initial,
-      lastAnimationTime: now,
-      animationStopTime: now,
-      animating: false
-    };
-  }
-  function initHandStates(watch, env, now, getNow, rawGetNow) {
-    const states = [];
-    const effectiveGetNow = getNow || (() => /* @__PURE__ */ new Date());
-    const effectiveRawGetNow = rawGetNow || effectiveGetNow;
-    collectDynamicParts(watch.parts, env, now, states, effectiveGetNow, effectiveRawGetNow);
-    return states;
-  }
-  function collectDynamicParts(parts, env, now, out, getNow, rawGetNow) {
-    for (const part of parts) {
-      if (part.type === "QHand" || part.type === "Wheel" || part.type === "QWedge") {
-        out.push(createHandState(part, env, now, getNow, rawGetNow));
-      } else if (part.type === "QDial" && part.animSpeed) {
-        out.push(createHandState(part, env, now, getNow, rawGetNow));
-      } else if (part.type === "QDayNightRing") {
-        out.push(createHandState(part, env, now, getNow, rawGetNow));
-      } else if (part.type === "CalendarRowCover") {
-        out.push(createCalendarCoverState(part, env, now, getNow, rawGetNow));
-      } else if (part.type === "Static") {
-        collectDynamicParts(part.children, env, now, out, getNow, rawGetNow);
-      }
-    }
-  }
-  function createHandState(part, env, now, getNow, rawGetNow) {
-    const updateIntervalSec = part.update ? evalAttr(part.update, env) : 1;
-    const updateIntervalMs = updateIntervalSec * 1e3;
-    const animSpeed = "animSpeed" in part && part.animSpeed ? evalAttr(part.animSpeed, env) : 1;
-    const initialAngle = part.type === "QDayNightRing" ? part.masterOffset ? evalAttr(part.masterOffset, env) : 0 : part.angle ? evalAttr(part.angle, env) : 0;
-    const hasOffsetAngle = (part.type === "QHand" || part.type === "QWedge") && part.offsetAngle;
-    const initialOffsetAngle = hasOffsetAngle ? evalAttr(part.offsetAngle, env) : 0;
-    part.dynamicState = {
-      currentAngle: initialAngle,
-      ...hasOffsetAngle ? { currentOffsetAngle: initialOffsetAngle } : {}
-    };
-    const hasXMotion = part.type === "QHand" && part.xMotion;
-    const hasYMotion = part.type === "QHand" && part.yMotion;
-    const initialXMotion = hasXMotion ? evalAttr(part.xMotion, env) : 0;
-    const initialYMotion = hasYMotion ? evalAttr(part.yMotion, env) : 0;
-    if (hasXMotion || hasYMotion) {
-      part.dynamicState.currentXMotion = initialXMotion;
-      part.dynamicState.currentYMotion = initialYMotion;
-    }
-    const nextDisplayMs = computeNextBoundary(updateIntervalMs, rawGetNow, 1, env);
-    let angleAnim;
-    if (part.type === "QDayNightRing") {
-      if (!part._masterOffsetAnim) {
-        part._masterOffsetAnim = makeAnimatingValue(initialAngle, now);
-      } else {
-        if (!part._masterOffsetAnim.animating) {
-          part._masterOffsetAnim.currentValue = initialAngle;
-          part._masterOffsetAnim.targetValue = initialAngle;
-        }
-      }
-      angleAnim = part._masterOffsetAnim;
-    } else {
-      angleAnim = {
-        currentValue: initialAngle,
-        targetValue: initialAngle,
-        lastAnimationTime: now,
-        animationStopTime: now,
-        animating: false
-      };
-    }
-    return {
-      part,
-      angle: angleAnim,
-      offsetAngle: hasOffsetAngle ? {
-        currentValue: initialOffsetAngle,
-        targetValue: initialOffsetAngle,
-        lastAnimationTime: now,
-        animationStopTime: now,
-        animating: false
-      } : null,
-      xMotion: hasXMotion ? makeAnimatingValue(initialXMotion, now) : null,
-      yMotion: hasYMotion ? makeAnimatingValue(initialYMotion, now) : null,
-      updateIntervalMs,
-      nextUpdateDisplayTime: nextDisplayMs,
-      nextUpdateTime: displayTimeToPerfNow(nextDisplayMs, rawGetNow),
-      animSpeed,
-      getNow,
-      rawGetNow
-    };
-  }
-  function computeCalendarCoverOffset(part, env) {
-    const calendarWeekdayStart = env.functions.get("calendarWeekdayStart")?.() ?? 0;
-    const cellWidth = env.variables.get("calendarCellWidth") ?? 13.3;
-    const monthNum = (env.functions.get("monthNumber")?.() ?? 0) + 1;
-    const yearNum = env.functions.get("yearNumber")?.() ?? 2024;
-    const era = env.functions.get("eraNumber")?.() ?? 1;
-    const absYear = yearNum;
-    const firstOfMonthDI = timeIntervalFromUTCComponents(era, absYear, monthNum, 1, 12, 0, 0);
-    const thisMonthStartCol = (7 + weekdayFromTimeInterval(firstOfMonthDI, 0) - calendarWeekdayStart) % 7;
-    const dim = daysInMonth(era, absYear, monthNum);
-    let prevEra = era;
-    let prevYear = absYear;
-    let prevMonth = monthNum - 1;
-    if (prevMonth < 1) {
-      prevMonth = 12;
-      if (era === 1 && absYear === 1) {
-        prevEra = 0;
-        prevYear = 1;
-      } else if (era === 0) {
-        prevYear = absYear + 1;
-      } else {
-        prevYear = absYear - 1;
-      }
-    }
-    const daysInPrevMonth = daysInMonth(prevEra, prevYear, prevMonth);
-    let nextEra = era;
-    let nextYear = absYear;
-    let nextMonth = monthNum + 1;
-    if (nextMonth > 12) {
-      nextMonth = 1;
-      if (era === 0 && absYear === 1) {
-        nextEra = 1;
-        nextYear = 1;
-      } else if (era === 0) {
-        nextYear = absYear - 1;
-      } else {
-        nextYear = absYear + 1;
-      }
-    }
-    const nextMonthFirstDI = timeIntervalFromUTCComponents(nextEra, nextYear, nextMonth, 1, 12, 0, 0);
-    const nextMonthStartCol = (7 + weekdayFromTimeInterval(nextMonthFirstDI, 0) - calendarWeekdayStart) % 7;
-    const nextMonthStartRow = Math.floor((dim + thisMonthStartCol) / 7);
-    const coverType = part.coverType || "";
-    let columnMotion = 7;
-    if (coverType === "row1Left") {
-      columnMotion = thisMonthStartCol + 22 - daysInPrevMonth;
-      if (columnMotion < -4) columnMotion = -4;
-    } else if (coverType === "row1Right") {
-      columnMotion = thisMonthStartCol + 26 - daysInPrevMonth;
-      if (columnMotion < -5) columnMotion = -5;
-    } else if (coverType === "row56Right") {
-      columnMotion = nextMonthStartRow === 4 ? nextMonthStartCol : 7;
-    } else if (coverType === "row6Left") {
-      if (nextMonthStartRow === 5) {
-        columnMotion = nextMonthStartCol;
-      } else if (nextMonthStartRow === 4) {
-        columnMotion = nextMonthStartCol - 7;
-      } else {
-        columnMotion = 7;
-      }
-    }
-    return Math.round(columnMotion * cellWidth);
-  }
-  function createCalendarCoverState(part, env, now, getNow, rawGetNow) {
-    const updateIntervalSec = part.update ? evalAttr(part.update, env) : 3600;
-    const updateIntervalMs = updateIntervalSec * 1e3;
-    const animSpeed = part.animSpeed ? evalAttr(part.animSpeed, env) : 1;
-    const initialXOffset = computeCalendarCoverOffset(part, env);
-    part.dynamicState = {
-      currentAngle: 0,
-      currentXMotion: initialXOffset
-    };
-    const nextDisplayMs = computeNextBoundary(updateIntervalMs, rawGetNow, 1, env);
-    return {
-      part,
-      angle: makeAnimatingValue(0, now),
-      offsetAngle: null,
-      xMotion: makeAnimatingValue(initialXOffset, now),
-      yMotion: null,
-      updateIntervalMs,
-      nextUpdateDisplayTime: nextDisplayMs,
-      nextUpdateTime: displayTimeToPerfNow(nextDisplayMs, rawGetNow),
-      animSpeed,
-      getNow,
-      rawGetNow
-    };
-  }
-  function tickAnimations(states, env, now, tickIntervalMs = null, displayDeltaPerTickSec = 0, timeDirection = 1) {
-    for (const state of states) {
-      if (now >= state.nextUpdateTime) {
-        const newTarget = state.part.type === "QDayNightRing" ? state.part.masterOffset ? evalAttr(state.part.masterOffset, env) : 0 : "angle" in state.part && state.part.angle ? evalAttr(state.part.angle, env) : 0;
-        const newOffsetTarget = state.offsetAngle && (state.part.type === "QHand" || state.part.type === "QWedge") && state.part.offsetAngle ? evalAttr(state.part.offsetAngle, env) : null;
-        const nextDisplayMs = computeNextBoundary(state.updateIntervalMs, state.rawGetNow, timeDirection, env);
-        if (tickIntervalMs !== null && tickIntervalMs > 0) {
-          const displayNowMs = state.getNow().getTime();
-          const displayDeltaMs = Math.abs(nextDisplayMs - displayNowMs);
-          const displayDeltaPerTickMs = displayDeltaPerTickSec * 1e3;
-          const ticksUntilUpdate = displayDeltaPerTickMs > 0 ? Math.max(1, Math.ceil(displayDeltaMs / displayDeltaPerTickMs)) : 1;
-          const timeUntilNextUpdateMs = ticksUntilUpdate * tickIntervalMs;
-          const animateSpeed = kECGLAngleAnimationSpeed2 * state.animSpeed;
-          const normalizedTarget = fmod3(newTarget, 2 * Math.PI);
-          const normalizedCurrent = fmod3(state.angle.currentValue, 2 * Math.PI);
-          let angleDelta = Math.abs(normalizedTarget - normalizedCurrent);
-          if (angleDelta > Math.PI) angleDelta = 2 * Math.PI - angleDelta;
-          const angleDurationMs = animateSpeed > 0 ? angleDelta / animateSpeed * 1e3 : 0;
-          if (angleDurationMs > timeUntilNextUpdateMs) {
-            startAnimation(state, newTarget, now, timeUntilNextUpdateMs);
-          } else {
-            startAnimation(state, newTarget, now);
-          }
-          if (newOffsetTarget !== null && state.offsetAngle) {
-            const normOffTarget = fmod3(newOffsetTarget, 2 * Math.PI);
-            const normOffCurrent = fmod3(state.offsetAngle.currentValue, 2 * Math.PI);
-            let offDelta = Math.abs(normOffTarget - normOffCurrent);
-            if (offDelta > Math.PI) offDelta = 2 * Math.PI - offDelta;
-            const offsetDurationMs = animateSpeed > 0 ? offDelta / animateSpeed * 1e3 : 0;
-            if (offsetDurationMs > timeUntilNextUpdateMs) {
-              startAnimationRaw(state.offsetAngle, newOffsetTarget, now, state.animSpeed, timeUntilNextUpdateMs);
-            } else {
-              startAnimationRaw(state.offsetAngle, newOffsetTarget, now, state.animSpeed);
-            }
-          }
-          compressLinearMotions(state, env, now, timeUntilNextUpdateMs);
-          state.nextUpdateDisplayTime = nextDisplayMs;
-          state.nextUpdateTime = now + timeUntilNextUpdateMs;
-        } else {
-          startAnimation(state, newTarget, now);
-          if (newOffsetTarget !== null && state.offsetAngle) {
-            startAnimationRaw(state.offsetAngle, newOffsetTarget, now, state.animSpeed);
-          }
-          evaluateLinearMotions(state, env, now);
-          state.nextUpdateDisplayTime = nextDisplayMs;
-          state.nextUpdateTime = displayTimeToPerfNow(nextDisplayMs, state.rawGetNow);
-        }
-      }
-      const rawAngle = interpolateValue(state.angle, now);
-      const angle = state.angle.animating ? rawAngle : fmod3(rawAngle, 2 * Math.PI);
-      if (!state.part.dynamicState) {
-        state.part.dynamicState = { currentAngle: angle };
-      } else {
-        state.part.dynamicState.currentAngle = angle;
-      }
-      if (state.offsetAngle) {
-        const rawOA = interpolateValue(state.offsetAngle, now);
-        const oa = state.offsetAngle.animating ? rawOA : fmod3(rawOA, 2 * Math.PI);
-        if (state.part.dynamicState) {
-          state.part.dynamicState.currentOffsetAngle = oa;
-        }
-      }
-      if (state.xMotion) {
-        const xm = interpolateValue(state.xMotion, now);
-        if (state.part.dynamicState) {
-          state.part.dynamicState.currentXMotion = xm;
-        }
-      }
-      if (state.yMotion) {
-        const ym = interpolateValue(state.yMotion, now);
-        if (state.part.dynamicState) {
-          state.part.dynamicState.currentYMotion = ym;
-        }
-      }
-    }
-  }
-  function nextWakeupTime(states) {
-    let earliest = Infinity;
-    for (const s of states) {
-      if (s.nextUpdateTime < earliest) earliest = s.nextUpdateTime;
-    }
-    return earliest;
-  }
-  function anyAnimating(states) {
-    for (const s of states) {
-      if (s.angle.animating) return true;
-      if (s.offsetAngle && s.offsetAngle.animating) return true;
-      if (s.xMotion && s.xMotion.animating) return true;
-      if (s.yMotion && s.yMotion.animating) return true;
-    }
-    return false;
-  }
-  function finishAnimations(states) {
-    for (const s of states) {
-      const val = s.angle;
-      if (val.animating) {
-        val.currentValue = fmod3(val.targetValue, 2 * Math.PI);
-        val.animating = false;
-        if (s.part.dynamicState) {
-          s.part.dynamicState.currentAngle = val.currentValue;
-        }
-      }
-      if (s.offsetAngle && s.offsetAngle.animating) {
-        s.offsetAngle.currentValue = fmod3(s.offsetAngle.targetValue, 2 * Math.PI);
-        s.offsetAngle.animating = false;
-        if (s.part.dynamicState) {
-          s.part.dynamicState.currentOffsetAngle = s.offsetAngle.currentValue;
-        }
-      }
-      if (s.xMotion && s.xMotion.animating) {
-        s.xMotion.currentValue = s.xMotion.targetValue;
-        s.xMotion.animating = false;
-        if (s.part.dynamicState) {
-          s.part.dynamicState.currentXMotion = s.xMotion.currentValue;
-        }
-      }
-      if (s.yMotion && s.yMotion.animating) {
-        s.yMotion.currentValue = s.yMotion.targetValue;
-        s.yMotion.animating = false;
-        if (s.part.dynamicState) {
-          s.part.dynamicState.currentYMotion = s.yMotion.currentValue;
-        }
-      }
-      s.nextUpdateDisplayTime = Infinity;
-      s.nextUpdateTime = Infinity;
-    }
-  }
-  function resetHandSchedules(states) {
-    for (const s of states) {
-      s.nextUpdateDisplayTime = 0;
-      s.nextUpdateTime = 0;
-    }
-  }
-  function startAnimation(state, newTarget, now, durationOverrideMs) {
-    startAnimationRaw(state.angle, newTarget, now, state.animSpeed, durationOverrideMs);
-  }
-  function startValueAnimation(val, newTarget, now, speed, durationOverrideMs) {
-    if (speed === 0) {
-      val.currentValue = newTarget;
-      val.targetValue = newTarget;
-      val.animating = false;
-      return;
-    }
-    if (val.animating && val.targetValue === newTarget) return;
-    if (val.animating) {
-      interpolateValue(val, now);
-    }
-    if (val.currentValue === newTarget) {
-      val.animating = false;
-      return;
-    }
-    val.targetValue = newTarget;
-    const delta = Math.abs(newTarget - val.currentValue);
-    const durationMs = durationOverrideMs ?? delta / speed * 1e3;
-    if (durationMs < kECGLFrameRate * 1e3) {
-      val.currentValue = newTarget;
-      val.animating = false;
-      return;
-    }
-    val.lastAnimationTime = now;
-    val.animating = true;
-    val.animationStopTime = now + durationMs;
-  }
-  function interpolateValue(val, now) {
-    if (!val.animating) {
-      return val.currentValue;
-    }
-    if (now >= val.animationStopTime) {
-      val.animating = false;
-      val.currentValue = val.targetValue;
-      return val.currentValue;
-    }
-    const fraction = (now - val.lastAnimationTime) / (val.animationStopTime - val.lastAnimationTime);
-    val.currentValue += (val.targetValue - val.currentValue) * fraction;
-    val.lastAnimationTime = now;
-    return val.currentValue;
-  }
-  function startAnimationRaw(val, newTarget, now, animSpeed = 1, durationOverrideMs, linear) {
-    const speed = kECGLAngleAnimationSpeed2 * animSpeed;
-    if (!linear) {
-      newTarget = fmod3(newTarget, 2 * Math.PI);
-    }
-    if (isNaN(newTarget) || isNaN(val.currentValue)) {
-      val.currentValue = newTarget;
-      val.targetValue = newTarget;
-      val.animating = false;
-      return;
-    }
-    if (speed === 0) {
-      val.currentValue = newTarget;
-      val.targetValue = newTarget;
-      val.animating = false;
-      return;
-    }
-    if (val.animating && val.targetValue === newTarget) return;
-    if (val.animating) {
-      interpolateValue(val, now);
-    }
-    if (val.currentValue === newTarget) {
-      val.animating = false;
-      return;
-    }
-    if (!linear) {
-      const TWO_PI6 = 2 * Math.PI;
-      let delta = newTarget - val.currentValue;
-      delta = delta - TWO_PI6 * Math.round(delta / TWO_PI6);
-      val.currentValue = newTarget - delta;
-    }
-    startValueAnimation(val, newTarget, now, speed, durationOverrideMs);
-  }
-  function interpolateRaw(val, now) {
-    const result = interpolateValue(val, now);
-    return val.animating ? result : fmod3(result, 2 * Math.PI);
-  }
-  function computeNextBoundary(updateIntervalMs, getNow, timeDirection, env) {
-    if (updateIntervalMs > 0) {
-      const tzOffsetMs = (env.tzOffsetSec ?? 0) * 1e3;
-      const displayNowMs = getNow().getTime();
-      const localNowMs = displayNowMs + tzOffsetMs;
-      if (timeDirection === -1) {
-        const localBoundary = Math.floor(localNowMs / updateIntervalMs) * updateIntervalMs;
-        const boundary = (localBoundary === localNowMs ? localBoundary - updateIntervalMs : localBoundary) - tzOffsetMs;
-        return boundary;
-      } else {
-        const localBoundary = Math.ceil(localNowMs / updateIntervalMs) * updateIntervalMs;
-        return localBoundary - tzOffsetMs;
-      }
-    }
-    const sentinel = updateIntervalMs / 1e3;
-    const eventDI = resolveSentinel(sentinel, getNow, env, timeDirection);
-    if (!isFinite(eventDI)) {
-      return Infinity;
-    }
-    return (eventDI + 978307200) * 1e3;
-  }
-  function displayTimeToPerfNow(displayTimeMs, getNow) {
-    if (!isFinite(displayTimeMs)) return Infinity;
-    const deltaMs = Math.abs(displayTimeMs - getNow().getTime());
-    return performance.now() + deltaMs;
-  }
-  var SENTINEL_FUDGE_SECONDS = 5;
-  var SENTINEL_LOOKAHEAD_SECONDS = 3600 * 13.2;
-  function nextPlanetRiseSet(riseNotSet, planetNumber, getNow, lat, lon, timeDirection) {
-    const calculationDI = dateToDateInterval(getNow());
-    const searchForward = timeDirection === 1;
-    const fudge = searchForward ? SENTINEL_FUDGE_SECONDS : -SENTINEL_FUDGE_SECONDS;
-    const lookahead = searchForward ? SENTINEL_LOOKAHEAD_SECONDS : -SENTINEL_LOOKAHEAD_SECONDS;
-    const fudgeDate = calculationDI + fudge;
-    const pool = new AstroCachePool();
-    initializeCachePool(pool, fudgeDate, lat, lon, !searchForward);
-    try {
-      const result = planetaryRiseSetTimeRefined(
-        fudgeDate,
-        lat,
-        lon,
-        riseNotSet,
-        planetNumber,
-        NaN,
-        pool
-      );
-      if (isNoRiseSet(result.riseSetTime)) {
-        return NaN;
-      }
-      const inRightDirection = searchForward ? result.transitTime >= fudgeDate : result.transitTime < fudgeDate;
-      if (inRightDirection) {
-        return result.riseSetTime;
-      }
-      const tryDate = fudgeDate + lookahead;
-      releaseCachePool(pool);
-      initializeCachePool(pool, tryDate, lat, lon, !searchForward);
-      const result2 = planetaryRiseSetTimeRefined(
-        tryDate,
-        lat,
-        lon,
-        riseNotSet,
-        planetNumber,
-        NaN,
-        pool
-      );
-      if (isNoRiseSet(result2.riseSetTime)) {
-        return NaN;
-      }
-      return result2.riseSetTime;
-    } finally {
-      releaseCachePool(pool);
-    }
-  }
-  function nextOrMidnight(eventDI, getNow, tzOffsetSec, timeDirection) {
-    if (isNaN(eventDI)) {
-      return nextMidnightDI(getNow, tzOffsetSec, timeDirection);
-    }
-    const nowDI = dateToDateInterval(getNow());
-    const localNowSec = nowDI + tzOffsetSec;
-    const dayStartLocal = Math.floor(localNowSec / 86400) * 86400;
-    const todayMidnightDI = dayStartLocal - tzOffsetSec;
-    if (timeDirection === -1) {
-      if (eventDI < todayMidnightDI) {
-        return todayMidnightDI;
-      }
-    } else {
-      const tomorrowMidnightDI = todayMidnightDI + 86400;
-      if (eventDI > tomorrowMidnightDI) {
-        return tomorrowMidnightDI;
-      }
-    }
-    return eventDI;
-  }
-  function nextMidnightDI(getNow, tzOffsetSec, timeDirection) {
-    const nowDI = dateToDateInterval(getNow());
-    const localNowSec = nowDI + tzOffsetSec;
-    const dayStartLocal = Math.floor(localNowSec / 86400) * 86400;
-    const todayMidnightDI = dayStartLocal - tzOffsetSec;
-    if (timeDirection === -1) {
-      return todayMidnightDI;
-    } else {
-      return todayMidnightDI + 86400;
-    }
-  }
-  var SSLAT_THRESHOLD = 0.1 * Math.PI / 180;
-  var SSLAT_SEARCH_RANGE = 2 * 86400;
-  var SSLAT_SEARCH_GRANULARITY = 3600;
-  function nextSslatChange(getNow, timeDirection) {
-    const nowDI = dateToDateInterval(getNow());
-    const currentDecl = sunRAandDecl(nowDI, null).declination;
-    const boundaryDI = nowDI + timeDirection * SSLAT_SEARCH_RANGE;
-    const boundaryDecl = sunRAandDecl(boundaryDI, null).declination;
-    if (Math.abs(boundaryDecl - currentDecl) < SSLAT_THRESHOLD) {
-      return boundaryDI;
-    }
-    let loDI = nowDI;
-    let hiDI = boundaryDI;
-    while (Math.abs(hiDI - loDI) > SSLAT_SEARCH_GRANULARITY) {
-      const midDI = (loDI + hiDI) / 2;
-      const midDecl = sunRAandDecl(midDI, null).declination;
-      if (Math.abs(midDecl - currentDecl) >= SSLAT_THRESHOLD) {
-        hiDI = midDI;
-      } else {
-        loDI = midDI;
-      }
-    }
-    return hiDI;
-  }
-  var ECLIPSE_THRESHOLD = Math.PI / 18;
-  var ECLIPSE_MAX_CLOSING_RATE = Math.PI / 180 / 3600;
-  var ECLIPSE_MAX_INTERVAL = 3600;
-  function nextInterestingEclipseMotion(getNow, lat, lon, timeDirection) {
-    const nowDI = dateToDateInterval(getNow());
-    const sep = calculateEclipse(nowDI, lat, lon, null).angularSeparation;
-    let intervalSec = (sep - ECLIPSE_THRESHOLD) / ECLIPSE_MAX_CLOSING_RATE;
-    if (intervalSec < 1) intervalSec = 1;
-    if (intervalSec > ECLIPSE_MAX_INTERVAL) intervalSec = ECLIPSE_MAX_INTERVAL;
-    return nowDI + timeDirection * intervalSec;
-  }
-  function resolveSentinel(sentinel, getNow, env, timeDirection) {
-    const lat = env.observerLatRad ?? 0;
-    const lon = env.observerLonRad ?? 0;
-    const tzOff = env.tzOffsetSec ?? 0;
-    switch (sentinel) {
-      // Bare rise/set (no midnight clamp)
-      case EC_UPDATE_NEXT_SUNRISE:
-        return nextPlanetRiseSet(true, 0 /* Sun */, getNow, lat, lon, timeDirection);
-      case EC_UPDATE_NEXT_SUNSET:
-        return nextPlanetRiseSet(false, 0 /* Sun */, getNow, lat, lon, timeDirection);
-      case EC_UPDATE_NEXT_MOONRISE:
-        return nextPlanetRiseSet(true, 1 /* Moon */, getNow, lat, lon, timeDirection);
-      case EC_UPDATE_NEXT_MOONSET:
-        return nextPlanetRiseSet(false, 1 /* Moon */, getNow, lat, lon, timeDirection);
-      // Rise/set clamped to midnight
-      case EC_UPDATE_NEXT_SUNRISE_OR_MIDNIGHT:
-        return nextOrMidnight(
-          nextPlanetRiseSet(true, 0 /* Sun */, getNow, lat, lon, timeDirection),
-          getNow,
-          tzOff,
-          timeDirection
-        );
-      case EC_UPDATE_NEXT_SUNSET_OR_MIDNIGHT:
-        return nextOrMidnight(
-          nextPlanetRiseSet(false, 0 /* Sun */, getNow, lat, lon, timeDirection),
-          getNow,
-          tzOff,
-          timeDirection
-        );
-      case EC_UPDATE_NEXT_MOONRISE_OR_MIDNIGHT:
-        return nextOrMidnight(
-          nextPlanetRiseSet(true, 1 /* Moon */, getNow, lat, lon, timeDirection),
-          getNow,
-          tzOff,
-          timeDirection
-        );
-      case EC_UPDATE_NEXT_MOONSET_OR_MIDNIGHT:
-        return nextOrMidnight(
-          nextPlanetRiseSet(false, 1 /* Moon */, getNow, lat, lon, timeDirection),
-          getNow,
-          tzOff,
-          timeDirection
-        );
-      // Combined: whichever comes first in the direction of flow
-      case EC_UPDATE_NEXT_SUNRISE_OR_SUNSET: {
-        const rise = nextPlanetRiseSet(true, 0 /* Sun */, getNow, lat, lon, timeDirection);
-        const set = nextPlanetRiseSet(false, 0 /* Sun */, getNow, lat, lon, timeDirection);
-        return closerInTimeDirection(rise, set, timeDirection);
-      }
-      case EC_UPDATE_NEXT_MOONRISE_OR_MOONSET: {
-        const rise = nextPlanetRiseSet(true, 1 /* Moon */, getNow, lat, lon, timeDirection);
-        const set = nextPlanetRiseSet(false, 1 /* Moon */, getNow, lat, lon, timeDirection);
-        return closerInTimeDirection(rise, set, timeDirection);
-      }
-      // Adaptive sslat (sun declination) change sentinel for earth view
-      case EC_UPDATE_NEXT_SSLAT_CHANGE:
-        return nextSslatChange(getNow, timeDirection);
-      // Adaptive eclipse-simulator cadence: ~1 s while the disc is drawn,
-      // capped at 1 h while only the caption shows.
-      case EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION:
-        return nextInterestingEclipseMotion(getNow, lat, lon, timeDirection);
-      // Environment change only — effectively never (only explicit reset)
-      case 0:
-      case EC_UPDATE_ENV_CHANGE_ONLY:
-        return Infinity;
-      default:
-        if (isPlanetRiseSetSentinel(sentinel)) {
-          const { planet, isRise } = decodePlanetSentinel(sentinel);
-          return nextPlanetRiseSet(isRise, planet, getNow, lat, lon, timeDirection);
-        }
-        console.warn(`Unknown update sentinel: ${sentinel}, defaulting to daily`);
-        return nextMidnightDI(getNow, tzOff, timeDirection);
-    }
-  }
-  function closerInTimeDirection(a, b, timeDirection) {
-    if (isNaN(a)) return b;
-    if (isNaN(b)) return a;
-    return timeDirection === 1 ? Math.min(a, b) : Math.max(a, b);
-  }
-  function fmod3(value, modulus) {
-    const result = value % modulus;
-    return result < 0 ? result + modulus : result;
-  }
-  function startLinearAnimation(val, newTarget, now, animSpeed = 1, durationOverrideMs) {
-    startValueAnimation(val, newTarget, now, kECGLLinearAnimationSpeed * animSpeed, durationOverrideMs);
-  }
-  function evaluateLinearMotions(state, env, now) {
-    if (state.part.type === "QHand") {
-      const qhand = state.part;
-      if (state.xMotion && qhand.xMotion) {
-        startLinearAnimation(state.xMotion, evalAttr(qhand.xMotion, env), now, state.animSpeed);
-      }
-      if (state.yMotion && qhand.yMotion) {
-        startLinearAnimation(state.yMotion, evalAttr(qhand.yMotion, env), now, state.animSpeed);
-      }
-    }
-    if (state.part.type === "CalendarRowCover" && state.xMotion) {
-      const newXM = computeCalendarCoverOffset(state.part, env);
-      startLinearAnimation(state.xMotion, newXM, now, state.animSpeed);
-    }
-  }
-  function compressLinearMotions(state, env, now, timeUntilNextUpdateMs) {
-    const linearSpeed = kECGLLinearAnimationSpeed * state.animSpeed;
-    const compressLinear = (val, newTarget) => {
-      const naturalMs = linearSpeed > 0 ? Math.abs(newTarget - val.currentValue) / linearSpeed * 1e3 : 0;
-      const overrideMs = naturalMs > timeUntilNextUpdateMs ? timeUntilNextUpdateMs : void 0;
-      startLinearAnimation(val, newTarget, now, state.animSpeed, overrideMs);
-    };
-    if (state.part.type === "QHand") {
-      const qhand = state.part;
-      if (state.xMotion && qhand.xMotion) {
-        compressLinear(state.xMotion, evalAttr(qhand.xMotion, env));
-      }
-      if (state.yMotion && qhand.yMotion) {
-        compressLinear(state.yMotion, evalAttr(qhand.yMotion, env));
-      }
-    }
-    if (state.part.type === "CalendarRowCover" && state.xMotion) {
-      compressLinear(state.xMotion, computeCalendarCoverOffset(state.part, env));
-    }
-  }
-  function finishDayNightSlides(watch) {
-    for (const part of watch.parts) {
-      if (part.type === "QDayNightRing") {
-        if (part._wedgeSlides) {
-          for (const slide of part._wedgeSlides) {
-            if (slide.animating) {
-              slide.currentValue = slide.targetValue;
-              slide.animating = false;
-            }
-          }
-        }
-        if (part._wedgeAngleAnims) {
-          for (const anim of part._wedgeAngleAnims) {
-            if (anim.animating) {
-              anim.currentValue = anim.targetValue;
-              anim.animating = false;
-            }
-          }
-        }
-        part._cacheNextUpdate = 0;
-        part._cacheStart = void 0;
-      }
-    }
-  }
-  function resetDayNightSlides(watch) {
-    for (const part of watch.parts) {
-      if (part.type === "QDayNightRing") {
-        part._cacheNextUpdate = 0;
-        part._cacheStart = void 0;
-      }
-    }
-  }
-
-  // src/shared/url-state.ts
-  function readUrlState() {
-    const params = new URLSearchParams(window.location.search);
-    const latStr = params.get("lat");
-    const lonStr = params.get("lon") || params.get("long");
-    const lat = latStr !== null ? parseFloat(latStr) : NaN;
-    const lon = lonStr !== null ? parseFloat(lonStr) : NaN;
-    const city = params.get("city");
-    const blocStr = params.get("bloc");
-    const tcStr = params.get("tc");
-    const tStr = params.get("t");
-    const offStr = params.get("off");
-    const dirStr = params.get("dir");
-    let dir = 1;
-    if (dirStr === "-1") dir = -1;
-    else if (dirStr === "0") dir = 0;
-    return {
-      lat: !isNaN(lat) ? lat : null,
-      lon: !isNaN(lon) ? lon : null,
-      city: city || null,
-      bloc: blocStr === "1",
-      tc: tcStr === "1",
-      t: tStr !== null ? parseInt(tStr, 10) : null,
-      off: offStr !== null ? parseInt(offStr, 10) : null,
-      dir,
-      tz: params.get("tz") || null,
-      picks: params.get("picks") || null,
-      tp: params.get("tp") === "a" ? "a" : "d",
-      embed: params.get("embed") === "1",
-      fps: params.has("fps"),
-      kyhand: params.get("kyhand"),
-      kmode: params.get("kmode"),
-      op: (() => {
-        const s = params.get("op");
-        const n = s !== null ? parseInt(s, 10) : NaN;
-        return Number.isFinite(n) ? n : null;
-      })(),
-      onoon: params.get("onoon") === "1",
-      body: params.get("body") || null,
-      vnoon: params.get("vnoon") === "1"
-    };
-  }
-  function writeUrlState(changes) {
-    const params = new URLSearchParams(window.location.search);
-    if ("lat" in changes) {
-      if (changes.lat !== null && changes.lat !== void 0) {
-        params.set("lat", changes.lat.toFixed(3));
-      } else {
-        params.delete("lat");
-      }
-    }
-    if ("lon" in changes) {
-      if (changes.lon !== null && changes.lon !== void 0) {
-        params.set("lon", changes.lon.toFixed(3));
-      } else {
-        params.delete("lon");
-      }
-    }
-    if ("picks" in changes) {
-      if (changes.picks) params.set("picks", changes.picks);
-      else params.delete("picks");
-    }
-    if ("kyhand" in changes) {
-      if (changes.kyhand) params.set("kyhand", changes.kyhand);
-      else params.delete("kyhand");
-    }
-    if ("kmode" in changes) {
-      if (changes.kmode) params.set("kmode", changes.kmode);
-      else params.delete("kmode");
-    }
-    if ("city" in changes) {
-      if (changes.city) {
-        params.set("city", changes.city);
-      } else {
-        params.delete("city");
-      }
-    }
-    if ("bloc" in changes) {
-      if (changes.bloc) {
-        params.set("bloc", "1");
-      } else {
-        params.delete("bloc");
-      }
-    }
-    if ("tc" in changes) {
-      if (changes.tc) {
-        params.set("tc", "1");
-      } else {
-        params.delete("tc");
-      }
-    }
-    if ("t" in changes) {
-      if (changes.t !== null && changes.t !== void 0) {
-        params.set("t", changes.t.toString());
-      } else {
-        params.delete("t");
-      }
-    }
-    if ("off" in changes) {
-      if (changes.off !== null && changes.off !== void 0) {
-        params.set("off", changes.off.toString());
-      } else {
-        params.delete("off");
-      }
-    }
-    if ("dir" in changes) {
-      if (changes.dir !== void 0 && changes.dir !== 1) {
-        params.set("dir", changes.dir.toString());
-      } else {
-        params.delete("dir");
-      }
-    }
-    if ("tz" in changes) {
-      if (changes.tz) {
-        params.set("tz", changes.tz);
-      } else {
-        params.delete("tz");
-      }
-    }
-    if ("tp" in changes) {
-      if (changes.tp === "a") {
-        params.set("tp", "a");
-      } else {
-        params.delete("tp");
-      }
-    }
-    if ("op" in changes) {
-      if (changes.op !== null && changes.op !== void 0 && changes.op !== 0) {
-        params.set("op", changes.op.toString());
-      } else {
-        params.delete("op");
-      }
-    }
-    if ("onoon" in changes) {
-      if (changes.onoon) {
-        params.set("onoon", "1");
-      } else {
-        params.delete("onoon");
-      }
-    }
-    if ("body" in changes) {
-      if (changes.body) params.set("body", changes.body);
-      else params.delete("body");
-    }
-    if ("vnoon" in changes) {
-      if (changes.vnoon) params.set("vnoon", "1");
-      else params.delete("vnoon");
-    }
-    params.delete("long");
-    params.delete("loc");
-    const qs = params.toString();
-    const newUrl = window.location.pathname + (qs ? "?" + qs : "");
-    history.replaceState(null, "", newUrl);
-    updateNavigationLinks();
-  }
-  function buildShareUrl(state, options = {}) {
-    const url = new URL(options.baseUrl ?? window.location.origin + window.location.pathname);
-    const p = url.searchParams;
-    if (state.lat !== null && state.lat !== void 0) p.set("lat", state.lat.toFixed(3));
-    if (state.lon !== null && state.lon !== void 0) p.set("lon", state.lon.toFixed(3));
-    if (state.city) p.set("city", state.city);
-    if (state.tz) p.set("tz", state.tz);
-    if (state.bloc) p.set("bloc", "1");
-    if (state.off !== null && state.off !== void 0) p.set("off", state.off.toString());
-    if (state.t !== null && state.t !== void 0) p.set("t", state.t.toString());
-    if (state.dir !== 1) p.set("dir", state.dir.toString());
-    if (state.picks) p.set("picks", state.picks);
-    if (state.kyhand) p.set("kyhand", state.kyhand);
-    if (state.kmode) p.set("kmode", state.kmode);
-    if (state.op !== null && state.op !== void 0 && state.op !== 0) p.set("op", state.op.toString());
-    if (state.onoon) p.set("onoon", "1");
-    if (state.body) p.set("body", state.body);
-    if (state.vnoon) p.set("vnoon", "1");
-    if (state.tp === "a") p.set("tp", "a");
-    if (options.slots) {
-      for (const [k, v] of Object.entries(options.slots)) p.set(k, v);
-    }
-    return url.toString();
-  }
-  var picksProvider = () => new URLSearchParams(window.location.search).get("picks");
-  function setPicksProvider(fn) {
-    picksProvider = fn;
-  }
-  function updateNavigationLinks() {
-    const search = window.location.search;
-    const backLink = document.getElementById("back-link");
-    if (backLink) {
-      const url = new URL(backLink.getAttribute("data-base-href") || "index.html", window.location.href);
-      url.search = search;
-      backLink.href = url.toString();
-    }
-    const allFacesLink = document.getElementById("all-faces-link");
-    if (allFacesLink) {
-      const url = new URL(allFacesLink.getAttribute("data-base-href") || "all.html", window.location.href);
-      url.search = search;
-      allFacesLink.href = url.toString();
-    }
-    const selectedLink = document.getElementById("selected-faces-link");
-    if (selectedLink) {
-      const hasPicks = !!picksProvider();
-      const baseHref = hasPicks ? "selected.html" : "pick.html";
-      const url = new URL(baseHref, window.location.href);
-      url.search = search;
-      selectedLink.href = url.toString();
-      selectedLink.title = hasPicks ? "Selected Faces" : "Pick Faces";
-    }
-    const editPicksLink = document.getElementById("edit-picks-link");
-    if (editPicksLink) {
-      const url = new URL("pick.html", window.location.href);
-      url.search = search;
-      editPicksLink.href = url.toString();
-    }
-    document.querySelectorAll("a.face-card").forEach((a) => {
-      const anchor = a;
-      const url = new URL(anchor.getAttribute("data-base-href") || anchor.getAttribute("href"), window.location.href);
-      url.search = search;
-      anchor.href = url.toString();
-    });
-  }
-  function initNavigationLinks() {
-    const backLink = document.getElementById("back-link");
-    if (backLink && !backLink.hasAttribute("data-base-href")) {
-      backLink.setAttribute("data-base-href", backLink.getAttribute("href") || "index.html");
-    }
-    const allFacesLink = document.getElementById("all-faces-link");
-    if (allFacesLink && !allFacesLink.hasAttribute("data-base-href")) {
-      allFacesLink.setAttribute("data-base-href", allFacesLink.getAttribute("href") || "all.html");
-    }
-    document.querySelectorAll("a.face-card").forEach((a) => {
-      const anchor = a;
-      if (!anchor.hasAttribute("data-base-href")) {
-        anchor.setAttribute("data-base-href", anchor.getAttribute("href"));
-      }
-    });
-    updateNavigationLinks();
-  }
-
-  // src/shared/incoming-settings-dialog.ts
-  var STYLE_ID = "ec-settings-dialog-style";
-  var CSS = `
-.ec-modal-backdrop {
-    position: fixed; inset: 0; z-index: 1000;
-    display: flex; align-items: center; justify-content: center;
-    padding: 24px 16px;
-    background: rgba(0, 0, 0, 0.5);
-}
-.ec-modal {
-    position: relative;
-    background: rgba(26, 26, 46, 0.98);
-    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-    border: 1px solid #3a3a5e; border-radius: 14px;
-    padding: 26px 30px; min-width: 300px; max-width: 400px; width: 100%;
-    box-shadow: 0 8px 48px rgba(0, 0, 0, 0.6);
-    text-align: center;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-.ec-modal-title {
-    font-size: 16px; color: #e0d8c8; margin: 0 0 10px; font-weight: 400;
-}
-.ec-modal-text {
-    font-size: 13px; color: #aab; line-height: 1.5; margin: 0 0 20px;
-}
-.ec-modal-buttons { display: flex; flex-direction: column; gap: 8px; }
-.ec-modal-btn {
-    border-radius: 6px; font-size: 13px; padding: 9px 16px;
-    cursor: pointer; transition: background 0.15s, color 0.15s;
-    background: #2a2a4e; border: 1px solid #3a3a5e; color: #aac;
-}
-.ec-modal-btn:hover { background: #3a3a6e; color: #ddf; }
-.ec-modal-btn.ec-primary {
-    background: #34507a; border-color: #4a6fa5; color: #dde9ff;
-}
-.ec-modal-btn.ec-primary:hover { background: #3f5f92; color: #fff; }
-
-.ec-toast {
-    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
-    z-index: 1001; max-width: 340px;
-    background: rgba(26, 26, 46, 0.98); border: 1px solid #3a3a5e;
-    border-radius: 10px; padding: 12px 16px;
-    box-shadow: 0 6px 32px rgba(0, 0, 0, 0.5);
-    color: #ccd; font-size: 12.5px; line-height: 1.45;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    display: flex; align-items: center; gap: 12px;
-}
-.ec-toast-close {
-    background: none; border: none; color: #889; font-size: 18px;
-    cursor: pointer; padding: 0 2px; line-height: 1;
-}
-.ec-toast-close:hover { color: #ccd; }
-
-.ec-modal-input {
-    width: 100%; box-sizing: border-box;
-    background: #1d1d30; border: 1px solid #3a3a5e; border-radius: 6px;
-    color: #cdd; font-size: 12px; font-family: monospace;
-    padding: 8px 10px; margin: 0 0 14px;
-    text-align: left;
-}
-
-.ec-url-badge {
-    position: fixed; left: 10px; bottom: 8px; z-index: 999;
-    font-size: 11px; color: #99a; opacity: 0.7;
-    background: rgba(0, 0, 0, 0.3); padding: 2px 8px; border-radius: 6px;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    pointer-events: none; user-select: none;
-}
-`;
-  function ensureModalStyles() {
-    if (document.getElementById(STYLE_ID)) return;
-    const style = document.createElement("style");
-    style.id = STYLE_ID;
-    style.textContent = CSS;
-    document.head.appendChild(style);
-  }
-  var COPY = {
-    incoming: {
-      title: "Use these shared settings?",
-      text: "This link includes a saved time, location, or configuration. Save them as your default on this device, or use them just for this visit?",
-      save: "Save as my default",
-      session: "Use for this visit only"
-    },
-    reprompt: {
-      title: "Save your changes?",
-      text: "You changed a setting while viewing shared settings. Save your current settings as the default on this device, or keep them only for this visit?",
-      save: "Save as my default",
-      session: "Keep for this visit only"
-    }
-  };
-  function showIncomingSettingsDialog(options) {
-    ensureModalStyles();
-    const copy = COPY[options.mode];
-    return new Promise((resolve) => {
-      const backdrop = document.createElement("div");
-      backdrop.className = "ec-modal-backdrop";
-      const modal = document.createElement("div");
-      modal.className = "ec-modal";
-      modal.setAttribute("role", "dialog");
-      modal.setAttribute("aria-modal", "true");
-      const title = document.createElement("h2");
-      title.className = "ec-modal-title";
-      title.textContent = copy.title;
-      const text = document.createElement("p");
-      text.className = "ec-modal-text";
-      text.textContent = copy.text;
-      const buttons = document.createElement("div");
-      buttons.className = "ec-modal-buttons";
-      const saveBtn = document.createElement("button");
-      saveBtn.className = "ec-modal-btn ec-primary";
-      saveBtn.textContent = copy.save;
-      const sessionBtn = document.createElement("button");
-      sessionBtn.className = "ec-modal-btn";
-      sessionBtn.textContent = copy.session;
-      buttons.append(saveBtn, sessionBtn);
-      modal.append(title, text, buttons);
-      backdrop.append(modal);
-      document.body.appendChild(backdrop);
-      let done = false;
-      const finish = (choice) => {
-        if (done) return;
-        done = true;
-        document.removeEventListener("keydown", onKey);
-        backdrop.remove();
-        resolve(choice);
-      };
-      const onKey = (e) => {
-        if (e.key === "Escape") finish("session");
-      };
-      saveBtn.addEventListener("click", () => finish("save"));
-      sessionBtn.addEventListener("click", () => finish("session"));
-      backdrop.addEventListener("click", (e) => {
-        if (e.target === backdrop) finish("session");
-      });
-      document.addEventListener("keydown", onKey);
-      saveBtn.focus();
-    });
-  }
-  function showStorageWarning(message) {
-    ensureModalStyles();
-    const toast = document.createElement("div");
-    toast.className = "ec-toast";
-    const span = document.createElement("span");
-    span.textContent = message;
-    const close = document.createElement("button");
-    close.className = "ec-toast-close";
-    close.setAttribute("aria-label", "Dismiss");
-    close.textContent = "\xD7";
-    close.addEventListener("click", () => toast.remove());
-    toast.append(span, close);
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 12e3);
-  }
-  function showParadigmNotice() {
-    ensureModalStyles();
-    const toast = document.createElement("div");
-    toast.className = "ec-toast";
-    const span = document.createElement("span");
-    span.textContent = "Your settings now save in this browser instead of the URL. Use the Share button to copy a link to a view; local storage can be cleared along with your browser history.";
-    const close = document.createElement("button");
-    close.className = "ec-toast-close";
-    close.setAttribute("aria-label", "Dismiss");
-    close.textContent = "\xD7";
-    close.addEventListener("click", () => toast.remove());
-    toast.append(span, close);
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 16e3);
-  }
-  function showUrlModeBadge() {
-    ensureModalStyles();
-    if (document.getElementById("ec-url-badge")) return;
-    const badge = document.createElement("div");
-    badge.id = "ec-url-badge";
-    badge.className = "ec-url-badge";
-    badge.textContent = "(URL)";
-    badge.title = "Local storage is unavailable here, so settings are kept in the URL.";
-    document.body.appendChild(badge);
-  }
-
-  // src/shared/app-state.ts
-  var LOCALSTORAGE_ENABLED = true;
-  var SCHEMA_VERSION = 1;
-  var STORAGE_KEY_PREFIX = "ec:";
-  var SHARED_FIELDS = /* @__PURE__ */ new Set([
-    "lat",
-    "lon",
-    "city",
-    "tz",
-    "bloc",
-    "t",
-    "off",
-    "dir"
-  ]);
-  var URL_ONLY_FIELDS = /* @__PURE__ */ new Set([
-    "embed",
-    "fps",
-    "tc"
-  ]);
-  function namespaceOf(field, app) {
-    if (URL_ONLY_FIELDS.has(field)) return null;
-    if (SHARED_FIELDS.has(field)) return "shared";
-    switch (field) {
-      case "picks":
-      case "kyhand":
-      case "kmode":
-      case "body":
-      case "vnoon":
-        return "chronometer";
-      case "op":
-      case "onoon":
-        return "observatory";
-      case "tp":
-        return app === "index" || app === "pick" ? null : app;
-      default:
-        return null;
-    }
-  }
-  function defaultState() {
-    return {
-      lat: null,
-      lon: null,
-      city: null,
-      bloc: false,
-      tc: false,
-      t: null,
-      off: null,
-      dir: 1,
-      tz: null,
-      picks: null,
-      tp: "d",
-      embed: false,
-      fps: false,
-      kyhand: null,
-      kmode: null,
-      op: null,
-      onoon: false,
-      body: null,
-      vnoon: false
-    };
-  }
-  function isDefaultValue(field, value) {
-    if (value === null || value === void 0) return true;
-    switch (field) {
-      case "dir":
-        return value === 1;
-      case "tp":
-        return value === "d";
-      case "bloc":
-      case "tc":
-      case "embed":
-      case "fps":
-      case "onoon":
-      case "vnoon":
-        return value === false;
-      case "op":
-        return value === 0;
-      default:
-        return false;
-    }
-  }
-  var UrlBackend = class {
-    read() {
-      return readUrlState();
-    }
-    write(changes) {
-      writeUrlState(changes);
-    }
-  };
-  var LocalStorageBackend = class {
-    constructor(app) {
-      this.app = app;
-    }
-    read() {
-      const state = defaultState();
-      Object.assign(state, readNamespace("shared"));
-      const appNs = appNamespace(this.app);
-      if (appNs) Object.assign(state, readNamespace(appNs));
-      const url = readUrlState();
-      for (const field of URL_ONLY_FIELDS) {
-        state[field] = url[field];
-      }
-      return state;
-    }
-    write(changes) {
-      const buckets = /* @__PURE__ */ new Map();
-      for (const key of Object.keys(changes)) {
-        const ns = namespaceOf(key, this.app);
-        if (!ns) continue;
-        let bucket = buckets.get(ns);
-        if (!bucket) {
-          bucket = {};
-          buckets.set(ns, bucket);
-        }
-        bucket[key] = changes[key];
-      }
-      for (const [ns, bucket] of buckets) {
-        mergeNamespace(ns, bucket);
-      }
-    }
-  };
-  function appNamespace(app) {
-    switch (app) {
-      case "chronometer":
-        return "chronometer";
-      case "observatory":
-        return "observatory";
-      case "inspector":
-        return "inspector";
-      // The home and pick pages both surface the chronometer face set (the
-      // pick-card / selected-faces routing reads `picks`), so they read the
-      // chronometer namespace too.
-      case "pick":
-        return "chronometer";
-      case "index":
-        return "chronometer";
-    }
-  }
-  function readNamespace(ns) {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY_PREFIX + ns);
-      if (!raw) return {};
-      const obj = JSON.parse(raw);
-      delete obj.v;
-      return obj;
-    } catch {
-      return {};
-    }
-  }
-  function mergeNamespace(ns, changes) {
-    const key = STORAGE_KEY_PREFIX + ns;
-    let current;
-    try {
-      current = JSON.parse(localStorage.getItem(key) || "{}");
-    } catch {
-      current = {};
-    }
-    for (const field of Object.keys(changes)) {
-      const value = changes[field];
-      if (isDefaultValue(field, value)) {
-        delete current[field];
-      } else {
-        current[field] = value;
-      }
-    }
-    delete current.v;
-    if (Object.keys(current).length === 0) {
-      localStorage.removeItem(key);
-    } else {
-      current.v = SCHEMA_VERSION;
-      localStorage.setItem(key, JSON.stringify(current));
-    }
-  }
-  var InMemoryBackend = class {
-    constructor(seed) {
-      this.state = { ...defaultState(), ...seed || {} };
-    }
-    read() {
-      const url = readUrlState();
-      const state = { ...this.state };
-      for (const field of URL_ONLY_FIELDS) {
-        state[field] = url[field];
-      }
-      return state;
-    }
-    write(changes) {
-      for (const key of Object.keys(changes)) {
-        if (URL_ONLY_FIELDS.has(key)) continue;
-        this.state[key] = changes[key];
-      }
-    }
-  };
-  function storageWorks() {
-    try {
-      const k = STORAGE_KEY_PREFIX + "__probe__";
-      localStorage.setItem(k, "1");
-      const ok = localStorage.getItem(k) === "1";
-      localStorage.removeItem(k);
-      return ok;
-    } catch {
-      return false;
-    }
-  }
-  var TIME_FIELDS = /* @__PURE__ */ new Set(["t", "off", "dir"]);
-  var SHAREABLE_FIELDS = [
-    "lat",
-    "lon",
-    "city",
-    "tz",
-    "bloc",
-    "t",
-    "off",
-    "dir",
-    "picks",
-    "kyhand",
-    "kmode",
-    "op",
-    "onoon",
-    "body",
-    "vnoon",
-    "tp"
-  ];
-  var SHAREABLE_URL_KEYS = [
-    "lat",
-    "lon",
-    "long",
-    "city",
-    "loc",
-    "tz",
-    "bloc",
-    "t",
-    "off",
-    "dir",
-    "picks",
-    "kyhand",
-    "kmode",
-    "op",
-    "onoon",
-    "body",
-    "vnoon",
-    "tp"
-  ];
-  var CLEARED_URL_KEYS = [...SHAREABLE_URL_KEYS, "tc"];
-  var SLOT_STORAGE_KEY = STORAGE_KEY_PREFIX + "slots";
-  var SLOT_KEY_RE = /^[rd]\d+(tz|lat|lon)?$/;
-  function urlSlotMap() {
-    const out = {};
-    for (const [k, v] of new URLSearchParams(window.location.search)) {
-      if (SLOT_KEY_RE.test(k)) out[k] = v;
-    }
-    return out;
-  }
-  function storedSlotMap() {
-    try {
-      const obj = JSON.parse(localStorage.getItem(SLOT_STORAGE_KEY) || "{}");
-      delete obj.v;
-      return obj;
-    } catch {
-      return {};
-    }
-  }
-  function urlHasSlotParams() {
-    for (const k of new URLSearchParams(window.location.search).keys()) {
-      if (SLOT_KEY_RE.test(k)) return true;
-    }
-    return false;
-  }
-  function hasShareableParamsInUrl() {
-    const params = new URLSearchParams(window.location.search);
-    return SHAREABLE_URL_KEYS.some((k) => params.has(k)) || urlHasSlotParams();
-  }
-  function shareableUrlEqualsStored(ls) {
-    const url = readUrlState();
-    const stored = ls.read();
-    if (!SHAREABLE_FIELDS.every((f) => url[f] === stored[f])) return false;
-    const u = urlSlotMap();
-    const s = storedSlotMap();
-    const keys = /* @__PURE__ */ new Set([...Object.keys(u), ...Object.keys(s)]);
-    for (const k of keys) if (u[k] !== s[k]) return false;
-    return true;
-  }
-  function urlScalarOverrides() {
-    const params = new URLSearchParams(window.location.search);
-    const url = readUrlState();
-    const out = {};
-    const has = (...keys) => keys.some((k) => params.has(k));
-    if (has("lat")) out.lat = url.lat;
-    if (has("lon", "long")) out.lon = url.lon;
-    if (has("city")) out.city = url.city;
-    if (has("tz")) out.tz = url.tz;
-    if (has("bloc")) out.bloc = url.bloc;
-    if (has("t")) out.t = url.t;
-    if (has("off")) out.off = url.off;
-    if (has("dir")) out.dir = url.dir;
-    if (has("picks")) out.picks = url.picks;
-    if (has("kyhand")) out.kyhand = url.kyhand;
-    if (has("kmode")) out.kmode = url.kmode;
-    if (has("op")) out.op = url.op;
-    if (has("onoon")) out.onoon = url.onoon;
-    if (has("body")) out.body = url.body;
-    if (has("vnoon")) out.vnoon = url.vnoon;
-    if (has("tp")) out.tp = url.tp;
-    return out;
-  }
-  function clearShareableParamsFromUrl() {
-    const params = new URLSearchParams(window.location.search);
-    for (const k of CLEARED_URL_KEYS) params.delete(k);
-    for (const k of [...params.keys()]) if (SLOT_KEY_RE.test(k)) params.delete(k);
-    const qs = params.toString();
-    history.replaceState(null, "", window.location.pathname + (qs ? "?" + qs : ""));
-  }
-  var activeBackend = null;
-  var appName = "index";
-  var sessionRePromptArmed = false;
-  var warnedNoPersistence = false;
-  var inMemorySlots = {};
-  function initAppState(options) {
-    appName = options.app;
-    setPicksProvider(() => getState().picks);
-    if (!LOCALSTORAGE_ENABLED) {
-      activeBackend = new UrlBackend();
-      return;
-    }
-    if (readUrlState().embed) {
-      activeBackend = new UrlBackend();
-      return;
-    }
-    if (!storageWorks()) {
-      if (window.location.protocol === "file:") {
-        activeBackend = new UrlBackend();
-        showUrlModeBadge();
-      } else {
-        activeBackend = new InMemoryBackend(readUrlState());
-        warnNoPersistence();
-      }
-      return;
-    }
-    const ls = new LocalStorageBackend(appName);
-    if (!hasShareableParamsInUrl()) {
-      activeBackend = ls;
-      maybeShowParadigmNotice();
-      return;
-    }
-    if (shareableUrlEqualsStored(ls)) {
-      clearShareableParamsFromUrl();
-      activeBackend = ls;
-      maybeShowParadigmNotice();
-      return;
-    }
-    activeBackend = new UrlBackend();
-    void promptIncomingSettings(ls);
-  }
-  async function promptIncomingSettings(ls) {
-    const choice = await showIncomingSettingsDialog({ mode: "incoming" });
-    if (choice === "save") {
-      adoptCurrentStateAsDefault(ls);
-    } else {
-      sessionRePromptArmed = true;
-    }
-  }
-  function adoptCurrentStateAsDefault(ls) {
-    const overrides = urlScalarOverrides();
-    const slots = urlSlotMap();
-    activeBackend = ls;
-    ls.write(overrides);
-    if (Object.keys(slots).length > 0) setSlotOverrides(slots);
-    clearShareableParamsFromUrl();
-    sessionRePromptArmed = false;
-  }
-  function warnNoPersistence() {
-    if (warnedNoPersistence) return;
-    warnedNoPersistence = true;
-    showStorageWarning("Your settings can't be saved in this browser and won't persist after you reload.");
-  }
-  function maybeShowParadigmNotice() {
-    let meta = {};
-    try {
-      meta = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + "meta") || "{}");
-    } catch {
-    }
-    if (meta.noticeSeen) return;
-    try {
-      localStorage.setItem(STORAGE_KEY_PREFIX + "meta", JSON.stringify({ ...meta, noticeSeen: true, v: SCHEMA_VERSION }));
-    } catch {
-    }
-    showParadigmNotice();
-  }
-  function downgradeToInMemory() {
-    if (activeBackend instanceof InMemoryBackend) return;
-    const seed = activeBackend ? activeBackend.read() : void 0;
-    inMemorySlots = getSlotOverrides();
-    activeBackend = new InMemoryBackend(seed);
-    warnNoPersistence();
-  }
-  function backend() {
-    if (!activeBackend) activeBackend = new UrlBackend();
-    return activeBackend;
-  }
-  function hasNonTimePersistableChange(changes) {
-    return Object.keys(changes).some(
-      (k) => !TIME_FIELDS.has(k) && namespaceOf(k, appName) !== null
+  // src/watch/analemma.ts
+  var REF_LAT_RAD = 45 * Math.PI / 180;
+  var REF_EPOCH_SECONDS = (() => {
+    const d = new Date(Date.UTC(2024, 2, 20, 12, 0, 0));
+    return d.getTime() / 1e3 - 978307200;
+  })();
+  var PATH_SAMPLE_COUNT = 1e3;
+  var DEFAULT_UPDATE_SEC = 300;
+  var PATH_MARGIN_FRACTION = 0.15;
+  function normalizeAngleDelta(delta) {
+    while (delta > Math.PI) delta -= 2 * Math.PI;
+    while (delta < -Math.PI) delta += 2 * Math.PI;
+    return delta;
+  }
+  function analemmaPointFromEotDecl(di, phi) {
+    const dec = sunRAandDecl(di, null).declination;
+    const H = EOTSeconds(di, null) * (2 * Math.PI / 86400);
+    const sinAlt = Math.sin(dec) * Math.sin(phi) + Math.cos(dec) * Math.cos(phi) * Math.cos(H);
+    const alt = Math.asin(sinAlt);
+    const az = Math.atan2(
+      -Math.cos(dec) * Math.cos(phi) * Math.sin(H),
+      Math.sin(dec) - Math.sin(phi) * sinAlt
     );
+    return { alt, az };
   }
-  function getState() {
-    return backend().read();
-  }
-  function setState(changes) {
-    try {
-      backend().write(changes);
-    } catch {
-      downgradeToInMemory();
-      backend().write(changes);
+  function computeAnalemmaPath() {
+    const veRef = vernalEquinoxOnOrBefore(REF_EPOCH_SECONDS, null);
+    const yearLen = vernalEquinoxAfter(veRef, null) - veRef;
+    const ref = analemmaPointFromEotDecl(veRef, REF_LAT_RAD);
+    const refAlt = ref.alt;
+    const refAz = ref.az;
+    const path = [];
+    for (let d = 0; d < PATH_SAMPLE_COUNT; d++) {
+      const di = veRef + d / PATH_SAMPLE_COUNT * yearLen;
+      const { alt, az } = analemmaPointFromEotDecl(di, REF_LAT_RAD);
+      path.push({
+        deltaAz: normalizeAngleDelta(az - refAz),
+        deltaAlt: alt - refAlt
+      });
     }
-    if (sessionRePromptArmed && hasNonTimePersistableChange(changes)) {
-      sessionRePromptArmed = false;
-      void promptSessionReprompt();
+    return { path, refAlt, refAz, veRef };
+  }
+  function pathParamToXY(pathScaled, pathParameter) {
+    const n = pathScaled.length;
+    if (n === 0) return [0, 0];
+    let t = pathParameter % n;
+    if (!Number.isFinite(t)) t = 0;
+    if (t < 0) t += n;
+    const i0 = Math.floor(t);
+    const i1 = (i0 + 1) % n;
+    const frac = t - i0;
+    const [x0, y0] = pathScaled[i0];
+    const [x1, y1] = pathScaled[i1];
+    return [x0 + (x1 - x0) * frac, y0 + (y1 - y0) * frac];
+  }
+  function expandAnalemma(part, env, images) {
+    const centerX = evalAttr(part.x, env);
+    const centerY = evalAttr(part.y, env);
+    const radius = evalAttr(part.radius, env) || 40;
+    const sunRadius = evalAttr(part.sunRadius, env) || 2.5;
+    const sunFillColor = part.sunFillColor ? evalColor(part.sunFillColor, env) : "rgba(242,228,7,1)";
+    const sunStrokeColor = part.sunStrokeColor ? evalColor(part.sunStrokeColor, env) : "rgba(139,129,75,1)";
+    const channelColor = part.channelColor ? evalColor(part.channelColor, env) : "rgba(0,0,0,1)";
+    const channelWidth = evalAttr(part.channelWidth, env) || 0.8;
+    const bgRotates = (evalAttr(part.bgRotates, env) || 0) !== 0;
+    const updateIntervalSec2 = evalAttr(part.update, env) || DEFAULT_UPDATE_SEC;
+    const { path, refAlt, refAz, veRef } = computeAnalemmaPath();
+    const usableRadius = radius * (1 - PATH_MARGIN_FRACTION);
+    let maxAbsX = 0;
+    let maxAbsY = 0;
+    for (const pt of path) {
+      const correctedAz = pt.deltaAz * Math.cos(refAlt + pt.deltaAlt);
+      const absX = Math.abs(correctedAz);
+      const absY = Math.abs(pt.deltaAlt);
+      if (absX > maxAbsX) maxAbsX = absX;
+      if (absY > maxAbsY) maxAbsY = absY;
     }
-  }
-  function isPersistentMode() {
-    return backend() instanceof LocalStorageBackend;
-  }
-  function getSlotOverrides() {
-    const b = backend();
-    if (b instanceof LocalStorageBackend) return storedSlotMap();
-    if (b instanceof InMemoryBackend) return { ...inMemorySlots };
-    return urlSlotMap();
-  }
-  function setSlotOverrides(changes) {
-    const b = backend();
-    if (b instanceof InMemoryBackend) {
-      for (const [k, v] of Object.entries(changes)) {
-        if (v == null) delete inMemorySlots[k];
-        else inMemorySlots[k] = v;
+    const maxExtent = Math.max(maxAbsX, maxAbsY);
+    const scaleFactor = maxExtent > 0 ? usableRadius / maxExtent : 1;
+    const pathScaled = path.map((pt) => [
+      pt.deltaAz * Math.cos(refAlt + pt.deltaAlt) * scaleFactor,
+      pt.deltaAlt * scaleFactor
+    ]);
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const [px, py] of pathScaled) {
+      if (px < minX) minX = px;
+      if (px > maxX) maxX = px;
+      if (py < minY) minY = py;
+      if (py > maxY) maxY = py;
+    }
+    const pathOffsetX = (minX + maxX) / 2;
+    const pathOffsetY = (minY + maxY) / 2;
+    for (let i = 0; i < pathScaled.length; i++) {
+      pathScaled[i][0] -= pathOffsetX;
+      pathScaled[i][1] -= pathOffsetY;
+    }
+    let bgBitmap = null;
+    if (part.bgSrc) {
+      const loaded2 = images.get(part.bgSrc);
+      if (loaded2) {
+        bgBitmap = createDiscBackground(loaded2.bitmap, loaded2.scale, radius);
       }
-      return;
     }
-    if (b instanceof LocalStorageBackend) {
-      const cur = storedSlotMap();
-      for (const [k, v] of Object.entries(changes)) {
-        if (v == null) delete cur[k];
-        else cur[k] = v;
-      }
-      delete cur.v;
-      try {
-        if (Object.keys(cur).length === 0) {
-          localStorage.removeItem(SLOT_STORAGE_KEY);
-        } else {
-          cur.v = SCHEMA_VERSION;
-          localStorage.setItem(SLOT_STORAGE_KEY, JSON.stringify(cur));
-        }
-      } catch {
-        downgradeToInMemory();
-        setSlotOverrides(changes);
-      }
-      return;
+    if (!bgBitmap) {
+      bgBitmap = createFallbackDiscBackground(radius);
     }
-    const params = new URLSearchParams(window.location.search);
-    for (const [k, v] of Object.entries(changes)) {
-      if (v == null) params.delete(k);
-      else params.set(k, v);
-    }
-    const qs = params.toString();
-    history.replaceState(null, "", window.location.pathname + (qs ? "?" + qs : ""));
-  }
-  async function promptSessionReprompt() {
-    const choice = await showIncomingSettingsDialog({ mode: "reprompt" });
-    if (choice === "save") {
-      adoptCurrentStateAsDefault(new LocalStorageBackend(appName));
-    }
-  }
-  function onSharedChange(callback) {
-    const handler = (e) => {
-      if (!(activeBackend instanceof LocalStorageBackend)) return;
-      if (e.key !== null && !e.key.startsWith(STORAGE_KEY_PREFIX)) return;
-      callback(getState());
+    const { bitmap: sunBitmap, anchorX: sunAnchorX, anchorY: sunAnchorY, w: sunW, h: sunH } = buildSunBitmap(sunRadius, sunFillColor, sunStrokeColor);
+    const seasonTicks = computeSeasonTicks(veRef);
+    const channelBitmap = buildChannelBitmap(
+      pathScaled,
+      radius,
+      channelColor,
+      channelWidth,
+      seasonTicks
+    );
+    const state = {
+      path,
+      pathScaled,
+      scaleFactor,
+      pathOffsetX,
+      pathOffsetY,
+      refAlt,
+      refAz,
+      centerX,
+      centerY,
+      radius,
+      sunRadius,
+      sunFillColor,
+      sunStrokeColor,
+      channelColor,
+      channelWidth,
+      bgRotates,
+      currentPathParameter: 0,
+      currentRotation: 0,
+      seasonTicks,
+      updateIntervalSec: updateIntervalSec2,
+      nextUpdateTime: 0,
+      channelBitmap,
+      bgBitmap,
+      sunBitmap,
+      sunBitmapAnchorX: sunAnchorX,
+      sunBitmapAnchorY: sunAnchorY,
+      sunBitmapW: sunW,
+      sunBitmapH: sunH
     };
-    window.addEventListener("storage", handler);
-    return () => window.removeEventListener("storage", handler);
+    updateAnalemmaValues(state, env);
+    return state;
+  }
+  function buildChannelPath2D(pathScaled) {
+    const p = new Path2D();
+    if (pathScaled.length === 0) return p;
+    p.moveTo(pathScaled[0][0], -pathScaled[0][1]);
+    for (let i = 1; i < pathScaled.length; i++) {
+      p.lineTo(pathScaled[i][0], -pathScaled[i][1]);
+    }
+    p.closePath();
+    return p;
+  }
+  function buildChannelBitmap(pathScaled, radius, channelColor, channelWidth, seasonTicks) {
+    const scale = 4;
+    const size = radius * 2;
+    const pxSize = Math.ceil(size * scale);
+    const canvas = new OffscreenCanvas(pxSize, pxSize);
+    const ctx = canvas.getContext("2d");
+    ctx.scale(scale, scale);
+    ctx.translate(radius, radius);
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.09)";
+    ctx.fill();
+    const channelPath = buildChannelPath2D(pathScaled);
+    ctx.strokeStyle = channelColor;
+    ctx.lineWidth = channelWidth;
+    ctx.lineJoin = "round";
+    ctx.stroke(channelPath);
+    const tickLen = 2;
+    const tickAlong = 0.5;
+    const gap = channelWidth / 2;
+    for (const { index, color } of seasonTicks) {
+      const idx = (Math.round(index) % pathScaled.length + pathScaled.length) % pathScaled.length;
+      const [px, py] = pathScaled[idx];
+      const prev = (idx - 1 + pathScaled.length) % pathScaled.length;
+      const next = (idx + 1) % pathScaled.length;
+      const dx = pathScaled[next][0] - pathScaled[prev][0];
+      const dy = pathScaled[next][1] - pathScaled[prev][1];
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (len === 0) continue;
+      const tx = dx / len;
+      const ty = dy / len;
+      const nx = -ty;
+      const ny = tx;
+      ctx.fillStyle = color;
+      for (const side of [1, -1]) {
+        const innerX = px + side * nx * gap;
+        const innerY = py + side * ny * gap;
+        const outerX = px + side * nx * (gap + tickLen);
+        const outerY = py + side * ny * (gap + tickLen);
+        const midX = (innerX + outerX) / 2;
+        const midY = (innerY + outerY) / 2;
+        ctx.save();
+        ctx.translate(midX, -midY);
+        ctx.rotate(-Math.atan2(ty, tx));
+        ctx.fillRect(-tickAlong, -tickLen / 2, tickAlong * 2, tickLen);
+        ctx.restore();
+      }
+    }
+    return canvas;
+  }
+  function buildSunBitmap(sunRadius, fillColor, strokeColor) {
+    const shadowBlur = 1.5;
+    const shadowOffsetX = 0.5;
+    const shadowOffsetY = 0.5;
+    const shadowPad = shadowBlur * 3 + Math.max(Math.abs(shadowOffsetX), Math.abs(shadowOffsetY));
+    const extent = sunRadius + 0.5 + shadowPad;
+    const w = extent * 2;
+    const h = extent * 2;
+    const scale = 8;
+    const pxW = Math.ceil(w * scale);
+    const pxH = Math.ceil(h * scale);
+    const canvas = new OffscreenCanvas(pxW, pxH);
+    const ctx = canvas.getContext("2d");
+    ctx.scale(scale, scale);
+    ctx.shadowColor = "rgba(0, 0, 0, 0.6)";
+    ctx.shadowBlur = shadowBlur * scale;
+    ctx.shadowOffsetX = shadowOffsetX * scale;
+    ctx.shadowOffsetY = shadowOffsetY * scale;
+    drawSunGlyph(ctx, extent, extent, sunRadius, fillColor, strokeColor);
+    return {
+      bitmap: canvas,
+      anchorX: extent,
+      // pivot is at center
+      anchorY: extent,
+      w,
+      h
+    };
+  }
+  function createDiscBackground(faceImage, faceImageScale, discRadius) {
+    const size = Math.ceil(discRadius * 2);
+    const pxSize = Math.ceil(size * 4);
+    const canvas = new OffscreenCanvas(pxSize, pxSize);
+    const ctx = canvas.getContext("2d");
+    ctx.beginPath();
+    ctx.arc(pxSize / 2, pxSize / 2, pxSize / 2, 0, Math.PI * 2);
+    ctx.clip();
+    const imgW = faceImage.width * faceImageScale;
+    const imgH = faceImage.height * faceImageScale;
+    const drawScale = pxSize / (discRadius * 2);
+    ctx.save();
+    ctx.translate(pxSize / 2, pxSize / 2);
+    ctx.scale(drawScale, drawScale);
+    ctx.drawImage(faceImage, -imgW / 2, -imgH / 2, imgW, imgH);
+    ctx.restore();
+    ctx.beginPath();
+    ctx.arc(pxSize / 2, pxSize / 2, pxSize / 2 - 1, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(0,0,0,0.8)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    return canvas;
+  }
+  function createFallbackDiscBackground(discRadius) {
+    const size = Math.ceil(discRadius * 2);
+    const pxSize = Math.ceil(size * 4);
+    const canvas = new OffscreenCanvas(pxSize, pxSize);
+    const ctx = canvas.getContext("2d");
+    ctx.beginPath();
+    ctx.arc(pxSize / 2, pxSize / 2, pxSize / 2, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(0,0,0,0.25)";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(pxSize / 2, pxSize / 2, pxSize / 2 - 1, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(0,0,0,0.8)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    return canvas;
+  }
+  function updateAnalemmaValues(state, env) {
+    const getNow = env.getNow;
+    if (!getNow) return;
+    const now = getNow();
+    const di = dateToDateInterval(now);
+    state.currentPathParameter = fractionOfVernalEquinoxYear(di, null) * PATH_SAMPLE_COUNT;
+    const obsLat = env.observerLatRad ?? 0;
+    const obsLon = env.observerLonRad ?? 0;
+    state.currentRotation = sunSkyOrientationAngle(di, obsLat, obsLon, null);
+  }
+  function drawSunGlyph(ctx, cx, cy, radius, fillColor, strokeColor, nRays = 8) {
+    const innerRadius = radius * 0.5;
+    const rayTip = radius;
+    ctx.fillStyle = fillColor;
+    ctx.beginPath();
+    for (let i = 0; i < nRays; i++) {
+      const theta = 2 * Math.PI * i / nRays;
+      const tipX = cx + rayTip * Math.cos(theta);
+      const tipY = cy + rayTip * Math.sin(theta);
+      const cwX = cx + innerRadius * Math.cos(theta + Math.PI / nRays);
+      const cwY = cy + innerRadius * Math.sin(theta + Math.PI / nRays);
+      const ccwX = cx + innerRadius * Math.cos(theta - Math.PI / nRays);
+      const ccwY = cy + innerRadius * Math.sin(theta - Math.PI / nRays);
+      ctx.moveTo(tipX, tipY);
+      ctx.lineTo(cwX, cwY);
+      ctx.lineTo(ccwX, ccwY);
+      ctx.closePath();
+    }
+    ctx.arc(cx, cy, innerRadius, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+  var MEAN_TROPICAL_YEAR_SECONDS2 = 365.2421897 * 86400;
+  var SEASON_TARGETS = [
+    { longitude: 0, color: "#22aa22" },
+    // Vernal equinox — green
+    { longitude: Math.PI / 2, color: "#ddcc00" },
+    // Summer solstice — yellow
+    { longitude: Math.PI, color: "#ee7722" },
+    // Autumnal equinox — orange
+    { longitude: 3 * Math.PI / 2, color: "#2266cc" }
+    // Winter solstice — blue
+  ];
+  function computeSeasonTicks(veRef) {
+    return SEASON_TARGETS.map(({ longitude, color }) => {
+      const approx = veRef + longitude / (2 * Math.PI) * MEAN_TROPICAL_YEAR_SECONDS2;
+      const crossing = solarLongitudeCrossingTime(longitude, approx, null);
+      const frac = fractionOfVernalEquinoxYear(crossing, null);
+      return { index: frac * PATH_SAMPLE_COUNT, color };
+    });
+  }
+  function drawAnalemma(ctx, state) {
+    const { centerX, centerY, radius, bgRotates } = state;
+    const currentRotation = state._obsRotation ? state._obsRotation.currentValue : state.currentRotation;
+    const pathParameter = state._obsPathParam ? state._obsPathParam.currentValue : state.currentPathParameter;
+    ctx.save();
+    ctx.translate(centerX, -centerY);
+    if (state.bgBitmap) {
+      if (bgRotates) {
+        ctx.save();
+        ctx.rotate(currentRotation);
+        drawBackground(ctx, state);
+        ctx.restore();
+      } else {
+        drawBackground(ctx, state);
+      }
+    }
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.rotate(currentRotation);
+    if (state.channelBitmap) {
+      ctx.drawImage(state.channelBitmap, -radius, -radius, radius * 2, radius * 2);
+    }
+    if (state.sunBitmap) {
+      const [sunX, sunY] = pathParamToXY(state.pathScaled, pathParameter);
+      ctx.drawImage(
+        state.sunBitmap,
+        sunX - state.sunBitmapAnchorX,
+        -sunY - state.sunBitmapAnchorY,
+        state.sunBitmapW,
+        state.sunBitmapH
+      );
+    }
+    ctx.restore();
+    ctx.restore();
+  }
+  function drawBackground(ctx, state) {
+    if (!state.bgBitmap) return;
+    const { radius } = state;
+    const bmp = state.bgBitmap;
+    ctx.drawImage(bmp, -radius, -radius, radius * 2, radius * 2);
   }
 
   // src/watch/watch-env.ts
+  var CALENDAR_COVER_CODES = {
+    row1Left: 0,
+    row1Right: 1,
+    row6Left: 2,
+    row56Right: 3
+  };
   var DEFAULT_LAT_DEG = 37.205;
   var DEFAULT_LON_DEG = -121.954;
   var cachedBatteryLevel2 = 1;
@@ -15755,9 +15665,127 @@
     env.functions.set("wadokeiDNSunriseAngle", () => {
       return wadokeiDNAngles()?.sunriseAngle ?? 0;
     });
+    env.functions.set(
+      "dayNightWedgeSlideAngle",
+      (_planet, wedgeIndex, numWedges, _slideDistance) => {
+        const TWO_PI6 = 2 * Math.PI;
+        const numVisFn = env.functions.get("wadokeiDNNumVisible");
+        const numVis = numVisFn ? numVisFn(numWedges) : numWedges;
+        const wedgeSpan = (TWO_PI6 + 0.2) / numWedges;
+        if (numVis > 0 && numVis < numWedges) {
+          const a = wadokeiDNAngles();
+          const sunsetAngle = a?.sunsetAngle ?? 0;
+          const sunriseAngle = a?.sunriseAngle ?? 0;
+          let nightArc = sunriseAngle - sunsetAngle;
+          if (nightArc < 0) nightArc += TWO_PI6;
+          const adjustedStart = sunsetAngle + wedgeSpan / 2;
+          const adjustedArc = nightArc - wedgeSpan;
+          const step = numVis > 1 ? adjustedArc / (numVis - 1) : 0;
+          if (wedgeIndex < numVis) {
+            const raw = adjustedStart + step * wedgeIndex;
+            return (raw % TWO_PI6 + TWO_PI6) % TWO_PI6;
+          }
+          return adjustedStart + step * (numVis - 1);
+        }
+        if (numVis === 0) {
+          return 0;
+        }
+        return TWO_PI6 * wedgeIndex / numWedges;
+      }
+    );
+    env.functions.set(
+      "dayNightWedgeSlideOffset",
+      (wedgeIndex, numWedges, slideDistance) => {
+        const numVisFn = env.functions.get("wadokeiDNNumVisible");
+        const numVis = numVisFn ? numVisFn(numWedges) : numWedges;
+        return wedgeIndex < numVis ? 0 : slideDistance;
+      }
+    );
+    env.functions.set("calendarCoverOffset", (coverTypeCode) => {
+      return computeCalendarCoverOffsetForEnv(env, coverTypeCode);
+    });
+    env.functions.set(
+      "terminatorLeafAngle",
+      (phase, quad, idx, leavesPerQuad, incr) => {
+        let a = terminatorAngle(phase, quad, idx, leavesPerQuad, incr);
+        const isUpper2 = quad === 0 || quad === 3;
+        if (!isUpper2) a += Math.PI;
+        return a;
+      }
+    );
+    env.functions.set("analemmaPathParameter", () => {
+      const di = dateToDateInterval(getNow());
+      return fractionOfVernalEquinoxYear(di, null) * PATH_SAMPLE_COUNT;
+    });
+    env.functions.set("analemmaRotation", () => {
+      const di = dateToDateInterval(getNow());
+      return sunSkyOrientationAngle(di, OBSERVER_LAT, OBSERVER_LON, null);
+    });
     registerTerraFunctions(env, OBSERVER_LAT, OBSERVER_LON, getNow, pool, tzOffsetSeconds, slotOverrides, globalLocationSlot, olsonTimezone);
     releaseCachePool(pool);
     return env;
+  }
+  function computeCalendarCoverOffsetForEnv(env, coverTypeCode) {
+    const calendarWeekdayStart = env.functions.get("calendarWeekdayStart")?.() ?? 0;
+    const cellWidth = env.variables.get("calendarCellWidth") ?? 13.3;
+    const monthNum = (env.functions.get("monthNumber")?.() ?? 0) + 1;
+    const yearNum = env.functions.get("yearNumber")?.() ?? 2024;
+    const era = env.functions.get("eraNumber")?.() ?? 1;
+    const absYear = yearNum;
+    const firstOfMonthDI = timeIntervalFromUTCComponents(era, absYear, monthNum, 1, 12, 0, 0);
+    const thisMonthStartCol = (7 + weekdayFromTimeInterval(firstOfMonthDI, 0) - calendarWeekdayStart) % 7;
+    const dim = daysInMonth(era, absYear, monthNum);
+    let prevEra = era;
+    let prevYear = absYear;
+    let prevMonth = monthNum - 1;
+    if (prevMonth < 1) {
+      prevMonth = 12;
+      if (era === 1 && absYear === 1) {
+        prevEra = 0;
+        prevYear = 1;
+      } else if (era === 0) {
+        prevYear = absYear + 1;
+      } else {
+        prevYear = absYear - 1;
+      }
+    }
+    const daysInPrevMonth = daysInMonth(prevEra, prevYear, prevMonth);
+    let nextEra = era;
+    let nextYear = absYear;
+    let nextMonth = monthNum + 1;
+    if (nextMonth > 12) {
+      nextMonth = 1;
+      if (era === 0 && absYear === 1) {
+        nextEra = 1;
+        nextYear = 1;
+      } else if (era === 0) {
+        nextYear = absYear - 1;
+      } else {
+        nextYear = absYear + 1;
+      }
+    }
+    const nextMonthFirstDI = timeIntervalFromUTCComponents(nextEra, nextYear, nextMonth, 1, 12, 0, 0);
+    const nextMonthStartCol = (7 + weekdayFromTimeInterval(nextMonthFirstDI, 0) - calendarWeekdayStart) % 7;
+    const nextMonthStartRow = Math.floor((dim + thisMonthStartCol) / 7);
+    let columnMotion = 7;
+    if (coverTypeCode === CALENDAR_COVER_CODES.row1Left) {
+      columnMotion = thisMonthStartCol + 22 - daysInPrevMonth;
+      if (columnMotion < -4) columnMotion = -4;
+    } else if (coverTypeCode === CALENDAR_COVER_CODES.row1Right) {
+      columnMotion = thisMonthStartCol + 26 - daysInPrevMonth;
+      if (columnMotion < -5) columnMotion = -5;
+    } else if (coverTypeCode === CALENDAR_COVER_CODES.row56Right) {
+      columnMotion = nextMonthStartRow === 4 ? nextMonthStartCol : 7;
+    } else if (coverTypeCode === CALENDAR_COVER_CODES.row6Left) {
+      if (nextMonthStartRow === 5) {
+        columnMotion = nextMonthStartCol;
+      } else if (nextMonthStartRow === 4) {
+        columnMotion = nextMonthStartCol - 7;
+      } else {
+        columnMotion = 7;
+      }
+    }
+    return Math.round(columnMotion * cellWidth);
   }
   function registerTerraFunctions(env, OBSERVER_LAT, OBSERVER_LON, getNow, pool, tzOffsetSeconds, slotOverrides, globalLocationSlot, olsonTimezone) {
     const { functions } = env;
@@ -16122,382 +16150,6 @@
     return city.replace(/_/g, " ");
   }
 
-  // src/watch/analemma.ts
-  var REF_LAT_RAD = 45 * Math.PI / 180;
-  var REF_EPOCH_SECONDS = (() => {
-    const d = new Date(Date.UTC(2024, 2, 20, 12, 0, 0));
-    return d.getTime() / 1e3 - 978307200;
-  })();
-  var PATH_SAMPLE_COUNT = 1e3;
-  var DEFAULT_UPDATE_SEC = 300;
-  var PATH_MARGIN_FRACTION = 0.15;
-  function normalizeAngleDelta(delta) {
-    while (delta > Math.PI) delta -= 2 * Math.PI;
-    while (delta < -Math.PI) delta += 2 * Math.PI;
-    return delta;
-  }
-  function analemmaPointFromEotDecl(di, phi) {
-    const dec = sunRAandDecl(di, null).declination;
-    const H = EOTSeconds(di, null) * (2 * Math.PI / 86400);
-    const sinAlt = Math.sin(dec) * Math.sin(phi) + Math.cos(dec) * Math.cos(phi) * Math.cos(H);
-    const alt = Math.asin(sinAlt);
-    const az = Math.atan2(
-      -Math.cos(dec) * Math.cos(phi) * Math.sin(H),
-      Math.sin(dec) - Math.sin(phi) * sinAlt
-    );
-    return { alt, az };
-  }
-  function computeAnalemmaPath() {
-    const veRef = vernalEquinoxOnOrBefore(REF_EPOCH_SECONDS, null);
-    const yearLen = vernalEquinoxAfter(veRef, null) - veRef;
-    const ref = analemmaPointFromEotDecl(veRef, REF_LAT_RAD);
-    const refAlt = ref.alt;
-    const refAz = ref.az;
-    const path = [];
-    for (let d = 0; d < PATH_SAMPLE_COUNT; d++) {
-      const di = veRef + d / PATH_SAMPLE_COUNT * yearLen;
-      const { alt, az } = analemmaPointFromEotDecl(di, REF_LAT_RAD);
-      path.push({
-        deltaAz: normalizeAngleDelta(az - refAz),
-        deltaAlt: alt - refAlt
-      });
-    }
-    return { path, refAlt, refAz, veRef };
-  }
-  function pathParamToXY(pathScaled, pathParameter) {
-    const n = pathScaled.length;
-    if (n === 0) return [0, 0];
-    let t = pathParameter % n;
-    if (!Number.isFinite(t)) t = 0;
-    if (t < 0) t += n;
-    const i0 = Math.floor(t);
-    const i1 = (i0 + 1) % n;
-    const frac = t - i0;
-    const [x0, y0] = pathScaled[i0];
-    const [x1, y1] = pathScaled[i1];
-    return [x0 + (x1 - x0) * frac, y0 + (y1 - y0) * frac];
-  }
-  function expandAnalemma(part, env, images) {
-    const centerX = evalAttr(part.x, env);
-    const centerY = evalAttr(part.y, env);
-    const radius = evalAttr(part.radius, env) || 40;
-    const sunRadius = evalAttr(part.sunRadius, env) || 2.5;
-    const sunFillColor = part.sunFillColor ? evalColor(part.sunFillColor, env) : "rgba(242,228,7,1)";
-    const sunStrokeColor = part.sunStrokeColor ? evalColor(part.sunStrokeColor, env) : "rgba(139,129,75,1)";
-    const channelColor = part.channelColor ? evalColor(part.channelColor, env) : "rgba(0,0,0,1)";
-    const channelWidth = evalAttr(part.channelWidth, env) || 0.8;
-    const bgRotates = (evalAttr(part.bgRotates, env) || 0) !== 0;
-    const updateIntervalSec = evalAttr(part.update, env) || DEFAULT_UPDATE_SEC;
-    const { path, refAlt, refAz, veRef } = computeAnalemmaPath();
-    const usableRadius = radius * (1 - PATH_MARGIN_FRACTION);
-    let maxAbsX = 0;
-    let maxAbsY = 0;
-    for (const pt of path) {
-      const correctedAz = pt.deltaAz * Math.cos(refAlt + pt.deltaAlt);
-      const absX = Math.abs(correctedAz);
-      const absY = Math.abs(pt.deltaAlt);
-      if (absX > maxAbsX) maxAbsX = absX;
-      if (absY > maxAbsY) maxAbsY = absY;
-    }
-    const maxExtent = Math.max(maxAbsX, maxAbsY);
-    const scaleFactor = maxExtent > 0 ? usableRadius / maxExtent : 1;
-    const pathScaled = path.map((pt) => [
-      pt.deltaAz * Math.cos(refAlt + pt.deltaAlt) * scaleFactor,
-      pt.deltaAlt * scaleFactor
-    ]);
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const [px, py] of pathScaled) {
-      if (px < minX) minX = px;
-      if (px > maxX) maxX = px;
-      if (py < minY) minY = py;
-      if (py > maxY) maxY = py;
-    }
-    const pathOffsetX = (minX + maxX) / 2;
-    const pathOffsetY = (minY + maxY) / 2;
-    for (let i = 0; i < pathScaled.length; i++) {
-      pathScaled[i][0] -= pathOffsetX;
-      pathScaled[i][1] -= pathOffsetY;
-    }
-    let bgBitmap = null;
-    if (part.bgSrc) {
-      const loaded2 = images.get(part.bgSrc);
-      if (loaded2) {
-        bgBitmap = createDiscBackground(loaded2.bitmap, loaded2.scale, radius);
-      }
-    }
-    if (!bgBitmap) {
-      bgBitmap = createFallbackDiscBackground(radius);
-    }
-    const { bitmap: sunBitmap, anchorX: sunAnchorX, anchorY: sunAnchorY, w: sunW, h: sunH } = buildSunBitmap(sunRadius, sunFillColor, sunStrokeColor);
-    const seasonTicks = computeSeasonTicks(veRef);
-    const channelBitmap = buildChannelBitmap(
-      pathScaled,
-      radius,
-      channelColor,
-      channelWidth,
-      seasonTicks
-    );
-    const state = {
-      path,
-      pathScaled,
-      scaleFactor,
-      pathOffsetX,
-      pathOffsetY,
-      refAlt,
-      refAz,
-      centerX,
-      centerY,
-      radius,
-      sunRadius,
-      sunFillColor,
-      sunStrokeColor,
-      channelColor,
-      channelWidth,
-      bgRotates,
-      currentPathParameter: 0,
-      currentRotation: 0,
-      seasonTicks,
-      updateIntervalSec,
-      nextUpdateTime: 0,
-      channelBitmap,
-      bgBitmap,
-      sunBitmap,
-      sunBitmapAnchorX: sunAnchorX,
-      sunBitmapAnchorY: sunAnchorY,
-      sunBitmapW: sunW,
-      sunBitmapH: sunH
-    };
-    updateAnalemmaValues(state, env);
-    return state;
-  }
-  function buildChannelPath2D(pathScaled) {
-    const p = new Path2D();
-    if (pathScaled.length === 0) return p;
-    p.moveTo(pathScaled[0][0], -pathScaled[0][1]);
-    for (let i = 1; i < pathScaled.length; i++) {
-      p.lineTo(pathScaled[i][0], -pathScaled[i][1]);
-    }
-    p.closePath();
-    return p;
-  }
-  function buildChannelBitmap(pathScaled, radius, channelColor, channelWidth, seasonTicks) {
-    const scale = 4;
-    const size = radius * 2;
-    const pxSize = Math.ceil(size * scale);
-    const canvas = new OffscreenCanvas(pxSize, pxSize);
-    const ctx = canvas.getContext("2d");
-    ctx.scale(scale, scale);
-    ctx.translate(radius, radius);
-    ctx.beginPath();
-    ctx.arc(0, 0, radius, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(0, 0, 0, 0.09)";
-    ctx.fill();
-    const channelPath = buildChannelPath2D(pathScaled);
-    ctx.strokeStyle = channelColor;
-    ctx.lineWidth = channelWidth;
-    ctx.lineJoin = "round";
-    ctx.stroke(channelPath);
-    const tickLen = 2;
-    const tickAlong = 0.5;
-    const gap = channelWidth / 2;
-    for (const { index, color } of seasonTicks) {
-      const idx = (Math.round(index) % pathScaled.length + pathScaled.length) % pathScaled.length;
-      const [px, py] = pathScaled[idx];
-      const prev = (idx - 1 + pathScaled.length) % pathScaled.length;
-      const next = (idx + 1) % pathScaled.length;
-      const dx = pathScaled[next][0] - pathScaled[prev][0];
-      const dy = pathScaled[next][1] - pathScaled[prev][1];
-      const len = Math.sqrt(dx * dx + dy * dy);
-      if (len === 0) continue;
-      const tx = dx / len;
-      const ty = dy / len;
-      const nx = -ty;
-      const ny = tx;
-      ctx.fillStyle = color;
-      for (const side of [1, -1]) {
-        const innerX = px + side * nx * gap;
-        const innerY = py + side * ny * gap;
-        const outerX = px + side * nx * (gap + tickLen);
-        const outerY = py + side * ny * (gap + tickLen);
-        const midX = (innerX + outerX) / 2;
-        const midY = (innerY + outerY) / 2;
-        ctx.save();
-        ctx.translate(midX, -midY);
-        ctx.rotate(-Math.atan2(ty, tx));
-        ctx.fillRect(-tickAlong, -tickLen / 2, tickAlong * 2, tickLen);
-        ctx.restore();
-      }
-    }
-    return canvas;
-  }
-  function buildSunBitmap(sunRadius, fillColor, strokeColor) {
-    const shadowBlur = 1.5;
-    const shadowOffsetX = 0.5;
-    const shadowOffsetY = 0.5;
-    const shadowPad = shadowBlur * 3 + Math.max(Math.abs(shadowOffsetX), Math.abs(shadowOffsetY));
-    const extent = sunRadius + 0.5 + shadowPad;
-    const w = extent * 2;
-    const h = extent * 2;
-    const scale = 8;
-    const pxW = Math.ceil(w * scale);
-    const pxH = Math.ceil(h * scale);
-    const canvas = new OffscreenCanvas(pxW, pxH);
-    const ctx = canvas.getContext("2d");
-    ctx.scale(scale, scale);
-    ctx.shadowColor = "rgba(0, 0, 0, 0.6)";
-    ctx.shadowBlur = shadowBlur * scale;
-    ctx.shadowOffsetX = shadowOffsetX * scale;
-    ctx.shadowOffsetY = shadowOffsetY * scale;
-    drawSunGlyph(ctx, extent, extent, sunRadius, fillColor, strokeColor);
-    return {
-      bitmap: canvas,
-      anchorX: extent,
-      // pivot is at center
-      anchorY: extent,
-      w,
-      h
-    };
-  }
-  function createDiscBackground(faceImage, faceImageScale, discRadius) {
-    const size = Math.ceil(discRadius * 2);
-    const pxSize = Math.ceil(size * 4);
-    const canvas = new OffscreenCanvas(pxSize, pxSize);
-    const ctx = canvas.getContext("2d");
-    ctx.beginPath();
-    ctx.arc(pxSize / 2, pxSize / 2, pxSize / 2, 0, Math.PI * 2);
-    ctx.clip();
-    const imgW = faceImage.width * faceImageScale;
-    const imgH = faceImage.height * faceImageScale;
-    const drawScale = pxSize / (discRadius * 2);
-    ctx.save();
-    ctx.translate(pxSize / 2, pxSize / 2);
-    ctx.scale(drawScale, drawScale);
-    ctx.drawImage(faceImage, -imgW / 2, -imgH / 2, imgW, imgH);
-    ctx.restore();
-    ctx.beginPath();
-    ctx.arc(pxSize / 2, pxSize / 2, pxSize / 2 - 1, 0, Math.PI * 2);
-    ctx.strokeStyle = "rgba(0,0,0,0.8)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    return canvas;
-  }
-  function createFallbackDiscBackground(discRadius) {
-    const size = Math.ceil(discRadius * 2);
-    const pxSize = Math.ceil(size * 4);
-    const canvas = new OffscreenCanvas(pxSize, pxSize);
-    const ctx = canvas.getContext("2d");
-    ctx.beginPath();
-    ctx.arc(pxSize / 2, pxSize / 2, pxSize / 2, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(0,0,0,0.25)";
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(pxSize / 2, pxSize / 2, pxSize / 2 - 1, 0, Math.PI * 2);
-    ctx.strokeStyle = "rgba(0,0,0,0.8)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    return canvas;
-  }
-  function updateAnalemmaValues(state, env) {
-    const getNow = env.getNow;
-    if (!getNow) return;
-    const now = getNow();
-    const di = dateToDateInterval(now);
-    state.currentPathParameter = fractionOfVernalEquinoxYear(di, null) * PATH_SAMPLE_COUNT;
-    const obsLat = env.observerLatRad ?? 0;
-    const obsLon = env.observerLonRad ?? 0;
-    state.currentRotation = sunSkyOrientationAngle(di, obsLat, obsLon, null);
-  }
-  function tickAnalemma(state, env, now) {
-    if (now >= state.nextUpdateTime) {
-      updateAnalemmaValues(state, env);
-      state.nextUpdateTime = now + state.updateIntervalSec * 1e3;
-    }
-  }
-  function resetAnalemmaSchedule(state) {
-    state.nextUpdateTime = 0;
-  }
-  function drawSunGlyph(ctx, cx, cy, radius, fillColor, strokeColor, nRays = 8) {
-    const innerRadius = radius * 0.5;
-    const rayTip = radius;
-    ctx.fillStyle = fillColor;
-    ctx.beginPath();
-    for (let i = 0; i < nRays; i++) {
-      const theta = 2 * Math.PI * i / nRays;
-      const tipX = cx + rayTip * Math.cos(theta);
-      const tipY = cy + rayTip * Math.sin(theta);
-      const cwX = cx + innerRadius * Math.cos(theta + Math.PI / nRays);
-      const cwY = cy + innerRadius * Math.sin(theta + Math.PI / nRays);
-      const ccwX = cx + innerRadius * Math.cos(theta - Math.PI / nRays);
-      const ccwY = cy + innerRadius * Math.sin(theta - Math.PI / nRays);
-      ctx.moveTo(tipX, tipY);
-      ctx.lineTo(cwX, cwY);
-      ctx.lineTo(ccwX, ccwY);
-      ctx.closePath();
-    }
-    ctx.arc(cx, cy, innerRadius, 0, 2 * Math.PI);
-    ctx.fill();
-  }
-  var MEAN_TROPICAL_YEAR_SECONDS2 = 365.2421897 * 86400;
-  var SEASON_TARGETS = [
-    { longitude: 0, color: "#22aa22" },
-    // Vernal equinox — green
-    { longitude: Math.PI / 2, color: "#ddcc00" },
-    // Summer solstice — yellow
-    { longitude: Math.PI, color: "#ee7722" },
-    // Autumnal equinox — orange
-    { longitude: 3 * Math.PI / 2, color: "#2266cc" }
-    // Winter solstice — blue
-  ];
-  function computeSeasonTicks(veRef) {
-    return SEASON_TARGETS.map(({ longitude, color }) => {
-      const approx = veRef + longitude / (2 * Math.PI) * MEAN_TROPICAL_YEAR_SECONDS2;
-      const crossing = solarLongitudeCrossingTime(longitude, approx, null);
-      const frac = fractionOfVernalEquinoxYear(crossing, null);
-      return { index: frac * PATH_SAMPLE_COUNT, color };
-    });
-  }
-  function drawAnalemma(ctx, state) {
-    const { centerX, centerY, radius, currentRotation, bgRotates } = state;
-    ctx.save();
-    ctx.translate(centerX, -centerY);
-    if (state.bgBitmap) {
-      if (bgRotates) {
-        ctx.save();
-        ctx.rotate(currentRotation);
-        drawBackground(ctx, state);
-        ctx.restore();
-      } else {
-        drawBackground(ctx, state);
-      }
-    }
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(0, 0, radius, 0, Math.PI * 2);
-    ctx.clip();
-    ctx.rotate(currentRotation);
-    if (state.channelBitmap) {
-      ctx.drawImage(state.channelBitmap, -radius, -radius, radius * 2, radius * 2);
-    }
-    if (state.sunBitmap) {
-      const [sunX, sunY] = pathParamToXY(state.pathScaled, state.currentPathParameter);
-      ctx.drawImage(
-        state.sunBitmap,
-        sunX - state.sunBitmapAnchorX,
-        -sunY - state.sunBitmapAnchorY,
-        state.sunBitmapW,
-        state.sunBitmapH
-      );
-    }
-    ctx.restore();
-    ctx.restore();
-  }
-  function drawBackground(ctx, state) {
-    if (!state.bgBitmap) return;
-    const { radius } = state;
-    const bmp = state.bgBitmap;
-    ctx.drawImage(bmp, -radius, -radius, radius * 2, radius * 2);
-  }
-
   // src/watch/renderer.ts
   function isTransparent(cssColor) {
     const m = cssColor.match(/,([\d.]+)\)$/);
@@ -16536,14 +16188,6 @@
         part.cachedCanvas = cache;
       } else {
         pendingWindows.length = 0;
-      }
-    }
-  }
-  function invalidateDayNightCaches(watch) {
-    for (const part of watch.parts) {
-      if (part.type === "QDayNightRing") {
-        part._cacheNextUpdate = 0;
-        part._cacheStart = void 0;
       }
     }
   }
@@ -17254,8 +16898,8 @@
     const marks = parseMarksType(part.marks);
     ctx.save();
     ctx.translate(x, y);
-    if (part.dynamicState) {
-      ctx.rotate(part.dynamicState.currentAngle);
+    if (part._obsAngle) {
+      ctx.rotate(part._obsAngle.currentValue);
     } else if (part.angle) {
       ctx.rotate(evalAttr(part.angle, env));
     }
@@ -17462,14 +17106,14 @@
   function drawQHand(ctx, part, env) {
     const x = evalAttr(part.x, env);
     const y = -evalAttr(part.y, env);
-    const angle = part.dynamicState ? part.dynamicState.currentAngle : evalAttr(part.angle, env);
+    const angle = part._obsAngle ? part._obsAngle.currentValue : evalAttr(part.angle, env);
     const length = evalAttr(part.length, env);
     const width = evalAttr(part.width, env);
     const tail = evalAttr(part.tail, env);
     const handType = part.handType || "tri";
     if (handType === "spoke") {
       const offsetRadius = evalAttr(part.offsetRadius, env);
-      const offsetAngle = part.dynamicState ? part.dynamicState.currentOffsetAngle ?? evalAttr(part.offsetAngle, env) : evalAttr(part.offsetAngle, env);
+      const offsetAngle = part._obsOffsetAngle ? part._obsOffsetAngle.currentValue : evalAttr(part.offsetAngle, env);
       const fontSize = evalAttr(part.fontSize, env) || 8;
       const fontName = part.fontName || "Arial";
       const strokeColor2 = part.strokeColor ? evalColor(part.strokeColor, env) : "rgba(0,0,0,1)";
@@ -17498,9 +17142,9 @@
     if (part._shadowBitmap) {
       ctx.save();
       ctx.translate(x, y);
-      if (part.dynamicState) {
-        const xm = part.dynamicState.currentXMotion ?? 0;
-        const ym = part.dynamicState.currentYMotion ?? 0;
+      if (part._obsXMotion || part._obsYMotion) {
+        const xm = part._obsXMotion?.currentValue ?? 0;
+        const ym = part._obsYMotion?.currentValue ?? 0;
         if (xm !== 0 || ym !== 0) {
           ctx.translate(xm, -ym);
         }
@@ -17522,9 +17166,9 @@
     ctx.save();
     const hasShadow = setupHandShadow(ctx, part, env);
     ctx.translate(x, y);
-    if (part.dynamicState) {
-      const xm = part.dynamicState.currentXMotion ?? 0;
-      const ym = part.dynamicState.currentYMotion ?? 0;
+    if (part._obsXMotion || part._obsYMotion) {
+      const xm = part._obsXMotion?.currentValue ?? 0;
+      const ym = part._obsYMotion?.currentValue ?? 0;
       if (xm !== 0 || ym !== 0) {
         ctx.translate(xm, -ym);
       }
@@ -17760,7 +17404,7 @@
     const x = evalAttr(part.x, env);
     const y = -evalAttr(part.y, env);
     const radius = evalAttr(part.radius, env);
-    const angle = part.dynamicState ? part.dynamicState.currentAngle : evalAttr(part.angle, env);
+    const angle = part._obsAngle ? part._obsAngle.currentValue : evalAttr(part.angle, env);
     if (radius <= 0) return;
     const labels = part.text?.split(",") || [];
     const n = labels.length;
@@ -18014,9 +17658,9 @@
     if (alpha <= 0) return;
     const x = evalAttr(part.x, env);
     const y = -evalAttr(part.y, env);
-    const angle = part.dynamicState ? part.dynamicState.currentAngle : evalAttr(part.angle, env);
+    const angle = part._obsAngle ? part._obsAngle.currentValue : evalAttr(part.angle, env);
     const offsetRadius = evalAttr(part.offsetRadius, env);
-    const offsetAngle = part.dynamicState && part.dynamicState.currentOffsetAngle !== void 0 ? part.dynamicState.currentOffsetAngle : evalAttr(part.offsetAngle, env);
+    const offsetAngle = part._obsOffsetAngle ? part._obsOffsetAngle.currentValue : evalAttr(part.offsetAngle, env);
     const { bitmap, scale: imgScale } = loaded2;
     const drawW = bitmap.width * imgScale;
     const drawH = bitmap.height * imgScale;
@@ -18104,7 +17748,7 @@
     const outerR = evalAttr(part.outerRadius, env);
     const innerR = evalAttr(part.innerRadius, env);
     const span = evalAttr(part.angleSpan, env);
-    const angle = part.dynamicState ? part.dynamicState.currentAngle : evalAttr(part.angle, env);
+    const angle = part._obsAngle ? part._obsAngle.currentValue : evalAttr(part.angle, env);
     if (outerR <= 0 || innerR <= 0 || span <= 0) return;
     const strokeColor = part.strokeColor ? evalColor(part.strokeColor, env) : "black";
     const fillColor = part.fillColor ? evalColor(part.fillColor, env) : "transparent";
@@ -18113,7 +17757,7 @@
     let totalAngle = angle;
     if (part.offsetRadius && part.offsetAngle) {
       const offR = evalAttr(part.offsetRadius, env);
-      const offA = part.dynamicState?.currentOffsetAngle !== void 0 ? part.dynamicState.currentOffsetAngle : evalAttr(part.offsetAngle, env);
+      const offA = part._obsOffsetAngle ? part._obsOffsetAngle.currentValue : evalAttr(part.offsetAngle, env);
       ctx.translate(offR * Math.sin(offA), -offR * Math.cos(offA));
       totalAngle = offA + angle;
     }
@@ -18140,108 +17784,20 @@
     const cy = -evalAttr(part.y, env);
     const outerR = evalAttr(part.outerRadius, env);
     const innerR = evalAttr(part.innerRadius, env);
-    const numWedges = evalAttr(part.numWedges, env) || 24;
-    const planetNumber = evalAttr(part.planetNumber, env);
-    const masterOffset = part._masterOffsetAnim && part._masterOffsetAnim.animating ? part._masterOffsetAnim.currentValue : evalAttr(part.masterOffset, env);
     if (outerR <= 0 || innerR <= 0) return;
+    const angleValues = part._obsWedgeAngles;
+    if (!angleValues || angleValues.length === 0) return;
+    const numWedges = angleValues.length;
+    const masterOffset = part._obsMasterOffset ? part._obsMasterOffset.currentValue : evalAttr(part.masterOffset, env);
     const strokeColor = part.strokeColor ? evalColor(part.strokeColor, env) : "black";
     const fillColor = part.fillColor ? evalColor(part.fillColor, env) : "white";
     const wedgeSpan = (2 * Math.PI + 0.2) / numWedges;
-    const slotNumber = part.envSlot ? evalAttr(part.envSlot, env) : void 0;
-    let leafAngleFn;
-    if (slotNumber != null && !isNaN(slotNumber)) {
-      const slotFn = env.functions.get("dayNightLeafAngleForSlot");
-      if (slotFn) {
-        leafAngleFn = (p, l, n) => slotFn(p, l, n, slotNumber);
-      }
-    }
-    if (!leafAngleFn) {
-      const fnName = part.timeBase === "LST" ? "dayNightLeafAngleLST" : "dayNightLeafAngle";
-      leafAngleFn = env.functions.get(fnName);
-    }
-    if (!leafAngleFn) return;
-    const updateSec = part.update ? evalAttr(part.update, env) : 5;
-    const updateMs = updateSec * 1e3;
-    const displayNowMs = env.getNow ? env.getNow().getTime() : performance.now();
-    let angles;
-    const slideDistance = part.slideDistance ? evalAttr(part.slideDistance, env) : 0;
-    const slideAnimSpeed = part.slideAnimSpeed ? evalAttr(part.slideAnimSpeed, env) : 1;
-    const perfNow = performance.now();
-    let numVis = numWedges;
-    if (slideDistance > 0) {
-      const numVisFn = env.functions.get("wadokeiDNNumVisible");
-      if (numVisFn) {
-        numVis = numVisFn(numWedges);
-      }
-    }
-    if (part._cachedAngles && part._cachedAngles.length === numWedges && part._cacheStart != null && part._cacheNextUpdate != null && displayNowMs >= part._cacheStart && displayNowMs < part._cacheNextUpdate && part._cacheNumVis === numVis) {
-      angles = part._cachedAngles;
-    } else {
-      angles = new Array(numWedges);
-      if (slideDistance > 0 && numVis > 0 && numVis < numWedges) {
-        const sunsetAngle = part.sunsetAngle ? evalAttr(part.sunsetAngle, env) : leafAngleFn(planetNumber, 1, 0);
-        const sunriseAngle = part.sunriseAngle ? evalAttr(part.sunriseAngle, env) : leafAngleFn(planetNumber, 0, 0);
-        let nightArc = sunriseAngle - sunsetAngle;
-        if (nightArc < 0) nightArc += 2 * Math.PI;
-        const adjustedStart = sunsetAngle + wedgeSpan / 2;
-        const adjustedArc = nightArc - wedgeSpan;
-        const step = numVis > 1 ? adjustedArc / (numVis - 1) : 0;
-        for (let i = 0; i < numVis; i++) {
-          const raw = adjustedStart + step * i;
-          angles[i] = (raw % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
-        }
-        const parkAngle = numVis > 0 ? adjustedStart + step * (numVis - 1) : sunsetAngle;
-        for (let i = numVis; i < numWedges; i++) {
-          angles[i] = parkAngle;
-        }
-      } else if (slideDistance > 0 && numVis === 0) {
-        for (let i = 0; i < numWedges; i++) {
-          angles[i] = 0;
-        }
-      } else if (slideDistance > 0 && numVis >= numWedges) {
-        for (let i = 0; i < numWedges; i++) {
-          angles[i] = 2 * Math.PI * i / numWedges;
-        }
-      } else {
-        for (let i = 0; i < numWedges; i++) {
-          angles[i] = leafAngleFn(planetNumber, i, numWedges);
-        }
-      }
-      part._cachedAngles = angles;
-      part._cacheStart = displayNowMs;
-      part._cacheNextUpdate = displayNowMs + updateMs;
-      part._cacheNumVis = numVis;
-    }
-    if (!part._wedgeAngleAnims || part._wedgeAngleAnims.length !== numWedges) {
-      part._wedgeAngleAnims = [];
-      for (let i = 0; i < numWedges; i++) {
-        part._wedgeAngleAnims.push(makeAnimatingValue(angles[i], perfNow));
-      }
-    }
-    for (let i = 0; i < numWedges; i++) {
-      startAnimationRaw(part._wedgeAngleAnims[i], angles[i], perfNow);
-    }
-    if (slideDistance > 0) {
-      if (!part._wedgeSlides || part._wedgeSlides.length !== numWedges) {
-        part._wedgeSlides = [];
-        for (let i = 0; i < numWedges; i++) {
-          part._wedgeSlides.push(makeAnimatingValue(slideDistance, perfNow));
-        }
-      }
-      for (let i = 0; i < numWedges; i++) {
-        const target = i < numVis ? 0 : slideDistance;
-        startLinearAnimation(part._wedgeSlides[i], target, perfNow, slideAnimSpeed);
-      }
-    }
+    const slideValues = part._obsWedgeSlides;
     ctx.save();
     ctx.translate(cx, cy);
     for (let i = 0; i < numWedges; i++) {
-      const animatedAngle = interpolateRaw(part._wedgeAngleAnims[i], perfNow);
-      const angle = masterOffset + animatedAngle;
-      let slide = 0;
-      if (part._wedgeSlides && part._wedgeSlides[i]) {
-        slide = interpolateValue(part._wedgeSlides[i], perfNow);
-      }
+      const angle = masterOffset + angleValues[i].currentValue;
+      const slide = slideValues ? slideValues[i]?.currentValue ?? 0 : 0;
       ctx.save();
       ctx.rotate(angle);
       if (Math.abs(slide) > 0.01) {
@@ -18383,7 +17939,7 @@
     if (!terraSlots || !images || !part.src) return;
     const loaded2 = images.get(part.src);
     if (!loaded2) return;
-    const angle = part.dynamicState ? part.dynamicState.currentAngle : evalAttr(part.angle, env);
+    const angle = part._obsAngle ? part._obsAngle.currentValue : evalAttr(part.angle, env);
     let cache = env._terraCityKnockout;
     if (!cache) {
       cache = buildTerraRingKnockoutCache(loaded2, terraSlots);
@@ -18456,7 +18012,7 @@
       console.log("[Terra] No getDSTRange function");
       return;
     }
-    const angle = part.dynamicState ? part.dynamicState.currentAngle : evalAttr(part.angle, env);
+    const angle = part._obsAngle ? part._obsAngle.currentValue : evalAttr(part.angle, env);
     const channelRad1 = 112;
     const channelRad2 = 125.5;
     const channelWidth = 0.25;
@@ -18579,7 +18135,7 @@
     const x = evalAttr(part.x, env);
     const y = -evalAttr(part.y, env);
     const radius = evalAttr(part.radius, env);
-    const angle = part.dynamicState ? part.dynamicState.currentAngle : evalAttr(part.angle, env);
+    const angle = part._obsAngle ? part._obsAngle.currentValue : evalAttr(part.angle, env);
     const fontSize = evalAttr(part.fontSize, env) || 8;
     const fontName = part.fontName || "Arial";
     const bgColor = evalColor(part.bgColor, env);
@@ -18712,7 +18268,7 @@
     const cellHeight = env.variables.get("calendarCellHeight") ?? 11;
     const calRadius = evalAttr(part.calendarRadius, env) || 117;
     const coverType = part.coverType || "";
-    const xOffset = part.dynamicState?.currentXMotion ?? 0;
+    const xOffset = part._obsXMotion?.currentValue ?? 0;
     const gridTop = -(calRadius - calHeight / 2);
     let rowY;
     if (coverType === "row56Right" || coverType === "row6Left") {
@@ -19436,6 +18992,741 @@
       }
     }
   };
+
+  // src/shared/updater.ts
+  var K_ANGLE_ANIM_SPEED = 2;
+  var NATURAL_ERROR_THRESHOLD = 2e-3;
+  function makeOverridableGetNow(base) {
+    let overrideMs = null;
+    const getNow = () => overrideMs != null ? new Date(overrideMs) : base();
+    function withDisplayTime(displayMs, fn) {
+      const prev = overrideMs;
+      overrideMs = displayMs;
+      try {
+        return fn();
+      } finally {
+        overrideMs = prev;
+      }
+    }
+    return { getNow, withDisplayTime };
+  }
+  function timingContextForFrame(tc) {
+    const rate = tc.currentRate;
+    return {
+      tickIntervalMs: rate ? TICK_INTERVAL_MS : null,
+      displayDeltaSec: rate ? displaySecondsPerTick(rate.unit) : 0,
+      direction: tc.isStopped ? 0 : tc.currentDirection
+    };
+  }
+  function updateObsValueDiscrete(v, env, perfNow, getNow, timeDirection, tickIntervalMs) {
+    const newTarget = evalAttr(v.expr, env);
+    if (timeDirection === 0) {
+      v.nextUpdateTime = perfNow + 100;
+    } else if (tickIntervalMs !== null && tickIntervalMs > 0) {
+      v.nextUpdateTime = perfNow + tickIntervalMs;
+    } else {
+      const dir = timeDirection === -1 ? -1 : 1;
+      const nextDisplayMs = computeNextBoundary(v.updateInterval * 1e3, getNow, dir, env);
+      v.nextUpdateDisplayTime = nextDisplayMs;
+      v.nextUpdateTime = displayTimeToPerfNow(nextDisplayMs, getNow);
+    }
+    v.pendingSweep = null;
+    v.anim.currentValue = newTarget;
+    v.anim.targetValue = newTarget;
+    v.anim.animating = false;
+  }
+  function updateObsValueEvalAhead(v, env, perfNow, getNow, timeDirection, tickIntervalMs, displayDeltaSec, withDisplayTime) {
+    let nextDisplayMs;
+    let budgetMs;
+    if (tickIntervalMs !== null && tickIntervalMs > 0) {
+      nextDisplayMs = getNow().getTime() + displayDeltaSec * 1e3 * timeDirection;
+      budgetMs = tickIntervalMs;
+      v.nextUpdateTime = perfNow + tickIntervalMs;
+    } else {
+      nextDisplayMs = computeNextBoundary(v.updateInterval * 1e3, getNow, timeDirection, env);
+      v.nextUpdateTime = displayTimeToPerfNow(nextDisplayMs, getNow);
+      budgetMs = v.nextUpdateTime - perfNow;
+    }
+    v.nextUpdateDisplayTime = nextDisplayMs;
+    const target = withDisplayTime ? withDisplayTime(nextDisplayMs, () => evalAttr(v.expr, env)) : evalAttr(v.expr, env);
+    v.pendingSweep = null;
+    const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
+    if (budgetMs > 0 && isFinite(budgetMs)) {
+      startAnimationRaw(v.anim, target, perfNow, multiplier, budgetMs, v.period);
+    } else {
+      startAnimationRaw(v.anim, target, perfNow, multiplier, void 0, v.period);
+    }
+  }
+  function updateNaturalSpeedValue(v, env, perfNow, getNow, timeDirection) {
+    const currentCorrectAngle = evalAttr(v.expr, env);
+    const nextDisplayMs = computeNextBoundary(
+      v.updateInterval * 1e3,
+      getNow,
+      timeDirection,
+      env
+    );
+    v.nextUpdateDisplayTime = nextDisplayMs;
+    v.nextUpdateTime = displayTimeToPerfNow(nextDisplayMs, getNow);
+    const dtToNextUpdateMs = v.nextUpdateTime - perfNow;
+    const dtToNextUpdateSec = dtToNextUpdateMs / 1e3;
+    if (dtToNextUpdateSec <= 0 || !isFinite(dtToNextUpdateSec)) {
+      startAnimationRaw(
+        v.anim,
+        currentCorrectAngle,
+        perfNow,
+        v.animSpeed / K_ANGLE_ANIM_SPEED,
+        void 0,
+        v.period
+      );
+      v.pendingSweep = null;
+      return;
+    }
+    const effNaturalSpeed = v.naturalSpeed * timeDirection;
+    const TWO_PI6 = 2 * Math.PI;
+    let error;
+    if (timeDirection === 1) {
+      error = currentCorrectAngle - v.anim.currentValue;
+      error = (error % TWO_PI6 + TWO_PI6) % TWO_PI6;
+    } else {
+      error = v.anim.currentValue - currentCorrectAngle;
+      error = (error % TWO_PI6 + TWO_PI6) % TWO_PI6;
+    }
+    if (error < NATURAL_ERROR_THRESHOLD) {
+      const sweepAngle2 = effNaturalSpeed * dtToNextUpdateSec;
+      const finalTarget = currentCorrectAngle + sweepAngle2;
+      startAnimationRaw(
+        v.anim,
+        finalTarget,
+        perfNow,
+        v.naturalSpeed / K_ANGLE_ANIM_SPEED,
+        dtToNextUpdateMs,
+        v.period
+      );
+      v.pendingSweep = null;
+      return;
+    }
+    const differentialSpeed = v.animSpeed - v.naturalSpeed;
+    if (differentialSpeed <= 0) {
+      const sweepAngle2 = effNaturalSpeed * dtToNextUpdateSec;
+      const finalTarget = currentCorrectAngle + sweepAngle2;
+      startAnimationRaw(
+        v.anim,
+        finalTarget,
+        perfNow,
+        v.animSpeed / K_ANGLE_ANIM_SPEED,
+        dtToNextUpdateMs,
+        v.period
+      );
+      v.pendingSweep = null;
+      return;
+    }
+    const catchUpSec = error / differentialSpeed;
+    const catchUpMs = catchUpSec * 1e3;
+    if (catchUpMs >= dtToNextUpdateMs) {
+      const sweepAngle2 = effNaturalSpeed * dtToNextUpdateSec;
+      const finalTarget = currentCorrectAngle + sweepAngle2;
+      startAnimationRaw(
+        v.anim,
+        finalTarget,
+        perfNow,
+        v.animSpeed / K_ANGLE_ANIM_SPEED,
+        dtToNextUpdateMs,
+        v.period
+      );
+      v.pendingSweep = null;
+      return;
+    }
+    const catchUpTarget = currentCorrectAngle + effNaturalSpeed * catchUpSec;
+    startAnimationRaw(
+      v.anim,
+      catchUpTarget,
+      perfNow,
+      v.animSpeed / K_ANGLE_ANIM_SPEED,
+      catchUpMs,
+      v.period
+    );
+    const remainingMs = dtToNextUpdateMs - catchUpMs;
+    const sweepAngle = effNaturalSpeed * (remainingMs / 1e3);
+    v.pendingSweep = {
+      target: catchUpTarget + sweepAngle,
+      durationMs: remainingMs
+    };
+  }
+  function updateObsValueScrub(v, env, perfNow, getNow, timeDirection, tickIntervalMs, displayDeltaPerTickSec) {
+    const newTarget = evalAttr(v.expr, env);
+    const nextDisplayMs = computeNextBoundary(
+      v.updateInterval * 1e3,
+      getNow,
+      timeDirection,
+      env
+    );
+    v.nextUpdateDisplayTime = nextDisplayMs;
+    const displayNowMs = getNow().getTime();
+    const displayDeltaMs = Math.abs(nextDisplayMs - displayNowMs);
+    const displayDeltaPerTickMs = displayDeltaPerTickSec * 1e3;
+    const ticksUntilUpdate = displayDeltaPerTickMs > 0 ? Math.max(1, Math.ceil(displayDeltaMs / displayDeltaPerTickMs)) : 1;
+    const timeUntilNextUpdateMs = ticksUntilUpdate * tickIntervalMs;
+    v.nextUpdateTime = perfNow + timeUntilNextUpdateMs;
+    const speed = v.animSpeed;
+    let angleDelta;
+    if (!isFinite(v.period)) {
+      angleDelta = Math.abs(newTarget - v.anim.currentValue);
+    } else {
+      const P = v.period;
+      const normalizedTarget = (newTarget % P + P) % P;
+      const normalizedCurrent = (v.anim.currentValue % P + P) % P;
+      angleDelta = Math.abs(normalizedTarget - normalizedCurrent);
+      if (angleDelta > P / 2) angleDelta = P - angleDelta;
+    }
+    const naturalDurationMs = speed > 0 ? angleDelta / speed * 1e3 : 0;
+    const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
+    if (naturalDurationMs > timeUntilNextUpdateMs) {
+      startAnimationRaw(
+        v.anim,
+        newTarget,
+        perfNow,
+        multiplier,
+        timeUntilNextUpdateMs,
+        v.period
+      );
+    } else if (naturalDurationMs < tickIntervalMs) {
+      startAnimationRaw(
+        v.anim,
+        newTarget,
+        perfNow,
+        multiplier,
+        tickIntervalMs,
+        v.period
+      );
+    } else {
+      startAnimationRaw(
+        v.anim,
+        newTarget,
+        perfNow,
+        multiplier,
+        void 0,
+        v.period
+      );
+    }
+    v.pendingSweep = null;
+  }
+  function settleAtNow(v, env, perfNow) {
+    const newTarget = evalAttr(v.expr, env);
+    v.nextUpdateTime = perfNow + 100;
+    v.pendingSweep = null;
+    startAnimationRaw(
+      v.anim,
+      newTarget,
+      perfNow,
+      v.animSpeed / K_ANGLE_ANIM_SPEED,
+      void 0,
+      v.period
+    );
+  }
+  function updateObsValueFixedDuration(v, env, perfNow, durationMs) {
+    const newTarget = evalAttr(v.expr, env);
+    v.nextUpdateTime = 0;
+    v.pendingSweep = null;
+    if (v.discrete) {
+      v.anim.currentValue = newTarget;
+      v.anim.targetValue = newTarget;
+      v.anim.animating = false;
+      return;
+    }
+    const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
+    startAnimationRaw(v.anim, newTarget, perfNow, multiplier, durationMs, v.period);
+  }
+  function snapToTargetAtBoundary(v, env, perfNow, getNow, timeDirection) {
+    const newTarget = evalAttr(v.expr, env);
+    const nextDisplayMs = computeNextBoundary(v.updateInterval * 1e3, getNow, timeDirection, env);
+    v.nextUpdateDisplayTime = nextDisplayMs;
+    v.nextUpdateTime = displayTimeToPerfNow(nextDisplayMs, getNow);
+    v.pendingSweep = null;
+    startAnimationRaw(
+      v.anim,
+      newTarget,
+      perfNow,
+      v.animSpeed / K_ANGLE_ANIM_SPEED,
+      void 0,
+      v.period
+    );
+  }
+  function updateObsValue(v, env, perfNow, getNow, tickIntervalMs, displayDeltaPerTickSec, timeDirection, withDisplayTime) {
+    if (v.discrete) {
+      updateObsValueDiscrete(v, env, perfNow, getNow, timeDirection, tickIntervalMs);
+    } else if (timeDirection === 0) {
+      settleAtNow(v, env, perfNow);
+    } else if (v.evalAhead) {
+      updateObsValueEvalAhead(
+        v,
+        env,
+        perfNow,
+        getNow,
+        timeDirection,
+        tickIntervalMs,
+        displayDeltaPerTickSec,
+        withDisplayTime
+      );
+    } else if (tickIntervalMs !== null && tickIntervalMs > 0) {
+      updateObsValueScrub(
+        v,
+        env,
+        perfNow,
+        getNow,
+        timeDirection,
+        tickIntervalMs,
+        displayDeltaPerTickSec
+      );
+    } else if (v.naturalSpeed > 0) {
+      updateNaturalSpeedValue(v, env, perfNow, getNow, timeDirection);
+    } else {
+      snapToTargetAtBoundary(v, env, perfNow, getNow, timeDirection);
+    }
+  }
+  function updateObsValues(values, env, perfNow, getNow, tickIntervalMs = null, displayDeltaPerTickSec = 0, timeDirection = 1, withDisplayTime) {
+    for (const v of values) {
+      if (perfNow >= v.nextUpdateTime) {
+        updateObsValue(
+          v,
+          env,
+          perfNow,
+          getNow,
+          tickIntervalMs,
+          displayDeltaPerTickSec,
+          timeDirection,
+          withDisplayTime
+        );
+      }
+    }
+  }
+  function animateObsValue(v, perfNow) {
+    v.currentValue = interpolateValue(v.anim, perfNow);
+    if (!v.anim.animating && v.pendingSweep) {
+      const sweep = v.pendingSweep;
+      v.pendingSweep = null;
+      const sweepMultiplier = v.naturalSpeed / K_ANGLE_ANIM_SPEED;
+      startAnimationRaw(
+        v.anim,
+        sweep.target,
+        perfNow,
+        sweepMultiplier,
+        sweep.durationMs,
+        v.period
+      );
+      v.currentValue = interpolateValue(v.anim, perfNow);
+    }
+  }
+  function animateObsValues(values, perfNow) {
+    for (const v of values) {
+      animateObsValue(v, perfNow);
+    }
+  }
+  function resetObsValueSchedules(values) {
+    for (const v of values) {
+      v.nextUpdateDisplayTime = 0;
+      v.nextUpdateTime = 0;
+    }
+  }
+  function anyObsAnimating(values) {
+    for (const v of values) {
+      if (v.anim.animating || v.pendingSweep) return true;
+    }
+    return false;
+  }
+  var Updater = class {
+    constructor() {
+      this.values = [];
+      this.byName = /* @__PURE__ */ new Map();
+    }
+    /** Register a value; returns it for convenient handle capture. */
+    add(v) {
+      this.values.push(v);
+      this.byName.set(v.name, v);
+      return v;
+    }
+    addAll(vs) {
+      for (const v of vs) this.add(v);
+    }
+    remove(v) {
+      const i = this.values.indexOf(v);
+      if (i >= 0) this.values.splice(i, 1);
+      this.byName.delete(v.name);
+    }
+    clear() {
+      this.values.length = 0;
+      this.byName.clear();
+    }
+    get all() {
+      return this.values;
+    }
+    /** Look up a registered value by name; throws if no such value exists. */
+    get(name) {
+      const v = this.byName.get(name);
+      if (!v) throw new Error(`Updater.get: no value named "${name}"`);
+      return v;
+    }
+    /** True if a value with this name is registered. */
+    has(name) {
+      return this.byName.has(name);
+    }
+    /** Per-frame: re-evaluate expired values + animate the whole collection. */
+    tick(env, perfNow, getNow, withDisplayTime, ctx) {
+      updateObsValues(
+        this.values,
+        env,
+        perfNow,
+        getNow,
+        ctx.tickIntervalMs,
+        ctx.displayDeltaSec,
+        ctx.direction,
+        withDisplayTime
+      );
+      animateObsValues(this.values, perfNow);
+    }
+    /** True while any value is mid-animation (for idle-scheduler decisions). */
+    anyAnimating() {
+      return anyObsAnimating(this.values);
+    }
+    /**
+     * Re-evaluate every value on the next frame. Bind the time-controls transition
+     * callbacks (scrub start/end, step, now, transport change) to this — clients
+     * "react to transitions" without computing how the controller affects values.
+     */
+    reset() {
+      resetObsValueSchedules(this.values);
+    }
+    /**
+     * Snap every in-flight animation to its target and freeze schedules.
+     *
+     * For each value: clear any pending Phase-2 sweep, set the animation (and the
+     * displayed `currentValue`) to the target — wrapped to `[0, period)` for cyclic
+     * values, left as-is for linear ones — stop animating, and freeze the schedule
+     * (`nextUpdateTime = Infinity`) so nothing re-evaluates until `reset()`.
+     *
+     * Used for step / transport / scrub-end transitions where the system must
+     * settle immediately, and (with the freeze) to hold the stopped-clock state
+     * idle. Generalizes the legacy `finishAnimations`/`finishLeafAnimations` to the
+     * ObsValue fields and the `period` wrap.
+     */
+    finish() {
+      for (const v of this.values) {
+        v.pendingSweep = null;
+        let target = v.anim.targetValue;
+        if (isFinite(v.period)) {
+          target = (target % v.period + v.period) % v.period;
+        }
+        v.anim.currentValue = target;
+        v.anim.targetValue = target;
+        v.anim.animating = false;
+        v.currentValue = target;
+        v.nextUpdateDisplayTime = Infinity;
+        v.nextUpdateTime = Infinity;
+      }
+    }
+    /**
+     * Earliest `performance.now()` at which any value is scheduled to re-evaluate
+     * (`Infinity` if all are frozen). The idle scheduler uses this to set a precise
+     * wakeup `setTimeout`. Generalizes the legacy `nextWakeupTime(states)`.
+     */
+    nextWakeupTime() {
+      let earliest = Infinity;
+      for (const v of this.values) {
+        if (v.nextUpdateTime < earliest) earliest = v.nextUpdateTime;
+      }
+      return earliest;
+    }
+    /**
+     * Like `tick()`, but forces every value to animate over exactly
+     * `durationMs` of real time — no boundary scheduling, no two-phase
+     * sweep.  Used for drag-to-explore, where pointer events drive
+     * continuous re-evaluation at a fixed animation budget.
+     *
+     * Bypasses the `nextUpdateTime` gate (every value is always updated)
+     * and ignores the `TimingContext` entirely.
+     */
+    tickFixedDuration(env, perfNow, durationMs) {
+      for (const v of this.values) {
+        updateObsValueFixedDuration(v, env, perfNow, durationMs);
+      }
+      animateObsValues(this.values, perfNow);
+    }
+    /**
+     * Interpolation-only pass — advance in-flight animations without
+     * re-evaluating expressions.  Use on frames where the inputs (env)
+     * haven't changed but existing animations should keep progressing.
+     */
+    animateOnly(perfNow) {
+      animateObsValues(this.values, perfNow);
+    }
+  };
+
+  // src/shared/obs-value.ts
+  function createObsValue(def, env, perfNow, getNow) {
+    return createObsValueFromAST({ ...def, expr: parse(def.expr) }, env, perfNow, getNow);
+  }
+  function createObsValueFromAST(def, env, perfNow, _getNow) {
+    const expr = def.expr;
+    const initialValue = evalAttr(expr, env);
+    const animSpeed = def.animSpeed ?? 2;
+    const naturalSpeed = def.naturalSpeed ?? 0;
+    const linear = def.linear ?? false;
+    const period = linear ? Infinity : def.period ?? 2 * Math.PI;
+    return {
+      name: def.name,
+      expr,
+      updateInterval: def.updateInterval,
+      animSpeed,
+      naturalSpeed,
+      currentValue: initialValue,
+      anim: makeAnimatingValue(initialValue, perfNow),
+      // Schedule immediate update on first frame so animation starts right away.
+      nextUpdateDisplayTime: 0,
+      nextUpdateTime: 0,
+      pendingSweep: null,
+      linear,
+      period,
+      evalAhead: def.evalAhead ?? false,
+      discrete: def.discrete ?? false
+    };
+  }
+
+  // src/watch/hand-values.ts
+  var ANGLE_BASE_SPEED = 2;
+  var LINEAR_BASE_SPEED = 60;
+  var EVAL_AHEAD = false;
+  function buildHandValues(faceName, watch, env, perfNow, lightweight = false) {
+    const updater = new Updater();
+    collectValues(watch.parts, faceName, env, perfNow, updater, lightweight);
+    return updater;
+  }
+  function collectValues(parts, faceName, env, perfNow, updater, lightweight) {
+    for (const part of parts) {
+      if (part.type === "QHand" || part.type === "Wheel" || part.type === "QWedge") {
+        buildHandPart(part, faceName, env, perfNow, updater);
+      } else if (part.type === "QDial" && part.animSpeed) {
+        buildDialPart(part, faceName, env, perfNow, updater);
+      } else if (part.type === "QDayNightRing") {
+        buildDayNightRing(part, faceName, env, perfNow, updater, lightweight);
+      } else if (part.type === "CalendarRowCover") {
+        buildCalendarCover(part, faceName, env, perfNow, updater);
+      } else if (part.type === "Static") {
+        collectValues(part.children, faceName, env, perfNow, updater, lightweight);
+      }
+    }
+  }
+  function xmlAnimSpeed(part, env) {
+    return part.animSpeed ? evalAttr(part.animSpeed, env) : 1;
+  }
+  function updateIntervalSec(part, env, def) {
+    return part.update ? evalAttr(part.update, env) : def;
+  }
+  function addAngleValue(updater, name, expr, env, perfNow, updateInterval, animSpeedRadPerSec) {
+    return updater.add(createObsValueFromAST({
+      name,
+      expr,
+      updateInterval,
+      animSpeed: animSpeedRadPerSec,
+      evalAhead: EVAL_AHEAD
+    }, env, perfNow));
+  }
+  function addLinearValue(updater, name, expr, env, perfNow, updateInterval, animSpeedPxPerSec) {
+    return updater.add(createObsValueFromAST({
+      name,
+      expr,
+      updateInterval,
+      linear: true,
+      animSpeed: animSpeedPxPerSec,
+      evalAhead: EVAL_AHEAD
+    }, env, perfNow));
+  }
+  function buildHandPart(part, faceName, env, perfNow, updater) {
+    const key = (prop) => `${faceName}.${part.name}.${prop}`;
+    const animS = xmlAnimSpeed(part, env);
+    const interval = updateIntervalSec(part, env, 1);
+    if (part.angle) {
+      part._obsAngle = addAngleValue(
+        updater,
+        key("angle"),
+        part.angle,
+        env,
+        perfNow,
+        interval,
+        ANGLE_BASE_SPEED * animS
+      );
+    }
+    const offsetAngle = part.type === "QHand" || part.type === "QWedge" ? part.offsetAngle : void 0;
+    if (offsetAngle) {
+      part._obsOffsetAngle = addAngleValue(
+        updater,
+        key("offsetAngle"),
+        offsetAngle,
+        env,
+        perfNow,
+        interval,
+        ANGLE_BASE_SPEED * animS
+      );
+    }
+    if (part.type === "QHand") {
+      if (part.xMotion) {
+        part._obsXMotion = addLinearValue(
+          updater,
+          key("xMotion"),
+          part.xMotion,
+          env,
+          perfNow,
+          interval,
+          LINEAR_BASE_SPEED * animS
+        );
+      }
+      if (part.yMotion) {
+        part._obsYMotion = addLinearValue(
+          updater,
+          key("yMotion"),
+          part.yMotion,
+          env,
+          perfNow,
+          interval,
+          LINEAR_BASE_SPEED * animS
+        );
+      }
+    }
+  }
+  function buildDialPart(part, faceName, env, perfNow, updater) {
+    if (!part.angle) return;
+    const animS = xmlAnimSpeed(part, env);
+    const interval = updateIntervalSec(part, env, 1);
+    part._obsAngle = addAngleValue(
+      updater,
+      `${faceName}.${part.name}.angle`,
+      part.angle,
+      env,
+      perfNow,
+      interval,
+      ANGLE_BASE_SPEED * animS
+    );
+  }
+  function buildCalendarCover(part, faceName, env, perfNow, updater) {
+    const animS = xmlAnimSpeed(part, env);
+    const interval = updateIntervalSec(part, env, 3600);
+    const code = CALENDAR_COVER_CODES[part.coverType ?? ""] ?? 0;
+    part._obsXMotion = updater.add(createObsValue({
+      name: `${faceName}.${part.name}.xMotion`,
+      expr: `calendarCoverOffset(${code})`,
+      updateInterval: interval,
+      linear: true,
+      animSpeed: LINEAR_BASE_SPEED * animS,
+      evalAhead: EVAL_AHEAD
+    }, env, perfNow));
+  }
+  function buildDayNightRing(part, faceName, env, perfNow, updater, lightweight) {
+    const key = (prop) => `${faceName}.${part.name}.${prop}`;
+    const interval = updateIntervalSec(part, env, 5);
+    const ringAnimS = 1;
+    if (part.masterOffset) {
+      part._obsMasterOffset = updater.add(createObsValueFromAST({
+        name: key("masterOffset"),
+        expr: part.masterOffset,
+        updateInterval: interval,
+        animSpeed: ANGLE_BASE_SPEED * ringAnimS,
+        evalAhead: false
+      }, env, perfNow));
+    }
+    if (lightweight) return;
+    const numWedges = Math.round(evalAttr(part.numWedges, env)) || 24;
+    const planet = Math.round(evalAttr(part.planetNumber, env));
+    const slideDistance = part.slideDistance ? evalAttr(part.slideDistance, env) : 0;
+    const slideAnimS = part.slideAnimSpeed ? evalAttr(part.slideAnimSpeed, env) : 1;
+    const slot = part.envSlot ? evalAttr(part.envSlot, env) : NaN;
+    const useSlot = !isNaN(slot);
+    const leafFnCall = (i) => {
+      if (useSlot) return `dayNightLeafAngleForSlot(${planet}, ${i}, ${numWedges}, ${slot})`;
+      if (part.timeBase === "LST") return `dayNightLeafAngleLST(${planet}, ${i}, ${numWedges})`;
+      return `dayNightLeafAngle(${planet}, ${i}, ${numWedges})`;
+    };
+    const angles = [];
+    const slides = [];
+    for (let i = 0; i < numWedges; i++) {
+      let angleExpr;
+      if (slideDistance > 0) {
+        angleExpr = `dayNightWedgeSlideAngle(${planet}, ${i}, ${numWedges}, ${slideDistance})`;
+        slides.push(updater.add(createObsValue({
+          name: key(`wedgeSlide.${i}`),
+          expr: `dayNightWedgeSlideOffset(${i}, ${numWedges}, ${slideDistance})`,
+          updateInterval: interval,
+          linear: true,
+          animSpeed: LINEAR_BASE_SPEED * slideAnimS,
+          evalAhead: EVAL_AHEAD
+        }, env, perfNow)));
+      } else {
+        angleExpr = leafFnCall(i);
+      }
+      angles.push(updater.add(createObsValue({
+        name: key(`wedgeAngle.${i}`),
+        expr: angleExpr,
+        updateInterval: interval,
+        animSpeed: ANGLE_BASE_SPEED * ringAnimS,
+        evalAhead: EVAL_AHEAD
+      }, env, perfNow)));
+    }
+    part._obsWedgeAngles = angles;
+    if (slideDistance > 0) part._obsWedgeSlides = slides;
+  }
+  function lit(value) {
+    return { kind: "NumberLiteral", value };
+  }
+  function buildTerminatorValues(updater, faceName, leaves, env, perfNow) {
+    if (leaves.length === 0) return;
+    const rotExpr = leaves[0].rotationExpr;
+    const interval = leaves[0].updateIntervalSec;
+    let rotation;
+    if (rotExpr) {
+      rotation = updater.add(createObsValueFromAST({
+        name: `${faceName}.terminator.rotation`,
+        expr: rotExpr,
+        updateInterval: interval,
+        animSpeed: ANGLE_BASE_SPEED,
+        evalAhead: EVAL_AHEAD
+      }, env, perfNow));
+    }
+    leaves.forEach((leaf, i) => {
+      const angleExpr = {
+        kind: "FunctionCall",
+        name: "terminatorLeafAngle",
+        args: [
+          leaf.phaseExpr ?? lit(0),
+          lit(leaf.quadrant),
+          lit(leaf.indexWithinQuadrant),
+          lit(leaf.leavesPerQuadrant),
+          lit(leaf.incremental ? 1 : 0)
+        ]
+      };
+      leaf._obsAngle = updater.add(createObsValueFromAST({
+        name: `${faceName}.termLeaf.${i}.angle`,
+        expr: angleExpr,
+        updateInterval: leaf.updateIntervalSec,
+        animSpeed: ANGLE_BASE_SPEED,
+        evalAhead: EVAL_AHEAD
+      }, env, perfNow));
+      leaf._obsRotation = rotation;
+    });
+  }
+  function buildAnalemmaValues(updater, faceName, state, env, perfNow) {
+    state._obsPathParam = updater.add(createObsValue({
+      name: `${faceName}.analemma.pathParam`,
+      expr: "analemmaPathParameter()",
+      updateInterval: state.updateIntervalSec,
+      period: PATH_SAMPLE_COUNT,
+      animSpeed: ANGLE_BASE_SPEED,
+      evalAhead: EVAL_AHEAD
+    }, env, perfNow));
+    state._obsRotation = updater.add(createObsValue({
+      name: `${faceName}.analemma.rotation`,
+      expr: "analemmaRotation()",
+      updateInterval: state.updateIntervalSec,
+      animSpeed: ANGLE_BASE_SPEED,
+      evalAhead: EVAL_AHEAD
+    }, env, perfNow));
+  }
 
   // src/shared/fps-indicator.ts
   var FPS_WATCHDOG_MS = 1e3;
@@ -21469,10 +21760,10 @@
       }
     }
     const rawGetNow = () => timeController.getDisplayTime();
-    function makeGetNow(bps) {
-      if (bps <= 0) return rawGetNow;
+    function makeGetNow(bps, base = rawGetNow) {
+      if (bps <= 0) return base;
       return () => {
-        const d = rawGetNow();
+        const d = base();
         const ms = d.getTime();
         const quantizedMs = Math.round(ms / 1e3 * bps) / bps * 1e3;
         return new Date(quantizedMs);
@@ -21604,13 +21895,16 @@
       const watch = parsedWatches[i];
       const slotResult = buildSlotOverrides(watch);
       const faceOverrides = slotResult?.overrides;
-      const faceGetNow = makeGetNow(watch.beatsPerSecond);
+      const { getNow: faceRawGetNow, withDisplayTime } = makeOverridableGetNow(rawGetNow);
+      const faceGetNow = makeGetNow(watch.beatsPerSecond, faceRawGetNow);
       const env = createWatchEnvironment(watch, lat, lon, faceGetNow, locationTimezone, faceOverrides, slotResult?.globalLocationSlot);
       const face = {
         watch,
         env,
         cachesBuilt: false,
-        handStates: [],
+        updater: new Updater(),
+        getNow: faceRawGetNow,
+        withDisplayTime,
         canvas,
         ctx,
         sizePx: 0,
@@ -21619,7 +21913,6 @@
         scale: 1,
         terminatorLeaves: [],
         analemmaState: null,
-        lastTerminatorRebuild: 0,
         faceDataIndex: i,
         terraSlotOverrides: faceOverrides,
         globalLocationSlot: slotResult?.globalLocationSlot
@@ -21677,7 +21970,9 @@
           break;
         }
       }
-      face.handStates = initHandStates(watch, env, performance.now(), makeGetNow(watch.beatsPerSecond), rawGetNow);
+      face.updater = buildHandValues(watch.name, watch, env, performance.now());
+      buildTerminatorValues(face.updater, watch.name, face.terminatorLeaves, env, performance.now());
+      if (face.analemmaState) buildAnalemmaValues(face.updater, watch.name, face.analemmaState, env, performance.now());
     }
     function buildAllCachesSequentially(facesToBuild, onDone) {
       let idx = 0;
@@ -21699,20 +21994,15 @@
         if (!face.enabled) continue;
         const oldKnockout = face.env._terraCityKnockout;
         const oldTzOffset = face.env.tzOffsetSec;
-        face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+        face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
         restoreKyotoState(face);
         if (oldKnockout) face.env._terraCityKnockout = oldKnockout;
-        invalidateDayNightCaches(face.watch);
         const { canvas, watch, env, images, scale } = face;
         buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-        if (face.analemmaState) resetAnalemmaSchedule(face.analemmaState);
         if (oldTzOffset !== void 0 && face.env.tzOffsetSec !== oldTzOffset) {
           console.log(`[rebuildEnvironments] DST transition detected (offset ${oldTzOffset} -> ${face.env.tzOffsetSec}) - resetting schedules`);
           tzOffsetChanged = true;
-          resetHandSchedules(face.handStates);
-          resetLeafSchedules(face.terminatorLeaves);
-          resetDayNightSlides(face.watch);
-          if (face.analemmaState) resetAnalemmaSchedule(face.analemmaState);
+          face.updater.reset();
         }
       }
       if (tzDeltaMs !== oldTzDeltaMs || tzOffsetChanged) {
@@ -21863,47 +22153,18 @@
       const rate = timeController.currentRate;
       const tickMs = rate !== null ? TICK_INTERVAL_MS : null;
       const deltaSec = rate !== null ? displaySecondsPerTick(rate.unit) : 0;
-      const timeDir = timeController.currentDirection;
       let renderMs = 0;
       let animatingFaceCount = 0;
       const isPureAnimFrame = isScrubbing && !willTick;
       const animStart = isPureAnimFrame ? performance.now() : 0;
+      const timingCtx = timingContextForFrame(timeController);
       for (const face of faces) {
         if (!face.enabled || !face.cachesBuilt) continue;
-        tickAnimations(face.handStates, face.env, now, tickMs, deltaSec, timeDir);
-        for (const part of face.watch.parts) {
-          if (part.type === "QDayNightRing" && part._masterOffsetAnim && part._masterOffsetAnim.animating) {
-            interpolateValue(part._masterOffsetAnim, now);
-            part._cachedAngles = void 0;
-          }
-        }
-        if (face.terminatorLeaves.length > 0) {
-          tickLeafAnimations(face.terminatorLeaves, face.env, now, tickMs, deltaSec);
-          const cacheIntervalMs = tickMs !== null ? tickMs : Math.min(...face.terminatorLeaves.map((l) => l.updateIntervalSec)) * 1e3;
-          if (now - face.lastTerminatorRebuild > cacheIntervalMs) {
-            buildStaticBlockCaches(
-              face.watch,
-              face.env,
-              face.canvas.width,
-              face.canvas.height,
-              face.scale,
-              face.images,
-              face.terminatorLeaves
-            );
-            face.lastTerminatorRebuild = now;
-          }
-        }
-        if (face.analemmaState) {
-          if (tickMs !== null) resetAnalemmaSchedule(face.analemmaState);
-          tickAnalemma(face.analemmaState, face.env, now);
-        }
+        face.updater.tick(face.env, now, face.getNow, face.withDisplayTime, timingCtx);
         const renderStart = performance.now();
         renderFrame(face.ctx, face.watch, face.env, face.scale, face.images, face.terminatorLeaves, face.analemmaState);
         renderMs += performance.now() - renderStart;
-        const ringAnimating = face.watch.parts.some(
-          (p) => p.type === "QDayNightRing" && (p._masterOffsetAnim?.animating || p._wedgeSlides?.some((s) => s.animating) || p._wedgeAngleAnims?.some((a) => a.animating))
-        );
-        const faceAnimating = anyAnimating(face.handStates) || anyLeafAnimating(face.terminatorLeaves) || ringAnimating;
+        const faceAnimating = face.updater.anyAnimating();
         if (faceAnimating) {
           stillAnimating = true;
           animatingFaceCount++;
@@ -21951,8 +22212,8 @@
       if (timeController.isStopped) return;
       let earliest = Infinity;
       for (const face of faces) {
-        if (!face.enabled || face.handStates.length === 0) continue;
-        const t = nextWakeupTime(face.handStates);
+        if (!face.enabled) continue;
+        const t = face.updater.nextWakeupTime();
         if (t < earliest) earliest = t;
       }
       if (earliest === Infinity) return;
@@ -21974,19 +22235,15 @@
       for (const face of faces) {
         if (!face.enabled) continue;
         const oldKnockout = face.env._terraCityKnockout;
-        face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+        face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
         restoreKyotoState(face);
         if (oldKnockout) face.env._terraCityKnockout = oldKnockout;
-        invalidateDayNightCaches(face.watch);
         if (face.terminatorLeaves.length > 0) {
           updateLeafAngles(face.terminatorLeaves, face.env);
-          resetLeafSchedules(face.terminatorLeaves);
-          face.lastTerminatorRebuild = 0;
         }
-        if (face.analemmaState) resetAnalemmaSchedule(face.analemmaState);
         const { canvas, watch, env, images, scale } = face;
         buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-        resetHandSchedules(face.handStates);
+        face.updater.reset();
       }
       timeUI?.updateTimezoneDisplay();
       stopScheduler();
@@ -22389,20 +22646,14 @@
             lon: newLon
           };
         }
-        face.env = createWatchEnvironment(face.watch, newLat, newLon, makeGetNow(face.watch.beatsPerSecond), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+        face.env = createWatchEnvironment(face.watch, newLat, newLon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
         restoreKyotoState(face);
         if (face.terminatorLeaves.length > 0) {
           updateLeafAngles(face.terminatorLeaves, face.env);
-          resetLeafSchedules(face.terminatorLeaves);
-          face.lastTerminatorRebuild = 0;
         }
-        if (face.analemmaState) resetAnalemmaSchedule(face.analemmaState);
-        invalidateDayNightCaches(face.watch);
         const { canvas, watch, env, images, scale } = face;
         buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-        for (const hs of face.handStates) {
-          hs.nextUpdateTime = 0;
-        }
+        face.updater.reset();
       }
       updateLocationDisplay();
       timeUI?.updateTimezoneDisplay();
@@ -22738,18 +22989,12 @@
     });
     function finishAllAnimations() {
       for (const face of faces) {
-        finishAnimations(face.handStates);
-        finishLeafAnimations(face.terminatorLeaves);
-        finishDayNightSlides(face.watch);
-        if (face.analemmaState) resetAnalemmaSchedule(face.analemmaState);
+        face.updater.finish();
       }
     }
     function resetAllSchedules() {
       for (const face of faces) {
-        resetHandSchedules(face.handStates);
-        resetLeafSchedules(face.terminatorLeaves);
-        resetDayNightSlides(face.watch);
-        if (face.analemmaState) resetAnalemmaSchedule(face.analemmaState);
+        face.updater.reset();
       }
     }
     function ensureSchedulerRunning() {
@@ -22962,19 +23207,14 @@
           updateNavigationLinks();
           for (const face of faces) {
             if (!face.enabled) continue;
-            face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+            face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
             restoreKyotoState(face);
             if (face.terminatorLeaves.length > 0) {
               updateLeafAngles(face.terminatorLeaves, face.env);
-              resetLeafSchedules(face.terminatorLeaves);
-              face.lastTerminatorRebuild = 0;
             }
-            if (face.analemmaState) resetAnalemmaSchedule(face.analemmaState);
             const { canvas, watch, env, images, scale } = face;
             buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-            for (const hs of face.handStates) {
-              hs.nextUpdateTime = 0;
-            }
+            face.updater.reset();
           }
           stopScheduler();
           startScheduler();
@@ -23060,29 +23300,13 @@
         }, setNoonOnTop2 = function(noonOnTop) {
           const val = noonOnTop ? 1 : 0;
           const targetFlip = noonOnTop ? Math.PI : 0;
-          const now = performance.now();
           viennaFace.env.variables.set("noonOnTop", val);
           viennaFace.env.variables.set("dialFlip", targetFlip);
-          invalidateDayNightCaches(viennaFace.watch);
           const { canvas, watch, env, images, scale } = viennaFace;
           buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, viennaFace.terminatorLeaves);
-          for (const hs of viennaFace.handStates) {
-            hs.nextUpdateTime = 0;
-          }
-          const previousFlip = noonOnTop ? 0 : Math.PI;
-          for (const part of viennaFace.watch.parts) {
-            if (part.type === "QDayNightRing") {
-              if (!part._masterOffsetAnim) {
-                part._masterOffsetAnim = makeAnimatingValue(previousFlip, now);
-              }
-              part._cachedAngles = void 0;
-              startAnimationRaw(part._masterOffsetAnim, targetFlip, now, 1);
-            }
-          }
+          viennaFace.updater.reset();
           if (viennaFace.terminatorLeaves.length > 0) {
             updateLeafAngles(viennaFace.terminatorLeaves, viennaFace.env);
-            resetLeafSchedules(viennaFace.terminatorLeaves);
-            viennaFace.lastTerminatorRebuild = 0;
           }
           stopScheduler();
           startScheduler();
@@ -23139,14 +23363,6 @@
       };
       const setKyotoState = (handMode, rateMode) => {
         const env = getEnv();
-        const now = performance.now();
-        const oldMasterOffsets = /* @__PURE__ */ new Map();
-        for (const part of kyotoFace.watch.parts) {
-          if (part.type === "QDayNightRing") {
-            const oldVal = part._masterOffsetAnim && part._masterOffsetAnim.animating ? interpolateValue(part._masterOffsetAnim, now) : evalAttr(part.masterOffset, env);
-            oldMasterOffsets.set(part, oldVal);
-          }
-        }
         let changed = false;
         if (handMode !== null && env.kyHandMode !== handMode) {
           env.kyHandMode = handMode;
@@ -23159,24 +23375,8 @@
           changed = true;
         }
         if (changed) {
-          finishAnimations(kyotoFace.handStates);
-          finishDayNightSlides(kyotoFace.watch);
-          for (const hs of kyotoFace.handStates) {
-            hs.nextUpdateTime = 0;
-          }
-          for (const part of kyotoFace.watch.parts) {
-            if (part.type === "QDayNightRing") {
-              const oldVal = oldMasterOffsets.get(part) ?? 0;
-              const newVal = evalAttr(part.masterOffset, env);
-              if (!part._masterOffsetAnim) {
-                part._masterOffsetAnim = makeAnimatingValue(oldVal, now);
-              } else {
-                part._masterOffsetAnim.currentValue = oldVal;
-                part._masterOffsetAnim.animating = false;
-              }
-              startAnimationRaw(part._masterOffsetAnim, newVal, now, 1);
-            }
-          }
+          kyotoFace.updater.finish();
+          kyotoFace.updater.reset();
           updateUI();
           stopScheduler();
           startScheduler();
@@ -23258,20 +23458,15 @@
           }
           for (const face of faces) {
             if (!face.enabled) continue;
-            face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+            face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
             restoreKyotoState(face);
             if (face.terminatorLeaves.length > 0) {
               updateLeafAngles(face.terminatorLeaves, face.env);
-              resetLeafSchedules(face.terminatorLeaves);
-              face.lastTerminatorRebuild = 0;
             }
-            if (face.analemmaState) resetAnalemmaSchedule(face.analemmaState);
             face.env._terraCityKnockout = null;
             const { canvas, watch, env, images, scale } = face;
             buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-            for (const hs of face.handStates) {
-              hs.nextUpdateTime = 0;
-            }
+            face.updater.reset();
           }
           stopScheduler();
           startScheduler();
@@ -23513,19 +23708,14 @@
         }, rebuildGaiaForSlotChange2 = function() {
           for (const face of faces) {
             if (!face.enabled) continue;
-            face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+            face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
             restoreKyotoState(face);
             if (face.terminatorLeaves.length > 0) {
               updateLeafAngles(face.terminatorLeaves, face.env);
-              resetLeafSchedules(face.terminatorLeaves);
-              face.lastTerminatorRebuild = 0;
             }
-            if (face.analemmaState) resetAnalemmaSchedule(face.analemmaState);
             const { canvas, watch, env, images, scale } = face;
             buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-            for (const hs of face.handStates) {
-              hs.nextUpdateTime = 0;
-            }
+            face.updater.reset();
           }
           stopScheduler();
           startScheduler();

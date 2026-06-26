@@ -24,13 +24,12 @@ Parts are parsed once at startup via `parseWatchXML`. The resulting `watch.parts
 
 **The animation-preserving pattern** (used for any input change):
 1. Create a fresh `Environment` via `createWatchEnvironment()` (picks up new lat/lon/timezone/body)
-2. Preserve existing `HandState` objects — do **not** call `initHandStates()`
-3. Reset hand schedules (`hs.nextUpdateTime = 0`) so expressions re-evaluate immediately
-4. Update terminator leaf angles and reset their schedules
-5. Rebuild static caches (`buildStaticBlockCaches()`) for visual elements that depend on the new state
-6. Restart the scheduler
+2. Preserve the existing per-face `Updater` (and its ObsValues) — do **not** call `buildHandValues()` again
+3. Re-evaluate immediately by calling `face.updater.reset()` (sets every value's `nextUpdateTime = 0`). This also covers terminator-leaf and analemma values, which are ObsValues on the same Updater
+4. Rebuild static caches (`buildStaticBlockCaches()`) for visual elements that depend on the new state
+5. Restart the scheduler
 
-**The only exceptions** where full rebuild (including fresh hand states) is acceptable: initial startup and canvas resize — both are "from scratch" moments where there are no animations to preserve.
+**The only exceptions** where a full rebuild (including a fresh `Updater`) is acceptable: initial startup and canvas resize — both are "from scratch" moments where there are no animations to preserve.
 
 **If you believe a full part rebuild is needed, stop and ask the user.** There is almost certainly a way to achieve the desired effect by refreshing the environment and resetting schedules instead.
 
@@ -53,7 +52,7 @@ const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateIn
 
 ### NaN guards in astronomical functions
 
-During initial hand state collection (`createHandState` in `animation.ts`), expression functions may be called before all variables are resolved, producing `NaN` inputs. Functions that do table lookups (e.g., `findOuterPlanetDatum` in `wb-planets.ts`) must guard against `NaN` at the top:
+During initial ObsValue construction (`buildHandValues` in `hand-values.ts`), expression functions may be called before all variables are resolved, producing `NaN` inputs. Functions that do table lookups (e.g., `findOuterPlanetDatum` in `wb-planets.ts`) must guard against `NaN` at the top:
 
 ```typescript
 if (isNaN(U)) return null;
@@ -61,20 +60,20 @@ if (isNaN(U)) return null;
 
 `NaN` defeats range checks because `NaN < x` and `NaN > x` are both `false`, causing index calculations to produce `NaN` and crash on array access.
 
-### Boundary scheduling must use `rawGetNow`, never `getNow`
+### Boundary scheduling must use the unquantized time source, never the quantized one
 
-`HandState` has two time sources: `getNow` (quantized by `beatsPerSecond`) and `rawGetNow` (unquantized). `computeNextBoundary` and `displayTimeToPerfNow` must always use `rawGetNow`. Using the quantized `getNow` causes `Math.ceil` to return the current time (not the next boundary) when the quantized time is already aligned, leading to every-frame evaluation and a visible ~0.5s timing skew between faces with different `beatsPerSecond` values. See the `[!IMPORTANT]` block in [animation.md](animation.md) for details.
+A face has two time sources: a per-face quantized `getNow` (by `beatsPerSecond`), captured by the env's expression functions, and an unquantized base, passed to `updater.tick`. `computeNextBoundary` / `displayTimeToPerfNow` must always use the unquantized source. Using the quantized one causes `Math.ceil` to return the current time (not the next boundary) when the quantized time is already aligned, leading to every-frame evaluation and a visible ~0.5s timing skew between faces with different `beatsPerSecond` values. The seam is built by `makeOverridableGetNow(rawGetNow)` with the quantizer layered on top — see [animation.md](animation.md) and `hand-values.ts`.
 
 ## 6. Animation Schedule Reset Rules
 
-Reset hand schedules (`nextUpdateTime = 0`) only at **discrete transition points**:
+Re-arm value schedules with **`face.updater.reset()`** (sets every ObsValue's `nextUpdateTime = 0`) only at **discrete transition points**:
 - Single step taps
 - Body switches
 - Start of hold-to-scrub
 
-Do **not** reset on every tick during continuous scrubbing — the quantized tick system handles scheduling correctly, and resetting disrupts in-progress animations.
+Do **not** reset on every tick during continuous scrubbing — the scrub-compression update path handles scheduling correctly, and resetting disrupts in-progress animations.
 
-Terminator leaves have their own `nextUpdateTime` and `resetLeafSchedules()` function. These must also be reset at the same transition points as hand states.
+`updater.reset()` covers everything on the face: hands, wheels, dials, calendar covers, the day/night ring (masterOffset + wedges), terminator leaves, and the analemma — all are ObsValues on the one per-face `Updater`. There is no longer a separate `resetLeafSchedules()` / `resetAnalemmaSchedule()` to call. Pair it with `face.updater.finish()` (snap + freeze) where the legacy code called `finishAnimations()` — e.g. before re-arming on a step.
 
 ## 7. Engine Bundling and Import Discipline
 
@@ -106,14 +105,14 @@ blocks may set default values that would otherwise overwrite them.
 
 ### Animation-preserving body switch
 
-When switching bodies, preserve existing `HandState` objects rather than recreating them. Update the environment, reset schedules, and let the animation system interpolate from old to new target values for smooth transitions. (This is an instance of the general rule in §3.)
+When switching bodies, preserve the existing per-face `Updater` rather than rebuilding it. Update the environment and call `face.updater.reset()`, and let the values interpolate from old to new targets for smooth transitions. (This is an instance of the general rule in §3.)
 
 ### Vienna noon/midnight toggle
 
 Vienna's 24-hour dial supports switching between midnight-on-top (default) and noon-on-top via the persisted `vnoon` setting (stored through `app-state.ts`, in the `chronometer` namespace) and a pill toggle in `#vienna-noon-toggle`. The toggle:
 1. Sets `noonOnTop` and `dialFlip` env variables (the XML uses `dialFlip` in hand angles, day/night ring `masterOffset`, and the 24-hour number dial `angle`)
-2. Rebuilds the static cache and resets hand/dial schedules
-3. The 24-hour number dial animates automatically via its `HandState` (driven by `angle='dialFlip'` + `animSpeed='1'`)
+2. Rebuilds the static cache and calls `face.updater.reset()`
+3. The dials/hands and the ring's `masterOffset` ObsValue animate to the flipped position automatically. The `dialFlip` dials use `update='0'` (env-change-only), so they flip at constant `animSpeed`; the ring's `masterOffset` is deliberately **not** eval-ahead so it flips at the same constant speed and stays coherent with them
 
 The 24-hour number dial uses `orientation='radial'` so labels remain readable in both orientations — `radial` always points text tops outward. No text swapping is needed; the 180° rotation naturally moves the correct numbers to the top. The dial is outside the `<static>` block so the renderer can animate it per-frame.
 
@@ -130,7 +129,7 @@ Kyoto's fixed-hand and rate-mode toggles are controlled by the `wadokei='1'` XML
 
 **State restoration**: `restoreKyotoState(face)` must be called after every `createWatchEnvironment()` invocation (currently 6 sites in `engine-entry.ts`). It reads `kyhand` and `kmode` from the URL and injects them into the fresh environment. If you add a new `createWatchEnvironment()` call site, add `restoreKyotoState(face)` immediately after.
 
-**Animation snapping**: When toggling modes, `finishAnimations()` must be called on the face's hand states *before* applying the new mode values. Without this, `kyotoMasterRotation()` jumps by a large angle and the animation system may interpolate through the wrong direction.
+**Animation snapping**: When toggling modes, call `face.updater.finish()` (then `face.updater.reset()`) *before*/around applying the new mode values. Without the `finish()`, `kyotoMasterRotation()` jumps by a large angle and the values may interpolate through the wrong direction.
 
 **Face image**: `face.png` is a `<hand>` element (outside `<static>`) with `angle='0 - kyotoMasterRotation()'` so it rotates with the dial in fixed-hand mode. See [XML Syntax — Kyoto Wadokei Toggles](xml-syntax.md#kyoto-wadokei-toggles) for full details.
 

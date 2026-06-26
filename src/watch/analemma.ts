@@ -18,7 +18,7 @@
 
 import type { AnalemmaPart } from './types.js';
 import type { Environment } from '../expr/evaluator.js';
-import { evalAttr, evalColor } from './watch-env.js';
+import { evalAttr, evalColor } from '../shared/astro-env.js';
 import type { LoadedImage } from './image-loader.js';
 import { dateToDateInterval } from '../astronomy/es-time.js';
 import {
@@ -59,7 +59,7 @@ const REF_EPOCH_SECONDS = (() => {
  * the (EOT, declination) decomposition, so a high count smooths the figure's
  * sharp solstice turns at no correctness cost.
  */
-const PATH_SAMPLE_COUNT = 1000;
+export const PATH_SAMPLE_COUNT = 1000;
 
 /** Default update interval in seconds (5 minutes). */
 const DEFAULT_UPDATE_SEC = 300;
@@ -205,6 +205,11 @@ export interface AnalemmaState {
     // Current state (recomputed each frame from the display time, no interpolation)
     currentPathParameter: number;   // fraction-of-year × PATH_SAMPLE_COUNT, [0, PATH_SAMPLE_COUNT)
     currentRotation: number;
+
+    // ObsValue handles (driven by the per-face Updater; drawAnalemma reads
+    // `.currentValue`). Supersede the currentPathParameter/currentRotation path.
+    _obsPathParam?: import('../shared/obs-value.js').ObsValue;
+    _obsRotation?: import('../shared/obs-value.js').ObsValue;
 
     // Pre-computed season-tick path indices (fractional), from real crossings
     seasonTicks: { index: number; color: string }[];
@@ -603,29 +608,6 @@ function updateAnalemmaValues(state: AnalemmaState, env: Environment): void {
     state.currentRotation = sunSkyOrientationAngle(di, obsLat, obsLon, null);
 }
 
-/**
- * Tick the analemma — called every frame but only recomputes when the
- * update interval has elapsed.
- */
-export function tickAnalemma(
-    state: AnalemmaState,
-    env: Environment,
-    now: number,
-): void {
-    if (now >= state.nextUpdateTime) {
-        updateAnalemmaValues(state, env);
-        state.nextUpdateTime = now + state.updateIntervalSec * 1000;
-    }
-}
-
-/**
- * Reset the analemma schedule — forces an immediate recompute on the next tick.
- * Called on step events, body switches, and scrub starts.
- */
-export function resetAnalemmaSchedule(state: AnalemmaState): void {
-    state.nextUpdateTime = 0;
-}
-
 // ============================================================================
 // Drawing
 // ============================================================================
@@ -720,7 +702,11 @@ export function drawAnalemma(
     ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
     state: AnalemmaState,
 ): void {
-    const { centerX, centerY, radius, currentRotation, bgRotates } = state;
+    const { centerX, centerY, radius, bgRotates } = state;
+    // The per-face Updater drives these; fall back to the directly-computed values
+    // (updateAnalemmaValues) before the first tick / on the static path.
+    const currentRotation = state._obsRotation ? state._obsRotation.currentValue : state.currentRotation;
+    const pathParameter = state._obsPathParam ? state._obsPathParam.currentValue : state.currentPathParameter;
 
     ctx.save();
 
@@ -753,7 +739,7 @@ export function drawAnalemma(
 
     // --- Sun marker (pre-rendered bitmap with shadow) ---
     if (state.sunBitmap) {
-        const [sunX, sunY] = pathParamToXY(state.pathScaled, state.currentPathParameter);
+        const [sunX, sunY] = pathParamToXY(state.pathScaled, pathParameter);
         ctx.drawImage(
             state.sunBitmap,
             sunX - state.sunBitmapAnchorX,

@@ -18,7 +18,7 @@ src/
 ├── expr/                # Shared: expression tokenizer, parser, evaluator
 ├── shared/              # Shared: infrastructure modules used by multiple apps
 │   ├── astro-env.ts         # Astronomy function registry + createAstroEnvironment() factory
-│   ├── animation.ts         # Full animation system (AnimatingValue, HandState, scheduling)
+│   ├── animation.ts         # Animation primitives (AnimatingValue, startAnimationRaw, interpolateValue) + update-interval sentinel scheduling
 │   ├── obs-value.ts         # ObsValue: general expression-driven animated value (type + createObsValue)
 │   ├── updater.ts           # Shared updater: name-keyed Updater<K> + ObsValue update/animate passes + eval-ahead/TimingContext seam
 │   ├── time-controller.ts   # Time scrubbing, stepping, play/pause
@@ -33,8 +33,9 @@ src/
 │   ├── dst-detect.ts        # DST transition detection
 │   └── tz-resolve.ts        # Lat/lon → Olson timezone resolution
 ├── watch/               # Chronometer-only: XML parsing, rendering, watch-specific env
-│   ├── watch-env.ts         # Imports astro-env, adds Terra/Kyoto/Venezia specifics
-│   ├── renderer.ts          # Canvas rendering of watch parts
+│   ├── watch-env.ts         # Imports astro-env, adds Terra/Kyoto/Venezia specifics + wedge/terminator/analemma/calendar env functions
+│   ├── hand-values.ts       # Chronometer↔Updater bridge: buildHandValues / buildTerminatorValues / buildAnalemmaValues (parts → ObsValues)
+│   ├── renderer.ts          # Canvas rendering of watch parts (reads each part's _obs* ObsValue)
 │   ├── xml-parser.ts        # Watch XML → part model
 │   └── ...
 ├── inspector/           # Inspector app
@@ -132,7 +133,7 @@ Each XML part type is classified as static (drawn once, cached) or dynamic (redr
 The app displays 20–25 watch faces simultaneously in a CSS grid:
 
 - Column/row count determined by `ceil(sqrt(N))` heuristic
-- Each face is a `FaceInstance` with its own `Environment`, `OffscreenCanvas` (static cache), and `HandState[]`
+- Each face is a `FaceInstance` with its own `Environment`, `OffscreenCanvas` (static cache), and per-face `Updater` (ObsValues; built by `buildHandValues`)
 - `ResizeObserver` triggers debounced static cache rebuilds when the window resizes
 - Each canvas is sized to fill its grid cell at device pixel ratio
 

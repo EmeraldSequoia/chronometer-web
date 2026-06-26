@@ -1,30 +1,24 @@
 /**
- * Animation system for watch hands and wheels.
+ * Animation primitives + update-interval scheduling, shared by the ObsValue
+ * system (see shared/obs-value.ts + shared/updater.ts).
  *
  * Two-time-base architecture (see planning/2026-04-10-animation-strategy.md):
+ * - **Display time** (getNow) evaluates expressions — WHAT the target should be.
+ * - **Real time** (performance.now) drives interpolation — WHERE it is drawn now.
  *
- * - **Display time** (getNow) is used to evaluate angle expressions,
- *   determining WHAT the target angle should be.
- * - **Real time** (performance.now) is used for animation interpolation,
- *   determining WHERE the hand is drawn right now.
+ * This module owns the low-level pieces only:
+ *  - `AnimatingValue` + `makeAnimatingValue` — the raw interpolation state.
+ *  - `startAnimationRaw` / `startValueAnimation` / `interpolateValue` — the
+ *    period-aware (angle / linear / cyclic) animation start + interpolation.
+ *  - `computeNextBoundary` / `displayTimeToPerfNow` + the update-interval
+ *    sentinel resolvers (sunrise/sunset/eclipse/sslat …) — scheduling.
  *
- * At quantized rates (10 hr/s etc.), display time jumps discretely on
- * each tick. The animation system smoothly interpolates hand positions
- * at up to 240fps between ticks using real time.
- *
- * Animation duration is adaptive:
- * - If the normal speed-based duration would exceed the tick interval,
- *   compress the animation to fit within one tick (fast parts).
- * - Otherwise, use the normal speed-based duration (slow parts).
+ * The former per-part `HandState` / `tickAnimations` driver was retired when
+ * Chronometer moved onto the shared `Updater` (planning/2026-06-15-chronometer-
+ * obsvalue-port.md); per-frame driving now lives in shared/updater.ts.
  */
 
-import type { Watch, WatchPart, QHandPart, WheelPart, QWedgePart, QDialPart, CalendarRowCoverPart, QDayNightRingPart } from '../watch/types.js';
 import type { Environment } from '../expr/evaluator.js';
-import { evalAttr } from './astro-env.js';
-import {
-    timeIntervalFromUTCComponents, daysInMonth as calendarDaysInMonth,
-    weekdayFromTimeInterval,
-} from '../astronomy/es-calendar.js';
 import { dateToDateInterval } from '../astronomy/es-time.js';
 import { sunRAandDecl } from '../astronomy/es-coordinates.js';
 import { calculateEclipse } from '../astronomy/es-astro.js';
@@ -111,570 +105,6 @@ export function makeAnimatingValue(initial: number, now: number): AnimatingValue
     };
 }
 
-/** Per-part state tracked by the animation system. */
-export interface HandState {
-    /** Reference to the XML part definition. */
-    part: QHandPart | WheelPart | QWedgePart | QDialPart | CalendarRowCoverPart | QDayNightRingPart;
-    /** The angle being animated. */
-    angle: AnimatingValue;
-    /** The offsetAngle being animated (only for offset-orbit hands like Moon). */
-    offsetAngle: AnimatingValue | null;
-    /** Update interval in milliseconds. */
-    updateIntervalMs: number;
-    /** Display-time ms-since-epoch of the next scheduled update.
-     *  For positive intervals: next epoch-aligned boundary.
-     *  For sentinels: next astronomical event time. */
-    nextUpdateDisplayTime: number;
-    /** performance.now() at which to wake the idle timer (derived from nextUpdateDisplayTime). */
-    nextUpdateTime: number;
-    /** Animation speed multiplier from XML (default 1.0). */
-    animSpeed: number;
-    /** Time source for expression evaluation (may be quantized by beatsPerSecond). */
-    getNow: () => Date;
-    /** Unquantized time source for boundary scheduling.
-     *  Matches iOS architecture where update boundaries are computed in
-     *  iPhone time (real time), not latched/quantized watch time. */
-    rawGetNow: () => Date;
-    /** X-axis linear motion (calendar day-indicator wires). */
-    xMotion: AnimatingValue | null;
-    /** Y-axis linear motion (calendar day-indicator wires). */
-    yMotion: AnimatingValue | null;
-}
-
-
-// ============================================================================
-// Initialization
-// ============================================================================
-
-/**
- * Build animation state for all dynamic parts in the watch.
- * Call once after the environment is set up.
- */
-export function initHandStates(
-    watch: Watch,
-    env: Environment,
-    now: number,  // performance.now()
-    getNow?: () => Date,
-    rawGetNow?: () => Date,
-): HandState[] {
-    const states: HandState[] = [];
-    const effectiveGetNow = getNow || (() => new Date());
-    const effectiveRawGetNow = rawGetNow || effectiveGetNow;
-    collectDynamicParts(watch.parts, env, now, states, effectiveGetNow, effectiveRawGetNow);
-    return states;
-}
-
-function collectDynamicParts(
-    parts: WatchPart[],
-    env: Environment,
-    now: number,
-    out: HandState[],
-    getNow: () => Date,
-    rawGetNow: () => Date,
-): void {
-    for (const part of parts) {
-        if (part.type === 'QHand' || part.type === 'Wheel' || part.type === 'QWedge') {
-            out.push(createHandState(part, env, now, getNow, rawGetNow));
-        } else if (part.type === 'QDial' && part.animSpeed) {
-            // QDials with animSpeed participate in the animation system
-            // (e.g. Vienna 24-hour number dial with angle='dialFlip')
-            out.push(createHandState(part, env, now, getNow, rawGetNow));
-        } else if (part.type === 'QDayNightRing') {
-            out.push(createHandState(part, env, now, getNow, rawGetNow));
-        } else if (part.type === 'CalendarRowCover') {
-            out.push(createCalendarCoverState(part as CalendarRowCoverPart, env, now, getNow, rawGetNow));
-        } else if (part.type === 'Static') {
-            collectDynamicParts(part.children, env, now, out, getNow, rawGetNow);
-        }
-    }
-}
-
-function createHandState(
-    part: QHandPart | WheelPart | QWedgePart | QDialPart | QDayNightRingPart,
-    env: Environment,
-    now: number,
-    getNow: () => Date,
-    rawGetNow: () => Date,
-): HandState {
-    // Evaluate the update interval. Named sentinel constants evaluate to
-    // negative values; numeric values are expression strings like "1" or "60".
-    const updateIntervalSec = part.update ? evalAttr(part.update, env) : 1;
-    const updateIntervalMs = updateIntervalSec * 1000;
-
-    // animSpeed: default 1.0 (from original iOS boundsCheck default)
-    const animSpeed = ('animSpeed' in part && part.animSpeed) ? evalAttr(part.animSpeed, env) : 1.0;
-
-    // Evaluate initial angle and write to part's dynamicState
-    const initialAngle = part.type === 'QDayNightRing'
-        ? (part.masterOffset ? evalAttr(part.masterOffset, env) : 0)
-        : (part.angle ? evalAttr(part.angle, env) : 0);
-    // Evaluate initial offsetAngle if present (e.g. Moon orbit position)
-    const hasOffsetAngle = (part.type === 'QHand' || part.type === 'QWedge') && part.offsetAngle;
-    const initialOffsetAngle = hasOffsetAngle ? evalAttr(part.offsetAngle!, env) : 0;
-    part.dynamicState = {
-        currentAngle: initialAngle,
-        ...(hasOffsetAngle ? { currentOffsetAngle: initialOffsetAngle } : {}),
-    };
-    // Evaluate initial xMotion/yMotion if present (calendar day-indicator wires)
-    const hasXMotion = part.type === 'QHand' && part.xMotion;
-    const hasYMotion = part.type === 'QHand' && part.yMotion;
-    const initialXMotion = hasXMotion ? evalAttr((part as QHandPart).xMotion!, env) : 0;
-    const initialYMotion = hasYMotion ? evalAttr((part as QHandPart).yMotion!, env) : 0;
-    if (hasXMotion || hasYMotion) {
-        part.dynamicState!.currentXMotion = initialXMotion;
-        part.dynamicState!.currentYMotion = initialYMotion;
-    }
-
-    // Use raw (unquantized) time for boundary computation, matching iOS
-    // where boundaries are computed in iPhone time, not latched watch time.
-    const nextDisplayMs = computeNextBoundary(updateIntervalMs, rawGetNow, 1, env);
-
-    let angleAnim: AnimatingValue;
-    if (part.type === 'QDayNightRing') {
-        if (!part._masterOffsetAnim) {
-            part._masterOffsetAnim = makeAnimatingValue(initialAngle, now);
-        } else {
-            if (!part._masterOffsetAnim.animating) {
-                part._masterOffsetAnim.currentValue = initialAngle;
-                part._masterOffsetAnim.targetValue = initialAngle;
-            }
-        }
-        angleAnim = part._masterOffsetAnim;
-    } else {
-        angleAnim = {
-            currentValue: initialAngle,
-            targetValue: initialAngle,
-            lastAnimationTime: now,
-            animationStopTime: now,
-            animating: false,
-        };
-    }
-
-    return {
-        part,
-        angle: angleAnim,
-        offsetAngle: hasOffsetAngle ? {
-            currentValue: initialOffsetAngle,
-            targetValue: initialOffsetAngle,
-            lastAnimationTime: now,
-            animationStopTime: now,
-            animating: false,
-        } : null,
-        xMotion: hasXMotion ? makeAnimatingValue(initialXMotion, now) : null,
-        yMotion: hasYMotion ? makeAnimatingValue(initialYMotion, now) : null,
-        updateIntervalMs,
-        nextUpdateDisplayTime: nextDisplayMs,
-        nextUpdateTime: displayTimeToPerfNow(nextDisplayMs, rawGetNow),
-        animSpeed,
-        getNow,
-        rawGetNow,
-    };
-}
-
-/**
- * Compute the xOffset for a CalendarRowCover part.
- * Ported from iOS calendarRowCoverOffsetForType / calendarRowUnderlayOffsetForType.
- *
- * Uses the hybrid Julian/Gregorian calendar system (via es-calendar.ts)
- * for first-of-month weekday and month-length calculations.
- */
-function computeCalendarCoverOffset(
-    part: CalendarRowCoverPart,
-    env: Environment,
-): number {
-    const calendarWeekdayStart = env.functions.get('calendarWeekdayStart')?.() ?? 0;
-    const cellWidth = env.variables.get('calendarCellWidth') ?? 13.3;
-
-    const monthNum = (env.functions.get('monthNumber')?.() ?? 0) + 1;
-    const yearNum = env.functions.get('yearNumber')?.() ?? 2024;
-    const era = env.functions.get('eraNumber')?.() ?? 1;
-    const absYear = yearNum;
-
-    // First of this month: compute weekday via epoch arithmetic
-    const firstOfMonthDI = timeIntervalFromUTCComponents(era, absYear, monthNum, 1, 12, 0, 0);
-    const thisMonthStartCol = (7 + weekdayFromTimeInterval(firstOfMonthDI, 0) - calendarWeekdayStart) % 7;
-
-    // Days in this month and previous month (hybrid calendar)
-    const dim = calendarDaysInMonth(era, absYear, monthNum);
-    // Previous month: handle January → December of prior year
-    let prevEra = era;
-    let prevYear = absYear;
-    let prevMonth = monthNum - 1;
-    if (prevMonth < 1) {
-        prevMonth = 12;
-        if (era === 1 && absYear === 1) {
-            prevEra = 0; prevYear = 1;  // 1 CE - 1 = 1 BCE
-        } else if (era === 0) {
-            prevYear = absYear + 1;      // further into BCE
-        } else {
-            prevYear = absYear - 1;
-        }
-    }
-    const daysInPrevMonth = calendarDaysInMonth(prevEra, prevYear, prevMonth);
-
-    // Next month: compute weekday and start row
-    let nextEra = era;
-    let nextYear = absYear;
-    let nextMonth = monthNum + 1;
-    if (nextMonth > 12) {
-        nextMonth = 1;
-        if (era === 0 && absYear === 1) {
-            nextEra = 1; nextYear = 1;  // 1 BCE + 1 = 1 CE
-        } else if (era === 0) {
-            nextYear = absYear - 1;      // towards CE
-        } else {
-            nextYear = absYear + 1;
-        }
-    }
-    const nextMonthFirstDI = timeIntervalFromUTCComponents(nextEra, nextYear, nextMonth, 1, 12, 0, 0);
-    const nextMonthStartCol = (7 + weekdayFromTimeInterval(nextMonthFirstDI, 0) - calendarWeekdayStart) % 7;
-    const nextMonthStartRow = Math.floor((dim + thisMonthStartCol) / 7);
-
-    const coverType = part.coverType || '';
-    let columnMotion = 7;
-
-    if (coverType === 'row1Left') {
-        columnMotion = thisMonthStartCol + 22 - daysInPrevMonth;
-        if (columnMotion < -4) columnMotion = -4;
-    } else if (coverType === 'row1Right') {
-        columnMotion = thisMonthStartCol + 26 - daysInPrevMonth;
-        if (columnMotion < -5) columnMotion = -5;
-    } else if (coverType === 'row56Right') {
-        columnMotion = nextMonthStartRow === 4 ? nextMonthStartCol : 7;
-    } else if (coverType === 'row6Left') {
-        if (nextMonthStartRow === 5) {
-            columnMotion = nextMonthStartCol;
-        } else if (nextMonthStartRow === 4) {
-            columnMotion = nextMonthStartCol - 7;
-        } else {
-            columnMotion = 7;
-        }
-    }
-
-    return Math.round(columnMotion * cellWidth);
-}
-
-/**
- * Create animation state for a CalendarRowCover part.
- * These parts animate via xMotion (horizontal sliding) — no angle.
- */
-function createCalendarCoverState(
-    part: CalendarRowCoverPart,
-    env: Environment,
-    now: number,
-    getNow: () => Date,
-    rawGetNow: () => Date,
-): HandState {
-    const updateIntervalSec = part.update ? evalAttr(part.update, env) : 3600;
-    const updateIntervalMs = updateIntervalSec * 1000;
-    const animSpeed = part.animSpeed ? evalAttr(part.animSpeed, env) : 1.0;
-
-    const initialXOffset = computeCalendarCoverOffset(part, env);
-
-    part.dynamicState = {
-        currentAngle: 0,
-        currentXMotion: initialXOffset,
-    };
-
-    // Use raw (unquantized) time for boundary computation
-    const nextDisplayMs = computeNextBoundary(updateIntervalMs, rawGetNow, 1, env);
-
-    return {
-        part,
-        angle: makeAnimatingValue(0, now),
-        offsetAngle: null,
-        xMotion: makeAnimatingValue(initialXOffset, now),
-        yMotion: null,
-        updateIntervalMs,
-        nextUpdateDisplayTime: nextDisplayMs,
-        nextUpdateTime: displayTimeToPerfNow(nextDisplayMs, rawGetNow),
-        animSpeed,
-        getNow,
-        rawGetNow,
-    };
-}
-
-// ============================================================================
-// Per-frame update
-// ============================================================================
-
-/**
- * Tick all hand animations for one frame.
- * Call this from requestAnimationFrame before rendering.
- *
- * @param tickIntervalMs  When non-null, indicates quantized mode.
- *   The animation system uses this to:
- *   - Compress fast-part animations to fit within one tick
- *   - Schedule slow-part re-evaluation to skip unnecessary ticks
- * @param displayDeltaPerTickSec  Display seconds advanced per tick (e.g. 3600 for 10hr/s).
- *   Only used when tickIntervalMs is non-null.
- *
- * Updates each part's `dynamicState.currentAngle` in place.
- */
-export function tickAnimations(
-    states: HandState[],
-    env: Environment,
-    now: number,   // performance.now()
-    tickIntervalMs: number | null = null,
-    displayDeltaPerTickSec: number = 0,
-    timeDirection: 1 | -1 = 1,
-): void {
-    for (const state of states) {
-        // Gate on performance.now() — this handles reset (nextUpdateTime=0 → immediate)
-        // and freeze (nextUpdateTime=Infinity → never) direction-agnostically.
-        // The display-time boundary is used to COMPUTE nextUpdateTime, not as the gate.
-        if (now >= state.nextUpdateTime) {
-            const newTarget = state.part.type === 'QDayNightRing'
-                ? (state.part.masterOffset ? evalAttr(state.part.masterOffset, env) : 0)
-                : (('angle' in state.part && state.part.angle) ? evalAttr(state.part.angle, env) : 0);
-
-            // Also evaluate offsetAngle if this hand has one
-            const newOffsetTarget = state.offsetAngle && (state.part.type === 'QHand' || state.part.type === 'QWedge') && state.part.offsetAngle
-                ? evalAttr(state.part.offsetAngle!, env)
-                : null;
-
-            // Compute the next boundary BEFORE starting animations
-            // (so we know the time budget for compression)
-            // Use rawGetNow for boundary computation — matches iOS where
-            // boundaries are computed in iPhone time, not latched watch time.
-            const nextDisplayMs = computeNextBoundary(state.updateIntervalMs, state.rawGetNow, timeDirection, env);
-
-            if (tickIntervalMs !== null && tickIntervalMs > 0) {
-                // --- Quantized mode ---
-                // Compute real-time budget until next boundary for animation compression.
-                // The display-time delta is converted to real-time via the tick rate.
-                const displayNowMs = state.getNow().getTime();
-                const displayDeltaMs = Math.abs(nextDisplayMs - displayNowMs);
-                const displayDeltaPerTickMs = displayDeltaPerTickSec * 1000;
-                const ticksUntilUpdate = displayDeltaPerTickMs > 0
-                    ? Math.max(1, Math.ceil(displayDeltaMs / displayDeltaPerTickMs))
-                    : 1;
-                const timeUntilNextUpdateMs = ticksUntilUpdate * tickIntervalMs;
-
-                // Adaptive duration: use normal speed unless it wouldn't
-                // finish before the next re-evaluation.
-                // Angle and offsetAngle are compressed INDEPENDENTLY so that
-                // e.g. a slow wedge flip doesn't get compressed just because
-                // the offset (ring tracking) needs compression.
-                const animateSpeed = kECGLAngleAnimationSpeed * state.animSpeed;
-
-                // Angle duration
-                const normalizedTarget = fmod(newTarget, 2 * Math.PI);
-                const normalizedCurrent = fmod(state.angle.currentValue, 2 * Math.PI);
-                let angleDelta = Math.abs(normalizedTarget - normalizedCurrent);
-                if (angleDelta > Math.PI) angleDelta = 2 * Math.PI - angleDelta;
-                const angleDurationMs = (animateSpeed > 0)
-                    ? (angleDelta / animateSpeed) * 1000
-                    : 0;
-
-                // Compress angle if needed, otherwise use natural speed
-                if (angleDurationMs > timeUntilNextUpdateMs) {
-                    startAnimation(state, newTarget, now, timeUntilNextUpdateMs);
-                } else {
-                    startAnimation(state, newTarget, now);
-                }
-
-                // Handle offsetAngle independently
-                if (newOffsetTarget !== null && state.offsetAngle) {
-                    const normOffTarget = fmod(newOffsetTarget, 2 * Math.PI);
-                    const normOffCurrent = fmod(state.offsetAngle.currentValue, 2 * Math.PI);
-                    let offDelta = Math.abs(normOffTarget - normOffCurrent);
-                    if (offDelta > Math.PI) offDelta = 2 * Math.PI - offDelta;
-                    const offsetDurationMs = (animateSpeed > 0)
-                        ? (offDelta / animateSpeed) * 1000
-                        : 0;
-
-                    if (offsetDurationMs > timeUntilNextUpdateMs) {
-                        startAnimationRaw(state.offsetAngle, newOffsetTarget, now, state.animSpeed, timeUntilNextUpdateMs);
-                    } else {
-                        startAnimationRaw(state.offsetAngle, newOffsetTarget, now, state.animSpeed);
-                    }
-                }
-
-                // Compress xMotion/yMotion in quantized mode
-                compressLinearMotions(state, env, now, timeUntilNextUpdateMs);
-
-                // Schedule next re-evaluation (also update perfNow for idle timer)
-                state.nextUpdateDisplayTime = nextDisplayMs;
-                state.nextUpdateTime = now + timeUntilNextUpdateMs;
-            } else {
-                // --- 1× mode (normal) ---
-                startAnimation(state, newTarget, now);
-                if (newOffsetTarget !== null && state.offsetAngle) {
-                    startAnimationRaw(state.offsetAngle, newOffsetTarget, now, state.animSpeed);
-                }
-
-                // Evaluate xMotion/yMotion at natural speed
-                evaluateLinearMotions(state, env, now);
-
-                state.nextUpdateDisplayTime = nextDisplayMs;
-                state.nextUpdateTime = displayTimeToPerfNow(nextDisplayMs, state.rawGetNow);
-            }
-        }
-
-        // Interpolate if animating (uses real time for smooth rendering)
-        const rawAngle = interpolateValue(state.angle, now);
-        const angle = state.angle.animating ? rawAngle : fmod(rawAngle, 2 * Math.PI);
-
-        // Write to part's dynamicState
-        if (!state.part.dynamicState) {
-            state.part.dynamicState = { currentAngle: angle };
-        } else {
-            state.part.dynamicState.currentAngle = angle;
-        }
-
-        // Interpolate offsetAngle if present
-        if (state.offsetAngle) {
-            const rawOA = interpolateValue(state.offsetAngle, now);
-            const oa = state.offsetAngle.animating ? rawOA : fmod(rawOA, 2 * Math.PI);
-            if (state.part.dynamicState) {
-                state.part.dynamicState.currentOffsetAngle = oa;
-            }
-        }
-
-        // Interpolate xMotion/yMotion if present (linear, no angle wrapping)
-        if (state.xMotion) {
-            const xm = interpolateValue(state.xMotion, now);
-            if (state.part.dynamicState) {
-                state.part.dynamicState.currentXMotion = xm;
-            }
-        }
-        if (state.yMotion) {
-            const ym = interpolateValue(state.yMotion, now);
-            if (state.part.dynamicState) {
-                state.part.dynamicState.currentYMotion = ym;
-            }
-        }
-    }
-}
-
-// ============================================================================
-// Scheduler helpers
-// ============================================================================
-
-/**
- * Returns the performance.now() time of the next scheduled hand update,
- * across all hand states. Used by the scheduler to set an idle setTimeout.
- */
-export function nextWakeupTime(states: HandState[]): number {
-    let earliest = Infinity;
-    for (const s of states) {
-        if (s.nextUpdateTime < earliest) earliest = s.nextUpdateTime;
-    }
-    return earliest;
-}
-
-/**
- * Returns true if any hand is currently mid-animation.
- * When this is true the scheduler should keep calling requestAnimationFrame.
- */
-export function anyAnimating(states: HandState[]): boolean {
-    for (const s of states) {
-        if (s.angle.animating) return true;
-        if (s.offsetAngle && s.offsetAngle.animating) return true;
-        if (s.xMotion && s.xMotion.animating) return true;
-        if (s.yMotion && s.yMotion.animating) return true;
-    }
-    return false;
-}
-
-/**
- * Snap all in-flight animations to their target values immediately,
- * and freeze all schedules so no re-evaluation happens while stopped.
- * Call this when pausing so hands don't freeze mid-sweep.
- */
-export function finishAnimations(states: HandState[]): void {
-    for (const s of states) {
-        const val = s.angle;
-        if (val.animating) {
-            val.currentValue = fmod(val.targetValue, 2 * Math.PI);
-            val.animating = false;
-            if (s.part.dynamicState) {
-                s.part.dynamicState.currentAngle = val.currentValue;
-            }
-        }
-        if (s.offsetAngle && s.offsetAngle.animating) {
-            s.offsetAngle.currentValue = fmod(s.offsetAngle.targetValue, 2 * Math.PI);
-            s.offsetAngle.animating = false;
-            if (s.part.dynamicState) {
-                s.part.dynamicState.currentOffsetAngle = s.offsetAngle.currentValue;
-            }
-        }
-        if (s.xMotion && s.xMotion.animating) {
-            s.xMotion.currentValue = s.xMotion.targetValue;
-            s.xMotion.animating = false;
-            if (s.part.dynamicState) {
-                s.part.dynamicState.currentXMotion = s.xMotion.currentValue;
-            }
-        }
-        if (s.yMotion && s.yMotion.animating) {
-            s.yMotion.currentValue = s.yMotion.targetValue;
-            s.yMotion.animating = false;
-            if (s.part.dynamicState) {
-                s.part.dynamicState.currentYMotion = s.yMotion.currentValue;
-            }
-        }
-        // Prevent the scheduler from re-evaluating while stopped
-        s.nextUpdateDisplayTime = Infinity;
-        s.nextUpdateTime = Infinity;
-    }
-}
-
-/**
- * Unfreeze hand schedules so expressions re-evaluate on the very next frame.
- * Call when resuming playback after a finishAnimations() pause.
- */
-export function resetHandSchedules(states: HandState[]): void {
-    for (const s of states) {
-        s.nextUpdateDisplayTime = 0;
-        s.nextUpdateTime = 0;
-    }
-}
-
-// ============================================================================
-// Animation logic (ported from ECGLPart.m)
-// ============================================================================
-
-/**
- * Start (or restart) an animation from the current position to a new target.
- *
- * @param durationOverrideMs  When provided, use this fixed duration instead of
- *   computing from angular distance / animation speed. Used for tick-interval
- *   compression and single-tap steps.
- */
-function startAnimation(
-    state: HandState,
-    newTarget: number,
-    now: number,
-    durationOverrideMs?: number,
-): void {
-    startAnimationRaw(state.angle, newTarget, now, state.animSpeed, durationOverrideMs);
-}
-
-/**
- * Snap a hand directly to a target angle with no animation.
- * Used for parts with dragAnimationType != 'dragAnimationAlways' during scrub.
- */
-function snapToTarget(state: HandState, newTarget: number): void {
-    const normalized = fmod(newTarget, 2 * Math.PI);
-    state.angle.currentValue = normalized;
-    state.angle.targetValue = normalized;
-    state.angle.animating = false;
-    if (!state.part.dynamicState) {
-        state.part.dynamicState = { currentAngle: normalized };
-    } else {
-        state.part.dynamicState.currentAngle = normalized;
-    }
-}
-
-/** Snap an AnimatingValue directly to a target with no animation. */
-function snapToTargetRaw(val: AnimatingValue, newTarget: number): void {
-    const normalized = fmod(newTarget, 2 * Math.PI);
-    val.currentValue = normalized;
-    val.targetValue = normalized;
-    val.animating = false;
-}
-
 // ============================================================================
 // Core animation (semantics-free)
 // ============================================================================
@@ -758,8 +188,18 @@ export function interpolateValue(val: AnimatingValue, now: number): number {
 // ============================================================================
 
 /**
- * Start an angle animation.  Normalizes the target to [0, 2π) and unwraps
- * currentValue for the shortest angular path, then delegates to the core.
+ * Start a cyclic-or-linear animation.  Takes the shortest path around a value of
+ * the given `period`, then delegates to the core.
+ *
+ * `period` generalizes the old `linear` boolean (see
+ * planning/2026-06-15-chronometer-obsvalue-port.md, "Cyclic values"):
+ *   - `2π` (default) — angle: normalize target to [0, 2π) and unwrap currentValue
+ *     for the shortest angular path. Bit-identical to the former `linear:false`.
+ *   - `Infinity` — linear: straight-line interpolation, no wrapping (former
+ *     `linear:true`).
+ *   - any finite P — cyclic with period P (e.g. the analemma path parameter):
+ *     shortest path mod P, normalize target to [0, P).
+ *
  * Exported for use by the terminator leaf animation system.
  */
 export function startAnimationRaw(
@@ -768,13 +208,14 @@ export function startAnimationRaw(
     now: number,
     animSpeed: number = 1.0,
     durationOverrideMs?: number,
-    linear?: boolean,
+    period: number = 2 * Math.PI,
 ): void {
     const speed = kECGLAngleAnimationSpeed * animSpeed;
+    const wraps = isFinite(period);  // false ⇒ linear (no wrapping)
 
-    if (!linear) {
-        // Normalize target to [0, 2π)
-        newTarget = fmod(newTarget, 2 * Math.PI);
+    if (wraps) {
+        // Normalize target to [0, period)
+        newTarget = fmod(newTarget, period);
     }
 
     // NaN transition: snap immediately when either endpoint is NaN.
@@ -799,12 +240,12 @@ export function startAnimationRaw(
     if (val.animating) { interpolateValue(val, now); }
     if (val.currentValue === newTarget) { val.animating = false; return; }
 
-    if (!linear) {
-        // Unwrap currentValue so |currentValue - targetValue| ≤ π.
-        // This avoids the animation flipping direction when crossing 0°/360°.
-        const TWO_PI = 2 * Math.PI;
+    if (wraps) {
+        // Unwrap currentValue so |currentValue - targetValue| ≤ period/2.
+        // This avoids the animation flipping direction when crossing the seam
+        // (0/2π for angles, 0/period for other cyclic values).
         let delta = newTarget - val.currentValue;
-        delta = delta - TWO_PI * Math.round(delta / TWO_PI);
+        delta = delta - period * Math.round(delta / period);
         val.currentValue = newTarget - delta;
     }
 
@@ -1218,128 +659,3 @@ function fmod(value: number, modulus: number): number {
     return result < 0 ? result + modulus : result;
 }
 
-// ============================================================================
-// Linear animation helpers
-// ============================================================================
-
-/**
- * Start a linear animation (no angle wrapping) for xMotion/yMotion.
- * Delegates to the core startValueAnimation with linear speed.
- */
-export function startLinearAnimation(
-    val: AnimatingValue,
-    newTarget: number,
-    now: number,
-    animSpeed: number = 1.0,
-    durationOverrideMs?: number,
-): void {
-    startValueAnimation(val, newTarget, now, kECGLLinearAnimationSpeed * animSpeed, durationOverrideMs);
-}
-
-/**
- * Evaluate and start linear motions (xMotion/yMotion) for QHand and
- * CalendarRowCover parts at natural speed (1× mode).
- */
-function evaluateLinearMotions(
-    state: HandState,
-    env: Environment,
-    now: number,
-): void {
-    if (state.part.type === 'QHand') {
-        const qhand = state.part as QHandPart;
-        if (state.xMotion && qhand.xMotion) {
-            startLinearAnimation(state.xMotion, evalAttr(qhand.xMotion, env), now, state.animSpeed);
-        }
-        if (state.yMotion && qhand.yMotion) {
-            startLinearAnimation(state.yMotion, evalAttr(qhand.yMotion, env), now, state.animSpeed);
-        }
-    }
-    if (state.part.type === 'CalendarRowCover' && state.xMotion) {
-        const newXM = computeCalendarCoverOffset(state.part as CalendarRowCoverPart, env);
-        startLinearAnimation(state.xMotion, newXM, now, state.animSpeed);
-    }
-}
-
-/**
- * Evaluate and start linear motions with quantized-mode compression.
- * If the natural duration exceeds the time budget, compress to fit.
- */
-function compressLinearMotions(
-    state: HandState,
-    env: Environment,
-    now: number,
-    timeUntilNextUpdateMs: number,
-): void {
-    const linearSpeed = kECGLLinearAnimationSpeed * state.animSpeed;
-
-    const compressLinear = (val: AnimatingValue, newTarget: number) => {
-        const naturalMs = linearSpeed > 0
-            ? (Math.abs(newTarget - val.currentValue) / linearSpeed) * 1000
-            : 0;
-        const overrideMs = naturalMs > timeUntilNextUpdateMs ? timeUntilNextUpdateMs : undefined;
-        startLinearAnimation(val, newTarget, now, state.animSpeed, overrideMs);
-    };
-
-    if (state.part.type === 'QHand') {
-        const qhand = state.part as QHandPart;
-        if (state.xMotion && qhand.xMotion) {
-            compressLinear(state.xMotion, evalAttr(qhand.xMotion, env));
-        }
-        if (state.yMotion && qhand.yMotion) {
-            compressLinear(state.yMotion, evalAttr(qhand.yMotion, env));
-        }
-    }
-    if (state.part.type === 'CalendarRowCover' && state.xMotion) {
-        compressLinear(state.xMotion, computeCalendarCoverOffset(state.part as CalendarRowCoverPart, env));
-    }
-}
-
-// ============================================================================
-// Day/Night Ring animation lifecycle helpers
-// ============================================================================
-
-/**
- * Snap all QDayNightRing wedge slide and angle animations to their targets.
- * Called alongside finishAnimations() during pause, mode toggles, and scrub start.
- */
-export function finishDayNightSlides(watch: Watch): void {
-    for (const part of watch.parts) {
-        if (part.type === 'QDayNightRing') {
-            if (part._wedgeSlides) {
-                for (const slide of part._wedgeSlides) {
-                    if (slide.animating) {
-                        slide.currentValue = slide.targetValue;
-                        slide.animating = false;
-                    }
-                }
-            }
-            if (part._wedgeAngleAnims) {
-                for (const anim of part._wedgeAngleAnims) {
-                    if (anim.animating) {
-                        anim.currentValue = anim.targetValue;
-                        anim.animating = false;
-                    }
-                }
-            }
-            // Invalidate cache so the next frame recomputes angles
-            // (critical for mode toggles where masterOffset changes)
-            part._cacheNextUpdate = 0;
-            part._cacheStart = undefined;
-        }
-    }
-}
-
-/**
- * Mark all QDayNightRing wedge animations for re-evaluation.
- * Called alongside resetHandSchedules() when resuming playback or on env change.
- * The next frame's drawQDayNightRing will recompute angles and start new animations.
- */
-export function resetDayNightSlides(watch: Watch): void {
-    for (const part of watch.parts) {
-        if (part.type === 'QDayNightRing') {
-            // Invalidate the angle cache so wedges recompute on next frame
-            part._cacheNextUpdate = 0;
-            part._cacheStart = undefined;
-        }
-    }
-}

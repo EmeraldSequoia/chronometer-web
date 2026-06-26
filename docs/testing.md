@@ -58,7 +58,7 @@ src/__tests__/
 
 #### How It Works
 
-1. **`TestBench`** wraps `TimeController` + `createWatchEnvironment` + `initHandStates` + `tickAnimations` for headless execution in Node.js — no Canvas or DOM required.
+1. **`TestBench`** wraps `TimeController` + `createWatchEnvironment` + `buildHandValues` + `updater.tick` for headless execution in Node.js — no Canvas or DOM required. It mirrors the engine's animation path (overridable getNow seam + `beatsPerSecond` quantization) and builds the Updater in **lightweight** mode (skips day/night wedges, terminator leaves, and the analemma — none are snapshotted; the analemma needs `OffscreenCanvas`, absent in Node). Goldens capture each dynamic part's `_obs*` values.
 
 2. **Scenarios** define sequences of actions (set time, step, scrub, play/pause) with capture checkpoints. Six scenario types cover all interaction modes:
 

@@ -2,6 +2,28 @@
 
 The animation system manages how watch hands move between their computed positions, supporting both real-time ticking and accelerated time scrubbing.
 
+> [!IMPORTANT]
+> **Current architecture (June 2026).** Chronometer animation runs on the shared
+> **ObsValue / Updater** system — the same one Observatory and the Inspector use
+> ([shared/obs-value.ts](../src/shared/obs-value.ts), [shared/updater.ts](../src/shared/updater.ts)).
+> Each face has one `Updater`; the Chronometer-specific bridge that turns parts
+> into ObsValues is [watch/hand-values.ts](../src/watch/hand-values.ts)
+> (`buildHandValues` + `buildTerminatorValues` + `buildAnalemmaValues`). The
+> renderer reads each part's `_obs*` handle's `.currentValue`. Per-frame driving is
+> `face.updater.tick(...)`; transitions use `updater.reset()` / `updater.finish()`
+> / `updater.nextWakeupTime()` / `updater.anyAnimating()`.
+>
+> The former per-part **`HandState` / `tickAnimations`** driver (and the separate
+> terminator-leaf and analemma tick loops) were **retired** in the port — see
+> [planning/2026-06-15-chronometer-obsvalue-port.md](../planning/2026-06-15-chronometer-obsvalue-port.md).
+> `animation.ts` now holds only the low-level primitives (`AnimatingValue`,
+> `startAnimationRaw`, `interpolateValue`, `computeNextBoundary`, the update-interval
+> sentinel resolvers). Sections below describing `HandState`/`tickAnimations` are
+> historical; the mechanics (two time bases, `beatsPerSecond` quantization, adaptive
+> duration) carry over to the Updater. Eval-ahead is **off** for Chronometer
+> (`EVAL_AHEAD = false` in `hand-values.ts`) so hands tick and the 1× loop idles;
+> see the planning doc and [2026-06-26-worker-eval-ahead-pipeline.md](../planning/2026-06-26-worker-eval-ahead-pipeline.md).
+
 ## iOS/Android Reference
 
 > **Prerequisites**: Run `scripts/clone-refs.sh` to clone the reference repos. See [ios-reference.md](ios-reference.md).

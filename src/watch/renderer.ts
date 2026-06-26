@@ -39,8 +39,6 @@ import type { TerminatorLeafState } from './terminator.js';
 import { drawTerminator } from './terminator.js';
 import type { AnalemmaState } from './analemma.js';
 import { drawAnalemma } from './analemma.js';
-import type { AnimatingValue } from '../shared/animation.js';
-import { makeAnimatingValue, interpolateValue, interpolateRaw, startLinearAnimation, startAnimationRaw } from '../shared/animation.js';
 
 /** Returns true if a CSS color string has alpha = 0 (fully transparent). */
 function isTransparent(cssColor: string): boolean {
@@ -131,20 +129,6 @@ export function buildStaticBlockCaches(
         } else {
             // Non-window, non-static parts reset the pending windows
             pendingWindows.length = 0;
-        }
-    }
-}
-
-/**
- * Invalidate all QDayNightRing render-level caches in a watch.
- * Called when the environment changes (time stepping, location change)
- * so that cached astronomy angles are recomputed on the next frame.
- */
-export function invalidateDayNightCaches(watch: Watch): void {
-    for (const part of watch.parts) {
-        if (part.type === 'QDayNightRing') {
-            part._cacheNextUpdate = 0;
-            part._cacheStart = undefined;
         }
     }
 }
@@ -1265,9 +1249,9 @@ function drawQDial(
     ctx.translate(x, y);
 
     // Apply animated angle if this QDial participates in the animation system
-    // (i.e. has animSpeed set). Uses the same dynamicState.currentAngle pattern as QHands.
-    if (part.dynamicState) {
-        ctx.rotate(part.dynamicState.currentAngle);
+    // (i.e. has animSpeed set). Reads the Updater-driven ObsValue, same as QHands.
+    if (part._obsAngle) {
+        ctx.rotate(part._obsAngle.currentValue);
     } else if (part.angle) {
         ctx.rotate(evalAttr(part.angle, env));
     }
@@ -1604,8 +1588,8 @@ function drawQHand(
     const x = evalAttr(part.x, env);
     const y = -evalAttr(part.y, env);  // Negate Y: XML Y-up → Canvas Y-down
     // Use pre-computed animated angle if available, otherwise evaluate expression
-    const angle = part.dynamicState
-        ? part.dynamicState.currentAngle
+    const angle = part._obsAngle
+        ? part._obsAngle.currentValue
         : evalAttr(part.angle, env);
     const length = evalAttr(part.length, env);
     const width = evalAttr(part.width, env);
@@ -1616,8 +1600,8 @@ function drawQHand(
     // 'spoke' type: text label at offset position (e.g. AM/PM indicators)
     if (handType === 'spoke') {
         const offsetRadius = evalAttr(part.offsetRadius, env);
-        const offsetAngle = part.dynamicState
-            ? part.dynamicState.currentOffsetAngle ?? evalAttr(part.offsetAngle, env)
+        const offsetAngle = part._obsOffsetAngle
+            ? part._obsOffsetAngle.currentValue
             : evalAttr(part.offsetAngle, env);
         const fontSize = evalAttr(part.fontSize, env) || 8;
         const fontName = part.fontName || 'Arial';
@@ -1661,9 +1645,9 @@ function drawQHand(
         ctx.translate(x, y);
 
         // Apply xMotion/yMotion linear translation (calendar day-indicator wires)
-        if (part.dynamicState) {
-            const xm = part.dynamicState.currentXMotion ?? 0;
-            const ym = part.dynamicState.currentYMotion ?? 0;
+        if (part._obsXMotion || part._obsYMotion) {
+            const xm = part._obsXMotion?.currentValue ?? 0;
+            const ym = part._obsYMotion?.currentValue ?? 0;
             if (xm !== 0 || ym !== 0) {
                 ctx.translate(xm, -ym);
             }
@@ -1689,9 +1673,9 @@ function drawQHand(
     ctx.translate(x, y);
 
     // Apply xMotion/yMotion linear translation (calendar day-indicator wires)
-    if (part.dynamicState) {
-        const xm = part.dynamicState.currentXMotion ?? 0;
-        const ym = part.dynamicState.currentYMotion ?? 0;
+    if (part._obsXMotion || part._obsYMotion) {
+        const xm = part._obsXMotion?.currentValue ?? 0;
+        const ym = part._obsYMotion?.currentValue ?? 0;
         if (xm !== 0 || ym !== 0) {
             ctx.translate(xm, -ym);  // Negate Y: XML Y-up → Canvas Y-down
         }
@@ -2055,8 +2039,8 @@ function drawWheel(
     const y = -evalAttr(part.y, env);  // Negate Y: XML Y-up → Canvas Y-down
     const radius = evalAttr(part.radius, env);
     // Use pre-computed animated angle if available, otherwise evaluate expression
-    const angle = part.dynamicState
-        ? part.dynamicState.currentAngle
+    const angle = part._obsAngle
+        ? part._obsAngle.currentValue
         : evalAttr(part.angle, env);
     if (radius <= 0) return;
 
@@ -2461,13 +2445,13 @@ function drawImageHand(
     const x = evalAttr(part.x, env);
     const y = -evalAttr(part.y, env);  // Negate Y
     // Use pre-computed animated angle if available, otherwise evaluate expression
-    const angle = part.dynamicState
-        ? part.dynamicState.currentAngle
+    const angle = part._obsAngle
+        ? part._obsAngle.currentValue
         : evalAttr(part.angle, env);
     const offsetRadius = evalAttr(part.offsetRadius, env);
     // Use pre-computed animated offsetAngle if available (keeps in sync with animated angle)
-    const offsetAngle = (part.dynamicState && part.dynamicState.currentOffsetAngle !== undefined)
-        ? part.dynamicState.currentOffsetAngle
+    const offsetAngle = part._obsOffsetAngle
+        ? part._obsOffsetAngle.currentValue
         : evalAttr(part.offsetAngle, env);
 
     const { bitmap, scale: imgScale } = loaded;
@@ -2598,8 +2582,8 @@ function drawQWedge(
     const outerR = evalAttr(part.outerRadius, env);
     const innerR = evalAttr(part.innerRadius, env);
     const span = evalAttr(part.angleSpan, env);
-    const angle = part.dynamicState
-        ? part.dynamicState.currentAngle
+    const angle = part._obsAngle
+        ? part._obsAngle.currentValue
         : evalAttr(part.angle, env);
     if (outerR <= 0 || innerR <= 0 || span <= 0) return;
 
@@ -2615,8 +2599,8 @@ function drawQWedge(
     let totalAngle = angle;
     if (part.offsetRadius && part.offsetAngle) {
         const offR = evalAttr(part.offsetRadius, env);
-        const offA = part.dynamicState?.currentOffsetAngle !== undefined
-            ? part.dynamicState.currentOffsetAngle
+        const offA = part._obsOffsetAngle
+            ? part._obsOffsetAngle.currentValue
             : evalAttr(part.offsetAngle, env);
         ctx.translate(offR * Math.sin(offA), -offR * Math.cos(offA));
         totalAngle = offA + angle;
@@ -2660,12 +2644,17 @@ function drawQDayNightRing(
     const cy = -evalAttr(part.y, env);  // Y-flip
     const outerR = evalAttr(part.outerRadius, env);
     const innerR = evalAttr(part.innerRadius, env);
-    const numWedges = evalAttr(part.numWedges, env) || 24;
-    const planetNumber = evalAttr(part.planetNumber, env);
-    const masterOffset = (part._masterOffsetAnim && part._masterOffsetAnim.animating)
-        ? part._masterOffsetAnim.currentValue
-        : evalAttr(part.masterOffset, env);
     if (outerR <= 0 || innerR <= 0) return;
+
+    // Animated values come from the per-face Updater (built in buildHandValues).
+    // The wedge angles/slides and masterOffset are ObsValues; the renderer just
+    // reads their currentValue (no astronomy, no animation, no caching here).
+    const angleValues = part._obsWedgeAngles;
+    if (!angleValues || angleValues.length === 0) return;
+    const numWedges = angleValues.length;
+    const masterOffset = part._obsMasterOffset
+        ? part._obsMasterOffset.currentValue
+        : evalAttr(part.masterOffset, env);
 
     const strokeColor = part.strokeColor ? evalColor(part.strokeColor, env) : 'black';
     const fillColor = part.fillColor ? evalColor(part.fillColor, env) : 'white';
@@ -2673,168 +2662,15 @@ function drawQDayNightRing(
     // Each wedge spans a bit more than 2PI/numWedges so they overlap slightly (matching iOS)
     const wedgeSpan = (2 * Math.PI + 0.2) / numWedges;
 
-    // Select the leaf angle function based on time base and envSlot
-    const slotNumber = part.envSlot ? evalAttr(part.envSlot, env) : undefined;
-    let leafAngleFn: ((planetNumber: number, leafNumber: number, numLeaves: number) => number) | undefined;
-
-    if (slotNumber != null && !isNaN(slotNumber)) {
-        // Route through slot's city lat/lon for astronomy
-        const slotFn = env.functions.get('dayNightLeafAngleForSlot') as
-            ((p: number, l: number, n: number, s: number) => number) | undefined;
-        if (slotFn) {
-            leafAngleFn = (p, l, n) => slotFn(p, l, n, slotNumber);
-        }
-    }
-    if (!leafAngleFn) {
-        const fnName = part.timeBase === 'LST' ? 'dayNightLeafAngleLST' : 'dayNightLeafAngle';
-        leafAngleFn = env.functions.get(fnName) as
-            ((planetNumber: number, leafNumber: number, numLeaves: number) => number) | undefined;
-    }
-    if (!leafAngleFn) return;
-
-    // --- Angle caching: reuse cached wedge angles until the update interval fires ---
-    // Use display time (ms-since-epoch) so the cache expires when enough
-    // *display* time has passed, not real time. This correctly handles
-    // quantized scrubbing where display time jumps by hours per tick.
-    // Track a bidirectional window [_cacheStart, _cacheNextUpdate] so the
-    // cache also expires when time runs backward (e.g. reverse animation).
-    const updateSec = part.update ? evalAttr(part.update, env) : 5;
-    const updateMs = updateSec * 1000;
-    const displayNowMs = env.getNow ? env.getNow().getTime() : performance.now();
-    let angles: number[];
-
-    // --- Wadokei slide mode ---
-    const slideDistance = part.slideDistance ? evalAttr(part.slideDistance, env) : 0;
-    const slideAnimSpeed = part.slideAnimSpeed ? evalAttr(part.slideAnimSpeed, env) : 1.0;
-    const perfNow = performance.now();
-
-    let numVis = numWedges;  // default: all visible
-    if (slideDistance > 0) {
-        // Compute how many wedges are needed to tile the nighttime arc
-        const numVisFn = env.functions.get('wadokeiDNNumVisible') as
-            ((n: number) => number) | undefined;
-        if (numVisFn) {
-            numVis = numVisFn(numWedges);
-        }
-    }
-
-    // Angle caching: in slide mode, we compute wedge positions directly from
-    // sunset/sunrise angles using the actual rendered wedge span, rather than
-    // the leaf function (whose internal leafWidth doesn't match our wedge span).
-    if (part._cachedAngles && part._cachedAngles.length === numWedges
-        && part._cacheStart != null && part._cacheNextUpdate != null
-        && displayNowMs >= part._cacheStart && displayNowMs < part._cacheNextUpdate
-        && (part as any)._cacheNumVis === numVis) {
-        angles = part._cachedAngles;
-    } else {
-        angles = new Array(numWedges);
-        if (slideDistance > 0 && numVis > 0 && numVis < numWedges) {
-            // Slide mode: compute positions directly.
-            // Use XML-specified sunset/sunrise angles if provided; otherwise
-            // fall back to the leaf function's indicator mode.
-            const sunsetAngle = part.sunsetAngle
-                ? evalAttr(part.sunsetAngle, env)
-                : leafAngleFn(planetNumber, 1, 0);
-            const sunriseAngle = part.sunriseAngle
-                ? evalAttr(part.sunriseAngle, env)
-                : leafAngleFn(planetNumber, 0, 0);
-
-            // Compute the nighttime arc (sunset → sunrise, wrapping forward)
-            let nightArc = sunriseAngle - sunsetAngle;
-            if (nightArc < 0) nightArc += 2 * Math.PI;
-
-            // Adjust the arc inward by half a wedge span on each side so that
-            // the EDGES of the first/last wedge align with sunset/sunrise.
-            const adjustedStart = sunsetAngle + wedgeSpan / 2;
-            const adjustedArc = nightArc - wedgeSpan; // arc between first and last centers
-
-            // Distribute numVis wedge centers evenly across the adjusted arc
-            const step = numVis > 1 ? adjustedArc / (numVis - 1) : 0;
-            for (let i = 0; i < numVis; i++) {
-                const raw = adjustedStart + step * i;
-                angles[i] = ((raw % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-            }
-
-            // Park hidden wedges at the sunrise edge — where they enter/exit visibility.
-            // This avoids a large angular jump when numVis changes.
-            const parkAngle = numVis > 0
-                ? adjustedStart + step * (numVis - 1)   // last visible wedge position
-                : sunsetAngle;
-            for (let i = numVis; i < numWedges; i++) {
-                angles[i] = parkAngle;
-            }
-        } else if (slideDistance > 0 && numVis === 0) {
-            // Polar summer: no night at all — park all wedges at angle 0.
-            // They will all be slid out (hidden), so angle doesn't matter visually,
-            // but a consistent value prevents flash during slide-out animation.
-            for (let i = 0; i < numWedges; i++) {
-                angles[i] = 0;
-            }
-        } else if (slideDistance > 0 && numVis >= numWedges) {
-            // Polar winter: all wedges visible, distributed evenly across the
-            // full circle. We can't use leafAngleFn here because it leaves a
-            // one-leaf-width gap around the transit point (designed for faces
-            // like Mauna Kea that have separate QWedge polar masks to cover
-            // the gap). Kyoto uses the slide mechanism instead of masks, so
-            // we fill the full circle directly.
-            for (let i = 0; i < numWedges; i++) {
-                angles[i] = (2 * Math.PI * i) / numWedges;
-            }
-        } else {
-            // Normal mode (non-slide): standard leaf distribution
-            for (let i = 0; i < numWedges; i++) {
-                angles[i] = leafAngleFn(planetNumber, i, numWedges);
-            }
-        }
-        part._cachedAngles = angles;
-        part._cacheStart = displayNowMs;
-        part._cacheNextUpdate = displayNowMs + updateMs;
-        (part as any)._cacheNumVis = numVis;
-    }
-
-    // --- Per-wedge angle animation ---
-    // Initialize angle AnimatingValues on first call
-    if (!part._wedgeAngleAnims || part._wedgeAngleAnims.length !== numWedges) {
-        part._wedgeAngleAnims = [];
-        for (let i = 0; i < numWedges; i++) {
-            part._wedgeAngleAnims.push(makeAnimatingValue(angles[i], perfNow));
-        }
-    }
-    // Drive angle animations toward the current target angles
-    for (let i = 0; i < numWedges; i++) {
-        startAnimationRaw(part._wedgeAngleAnims[i], angles[i], perfNow);
-    }
-
-    if (slideDistance > 0) {
-        // Initialize per-wedge slide AnimatingValues on first call
-        if (!part._wedgeSlides || part._wedgeSlides.length !== numWedges) {
-            part._wedgeSlides = [];
-            for (let i = 0; i < numWedges; i++) {
-                // Start all wedges in hidden position
-                part._wedgeSlides.push(makeAnimatingValue(slideDistance, perfNow));
-            }
-        }
-
-        // Update slide targets and start animations
-        for (let i = 0; i < numWedges; i++) {
-            const target = i < numVis ? 0 : slideDistance;
-            startLinearAnimation(part._wedgeSlides[i], target, perfNow, slideAnimSpeed);
-        }
-    }
+    const slideValues = part._obsWedgeSlides;
 
     ctx.save();
     ctx.translate(cx, cy);
 
     for (let i = 0; i < numWedges; i++) {
-        // Use interpolated angle for smooth transitions
-        const animatedAngle = interpolateRaw(part._wedgeAngleAnims[i], perfNow);
-        const angle = masterOffset + animatedAngle;
-
-        // Interpolate slide for this frame
-        let slide = 0;
-        if (part._wedgeSlides && part._wedgeSlides[i]) {
-            slide = interpolateValue(part._wedgeSlides[i], perfNow);
-        }
+        // The Updater already evaluated + interpolated this wedge's angle/slide.
+        const angle = masterOffset + angleValues[i].currentValue;
+        const slide = slideValues ? (slideValues[i]?.currentValue ?? 0) : 0;
 
         ctx.save();
         ctx.rotate(angle);
@@ -3080,8 +2916,8 @@ function drawTerraRingWithKnockouts(
     const loaded = images.get(part.src);
     if (!loaded) return;
 
-    const angle = part.dynamicState
-        ? part.dynamicState.currentAngle
+    const angle = part._obsAngle
+        ? part._obsAngle.currentValue
         : evalAttr(part.angle, env);
 
     // Get or build the knockout cache
@@ -3205,8 +3041,8 @@ function drawTerraChannelLines(
     const getDSTRange = (env as any)._getDSTRange as ((slot: number) => { lowHours: number; highHours: number } | null) | undefined;
     if (!getDSTRange) { console.log('[Terra] No getDSTRange function'); return; }
 
-    const angle = part.dynamicState
-        ? part.dynamicState.currentAngle
+    const angle = part._obsAngle
+        ? part._obsAngle.currentValue
         : evalAttr(part.angle, env);
 
     // Channel radii matching iOS: channelRad1=111.5, channelRad2=126 (at 1x)
@@ -3391,8 +3227,8 @@ function drawCalendarWheel(
     const x = evalAttr(part.x, env);
     const y = -evalAttr(part.y, env);
     const radius = evalAttr(part.radius, env);
-    const angle = part.dynamicState
-        ? part.dynamicState.currentAngle
+    const angle = part._obsAngle
+        ? part._obsAngle.currentValue
         : evalAttr(part.angle, env);
 
     const fontSize = evalAttr(part.fontSize, env) || 8;
@@ -3598,8 +3434,8 @@ function drawCalendarRowCover(
 
     const coverType = part.coverType || '';
 
-    // xOffset — driven by animation system via dynamicState.currentXMotion.
-    const xOffset = part.dynamicState?.currentXMotion ?? 0;
+    // xOffset — driven by the Updater via the xMotion ObsValue.
+    const xOffset = part._obsXMotion?.currentValue ?? 0;
 
     // Grid position
     const gridTop = -(calRadius - calHeight / 2);

@@ -65,7 +65,7 @@ Each leaf is drawn as a filled and stroked path using Canvas 2D:
 
 Terminator leaves are **dynamic parts** — they animate individually when the phase changes. This matters for fast-forward modes where leaves visibly open and close.
 
-Terminator leaves have their own `nextUpdateTime` and `resetLeafSchedules()` function, separate from the main hand schedules. Both must be reset at the same transition points (see [Development Rules §6](development-rules.md#6-animation-schedule-reset-rules)).
+Each terminator leaf is now an ObsValue on the face's `Updater` (a per-leaf `angle`, composed from the shared `phaseAngle` expression via the `terminatorLeafAngle(...)` env function, plus one shared `rotation`), built by `buildTerminatorValues` in `hand-values.ts`. They reset/finish together with everything else via `face.updater.reset()` / `face.updater.finish()` — there is no separate `resetLeafSchedules()` (see [Development Rules §6](development-rules.md#6-animation-schedule-reset-rules)). The renderer reads `leaf._obsAngle` / `leaf._obsRotation`.
 
 ## Key Source Files
 

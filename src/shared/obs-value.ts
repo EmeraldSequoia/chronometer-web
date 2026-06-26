@@ -85,8 +85,16 @@ export interface ObsValue {
 
     /** If true, this value is linear (not an angle) — skip fmod wrapping.
      *  Used for earth view values like sun declination, and for the Inspector's
-     *  raw-number / date readouts. */
+     *  raw-number / date readouts. Def-level input; the updater drives animation
+     *  off {@link period} (derived from this). */
     linear: boolean;
+
+    /** Wrap period for shortest-path animation: `2π` for angles, `Infinity` for
+     *  linear values, or any finite period for a cyclic non-angle (e.g. the
+     *  analemma path parameter, period = PATH_SAMPLE_COUNT). Derived at
+     *  construction: `linear ? Infinity : (def.period ?? 2π)`. The single source
+     *  of truth the updater/animation core use for wrapping. */
+    period: number;
 
     /** If true, use the lag-free "eval-ahead" update: evaluate the expression at
      *  the *next* update boundary (one interval into the future) and sweep there,
@@ -110,7 +118,7 @@ export interface ObsValue {
     discrete: boolean;
 }
 
-/** Declarative definition used to construct an ObsValue. */
+/** Declarative definition used to construct an ObsValue (string expression). */
 export interface ObsValueDef {
     name: string;
     expr: string;
@@ -118,25 +126,46 @@ export interface ObsValueDef {
     animSpeed?: number;      // catch-up speed in rad/s; default 2.0
     naturalSpeed?: number;   // sweep speed in rad/s; default 0 (snap-to-target)
     linear?: boolean;        // if true, value is not an angle — skip fmod wrapping
+    period?: number;         // cyclic wrap period (default 2π for angles); ignored when linear
     evalAhead?: boolean;     // if true, use lag-free eval-ahead update
     discrete?: boolean;      // if true, evaluate at current time and snap (no interpolation)
+}
+
+/** Like {@link ObsValueDef} but with a pre-parsed AST expression. Used by clients
+ *  (Chronometer) whose part attributes are already parsed to `ASTNode`s, avoiding
+ *  a re-parse. */
+export interface ObsValueDefAST extends Omit<ObsValueDef, 'expr'> {
+    expr: ASTNode;
 }
 
 // ============================================================================
 // Construction
 // ============================================================================
 
-/** Create a single ObsValue from a definition. */
+/** Create a single ObsValue from a definition with a string expression. */
 export function createObsValue(
     def: ObsValueDef,
     env: Environment,
     perfNow: number,
+    getNow?: () => Date,
+): ObsValue {
+    return createObsValueFromAST({ ...def, expr: parse(def.expr) }, env, perfNow, getNow);
+}
+
+/** Create a single ObsValue from a definition with a pre-parsed AST expression. */
+export function createObsValueFromAST(
+    def: ObsValueDefAST,
+    env: Environment,
+    perfNow: number,
     _getNow?: () => Date,
 ): ObsValue {
-    const expr = parse(def.expr);
+    const expr = def.expr;
     const initialValue = evalAttr(expr, env);
     const animSpeed = def.animSpeed ?? 2.0;      // rad/s
     const naturalSpeed = def.naturalSpeed ?? 0;   // rad/s
+    const linear = def.linear ?? false;
+    // Wrap period: linear ⇒ no wrap (Infinity); else the given period or 2π (angle).
+    const period = linear ? Infinity : (def.period ?? 2 * Math.PI);
 
     return {
         name: def.name,
@@ -150,7 +179,8 @@ export function createObsValue(
         nextUpdateDisplayTime: 0,
         nextUpdateTime: 0,
         pendingSweep: null,
-        linear: def.linear ?? false,
+        linear,
+        period,
         evalAhead: def.evalAhead ?? false,
         discrete: def.discrete ?? false,
     };
