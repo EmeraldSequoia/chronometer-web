@@ -428,16 +428,16 @@ useful on its own; (B) is where the CPU win lands.
 
 ### Phase A — on-beat scheduling, single-thread
 
-**Status: implemented (2026-06-27), pending golden re-capture + manual sign-off.**
-`onBeat` flag added to `ObsValue`; `onBeatStep` (sit/sweep state machine + arrival
-edge + stopped-settle) added to `updater.ts`; Chronometer flipped from
-`EVAL_AHEAD=false` to `onBeat:true` (except `masterOffset`). `finish(env)` bakes
-`A(now)` on freeze paths; engine + bench updated. tsc clean; heaviest face
-(Mauna Kea) renders live with no console errors. Regression bench: stopped/paused/
-stepped/scrub-released captures match legacy **exactly** (settle-to-exact-time
-works); only **live-motion** samples (play/scrub mid-sweep) shift, by ≈0.5 s of hand
-motion — the intended on-beat change — plus the internal `nextUpdateDisplayTime`
-scheduling field. Goldens need re-capture to bless the live-motion change.
+**Status: ✅ COMPLETE (2026-06-27).** `onBeat` flag added to `ObsValue`;
+`onBeatStep` (sit/sweep state machine + arrival edge + stopped-settle) added to
+`updater.ts`; Chronometer flipped from `EVAL_AHEAD=false` to `onBeat:true` (except
+`masterOffset`). `finish(env)` bakes `A(now)` on freeze paths; engine + bench
+updated. tsc clean; heaviest face (Mauna Kea) renders live with no console errors.
+Owner verified the on-beat behavior in-browser (added a `performance.now()` readout
+to confirm hands land on the beat, differing from the committed code). Regression
+goldens re-captured to bless the live-motion timing; **full suite green (8539
+tests)**. Stopped/paused/stepped/scrub-released states preserve exact legacy values
+(settle-to-exact-time); only live-motion timing changed, as intended.
 
 Re-enable eval-ahead for Chronometer **as on-beat scheduling**, no worker yet.
 

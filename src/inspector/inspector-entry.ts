@@ -802,6 +802,12 @@ const KM_PER_AU = 149597870.7;
 const MINUS = '−';
 const APOS = '’';
 
+// Browser-time diagnostic row: raw wall-clock via performance.now(), no
+// TimeController/ObsValue in the path. Injected into the Time catalog group.
+let browserTimeEl: HTMLElement | null = null;
+let browserTimeRowEl: HTMLElement | null = null;
+let lastBrowserTimeStr = '';
+
 /** Build the catalog DOM and its parallel ObsValue list (once, at startup). */
 function buildCatalog(): void {
     const now = performance.now();
@@ -854,6 +860,27 @@ function buildCatalog(): void {
             groupEl.appendChild(rowEl);
         }
         catalogEl.appendChild(groupEl);
+    }
+
+    // Inject the "Browser time" diagnostic row into the first group (Time).
+    const timeGroupEl = catalogEl.querySelector('.cat-group');
+    if (timeGroupEl) {
+        const btRow = document.createElement('div');
+        btRow.className = 'cat-row';
+        const btLabel = document.createElement('span');
+        btLabel.className = 'cat-row-label';
+        btLabel.textContent = 'Browser time';
+        btRow.appendChild(btLabel);
+        const btCell = document.createElement('div');
+        btCell.className = 'cat-cell';
+        const btValue = document.createElement('span');
+        btValue.className = 'cat-cell-value';
+        btValue.textContent = '—';
+        btCell.appendChild(btValue);
+        btRow.appendChild(btCell);
+        timeGroupEl.appendChild(btRow);
+        browserTimeEl = btValue;
+        browserTimeRowEl = btRow;
     }
 }
 
@@ -1007,6 +1034,30 @@ function renderCatalog(): void {
     }
 }
 
+/**
+ * Render the "Browser time" diagnostic row from the raw browser clock.
+ * Uses performance.timeOrigin + performance.now() → Date, bypassing
+ * TimeController and ObsValue entirely. Grayed out when stopped (the
+ * comparison to display time is meaningless when the clock isn't running).
+ */
+function renderBrowserTime(): void {
+    if (!browserTimeEl || !browserTimeRowEl) return;
+    const stopped = timeController.isStopped;
+    browserTimeRowEl.style.opacity = stopped ? '0.35' : '';
+    if (stopped) return;  // no point updating the text while grayed out
+    const wallMs = performance.timeOrigin + performance.now();
+    const wallDate = new Date(wallMs);
+    // Apply the same tz shift the header uses so the comparison is apples-to-apples.
+    const shifted = tzDeltaMs !== 0 ? new Date(wallDate.getTime() + tzDeltaMs) : wallDate;
+    const secSinceMidnight = shifted.getHours() * 3600 + shifted.getMinutes() * 60
+        + shifted.getSeconds() + shifted.getMilliseconds() / 1000;
+    const str = fmtHMS(secSinceMidnight);
+    if (str !== lastBrowserTimeStr) {
+        lastBrowserTimeStr = str;
+        browserTimeEl.textContent = str;
+    }
+}
+
 // ============================================================================
 // Main update loop
 // ============================================================================
@@ -1042,6 +1093,7 @@ function tick(): void {
 
     updateTimeDisplay();
     renderCatalog();
+    renderBrowserTime();
     timeUI?.updateTimeUI();
 
     timeController.clampDisplayTime();
@@ -1106,6 +1158,7 @@ wireAppLink('open-chronometer', 'all.html');
 // Initial build + start
 buildCatalog();
 updateTimeDisplay();
+renderBrowserTime();
 timeUI?.updateTimeUI();
 scheduleFrame();
 

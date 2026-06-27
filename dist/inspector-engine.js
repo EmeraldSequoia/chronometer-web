@@ -18162,6 +18162,9 @@
   var KM_PER_AU = 1495978707e-1;
   var MINUS = "\u2212";
   var APOS = "\u2019";
+  var browserTimeEl = null;
+  var browserTimeRowEl = null;
+  var lastBrowserTimeStr = "";
   function buildCatalog() {
     const now = performance.now();
     for (const group of CATALOG) {
@@ -18215,6 +18218,25 @@
         groupEl.appendChild(rowEl);
       }
       catalogEl.appendChild(groupEl);
+    }
+    const timeGroupEl = catalogEl.querySelector(".cat-group");
+    if (timeGroupEl) {
+      const btRow = document.createElement("div");
+      btRow.className = "cat-row";
+      const btLabel = document.createElement("span");
+      btLabel.className = "cat-row-label";
+      btLabel.textContent = "Browser time";
+      btRow.appendChild(btLabel);
+      const btCell = document.createElement("div");
+      btCell.className = "cat-cell";
+      const btValue = document.createElement("span");
+      btValue.className = "cat-cell-value";
+      btValue.textContent = "\u2014";
+      btCell.appendChild(btValue);
+      btRow.appendChild(btCell);
+      timeGroupEl.appendChild(btRow);
+      browserTimeEl = btValue;
+      browserTimeRowEl = btRow;
     }
   }
   function resetAllSchedules() {
@@ -18356,6 +18378,21 @@
       else h.valueEl.textContent = str;
     }
   }
+  function renderBrowserTime() {
+    if (!browserTimeEl || !browserTimeRowEl) return;
+    const stopped = timeController.isStopped;
+    browserTimeRowEl.style.opacity = stopped ? "0.35" : "";
+    if (stopped) return;
+    const wallMs = performance.timeOrigin + performance.now();
+    const wallDate = new Date(wallMs);
+    const shifted = tzDeltaMs !== 0 ? new Date(wallDate.getTime() + tzDeltaMs) : wallDate;
+    const secSinceMidnight = shifted.getHours() * 3600 + shifted.getMinutes() * 60 + shifted.getSeconds() + shifted.getMilliseconds() / 1e3;
+    const str = fmtHMS(secSinceMidnight);
+    if (str !== lastBrowserTimeStr) {
+      lastBrowserTimeStr = str;
+      browserTimeEl.textContent = str;
+    }
+  }
   var fpsIndicator = createFpsIndicator(urlState.fps);
   var rafId = null;
   var inTick = false;
@@ -18379,6 +18416,7 @@
     tickExprValues(perfNow, ctx);
     updateTimeDisplay();
     renderCatalog();
+    renderBrowserTime();
     timeUI?.updateTimeUI();
     timeController.clampDisplayTime();
     timeController.endFrame();
@@ -18432,6 +18470,7 @@
   wireAppLink("open-chronometer", "all.html");
   buildCatalog();
   updateTimeDisplay();
+  renderBrowserTime();
   timeUI?.updateTimeUI();
   scheduleFrame();
   console.log(
