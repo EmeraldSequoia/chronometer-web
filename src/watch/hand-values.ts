@@ -11,8 +11,9 @@
  * Naming convention for ObsValue keys: `<faceName>.<partName>.<property>`.
  *
  * Animation policy:
- *   - `discrete: false`; eval-ahead is off (see {@link EVAL_AHEAD}) so hands tick
- *     and snap at `animSpeed` like the legacy `tickAnimations`.
+ *   - `discrete: false`; on-beat scheduling is on (see {@link ON_BEAT}) so hands
+ *     tick at `animSpeed` but *land on the beat* (the legacy `tickAnimations`
+ *     started the tick at the beat).
  *   - Angles wrap at 2π; linear motions (xMotion/yMotion, calendar covers, wadokei
  *     slides) are `linear: true` (no wrap).
  *   - `animSpeed` is carried over from the part's XML `animSpeed` (default 1),
@@ -42,19 +43,22 @@ const ANGLE_BASE_SPEED = 2.0;
 const LINEAR_BASE_SPEED = 60.0;
 
 /**
- * Whether Chronometer hand values use lag-free eval-ahead.
+ * Whether Chronometer hand values use **on-beat scheduling**.
  *
- * **Off.** Eval-ahead evaluates each value's target at the *next boundary* and
- * sweeps over the whole interval. For watch hands that breaks the mechanical
- * model: a 1-bps hand (update=1s) sweeps the entire second instead of *ticking*,
- * the 1× loop never goes idle (the hand is always mid-sweep), and each scrub
- * frame evaluates astronomy at a *future* time while the env/terminator/analemma
- * evaluate at *now* — thrashing the single astro cache. The non-eval-ahead
- * branches (snap-at-boundary / scrub-compression) are modeled on the legacy
- * `tickAnimations` and reproduce the committed behavior (ticks, 1× idle, single
- * astro time). See planning/2026-06-15-chronometer-obsvalue-port.md.
+ * **On.** On-beat keeps the natural-speed *snap* (so a 1-bps hand still *ticks*
+ * rather than sweeping the whole second) but *delays the start* so the snap
+ * *lands exactly on the beat* instead of starting at it. Properties: ticks, 1×
+ * idle (the value sits between snaps), on-beat arrival, and single-time astronomy
+ * during scrub (a value re-evaluates only when accelerated display time reaches
+ * its own boundary — not every tick). This supersedes the plain eval-ahead that
+ * was rejected during the ObsValue port (which stretched the sweep across the
+ * interval, never idled, and thrashed the astro cache). See
+ * planning/2026-06-26-worker-eval-ahead-pipeline.md (Phase A).
+ *
+ * `masterOffset` deliberately stays off this (constant-speed flip; see
+ * `buildDayNightRing`).
  */
-const EVAL_AHEAD = false;
+const ON_BEAT = true;
 
 /**
  * Build the per-face `Updater` and wire ObsValue handles onto every dynamic part.
@@ -122,7 +126,7 @@ function addAngleValue(
     return updater.add(createObsValueFromAST({
         name, expr, updateInterval,
         animSpeed: animSpeedRadPerSec,
-        evalAhead: EVAL_AHEAD,
+        onBeat: ON_BEAT,
     }, env, perfNow));
 }
 
@@ -134,7 +138,7 @@ function addLinearValue(
     return updater.add(createObsValueFromAST({
         name, expr, updateInterval, linear: true,
         animSpeed: animSpeedPxPerSec,
-        evalAhead: EVAL_AHEAD,
+        onBeat: ON_BEAT,
     }, env, perfNow));
 }
 
@@ -195,7 +199,7 @@ function buildCalendarCover(
         updateInterval: interval,
         linear: true,
         animSpeed: LINEAR_BASE_SPEED * animS,
-        evalAhead: EVAL_AHEAD,
+        onBeat: ON_BEAT,
     }, env, perfNow));
 }
 
@@ -252,7 +256,7 @@ function buildDayNightRing(
                 expr: `dayNightWedgeSlideOffset(${i}, ${numWedges}, ${slideDistance})`,
                 updateInterval: interval, linear: true,
                 animSpeed: LINEAR_BASE_SPEED * slideAnimS,
-                evalAhead: EVAL_AHEAD,
+                onBeat: ON_BEAT,
             }, env, perfNow)));
         } else {
             angleExpr = leafFnCall(i);
@@ -262,7 +266,7 @@ function buildDayNightRing(
             expr: angleExpr,
             updateInterval: interval,
             animSpeed: ANGLE_BASE_SPEED * ringAnimS,
-            evalAhead: EVAL_AHEAD,
+            onBeat: ON_BEAT,
         }, env, perfNow)));
     }
     part._obsWedgeAngles = angles;
@@ -301,7 +305,7 @@ export function buildTerminatorValues(
     if (rotExpr) {
         rotation = updater.add(createObsValueFromAST({
             name: `${faceName}.terminator.rotation`, expr: rotExpr,
-            updateInterval: interval, animSpeed: ANGLE_BASE_SPEED, evalAhead: EVAL_AHEAD,
+            updateInterval: interval, animSpeed: ANGLE_BASE_SPEED, onBeat: ON_BEAT,
         }, env, perfNow));
     }
 
@@ -320,7 +324,7 @@ export function buildTerminatorValues(
         leaf._obsAngle = updater.add(createObsValueFromAST({
             name: `${faceName}.termLeaf.${i}.angle`, expr: angleExpr,
             updateInterval: leaf.updateIntervalSec,
-            animSpeed: ANGLE_BASE_SPEED, evalAhead: EVAL_AHEAD,
+            animSpeed: ANGLE_BASE_SPEED, onBeat: ON_BEAT,
         }, env, perfNow));
         leaf._obsRotation = rotation;
     });
@@ -347,13 +351,13 @@ export function buildAnalemmaValues(
         updateInterval: state.updateIntervalSec,
         period: PATH_SAMPLE_COUNT,
         animSpeed: ANGLE_BASE_SPEED,
-        evalAhead: EVAL_AHEAD,
+        onBeat: ON_BEAT,
     }, env, perfNow));
     state._obsRotation = updater.add(createObsValue({
         name: `${faceName}.analemma.rotation`,
         expr: 'analemmaRotation()',
         updateInterval: state.updateIntervalSec,
         animSpeed: ANGLE_BASE_SPEED,
-        evalAhead: EVAL_AHEAD,
+        onBeat: ON_BEAT,
     }, env, perfNow));
 }

@@ -2246,10 +2246,20 @@ async function main() {
     // Time Controller UI (shared module)
     // =========================================================================
 
-    /** Snap all in-flight animations to their targets and freeze, across all faces. */
-    function finishAllAnimations() {
+    /**
+     * Snap all in-flight animations to their settled values and freeze, across all
+     * faces.
+     *
+     * `bakeNow` (default false): on the **freeze** paths that do *not* re-arm
+     * schedules afterward (pause, scrub-end while stopped), pass `true` so on-beat
+     * values snap to `A(current display time)` — a clock frozen between beats then
+     * reads the exact stopped time. On paths that `resetAllSchedules()` afterward
+     * (step, Now, transport-resume), leave it `false`: the subsequent stopped-frame
+     * settle animates on-beat values to `A(now)` (so the transition flips smoothly).
+     */
+    function finishAllAnimations(bakeNow = false) {
         for (const face of faces) {
-            face.updater.finish();
+            face.updater.finish(bakeNow ? face.env : undefined);
         }
     }
 
@@ -2302,7 +2312,9 @@ async function main() {
         onScrubEnd: () => {
             // The shared UI has already called timeController.stop().
             rebuildEnvironments();
-            finishAllAnimations();
+            // Freeze path when stopped: bake A(now) so on-beat hands read the exact
+            // scrub-end time rather than a beat position.
+            finishAllAnimations(timeController.isStopped);
             // While stopped, finishAllAnimations() has already snapped hands to
             // their final positions and frozen the schedules. Re-arming here
             // (resetAllSchedules) would defeat that freeze and make hands
@@ -2319,7 +2331,9 @@ async function main() {
         },
         onTransportChange: () => {
             rebuildEnvironments();
-            finishAllAnimations();
+            // Pausing (transition INTO stopped) is a freeze path: bake A(now) so
+            // on-beat hands read the exact paused time, not a beat position.
+            finishAllAnimations(timeController.isStopped);
             // Only re-arm schedules when resuming (play / direction change). When
             // transitioning INTO the stopped state, leave the freeze from
             // finishAllAnimations() in place so we don't re-evaluate while stopped.

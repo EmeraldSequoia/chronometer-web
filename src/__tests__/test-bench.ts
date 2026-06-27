@@ -162,17 +162,22 @@ export class TestBench {
             this.rebuildEnv();
         }
 
-        const dir = this.playDirection ?? 1;
+        // Not playing ⇒ the clock is stopped; tick with direction 0 so on-beat
+        // values settle to the exact time (matches the engine's stopped frames).
+        const dir = this.playDirection ?? (this.timeController.isStopped ? 0 : 1);
         this._tickAll(null, 0, dir);
     }
 
-    /** Run one animation frame at the current perfNow (quantized-mode params optional). */
+    /** Run one animation frame at the current perfNow (quantized-mode params optional).
+     *  Default direction follows the controller: 0 when stopped (the engine's
+     *  stopped-frame behavior), else forward. */
     tick(
         tickIntervalMs: number | null = null,
         displayDeltaPerTickSec: number = 0,
-        direction: 1 | -1 = 1,
+        direction?: 0 | 1 | -1,
     ): void {
-        this._tickAll(tickIntervalMs, displayDeltaPerTickSec, direction);
+        const dir = direction ?? (this.timeController.isStopped ? 0 : 1);
+        this._tickAll(tickIntervalMs, displayDeltaPerTickSec, dir);
     }
 
     /**
@@ -187,9 +192,12 @@ export class TestBench {
         this.rebuildEnv();
 
         // One-shot re-evaluation: reset schedules, then evaluate at the new time.
+        // The clock is stopped (step() above), so the engine ticks with direction 0;
+        // match that here so on-beat values settle to the exact stepped time (rather
+        // than running the live sit/sweep cadence against a frozen clock).
         this.timeController.beginFrame();
         this.updater.reset();
-        this._tick(null, 0, direction);
+        this._tick(null, 0, 0);
         this.timeController.endFrame();
     }
 
@@ -219,10 +227,11 @@ export class TestBench {
         this.timeController.endFrame();
     }
 
-    /** End a scrub simulation — stop and snap all animations. */
+    /** End a scrub simulation — stop and snap all animations (freeze path: bake
+     *  A(now) so on-beat hands read the exact scrub-end time). */
     endScrub(): void {
         this.timeController.stop();
-        this.updater.finish();
+        this.updater.finish(this.env);
     }
 
     /**
@@ -234,11 +243,12 @@ export class TestBench {
         this.updater.reset();
     }
 
-    /** Simulate pause — stop and snap animations. */
+    /** Simulate pause — stop and snap animations (freeze path: bake A(now) so
+     *  on-beat hands read the exact paused time, not a beat position). */
     pause(): void {
         this.playDirection = null;
         this.timeController.stop();
-        this.updater.finish();
+        this.updater.finish(this.env);
     }
 
     /**
@@ -247,12 +257,15 @@ export class TestBench {
      */
     finishAllAnimations(): void {
         const maxIterations = 300; // 5s at 60fps
+        const stopped = this.timeController.isStopped;
+        const dir: 0 | 1 | -1 = stopped ? 0 : this.timeController.currentDirection;
         for (let i = 0; i < maxIterations; i++) {
             if (!this.updater.anyAnimating()) break;
             this.perfNow += 16.7;
-            this._tickAll(null, 0, this.timeController.currentDirection);
+            this._tickAll(null, 0, dir);
         }
-        this.updater.finish();
+        // Freeze path when stopped: bake A(now) so on-beat hands settle exactly.
+        this.updater.finish(stopped ? this.env : undefined);
     }
 
     /**
@@ -309,7 +322,7 @@ export class TestBench {
     // Internal helpers
     // ========================================================================
 
-    private _tick(tickIntervalMs: number | null, displayDeltaPerTickSec: number, direction: 1 | -1): void {
+    private _tick(tickIntervalMs: number | null, displayDeltaPerTickSec: number, direction: 0 | 1 | -1): void {
         const ctx: TimingContext = {
             tickIntervalMs,
             displayDeltaSec: displayDeltaPerTickSec,
@@ -321,7 +334,7 @@ export class TestBench {
     private _tickAll(
         tickIntervalMs: number | null,
         displayDeltaPerTickSec: number,
-        direction: 1 | -1,
+        direction: 0 | 1 | -1,
     ): void {
         this.timeController.beginFrame();
         this._tick(tickIntervalMs, displayDeltaPerTickSec, direction);

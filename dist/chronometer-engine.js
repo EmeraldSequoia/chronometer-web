@@ -19251,6 +19251,94 @@
       v.period
     );
   }
+  function shortestPathDistance(current, target, period) {
+    if (isNaN(current) || isNaN(target)) return NaN;
+    if (!isFinite(period)) return Math.abs(target - current);
+    const P = period;
+    const normTarget = (target % P + P) % P;
+    let delta = normTarget - current;
+    delta = delta - P * Math.round(delta / P);
+    return Math.abs(delta);
+  }
+  function onArrivalOnBeat(v, env, perfNow, getNow, timeDirection, tickIntervalMs, displayDeltaPerTickSec, withDisplayTime) {
+    const nextDisplayMs = computeNextBoundary(
+      v.updateInterval * 1e3,
+      getNow,
+      timeDirection,
+      env
+    );
+    let boundaryRealMs;
+    if (tickIntervalMs !== null && tickIntervalMs > 0) {
+      const displayNowMs = getNow().getTime();
+      const displayDeltaMs = Math.abs(nextDisplayMs - displayNowMs);
+      const perTickMs = displayDeltaPerTickSec * 1e3;
+      const ticksUntilUpdate = perTickMs > 0 ? Math.max(1, Math.ceil(displayDeltaMs / perTickMs)) : 1;
+      boundaryRealMs = perfNow + ticksUntilUpdate * tickIntervalMs;
+    } else {
+      boundaryRealMs = displayTimeToPerfNow(nextDisplayMs, getNow);
+    }
+    const target = withDisplayTime ? withDisplayTime(nextDisplayMs, () => evalAttr(v.expr, env)) : evalAttr(v.expr, env);
+    const dist = shortestPathDistance(v.anim.currentValue, target, v.period);
+    const d = v.animSpeed > 0 && isFinite(dist) ? dist / v.animSpeed * 1e3 : 0;
+    let startTime = isFinite(boundaryRealMs) ? boundaryRealMs - d : Infinity;
+    if (startTime < perfNow) startTime = perfNow;
+    v.pendingTarget = { target, boundaryRealMs, startTime };
+    v.nextUpdateDisplayTime = nextDisplayMs;
+    v.nextUpdateTime = startTime;
+  }
+  function startOnBeatSweep(v, perfNow) {
+    const pt = v.pendingTarget;
+    v.pendingTarget = null;
+    const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
+    const budgetMs = pt.boundaryRealMs - perfNow;
+    if (isFinite(budgetMs) && budgetMs > 0) {
+      startAnimationRaw(v.anim, pt.target, perfNow, multiplier, budgetMs, v.period);
+    } else {
+      startAnimationRaw(v.anim, pt.target, perfNow, multiplier, void 0, v.period);
+    }
+    v.nextUpdateTime = isFinite(pt.boundaryRealMs) ? pt.boundaryRealMs : Infinity;
+  }
+  function onBeatStep(v, env, perfNow, getNow, timeDirection, tickIntervalMs, displayDeltaPerTickSec, withDisplayTime) {
+    const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
+    if (v.nextUpdateTime === Infinity && v.pendingTarget === null && !v.anim.animating) {
+      v.currentValue = v.anim.currentValue;
+      return;
+    }
+    if (timeDirection === 0) {
+      if (!v.anim.animating) {
+        const target = evalAttr(v.expr, env);
+        startAnimationRaw(v.anim, target, perfNow, multiplier, void 0, v.period);
+        v.pendingTarget = null;
+        v.nextUpdateDisplayTime = Infinity;
+        v.nextUpdateTime = Infinity;
+      }
+      v.currentValue = interpolateValue(v.anim, perfNow);
+      return;
+    }
+    const dir = timeDirection === -1 ? -1 : 1;
+    v.currentValue = interpolateValue(v.anim, perfNow);
+    let started = false;
+    for (let guard = 0; guard < 4 && !v.anim.animating; guard++) {
+      if (v.pendingTarget === null) {
+        onArrivalOnBeat(
+          v,
+          env,
+          perfNow,
+          getNow,
+          dir,
+          tickIntervalMs,
+          displayDeltaPerTickSec,
+          withDisplayTime
+        );
+      } else if (perfNow >= v.pendingTarget.startTime) {
+        startOnBeatSweep(v, perfNow);
+        started = true;
+      } else {
+        break;
+      }
+    }
+    if (started) v.currentValue = interpolateValue(v.anim, perfNow);
+  }
   function updateObsValue(v, env, perfNow, getNow, tickIntervalMs, displayDeltaPerTickSec, timeDirection, withDisplayTime) {
     if (v.discrete) {
       updateObsValueDiscrete(v, env, perfNow, getNow, timeDirection, tickIntervalMs);
@@ -19285,7 +19373,18 @@
   }
   function updateObsValues(values, env, perfNow, getNow, tickIntervalMs = null, displayDeltaPerTickSec = 0, timeDirection = 1, withDisplayTime) {
     for (const v of values) {
-      if (perfNow >= v.nextUpdateTime) {
+      if (v.onBeat && !v.discrete) {
+        onBeatStep(
+          v,
+          env,
+          perfNow,
+          getNow,
+          timeDirection,
+          tickIntervalMs,
+          displayDeltaPerTickSec,
+          withDisplayTime
+        );
+      } else if (perfNow >= v.nextUpdateTime) {
         updateObsValue(
           v,
           env,
@@ -19325,6 +19424,7 @@
     for (const v of values) {
       v.nextUpdateDisplayTime = 0;
       v.nextUpdateTime = 0;
+      v.pendingTarget = null;
     }
   }
   function anyObsAnimating(values) {
@@ -19407,11 +19507,21 @@
      * settle immediately, and (with the freeze) to hold the stopped-clock state
      * idle. Generalizes the legacy `finishAnimations`/`finishLeafAnimations` to the
      * ObsValue fields and the `period` wrap.
+     *
+     * **`env` (on-beat freeze paths).** When `env` is supplied, on-beat values snap
+     * to `A(current display time)` instead of `anim.targetValue` — so a clock frozen
+     * *between beats* reads the exact stopped time, not the last/next beat position.
+     * Pass `env` on the no-reset freeze paths (pause, scrub-end while stopped). Omit
+     * it on paths that `reset()` afterward (step, Now, toggles): there `finish()`
+     * just snaps where the hand is, and the subsequent stopped-`onBeatStep` settle
+     * animates to `A(now)` (so those transitions still flip smoothly). Non-on-beat
+     * values always snap to `anim.targetValue` regardless of `env`.
      */
-    finish() {
+    finish(env) {
       for (const v of this.values) {
         v.pendingSweep = null;
-        let target = v.anim.targetValue;
+        v.pendingTarget = null;
+        let target = v.onBeat && env ? evalAttr(v.expr, env) : v.anim.targetValue;
         if (isFinite(v.period)) {
           target = (target % v.period + v.period) % v.period;
         }
@@ -19483,9 +19593,11 @@
       nextUpdateDisplayTime: 0,
       nextUpdateTime: 0,
       pendingSweep: null,
+      pendingTarget: null,
       linear,
       period,
       evalAhead: def.evalAhead ?? false,
+      onBeat: def.onBeat ?? false,
       discrete: def.discrete ?? false
     };
   }
@@ -19493,7 +19605,7 @@
   // src/watch/hand-values.ts
   var ANGLE_BASE_SPEED = 2;
   var LINEAR_BASE_SPEED = 60;
-  var EVAL_AHEAD = false;
+  var ON_BEAT = true;
   function buildHandValues(faceName, watch, env, perfNow, lightweight = false) {
     const updater = new Updater();
     collectValues(watch.parts, faceName, env, perfNow, updater, lightweight);
@@ -19526,7 +19638,7 @@
       expr,
       updateInterval,
       animSpeed: animSpeedRadPerSec,
-      evalAhead: EVAL_AHEAD
+      onBeat: ON_BEAT
     }, env, perfNow));
   }
   function addLinearValue(updater, name, expr, env, perfNow, updateInterval, animSpeedPxPerSec) {
@@ -19536,7 +19648,7 @@
       updateInterval,
       linear: true,
       animSpeed: animSpeedPxPerSec,
-      evalAhead: EVAL_AHEAD
+      onBeat: ON_BEAT
     }, env, perfNow));
   }
   function buildHandPart(part, faceName, env, perfNow, updater) {
@@ -19615,7 +19727,7 @@
       updateInterval: interval,
       linear: true,
       animSpeed: LINEAR_BASE_SPEED * animS,
-      evalAhead: EVAL_AHEAD
+      onBeat: ON_BEAT
     }, env, perfNow));
   }
   function buildDayNightRing(part, faceName, env, perfNow, updater, lightweight) {
@@ -19655,7 +19767,7 @@
           updateInterval: interval,
           linear: true,
           animSpeed: LINEAR_BASE_SPEED * slideAnimS,
-          evalAhead: EVAL_AHEAD
+          onBeat: ON_BEAT
         }, env, perfNow)));
       } else {
         angleExpr = leafFnCall(i);
@@ -19665,7 +19777,7 @@
         expr: angleExpr,
         updateInterval: interval,
         animSpeed: ANGLE_BASE_SPEED * ringAnimS,
-        evalAhead: EVAL_AHEAD
+        onBeat: ON_BEAT
       }, env, perfNow)));
     }
     part._obsWedgeAngles = angles;
@@ -19685,7 +19797,7 @@
         expr: rotExpr,
         updateInterval: interval,
         animSpeed: ANGLE_BASE_SPEED,
-        evalAhead: EVAL_AHEAD
+        onBeat: ON_BEAT
       }, env, perfNow));
     }
     leaves.forEach((leaf, i) => {
@@ -19705,7 +19817,7 @@
         expr: angleExpr,
         updateInterval: leaf.updateIntervalSec,
         animSpeed: ANGLE_BASE_SPEED,
-        evalAhead: EVAL_AHEAD
+        onBeat: ON_BEAT
       }, env, perfNow));
       leaf._obsRotation = rotation;
     });
@@ -19717,14 +19829,14 @@
       updateInterval: state.updateIntervalSec,
       period: PATH_SAMPLE_COUNT,
       animSpeed: ANGLE_BASE_SPEED,
-      evalAhead: EVAL_AHEAD
+      onBeat: ON_BEAT
     }, env, perfNow));
     state._obsRotation = updater.add(createObsValue({
       name: `${faceName}.analemma.rotation`,
       expr: "analemmaRotation()",
       updateInterval: state.updateIntervalSec,
       animSpeed: ANGLE_BASE_SPEED,
-      evalAhead: EVAL_AHEAD
+      onBeat: ON_BEAT
     }, env, perfNow));
   }
 
@@ -23002,9 +23114,9 @@
         lpCityInput.value = "";
       }
     });
-    function finishAllAnimations() {
+    function finishAllAnimations(bakeNow = false) {
       for (const face of faces) {
-        face.updater.finish();
+        face.updater.finish(bakeNow ? face.env : void 0);
       }
     }
     function resetAllSchedules() {
@@ -23042,7 +23154,7 @@
       },
       onScrubEnd: () => {
         rebuildEnvironments();
-        finishAllAnimations();
+        finishAllAnimations(timeController.isStopped);
         if (!timeController.isStopped) resetAllSchedules();
       },
       onNowClicked: () => {
@@ -23053,7 +23165,7 @@
       },
       onTransportChange: () => {
         rebuildEnvironments();
-        finishAllAnimations();
+        finishAllAnimations(timeController.isStopped);
         if (!timeController.isStopped) resetAllSchedules();
       },
       ensureSchedulerRunning,

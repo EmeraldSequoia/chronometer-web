@@ -83,6 +83,15 @@ export interface ObsValue {
      *  Set during update pass; consumed during animate pass when Phase 1 ends. */
     pendingSweep: { target: number; durationMs: number } | null;
 
+    /** On-beat scheduling (see {@link onBeat}). When the value has *arrived* at a
+     *  boundary and is *sitting* waiting to begin its next snap, this holds the
+     *  already-evaluated next target, the real time the boundary lands
+     *  (`boundaryRealMs`), and the real time to *begin* the snap (`startTime =
+     *  boundaryRealMs − d`, where `d` is the sweep duration). `null` while sweeping
+     *  or frozen. The on-beat phase is implicit: sweeping ⇒ `anim.animating`;
+     *  sitting ⇒ `pendingTarget != null && !anim.animating`. */
+    pendingTarget: { target: number; boundaryRealMs: number; startTime: number } | null;
+
     /** If true, this value is linear (not an angle) — skip fmod wrapping.
      *  Used for earth view values like sun declination, and for the Inspector's
      *  raw-number / date readouts. Def-level input; the updater drives animation
@@ -102,6 +111,17 @@ export interface ObsValue {
      *  of interpolating between past samples. Requires a `withDisplayTime` helper
      *  to be supplied to the updater (see updater.ts / makeOverridableGetNow). */
     evalAhead: boolean;
+
+    /** If true, use **on-beat scheduling**: the value *snaps at its natural speed*
+     *  but *lands exactly on the beat* (the update boundary), instead of stretching
+     *  the sweep across the whole interval (plain {@link evalAhead}) or starting the
+     *  snap at the beat (legacy). On arrival at boundary `B_k`, the next target at
+     *  `B_{k+1}` is evaluated and stored in {@link pendingTarget}; the value *sits*
+     *  until `B_{k+1} − d` then snaps over `d`, arriving on `B_{k+1}`. Gives ticks +
+     *  1× idle + on-beat precision. Mutually exclusive with `evalAhead`/`discrete`;
+     *  requires `withDisplayTime`. See
+     *  planning/2026-06-26-worker-eval-ahead-pipeline.md. */
+    onBeat: boolean;
 
     /** If true, the updater evaluates this value at the *current* display time and
      *  **snaps** (no eval-ahead, no interpolation), so the underlying function's
@@ -128,6 +148,7 @@ export interface ObsValueDef {
     linear?: boolean;        // if true, value is not an angle — skip fmod wrapping
     period?: number;         // cyclic wrap period (default 2π for angles); ignored when linear
     evalAhead?: boolean;     // if true, use lag-free eval-ahead update
+    onBeat?: boolean;        // if true, use on-beat scheduling (snap lands on the boundary)
     discrete?: boolean;      // if true, evaluate at current time and snap (no interpolation)
 }
 
@@ -179,9 +200,11 @@ export function createObsValueFromAST(
         nextUpdateDisplayTime: 0,
         nextUpdateTime: 0,
         pendingSweep: null,
+        pendingTarget: null,
         linear,
         period,
         evalAhead: def.evalAhead ?? false,
+        onBeat: def.onBeat ?? false,
         discrete: def.discrete ?? false,
     };
 }

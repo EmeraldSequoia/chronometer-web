@@ -440,6 +440,184 @@ function snapToTargetAtBoundary(
 }
 
 // ============================================================================
+// On-beat scheduling (snap at natural speed, land on the boundary)
+// ============================================================================
+
+/**
+ * Shortest-path distance from `current` to `target` honoring the value's wrap
+ * `period` — mirrors the unwrap inside `startAnimationRaw` so the computed sweep
+ * duration `d` matches the distance the animation will actually cover. Returns
+ * `NaN` if either endpoint is `NaN` (caller treats that as a snap, `d = 0`).
+ */
+function shortestPathDistance(current: number, target: number, period: number): number {
+    if (isNaN(current) || isNaN(target)) return NaN;
+    if (!isFinite(period)) return Math.abs(target - current);
+    const P = period;
+    const normTarget = ((target % P) + P) % P;
+    let delta = normTarget - current;
+    delta = delta - P * Math.round(delta / P);
+    return Math.abs(delta);
+}
+
+/**
+ * On-beat **arrival**: the value has reached its current boundary and is now
+ * deciding where (and when) to go next. Compute the next update boundary in
+ * display time, evaluate the target *there* (eval-ahead), and schedule the snap to
+ * *begin* at `boundaryRealMs − d` so it *arrives on the boundary* rather than
+ * starting at it. Stores the plan in `v.pendingTarget` and points `nextUpdateTime`
+ * at the start (so the idle scheduler wakes exactly then).
+ *
+ * Mode-aware exactly like the eval-ahead branch, but only in the *budget* mapping:
+ * the boundary sequence is the value's own update boundaries either way (see
+ * planning/2026-06-26-worker-eval-ahead-pipeline.md, "Computing T+1, T+2").
+ */
+function onArrivalOnBeat(
+    v: ObsValue,
+    env: Environment,
+    perfNow: number,
+    getNow: () => Date,
+    timeDirection: 1 | -1,
+    tickIntervalMs: number | null,
+    displayDeltaPerTickSec: number,
+    withDisplayTime?: WithDisplayTime,
+): void {
+    const nextDisplayMs = computeNextBoundary(
+        v.updateInterval * 1000, getNow, timeDirection, env);
+
+    // Real time at which that boundary lands.
+    let boundaryRealMs: number;
+    if (tickIntervalMs !== null && tickIntervalMs > 0) {
+        // Scrub: compress display-time-to-boundary into whole ticks (the value is
+        // re-evaluated only when accelerated display time reaches its boundary —
+        // NOT every tick).
+        const displayNowMs = getNow().getTime();
+        const displayDeltaMs = Math.abs(nextDisplayMs - displayNowMs);
+        const perTickMs = displayDeltaPerTickSec * 1000;
+        const ticksUntilUpdate = perTickMs > 0
+            ? Math.max(1, Math.ceil(displayDeltaMs / perTickMs))
+            : 1;
+        boundaryRealMs = perfNow + ticksUntilUpdate * tickIntervalMs;
+    } else {
+        // 1× / reverse: display↔real 1:1.
+        boundaryRealMs = displayTimeToPerfNow(nextDisplayMs, getNow);
+    }
+
+    // Evaluate the target AT the future boundary's display time (eval-ahead).
+    const target = withDisplayTime
+        ? withDisplayTime(nextDisplayMs, () => evalAttr(v.expr, env))
+        : evalAttr(v.expr, env);
+
+    // Sweep duration d = distance / speed (0 when NaN/instant → snap on boundary).
+    const dist = shortestPathDistance(v.anim.currentValue, target, v.period);
+    const d = (v.animSpeed > 0 && isFinite(dist)) ? (dist / v.animSpeed) * 1000 : 0;
+
+    let startTime = isFinite(boundaryRealMs) ? boundaryRealMs - d : Infinity;
+    // Can't start in the past: if the snap should already be underway, begin now
+    // (the budget compresses to land on the boundary; or sweeps continuously when
+    // d ≥ interval — the bps=0 graceful-degrade case).
+    if (startTime < perfNow) startTime = perfNow;
+
+    v.pendingTarget = { target, boundaryRealMs, startTime };
+    v.nextUpdateDisplayTime = nextDisplayMs;
+    v.nextUpdateTime = startTime;
+}
+
+/**
+ * On-beat **start**: begin the snap toward the stored `pendingTarget` over the
+ * real-time budget remaining until its boundary, so it arrives on the boundary.
+ * Clears `pendingTarget`; the animation completing is the next *arrival*.
+ */
+function startOnBeatSweep(v: ObsValue, perfNow: number): void {
+    const pt = v.pendingTarget!;
+    v.pendingTarget = null;
+    const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
+    const budgetMs = pt.boundaryRealMs - perfNow;
+    if (isFinite(budgetMs) && budgetMs > 0) {
+        startAnimationRaw(v.anim, pt.target, perfNow, multiplier, budgetMs, v.period);
+    } else {
+        // Boundary is now/past — snap.
+        startAnimationRaw(v.anim, pt.target, perfNow, multiplier, undefined, v.period);
+    }
+    // While sweeping, the next event is arrival at the boundary (idle wakeup).
+    v.nextUpdateTime = isFinite(pt.boundaryRealMs) ? pt.boundaryRealMs : Infinity;
+}
+
+/**
+ * Per-frame on-beat step for one value: interpolate the in-flight snap, then run
+ * the sit/sweep state machine. Replaces the gated update + animate passes for
+ * `onBeat` values (it does both). Phases:
+ *   - **SWEEPING** (`anim.animating`): interpolation advances it; completing it is
+ *     an *arrival*.
+ *   - **ARRIVED** (`!animating && !pendingTarget`): schedule the next snap
+ *     (`onArrivalOnBeat`).
+ *   - **SITTING** (`!animating && pendingTarget`): begin the snap once
+ *     `perfNow ≥ startTime`.
+ *   - **FROZEN** (`finish()` ran: `nextUpdateTime === Infinity`, nothing pending):
+ *     stay put until `reset()`.
+ *
+ * `timeDirection === 0` (stopped): **settle to the exact current display time**
+ * once, then freeze (idle). On-beat ticking is a *live-play/scrub* aesthetic; a
+ * stopped clock must read the precise set time, not a beat position. This animates
+ * to `A(now)` (so a step / mode-toggle while stopped flips smoothly) and freezes
+ * (`nextUpdateTime = Infinity`) so nothing re-evaluates until `reset()` re-arms.
+ * (The no-reset freeze paths — pause / scrub-end — instead bake `A(now)` directly
+ * in `finish(env)`; this branch covers the reset-while-stopped paths: step, Now,
+ * UI toggles.)
+ */
+function onBeatStep(
+    v: ObsValue,
+    env: Environment,
+    perfNow: number,
+    getNow: () => Date,
+    timeDirection: 0 | 1 | -1,
+    tickIntervalMs: number | null,
+    displayDeltaPerTickSec: number,
+    withDisplayTime?: WithDisplayTime,
+): void {
+    const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
+
+    // Frozen by finish() — hold position until reset() re-arms (nextUpdateTime=0).
+    if (v.nextUpdateTime === Infinity && v.pendingTarget === null && !v.anim.animating) {
+        v.currentValue = v.anim.currentValue;
+        return;
+    }
+
+    // Stopped: settle to A(current display time) once (animating there), then freeze.
+    if (timeDirection === 0) {
+        if (!v.anim.animating) {
+            const target = evalAttr(v.expr, env);
+            startAnimationRaw(v.anim, target, perfNow, multiplier, undefined, v.period);
+            v.pendingTarget = null;
+            v.nextUpdateDisplayTime = Infinity;
+            v.nextUpdateTime = Infinity;
+        }
+        v.currentValue = interpolateValue(v.anim, perfNow);
+        return;
+    }
+    const dir: 1 | -1 = timeDirection === -1 ? -1 : 1;
+
+    // Advance any in-flight snap (may flip animating→false, i.e. arrive).
+    v.currentValue = interpolateValue(v.anim, perfNow);
+
+    // Resolve the scheduling state (ARRIVED → SITTING → SWEEPING can chain in one
+    // frame when the start time has already passed, e.g. continuous-sweep values).
+    let started = false;
+    for (let guard = 0; guard < 4 && !v.anim.animating; guard++) {
+        if (v.pendingTarget === null) {
+            onArrivalOnBeat(v, env, perfNow, getNow, dir,
+                tickIntervalMs, displayDeltaPerTickSec, withDisplayTime);
+        } else if (perfNow >= v.pendingTarget.startTime) {
+            startOnBeatSweep(v, perfNow);
+            started = true;
+        } else {
+            break;  // sitting, waiting for the start time
+        }
+    }
+    // If a snap just started, interpolate so currentValue is fresh this frame.
+    if (started) v.currentValue = interpolateValue(v.anim, perfNow);
+}
+
+// ============================================================================
 // Per-frame passes
 // ============================================================================
 
@@ -506,7 +684,12 @@ export function updateObsValues(
     withDisplayTime?: WithDisplayTime,
 ): void {
     for (const v of values) {
-        if (perfNow >= v.nextUpdateTime) {
+        if (v.onBeat && !v.discrete) {
+            // On-beat values run every frame (the step is its own sit/sweep state
+            // machine + interpolation); they are not gated by nextUpdateTime.
+            onBeatStep(v, env, perfNow, getNow, timeDirection,
+                tickIntervalMs, displayDeltaPerTickSec, withDisplayTime);
+        } else if (perfNow >= v.nextUpdateTime) {
             updateObsValue(v, env, perfNow, getNow,
                 tickIntervalMs, displayDeltaPerTickSec, timeDirection, withDisplayTime);
         }
@@ -549,6 +732,8 @@ export function resetObsValueSchedules(values: ObsValue[]): void {
     for (const v of values) {
         v.nextUpdateDisplayTime = 0;
         v.nextUpdateTime = 0;
+        // Drop any on-beat plan so the next frame re-evaluates from the new state.
+        v.pendingTarget = null;
     }
 }
 
@@ -648,11 +833,21 @@ export class Updater<K extends string = string> {
      * settle immediately, and (with the freeze) to hold the stopped-clock state
      * idle. Generalizes the legacy `finishAnimations`/`finishLeafAnimations` to the
      * ObsValue fields and the `period` wrap.
+     *
+     * **`env` (on-beat freeze paths).** When `env` is supplied, on-beat values snap
+     * to `A(current display time)` instead of `anim.targetValue` — so a clock frozen
+     * *between beats* reads the exact stopped time, not the last/next beat position.
+     * Pass `env` on the no-reset freeze paths (pause, scrub-end while stopped). Omit
+     * it on paths that `reset()` afterward (step, Now, toggles): there `finish()`
+     * just snaps where the hand is, and the subsequent stopped-`onBeatStep` settle
+     * animates to `A(now)` (so those transitions still flip smoothly). Non-on-beat
+     * values always snap to `anim.targetValue` regardless of `env`.
      */
-    finish(): void {
+    finish(env?: Environment): void {
         for (const v of this.values) {
             v.pendingSweep = null;
-            let target = v.anim.targetValue;
+            v.pendingTarget = null;
+            let target = (v.onBeat && env) ? evalAttr(v.expr, env) : v.anim.targetValue;
             if (isFinite(v.period)) {
                 target = ((target % v.period) + v.period) % v.period;
             }

@@ -19250,9 +19250,11 @@
       nextUpdateDisplayTime: 0,
       nextUpdateTime: 0,
       pendingSweep: null,
+      pendingTarget: null,
       linear,
       period,
       evalAhead: def.evalAhead ?? false,
+      onBeat: def.onBeat ?? false,
       discrete: def.discrete ?? false
     };
   }
@@ -19515,6 +19517,94 @@
       v.period
     );
   }
+  function shortestPathDistance(current, target, period) {
+    if (isNaN(current) || isNaN(target)) return NaN;
+    if (!isFinite(period)) return Math.abs(target - current);
+    const P = period;
+    const normTarget = (target % P + P) % P;
+    let delta = normTarget - current;
+    delta = delta - P * Math.round(delta / P);
+    return Math.abs(delta);
+  }
+  function onArrivalOnBeat(v, env2, perfNow, getNow2, timeDirection, tickIntervalMs, displayDeltaPerTickSec, withDisplayTime2) {
+    const nextDisplayMs = computeNextBoundary(
+      v.updateInterval * 1e3,
+      getNow2,
+      timeDirection,
+      env2
+    );
+    let boundaryRealMs;
+    if (tickIntervalMs !== null && tickIntervalMs > 0) {
+      const displayNowMs = getNow2().getTime();
+      const displayDeltaMs = Math.abs(nextDisplayMs - displayNowMs);
+      const perTickMs = displayDeltaPerTickSec * 1e3;
+      const ticksUntilUpdate = perTickMs > 0 ? Math.max(1, Math.ceil(displayDeltaMs / perTickMs)) : 1;
+      boundaryRealMs = perfNow + ticksUntilUpdate * tickIntervalMs;
+    } else {
+      boundaryRealMs = displayTimeToPerfNow(nextDisplayMs, getNow2);
+    }
+    const target = withDisplayTime2 ? withDisplayTime2(nextDisplayMs, () => evalAttr(v.expr, env2)) : evalAttr(v.expr, env2);
+    const dist = shortestPathDistance(v.anim.currentValue, target, v.period);
+    const d = v.animSpeed > 0 && isFinite(dist) ? dist / v.animSpeed * 1e3 : 0;
+    let startTime = isFinite(boundaryRealMs) ? boundaryRealMs - d : Infinity;
+    if (startTime < perfNow) startTime = perfNow;
+    v.pendingTarget = { target, boundaryRealMs, startTime };
+    v.nextUpdateDisplayTime = nextDisplayMs;
+    v.nextUpdateTime = startTime;
+  }
+  function startOnBeatSweep(v, perfNow) {
+    const pt = v.pendingTarget;
+    v.pendingTarget = null;
+    const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
+    const budgetMs = pt.boundaryRealMs - perfNow;
+    if (isFinite(budgetMs) && budgetMs > 0) {
+      startAnimationRaw(v.anim, pt.target, perfNow, multiplier, budgetMs, v.period);
+    } else {
+      startAnimationRaw(v.anim, pt.target, perfNow, multiplier, void 0, v.period);
+    }
+    v.nextUpdateTime = isFinite(pt.boundaryRealMs) ? pt.boundaryRealMs : Infinity;
+  }
+  function onBeatStep(v, env2, perfNow, getNow2, timeDirection, tickIntervalMs, displayDeltaPerTickSec, withDisplayTime2) {
+    const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
+    if (v.nextUpdateTime === Infinity && v.pendingTarget === null && !v.anim.animating) {
+      v.currentValue = v.anim.currentValue;
+      return;
+    }
+    if (timeDirection === 0) {
+      if (!v.anim.animating) {
+        const target = evalAttr(v.expr, env2);
+        startAnimationRaw(v.anim, target, perfNow, multiplier, void 0, v.period);
+        v.pendingTarget = null;
+        v.nextUpdateDisplayTime = Infinity;
+        v.nextUpdateTime = Infinity;
+      }
+      v.currentValue = interpolateValue(v.anim, perfNow);
+      return;
+    }
+    const dir = timeDirection === -1 ? -1 : 1;
+    v.currentValue = interpolateValue(v.anim, perfNow);
+    let started = false;
+    for (let guard = 0; guard < 4 && !v.anim.animating; guard++) {
+      if (v.pendingTarget === null) {
+        onArrivalOnBeat(
+          v,
+          env2,
+          perfNow,
+          getNow2,
+          dir,
+          tickIntervalMs,
+          displayDeltaPerTickSec,
+          withDisplayTime2
+        );
+      } else if (perfNow >= v.pendingTarget.startTime) {
+        startOnBeatSweep(v, perfNow);
+        started = true;
+      } else {
+        break;
+      }
+    }
+    if (started) v.currentValue = interpolateValue(v.anim, perfNow);
+  }
   function updateObsValue(v, env2, perfNow, getNow2, tickIntervalMs, displayDeltaPerTickSec, timeDirection, withDisplayTime2) {
     if (v.discrete) {
       updateObsValueDiscrete(v, env2, perfNow, getNow2, timeDirection, tickIntervalMs);
@@ -19549,7 +19639,18 @@
   }
   function updateObsValues(values, env2, perfNow, getNow2, tickIntervalMs = null, displayDeltaPerTickSec = 0, timeDirection = 1, withDisplayTime2) {
     for (const v of values) {
-      if (perfNow >= v.nextUpdateTime) {
+      if (v.onBeat && !v.discrete) {
+        onBeatStep(
+          v,
+          env2,
+          perfNow,
+          getNow2,
+          timeDirection,
+          tickIntervalMs,
+          displayDeltaPerTickSec,
+          withDisplayTime2
+        );
+      } else if (perfNow >= v.nextUpdateTime) {
         updateObsValue(
           v,
           env2,
@@ -19589,6 +19690,7 @@
     for (const v of values) {
       v.nextUpdateDisplayTime = 0;
       v.nextUpdateTime = 0;
+      v.pendingTarget = null;
     }
   }
   function anyObsAnimating(values) {
@@ -19671,11 +19773,21 @@
      * settle immediately, and (with the freeze) to hold the stopped-clock state
      * idle. Generalizes the legacy `finishAnimations`/`finishLeafAnimations` to the
      * ObsValue fields and the `period` wrap.
+     *
+     * **`env` (on-beat freeze paths).** When `env` is supplied, on-beat values snap
+     * to `A(current display time)` instead of `anim.targetValue` — so a clock frozen
+     * *between beats* reads the exact stopped time, not the last/next beat position.
+     * Pass `env` on the no-reset freeze paths (pause, scrub-end while stopped). Omit
+     * it on paths that `reset()` afterward (step, Now, toggles): there `finish()`
+     * just snaps where the hand is, and the subsequent stopped-`onBeatStep` settle
+     * animates to `A(now)` (so those transitions still flip smoothly). Non-on-beat
+     * values always snap to `anim.targetValue` regardless of `env`.
      */
-    finish() {
+    finish(env2) {
       for (const v of this.values) {
         v.pendingSweep = null;
-        let target = v.anim.targetValue;
+        v.pendingTarget = null;
+        let target = v.onBeat && env2 ? evalAttr(v.expr, env2) : v.anim.targetValue;
         if (isFinite(v.period)) {
           target = (target % v.period + v.period) % v.period;
         }
