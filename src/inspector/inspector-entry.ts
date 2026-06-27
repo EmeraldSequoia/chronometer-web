@@ -1048,7 +1048,7 @@ function tick(): void {
     timeController.endFrame();
 
     const continuous = !timeController.isStopped || updater.anyAnimating();
-    fpsIndicator?.recordFrame(continuous);
+    fpsIndicator?.recordFrame(continuous, performance.now() - perfNow);
 
     inTick = false;
     if (continuous || frameRequestedDuringTick) {

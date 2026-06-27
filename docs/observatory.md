@@ -129,10 +129,14 @@ This mirrors Chronometer's stopped-state behavior — see
 
 ### FPS overlay (`?fps`)
 
-The `?fps` URL parameter shows a page-level FPS readout (`<active> fps · <avg> avg`)
-via the shared `src/shared/fps-indicator.ts` helper — the same overlay Chronometer
-uses. `active` (render rate while animating, dimmed when idle) is fed
-`recordFrame(!isStopped || updater.anyAnimating())` each frame; `avg` is throughput.
+The `?fps` URL parameter shows a compact page-level readout
+(`<fps>fps <cpuFrame>% <cpu60>% <avg>avg`, e.g. `60fps 4% 4% 9avg`) via the shared
+`src/shared/fps-indicator.ts` helper — the same overlay Chronometer uses. It is fed
+`recordFrame(!isStopped || updater.anyAnimating(), workMs)` each frame: `fps` is the
+vsync-bound rate while animating (`1000/median(Δ)`), `cpuFrame` is CPU's share of
+that actual frame (`median(workMs)/median(Δ)`), `cpu60` is CPU's share of a nominal
+60 fps frame (`median(workMs)/16.67`, can exceed 100%; the animating values dim when
+idle), and `avg` is throughput including idle gaps.
 
 ### ObsValue Fields
 

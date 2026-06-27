@@ -116,12 +116,16 @@ see [Animation — Eval-ahead](animation.md#eval-ahead-lag-free-tracking).
 
 ### FPS overlay (`?fps`)
 
-The `?fps` URL parameter shows the same page-level FPS readout
-(`<active> fps · <avg> avg`) as Chronometer and Observatory, via the shared
-[src/shared/fps-indicator.ts](../src/shared/fps-indicator.ts). `active` is fed
-`recordFrame(!timeController.isStopped || updater.anyAnimating())` each frame —
-live while time is moving or an animation is settling, dimmed once the clock is
-stopped and everything has settled (when the idle scheduler parks the loop).
+The `?fps` URL parameter shows the same compact page-level readout
+(`<fps>fps <cpuFrame>% <cpu60>% <avg>avg`, e.g. `60fps 4% 4% 9avg`) as Chronometer
+and Observatory, via the shared
+[src/shared/fps-indicator.ts](../src/shared/fps-indicator.ts). It is fed
+`recordFrame(!timeController.isStopped || updater.anyAnimating(), workMs)` each
+frame, where `workMs` is the frame's CPU time. `fps` is the vsync-bound rate while
+animating (`1000/median(Δ)`); `cpuFrame` is CPU's share of that actual frame
+(`median(workMs)/median(Δ)`); `cpu60` is CPU's share of a nominal 60 fps frame
+(`median(workMs)/16.67`, can exceed 100%). The animating values are dimmed once the
+clock is stopped and everything has settled; `avg` is throughput including idle.
 Useful for confirming the readouts interpolate at the full frame rate while
 expressions are fully re-evaluated only 10×/s.
 

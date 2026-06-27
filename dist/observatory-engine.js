@@ -21357,27 +21357,37 @@
 
   // src/shared/fps-indicator.ts
   var FPS_WATCHDOG_MS = 1e3;
+  var TARGET_FRAME_MS = 1e3 / 60;
+  function median(xs) {
+    if (xs.length === 0) return 0;
+    const s = [...xs].sort((a, b) => a - b);
+    const mid = s.length >> 1;
+    return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+  }
   function createFpsIndicator(enabled) {
     if (typeof document === "undefined") return null;
-    let active = 0;
-    let activeLastTime = 0;
+    let lastFrameTime = 0;
     let wasContinuous = false;
     let continuousFrames = 0;
     let frameCount = 0;
     let windowStart = performance.now();
+    const workSamples = [];
+    const deltaSamples = [];
+    let fpsHeld = 0;
+    let cpuFrameHeld = 0;
+    let cpu60Held = 0;
     const el = document.createElement("div");
     el.id = "fps-indicator";
-    el.title = "left: render rate while animating (dimmed when idle) \xB7 right: average fps over the last second (low = idle / little work)";
+    el.title = "fps: wallclock rate while animating (vsync-bound) \xB7 1st %: CPU share of that actual frame (~100% = CPU-paced) \xB7 2nd %: CPU share of a 60 fps (16.7ms) frame, can exceed 100% (\xD74 for 240 fps) \xB7 avg: frames/sec over the last second, incl. idle";
     el.style.cssText = 'position:fixed;bottom:8px;left:8px;z-index:9999;pointer-events:none;font:11px "JetBrains Mono",monospace;color:rgba(255,255,255,0.5);background:rgba(0,0,0,0.35);padding:2px 6px;border-radius:4px;';
-    const activeEl = document.createElement("span");
+    const animEl = document.createElement("span");
     const thruEl = document.createElement("span");
     const sep = document.createElement("span");
-    sep.textContent = " \xB7 ";
-    sep.style.opacity = "0.5";
-    activeEl.textContent = "\u2013 fps";
-    activeEl.style.opacity = "0.4";
-    thruEl.textContent = "0 avg";
-    el.append(activeEl, sep, thruEl);
+    sep.textContent = " ";
+    animEl.textContent = "\u2013fps";
+    animEl.style.opacity = "0.4";
+    thruEl.textContent = "0avg";
+    el.append(animEl, sep, thruEl);
     document.body.appendChild(el);
     if (enabled) {
       document.body.classList.add("has-fps");
@@ -21411,26 +21421,31 @@
       const nowW = performance.now();
       const elapsedSec = (nowW - windowStart) / 1e3;
       const throughput = elapsedSec > 0 ? frameCount / elapsedSec : 0;
+      const mWork = median(workSamples);
+      const mDelta = median(deltaSamples);
+      if (mDelta > 0) fpsHeld = 1e3 / mDelta;
+      if (mWork > 0 && mDelta > 0) cpuFrameHeld = mWork / mDelta * 100;
+      if (mWork > 0) cpu60Held = mWork / TARGET_FRAME_MS * 100;
+      const isActive = continuousFrames > 0;
       frameCount = 0;
       windowStart = nowW;
-      const isActive = continuousFrames > 0;
       continuousFrames = 0;
-      activeEl.style.opacity = isActive ? "1" : "0.4";
-      activeEl.textContent = `${active.toFixed(0)} fps`;
-      thruEl.textContent = `${throughput.toFixed(0)} avg`;
+      workSamples.length = 0;
+      deltaSamples.length = 0;
+      animEl.style.opacity = isActive ? "1" : "0.4";
+      animEl.textContent = `${fpsHeld.toFixed(0)}fps ${cpuFrameHeld.toFixed(0)}% ${cpu60Held.toFixed(0)}%`;
+      thruEl.textContent = `${throughput.toFixed(0)}avg`;
     }, FPS_WATCHDOG_MS);
     return {
-      recordFrame(continuous) {
+      recordFrame(continuous, workMs) {
         const now = performance.now();
         frameCount++;
-        if (wasContinuous && activeLastTime > 0) {
-          const delta = now - activeLastTime;
-          if (delta > 0) {
-            const instantFps = 1e3 / delta;
-            active = active === 0 ? instantFps : active * 0.9 + instantFps * 0.1;
-          }
+        if (workMs > 0) workSamples.push(workMs);
+        if (continuous && wasContinuous && lastFrameTime > 0) {
+          const delta = now - lastFrameTime;
+          if (delta > 0) deltaSamples.push(delta);
         }
-        activeLastTime = now;
+        lastFrameTime = now;
         if (continuous) continuousFrames++;
         wasContinuous = continuous;
       }
@@ -21665,7 +21680,7 @@
     timeUI?.updateTimeUI();
     timeController.endFrame();
     const continuous = !timeController.isStopped || animating;
-    fpsIndicator?.recordFrame(continuous);
+    fpsIndicator?.recordFrame(continuous, performance.now() - perfNow);
     inTick = false;
     if (continuous || frameRequestedDuringTick) {
       rafId = requestAnimationFrame(tick);

@@ -487,7 +487,7 @@ function tick(): void {
     // clock has nothing to re-render — display time is frozen. The loop is
     // restarted by scheduleFrame()/ensureSchedulerRunning() on the next change.
     const continuous = !timeController.isStopped || animating;
-    fpsIndicator?.recordFrame(continuous);
+    fpsIndicator?.recordFrame(continuous, performance.now() - perfNow);
     inTick = false;
     if (continuous || frameRequestedDuringTick) {
         rafId = requestAnimationFrame(tick);

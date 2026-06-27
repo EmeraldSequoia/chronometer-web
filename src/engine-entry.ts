@@ -1137,7 +1137,7 @@ async function main() {
 
         // Decide whether to keep the RAF loop running
         const willContinue = timeController.needsContinuousRender || stillAnimating;
-        _fps?.recordFrame(willContinue);
+        _fps?.recordFrame(willContinue, performance.now() - frameStart);
         if (willContinue) {
             rafId = requestAnimationFrame(frame);
         } else {
