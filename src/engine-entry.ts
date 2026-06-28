@@ -33,6 +33,7 @@ import { buildStaticBlockCaches, renderFrame, buildHandShadowCaches, BEZEL_THICK
 import type { LoadedImage } from './watch/image-loader.js';
 import { SCHEDULER_LOOKAHEAD_MS } from './shared/animation.js';
 import { Updater, makeOverridableGetNow, timingContextForFrame, tickProfile, resetTickProfile, setTickProfiling, type WithDisplayTime } from './shared/updater.js';
+import { astroProfile, resetAstroProfile } from './shared/astro-env.js';
 import { buildHandValues } from './watch/hand-values.js';
 import type { Watch } from './watch/types.js';
 import type { Environment } from './expr/env.js';
@@ -973,6 +974,7 @@ async function main() {
                 _scrubRenderMsTotal = 0;
                 _scrubBodyFrameCount = 0;
                 resetTickProfile();
+                resetAstroProfile();
                 console.log('[scrub-perf] Scrubbing session started.');
             }
 
@@ -1070,6 +1072,15 @@ async function main() {
                     const obs = built.reduce((n, f) => n + f.updater.all.length, 0);
                     return `  - Ticked: ${obs} obsValues across ${built.length} faces ` +
                         `(${built.length ? (obs / built.length).toFixed(0) : 0}/face) · canvas ${built[0]?.sizePx ?? 0}px`;
+                })() +
+                (() => {
+                    const n = _scrubBodyFrameCount || 1;
+                    const a = astroProfile;
+                    const perSearch = a.masterComputes ? (a.masterMs / a.masterComputes) : 0;
+                    const hitRate = a.masterCalls ? (1 - a.masterComputes / a.masterCalls) * 100 : 0;
+                    return `\n  - Master rise/set search: ${a.masterComputes} computes / ${a.masterCalls} calls ` +
+                        `(${(a.masterComputes / n).toFixed(1)} computes/frame, ${hitRate.toFixed(0)}% cache hit), ` +
+                        `${perSearch.toFixed(3)}ms/search, ${(a.masterMs / n).toFixed(2)}ms/frame, ${a.masterMs.toFixed(0)}ms total`;
                 })() +
                 (_tickProfile ? '\n' + (() => {
                     const n = _scrubBodyFrameCount || 1;

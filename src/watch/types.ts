@@ -356,6 +356,28 @@ export interface TerminatorPart extends PartBase {
 // QWedge — annular sector (pie-slice of a ring)
 // ============================================================================
 
+/**
+ * Cached single-wedge bitmap for blit-based wedge rendering (see renderer.ts).
+ *
+ * A wedge/ring's annular sector is geometrically constant frame-to-frame (only
+ * its rotation changes), so we pre-render one sector to a device-resolution
+ * OffscreenCanvas and `drawImage` it rotated, instead of re-tessellating an arc
+ * path every frame. `canvas` is null when blitting is disabled for this geometry
+ * (e.g. span ≥ π, where the tight bounding box doesn't hold) — callers fall back
+ * to the path renderer.
+ */
+export interface WedgeBitmapCache {
+    /** Geometry+color+scale signature; the bitmap is rebuilt when this changes. */
+    sig: string;
+    /** Pre-rendered single wedge sector at device resolution, or null (use path). */
+    canvas: OffscreenCanvas | null;
+    /** Blit placement, in XML units (the main ctx is XML-unit space). */
+    destX: number;
+    destY: number;
+    destW: number;
+    destH: number;
+}
+
 export interface QWedgePart extends PartBase {
     type: 'QWedge';
     outerRadius?: string;

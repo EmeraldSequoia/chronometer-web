@@ -2031,6 +2031,30 @@ const RISE_SET_FUDGE_SECONDS = 5;       // iOS: fudgeFactorSeconds = 5
 const RISE_SET_LOOKAHEAD = 3600 * 13.2;
 
 /**
+ * Lightweight profiling counters for the master rise/set search — the dominant
+ * scrub-tick astronomy cost. `masterComputes` counts actual root-finder runs
+ * (cache misses); `masterCalls` counts every getMasterRiseSet lookup; `masterMs`
+ * is the wall time spent in the searches.
+ *
+ * With today's per-face pools, `masterComputes` per frame ≈ Σ(distinct planet
+ * rings per face) across all rendered faces — i.e. the same (Sun, today, lat,
+ * lon) search re-run once per face. A shared pool should collapse it to the
+ * globally-distinct (planet, location) set. Reset at scrub start and printed at
+ * scrub end; see the [scrub-perf] log in engine-entry.ts.
+ */
+export const astroProfile = {
+    masterCalls: 0,
+    masterComputes: 0,
+    masterMs: 0,
+};
+
+export function resetAstroProfile(): void {
+    astroProfile.masterCalls = 0;
+    astroProfile.masterComputes = 0;
+    astroProfile.masterMs = 0;
+}
+
+/**
  * The expensive half of the day/night computation: the two
  * nextPrevRiseSetInternal searches. Depends only on (planet, date, lat, lon),
  * so it is identical for every wedge in a ring. Ports iOS ESAstronomy.cpp
@@ -2044,6 +2068,9 @@ function computeMasterRiseSet(
     observerLon: number,
     pool: AstroCachePool,
 ): MasterRiseSet {
+    astroProfile.masterComputes++;
+    const _t0 = performance.now();
+
     // iOS: [self planetIsUp:planetNumber]
     const planetIsUp = planetIsUpForRiseSet(planetNumber, calcDate, observerLat, observerLon);
 
@@ -2057,6 +2084,7 @@ function computeMasterRiseSet(
         false, planetNumber, planetIsUp, -RISE_SET_FUDGE_SECONDS, RISE_SET_LOOKAHEAD, pool,
     );
 
+    astroProfile.masterMs += performance.now() - _t0;
     return {
         riseTime: riseResult.eventTime,
         setTime: setResult.eventTime,
@@ -2093,6 +2121,7 @@ function getMasterRiseSet(
     observerLon: number,
     pool: AstroCachePool,
 ): MasterRiseSet {
+    astroProfile.masterCalls++;
     if (planetNumber < 0 || planetNumber > 9) {
         return computeMasterRiseSet(planetNumber, calcDate, observerLat, observerLon, pool);
     }

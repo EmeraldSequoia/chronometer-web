@@ -14101,7 +14101,19 @@ return {${names2.join(",")}};`;
   }
   var RISE_SET_FUDGE_SECONDS = 5;
   var RISE_SET_LOOKAHEAD = 3600 * 13.2;
+  var astroProfile = {
+    masterCalls: 0,
+    masterComputes: 0,
+    masterMs: 0
+  };
+  function resetAstroProfile() {
+    astroProfile.masterCalls = 0;
+    astroProfile.masterComputes = 0;
+    astroProfile.masterMs = 0;
+  }
   function computeMasterRiseSet(planetNumber, calcDate, observerLat, observerLon, pool) {
+    astroProfile.masterComputes++;
+    const _t0 = performance.now();
     const planetIsUp = planetIsUpForRiseSet(planetNumber, calcDate, observerLat, observerLon);
     const riseResult = nextPrevRiseSetInternal(
       calcDate,
@@ -14125,6 +14137,7 @@ return {${names2.join(",")}};`;
       RISE_SET_LOOKAHEAD,
       pool
     );
+    astroProfile.masterMs += performance.now() - _t0;
     return {
       riseTime: riseResult.eventTime,
       setTime: setResult.eventTime,
@@ -14133,6 +14146,7 @@ return {${names2.join(",")}};`;
     };
   }
   function getMasterRiseSet(planetNumber, calcDate, observerLat, observerLon, pool) {
+    astroProfile.masterCalls++;
     if (planetNumber < 0 || planetNumber > 9) {
       return computeMasterRiseSet(planetNumber, calcDate, observerLat, observerLon, pool);
     }
@@ -15988,7 +16002,7 @@ return {${names2.join(",")}};`;
           drawWindowBorder(ctx, win, env);
         }
         pendingWindows.length = 0;
-        drawQDayNightRing(ctx, part, env);
+        drawQDayNightRing(ctx, part, env, scale);
         continue;
       }
       if (pendingWindows.length > 0) {
@@ -16277,10 +16291,10 @@ return {${names2.join(",")}};`;
         drawQRect(ctx, part, env);
         break;
       case "QWedge":
-        drawQWedge(ctx, part, env);
+        drawQWedge(ctx, part, env, scale);
         break;
       case "QDayNightRing":
-        drawQDayNightRing(ctx, part, env);
+        drawQDayNightRing(ctx, part, env, scale);
         break;
       case "CalendarRowCover":
         drawCalendarRowCover(ctx, part, env);
@@ -17198,26 +17212,7 @@ return {${names2.join(",")}};`;
     }
     ctx.restore();
   }
-  function drawQWedge(ctx, part, env) {
-    const cx = evalAttr(part.x, env);
-    const cy = -evalAttr(part.y, env);
-    const outerR = evalAttr(part.outerRadius, env);
-    const innerR = evalAttr(part.innerRadius, env);
-    const span = evalAttr(part.angleSpan, env);
-    const angle = part._obsAngle ? part._obsAngle.currentValue : evalAttr(part.angle, env);
-    if (outerR <= 0 || innerR <= 0 || span <= 0) return;
-    const strokeColor = part.strokeColor ? evalColor(part.strokeColor, env) : "black";
-    const fillColor = part.fillColor ? evalColor(part.fillColor, env) : "transparent";
-    ctx.save();
-    ctx.translate(cx, cy);
-    let totalAngle = angle;
-    if (part.offsetRadius && part.offsetAngle) {
-      const offR = evalAttr(part.offsetRadius, env);
-      const offA = part._obsOffsetAngle ? part._obsOffsetAngle.currentValue : evalAttr(part.offsetAngle, env);
-      ctx.translate(offR * Math.sin(offA), -offR * Math.cos(offA));
-      totalAngle = offA + angle;
-    }
-    ctx.rotate(totalAngle);
+  function strokeFillWedgePath(ctx, outerR, innerR, span, fillColor, strokeColor, lineWidth) {
     const startAngle = -Math.PI / 2 - span / 2;
     const endAngle = -Math.PI / 2 + span / 2;
     ctx.beginPath();
@@ -17230,12 +17225,81 @@ return {${names2.join(",")}};`;
     }
     if (!isTransparent(strokeColor)) {
       ctx.strokeStyle = strokeColor;
-      ctx.lineWidth = 0.3;
+      ctx.lineWidth = lineWidth;
       ctx.stroke();
+    }
+  }
+  function buildWedgeBitmap(scale, outerR, innerR, span, fillColor, strokeColor, lineWidth) {
+    const empty = { sig: "", canvas: null, destX: 0, destY: 0, destW: 0, destH: 0 };
+    if (span >= Math.PI || !(scale > 0)) return empty;
+    const halfSpan = span / 2;
+    const sinH = Math.sin(halfSpan);
+    const cosH = Math.cos(halfSpan);
+    const minX = -outerR * sinH;
+    const maxX = outerR * sinH;
+    const minY = -outerR;
+    const maxY = -innerR * cosH;
+    const bboxW = maxX - minX;
+    const bboxH = maxY - minY;
+    const pad = Math.ceil(lineWidth * scale / 2) + 2;
+    const devW = Math.max(1, Math.ceil(bboxW * scale) + 2 * pad);
+    const devH = Math.max(1, Math.ceil(bboxH * scale) + 2 * pad);
+    const canvas = new OffscreenCanvas(devW, devH);
+    const bctx = canvas.getContext("2d");
+    bctx.translate(pad - minX * scale, pad - minY * scale);
+    bctx.scale(scale, scale);
+    strokeFillWedgePath(bctx, outerR, innerR, span, fillColor, strokeColor, lineWidth);
+    return {
+      sig: "",
+      canvas,
+      // Destination rect in XML units → main ctx scale maps devW×devH back 1:1.
+      destX: minX - pad / scale,
+      destY: minY - pad / scale,
+      destW: devW / scale,
+      destH: devH / scale
+    };
+  }
+  var _wedgeBitmapCache = /* @__PURE__ */ new Map();
+  var WEDGE_CACHE_CAP = 128;
+  function getWedgeBitmap(scale, outerR, innerR, span, fillColor, strokeColor, lineWidth) {
+    const sig = `${scale}|${outerR}|${innerR}|${span}|${fillColor}|${strokeColor}|${lineWidth}`;
+    const cached = _wedgeBitmapCache.get(sig);
+    if (cached) return cached;
+    if (_wedgeBitmapCache.size >= WEDGE_CACHE_CAP) _wedgeBitmapCache.clear();
+    const wb = buildWedgeBitmap(scale, outerR, innerR, span, fillColor, strokeColor, lineWidth);
+    wb.sig = sig;
+    _wedgeBitmapCache.set(sig, wb);
+    return wb;
+  }
+  function drawQWedge(ctx, part, env, scale) {
+    const cx = evalAttr(part.x, env);
+    const cy = -evalAttr(part.y, env);
+    const outerR = evalAttr(part.outerRadius, env);
+    const innerR = evalAttr(part.innerRadius, env);
+    const span = evalAttr(part.angleSpan, env);
+    const angle = part._obsAngle ? part._obsAngle.currentValue : evalAttr(part.angle, env);
+    if (outerR <= 0 || innerR <= 0 || span <= 0) return;
+    const strokeColor = part.strokeColor ? evalColor(part.strokeColor, env) : "black";
+    const fillColor = part.fillColor ? evalColor(part.fillColor, env) : "transparent";
+    const wb = getWedgeBitmap(scale, outerR, innerR, span, fillColor, strokeColor, 0.3);
+    ctx.save();
+    ctx.translate(cx, cy);
+    let totalAngle = angle;
+    if (part.offsetRadius && part.offsetAngle) {
+      const offR = evalAttr(part.offsetRadius, env);
+      const offA = part._obsOffsetAngle ? part._obsOffsetAngle.currentValue : evalAttr(part.offsetAngle, env);
+      ctx.translate(offR * Math.sin(offA), -offR * Math.cos(offA));
+      totalAngle = offA + angle;
+    }
+    ctx.rotate(totalAngle);
+    if (wb.canvas) {
+      ctx.drawImage(wb.canvas, wb.destX, wb.destY, wb.destW, wb.destH);
+    } else {
+      strokeFillWedgePath(ctx, outerR, innerR, span, fillColor, strokeColor, 0.3);
     }
     ctx.restore();
   }
-  function drawQDayNightRing(ctx, part, env) {
+  function drawQDayNightRing(ctx, part, env, scale) {
     const cx = evalAttr(part.x, env);
     const cy = -evalAttr(part.y, env);
     const outerR = evalAttr(part.outerRadius, env);
@@ -17248,7 +17312,9 @@ return {${names2.join(",")}};`;
     const strokeColor = part.strokeColor ? evalColor(part.strokeColor, env) : "black";
     const fillColor = part.fillColor ? evalColor(part.fillColor, env) : "white";
     const wedgeSpan = (2 * Math.PI + 0.2) / numWedges;
+    const lineWidth = fillColor === "rgba(0,0,0,0)" ? 0.5 : 0.3;
     const slideValues = part._obsWedgeSlides;
+    const wb = getWedgeBitmap(scale, outerR, innerR, wedgeSpan, fillColor, strokeColor, lineWidth);
     ctx.save();
     ctx.translate(cx, cy);
     for (let i = 0; i < numWedges; i++) {
@@ -17259,20 +17325,10 @@ return {${names2.join(",")}};`;
       if (Math.abs(slide) > 0.01) {
         ctx.translate(0, slide);
       }
-      const startAngle = -Math.PI / 2 - wedgeSpan / 2;
-      const endAngle = -Math.PI / 2 + wedgeSpan / 2;
-      ctx.beginPath();
-      ctx.arc(0, 0, outerR, startAngle, endAngle);
-      ctx.arc(0, 0, innerR, endAngle, startAngle, true);
-      ctx.closePath();
-      if (!isTransparent(fillColor)) {
-        ctx.fillStyle = fillColor;
-        ctx.fill();
-      }
-      if (!isTransparent(strokeColor)) {
-        ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = fillColor === "rgba(0,0,0,0)" ? 0.5 : 0.3;
-        ctx.stroke();
+      if (wb.canvas) {
+        ctx.drawImage(wb.canvas, wb.destX, wb.destY, wb.destW, wb.destH);
+      } else {
+        strokeFillWedgePath(ctx, outerR, innerR, wedgeSpan, fillColor, strokeColor, lineWidth);
       }
       ctx.restore();
     }
@@ -21717,6 +21773,7 @@ return {${names2.join(",")}};`;
           _scrubRenderMsTotal = 0;
           _scrubBodyFrameCount = 0;
           resetTickProfile();
+          resetAstroProfile();
           console.log("[scrub-perf] Scrubbing session started.");
         }
         const elapsed = now - timeController.lastTickRealMs;
@@ -21787,6 +21844,13 @@ return {${names2.join(",")}};`;
             const built = faces.filter((f) => f.enabled && f.cachesBuilt);
             const obs = built.reduce((n, f) => n + f.updater.all.length, 0);
             return `  - Ticked: ${obs} obsValues across ${built.length} faces (${built.length ? (obs / built.length).toFixed(0) : 0}/face) \xB7 canvas ${built[0]?.sizePx ?? 0}px`;
+          })() + (() => {
+            const n = _scrubBodyFrameCount || 1;
+            const a = astroProfile;
+            const perSearch = a.masterComputes ? a.masterMs / a.masterComputes : 0;
+            const hitRate = a.masterCalls ? (1 - a.masterComputes / a.masterCalls) * 100 : 0;
+            return `
+  - Master rise/set search: ${a.masterComputes} computes / ${a.masterCalls} calls (${(a.masterComputes / n).toFixed(1)} computes/frame, ${hitRate.toFixed(0)}% cache hit), ${perSearch.toFixed(3)}ms/search, ${(a.masterMs / n).toFixed(2)}ms/frame, ${a.masterMs.toFixed(0)}ms total`;
           })() + (_tickProfile ? "\n" + (() => {
             const n = _scrubBodyFrameCount || 1;
             const p = tickProfile;

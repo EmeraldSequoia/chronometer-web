@@ -29,6 +29,7 @@ import type {
     QRectPart,
     QWedgePart,
     QDayNightRingPart,
+    WedgeBitmapCache,
     CalendarRowCoverPart,
     CalendarHeaderPart,
     EotDialPart,
@@ -702,7 +703,7 @@ function renderPartsDocumentOrder(
                 drawWindowBorder(ctx, win, env);
             }
             pendingWindows.length = 0;
-            drawQDayNightRing(ctx, part, env);
+            drawQDayNightRing(ctx, part, env, scale);
             continue;
         }
 
@@ -1133,10 +1134,10 @@ function drawStaticPart(
             drawQRect(ctx, part, env);
             break;
         case 'QWedge':
-            drawQWedge(ctx, part, env);
+            drawQWedge(ctx, part, env, scale);
             break;
         case 'QDayNightRing':
-            drawQDayNightRing(ctx, part, env);
+            drawQDayNightRing(ctx, part, env, scale);
             break;
         case 'CalendarRowCover':
             drawCalendarRowCover(ctx, part, env);
@@ -2572,10 +2573,136 @@ function drawQRect(
 // QWedge — annular sector (pie-slice of a ring)
 // ============================================================================
 
+/**
+ * Stroke+fill one annular sector centred on -PI/2 (12 o'clock) at the current
+ * origin, in XML units. Shared by the live path renderer (fallback) and the
+ * offscreen bitmap builder so the two stay pixel-faithful.
+ */
+function strokeFillWedgePath(
+    ctx: RenderContext,
+    outerR: number, innerR: number, span: number,
+    fillColor: string, strokeColor: string, lineWidth: number,
+): void {
+    const startAngle = -Math.PI / 2 - span / 2;
+    const endAngle = -Math.PI / 2 + span / 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, outerR, startAngle, endAngle);
+    ctx.arc(0, 0, innerR, endAngle, startAngle, true);
+    ctx.closePath();
+    if (!isTransparent(fillColor)) {
+        ctx.fillStyle = fillColor;
+        ctx.fill();
+    }
+    if (!isTransparent(strokeColor)) {
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = lineWidth;
+        ctx.stroke();
+    }
+}
+
+/**
+ * Build (or rebuild) the cached single-wedge bitmap for a wedge/ring geometry,
+ * keyed on a signature so it only rebuilds on resize / color / span change.
+ *
+ * The bitmap holds one annular sector (centred on -PI/2) rendered at device
+ * resolution; callers blit it rotated per wedge. The returned `destX/Y/W/H` are
+ * in XML units so that the main ctx — which is `translate(w/2,h/2); scale(scale)`
+ * space — maps the bitmap back to 1:1 device pixels (crisp, no resampling beyond
+ * the per-wedge rotation, exactly like image hands).
+ *
+ * Returns `canvas: null` when the sector subtends ≥ π (the tight bounding-box
+ * formula assumes the arc stays within one quadrant pair); callers fall back to
+ * the path renderer. Day/night rings (numWedges ≥ 3) and real QWedges never hit
+ * this, but it keeps the geometry honest.
+ */
+function buildWedgeBitmap(
+    scale: number,
+    outerR: number, innerR: number, span: number,
+    fillColor: string, strokeColor: string, lineWidth: number,
+): WedgeBitmapCache {
+    const empty: WedgeBitmapCache = { sig: '', canvas: null, destX: 0, destY: 0, destW: 0, destH: 0 };
+    if (span >= Math.PI || !(scale > 0)) return empty;
+
+    const halfSpan = span / 2;
+    const sinH = Math.sin(halfSpan);
+    const cosH = Math.cos(halfSpan);
+
+    // Bounding box of the sector in XML units (sector points up, toward -y).
+    //   top    (minY): outer arc apex at -PI/2  → -outerR
+    //   bottom (maxY): inner arc ends           → -innerR*cos(halfSpan)
+    //   sides  (±X):   outer arc ends           → ±outerR*sin(halfSpan)
+    const minX = -outerR * sinH;
+    const maxX = outerR * sinH;
+    const minY = -outerR;
+    const maxY = -innerR * cosH;
+    const bboxW = maxX - minX;
+    const bboxH = maxY - minY;
+
+    // Device-pixel padding to protect the half-stroke that bleeds past the path.
+    const pad = Math.ceil(lineWidth * scale / 2) + 2;
+    const devW = Math.max(1, Math.ceil(bboxW * scale) + 2 * pad);
+    const devH = Math.max(1, Math.ceil(bboxH * scale) + 2 * pad);
+
+    const canvas = new OffscreenCanvas(devW, devH);
+    const bctx = canvas.getContext('2d')!;
+    // Map XML coords → bitmap device px so that XML (minX,minY) lands at (pad,pad).
+    bctx.translate(pad - minX * scale, pad - minY * scale);
+    bctx.scale(scale, scale);
+    strokeFillWedgePath(bctx, outerR, innerR, span, fillColor, strokeColor, lineWidth);
+
+    return {
+        sig: '',
+        canvas,
+        // Destination rect in XML units → main ctx scale maps devW×devH back 1:1.
+        destX: minX - pad / scale,
+        destY: minY - pad / scale,
+        destW: devW / scale,
+        destH: devH / scale,
+    };
+}
+
+/**
+ * Process-wide wedge-bitmap cache, keyed purely by *appearance* signature
+ * (scale + geometry + colors). This is the `refName` image-sharing mechanism by
+ * another name: every wedge that looks identical — whether it's a QDayNightRing's
+ * N internal wedges, a group of `refName`-linked QWedge siblings (e.g. Selene's
+ * DELDay A/B rings), or even matching rings across faces — resolves to one
+ * bitmap and blits it rotated.
+ *
+ * Crucially this stays tiny under day-alternating colors: `delOnDayTintColor`
+ * only ever yields two colors, so the day-flip merely re-routes each wedge
+ * between the two already-built entries — no per-tick rebuilds. The cap is a
+ * safety valve for pathological continuously-varying appearances (rare); a clear
+ * just forces a one-frame rebuild.
+ */
+const _wedgeBitmapCache = new Map<string, WedgeBitmapCache>();
+const WEDGE_CACHE_CAP = 128;
+
+function getWedgeBitmap(
+    scale: number,
+    outerR: number, innerR: number, span: number,
+    fillColor: string, strokeColor: string, lineWidth: number,
+): WedgeBitmapCache {
+    const sig = `${scale}|${outerR}|${innerR}|${span}|${fillColor}|${strokeColor}|${lineWidth}`;
+    const cached = _wedgeBitmapCache.get(sig);
+    if (cached) return cached;
+    if (_wedgeBitmapCache.size >= WEDGE_CACHE_CAP) _wedgeBitmapCache.clear();
+    const wb = buildWedgeBitmap(scale, outerR, innerR, span, fillColor, strokeColor, lineWidth);
+    wb.sig = sig;
+    _wedgeBitmapCache.set(sig, wb);
+    return wb;
+}
+
+// QWedge is a single annular sector per part, but `refName`-linked siblings (e.g.
+// Selene's DELDay A/B rings) all share one appearance, so they collapse to one
+// cached bitmap via the appearance-keyed cache and blit it rotated — the same
+// image-sharing iOS uses. Day-alternating fill colors don't thrash the cache: it
+// holds the two stable appearances and re-routes wedges between them each day.
 function drawQWedge(
     ctx: RenderContext,
     part: QWedgePart,
     env: Environment,
+    scale: number,
 ): void {
     const cx = evalAttr(part.x, env);
     const cy = -evalAttr(part.y, env);  // Y-flip
@@ -2589,6 +2716,7 @@ function drawQWedge(
 
     const strokeColor = part.strokeColor ? evalColor(part.strokeColor, env) : 'black';
     const fillColor = part.fillColor ? evalColor(part.fillColor, env) : 'transparent';
+    const wb = getWedgeBitmap(scale, outerR, innerR, span, fillColor, strokeColor, 0.3);
 
     ctx.save();
     ctx.translate(cx, cy);
@@ -2609,23 +2737,10 @@ function drawQWedge(
     // Rotate by total angle (offsetAngle + partAngle)
     ctx.rotate(totalAngle);
 
-    // Draw annular sector path centred on -PI/2 (12 o'clock)
-    const startAngle = -Math.PI / 2 - span / 2;
-    const endAngle = -Math.PI / 2 + span / 2;
-
-    ctx.beginPath();
-    ctx.arc(0, 0, outerR, startAngle, endAngle);
-    ctx.arc(0, 0, innerR, endAngle, startAngle, true);
-    ctx.closePath();
-
-    if (!isTransparent(fillColor)) {
-        ctx.fillStyle = fillColor;
-        ctx.fill();
-    }
-    if (!isTransparent(strokeColor)) {
-        ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = 0.3;
-        ctx.stroke();
+    if (wb.canvas) {
+        ctx.drawImage(wb.canvas, wb.destX, wb.destY, wb.destW, wb.destH);
+    } else {
+        strokeFillWedgePath(ctx, outerR, innerR, span, fillColor, strokeColor, 0.3);
     }
 
     ctx.restore();
@@ -2639,6 +2754,7 @@ function drawQDayNightRing(
     ctx: RenderContext,
     part: QDayNightRingPart,
     env: Environment,
+    scale: number,
 ): void {
     const cx = evalAttr(part.x, env);
     const cy = -evalAttr(part.y, env);  // Y-flip
@@ -2661,8 +2777,13 @@ function drawQDayNightRing(
 
     // Each wedge spans a bit more than 2PI/numWedges so they overlap slightly (matching iOS)
     const wedgeSpan = (2 * Math.PI + 0.2) / numWedges;
+    const lineWidth = (fillColor === 'rgba(0,0,0,0)') ? 0.5 : 0.3;
 
     const slideValues = part._obsWedgeSlides;
+
+    // All wedges in the ring share one geometry → one cached bitmap, blitted
+    // rotated per wedge instead of re-tessellating numWedges arc paths.
+    const wb = getWedgeBitmap(scale, outerR, innerR, wedgeSpan, fillColor, strokeColor, lineWidth);
 
     ctx.save();
     ctx.translate(cx, cy);
@@ -2682,23 +2803,10 @@ function drawQDayNightRing(
             ctx.translate(0, slide);
         }
 
-        // Draw annular sector centred on -PI/2 (12 o'clock)
-        const startAngle = -Math.PI / 2 - wedgeSpan / 2;
-        const endAngle = -Math.PI / 2 + wedgeSpan / 2;
-
-        ctx.beginPath();
-        ctx.arc(0, 0, outerR, startAngle, endAngle);
-        ctx.arc(0, 0, innerR, endAngle, startAngle, true);
-        ctx.closePath();
-
-        if (!isTransparent(fillColor)) {
-            ctx.fillStyle = fillColor;
-            ctx.fill();
-        }
-        if (!isTransparent(strokeColor)) {
-            ctx.strokeStyle = strokeColor;
-            ctx.lineWidth = (fillColor === 'rgba(0,0,0,0)') ? 0.5 : 0.3;
-            ctx.stroke();
+        if (wb.canvas) {
+            ctx.drawImage(wb.canvas, wb.destX, wb.destY, wb.destW, wb.destH);
+        } else {
+            strokeFillWedgePath(ctx, outerR, innerR, wedgeSpan, fillColor, strokeColor, lineWidth);
         }
 
         ctx.restore();

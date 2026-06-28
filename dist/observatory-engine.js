@@ -12506,7 +12506,14 @@
   }
   var RISE_SET_FUDGE_SECONDS = 5;
   var RISE_SET_LOOKAHEAD = 3600 * 13.2;
+  var astroProfile = {
+    masterCalls: 0,
+    masterComputes: 0,
+    masterMs: 0
+  };
   function computeMasterRiseSet(planetNumber, calcDate, observerLat, observerLon, pool) {
+    astroProfile.masterComputes++;
+    const _t0 = performance.now();
     const planetIsUp = planetIsUpForRiseSet(planetNumber, calcDate, observerLat, observerLon);
     const riseResult = nextPrevRiseSetInternal(
       calcDate,
@@ -12530,6 +12537,7 @@
       RISE_SET_LOOKAHEAD,
       pool
     );
+    astroProfile.masterMs += performance.now() - _t0;
     return {
       riseTime: riseResult.eventTime,
       setTime: setResult.eventTime,
@@ -12538,6 +12546,7 @@
     };
   }
   function getMasterRiseSet(planetNumber, calcDate, observerLat, observerLon, pool) {
+    astroProfile.masterCalls++;
     if (planetNumber < 0 || planetNumber > 9) {
       return computeMasterRiseSet(planetNumber, calcDate, observerLat, observerLon, pool);
     }
