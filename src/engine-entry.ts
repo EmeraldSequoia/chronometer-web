@@ -923,6 +923,13 @@ async function main() {
     let _pureAnimDeltaMax = -Infinity;
     let _lastAnimFrameTime: number | null = null;
 
+    // Per-frame CPU breakdown across ALL scrub frames (tick = updater update+animate,
+    // incl. astronomy; render = renderFrame draw-command issuance). Answers "where
+    // does the frame CPU go — astronomy/expression eval or rendering?".
+    let _scrubTickMsTotal = 0;
+    let _scrubRenderMsTotal = 0;
+    let _scrubBodyFrameCount = 0;
+
     function frame() {
         rafId = null;
         const now = performance.now();
@@ -956,6 +963,9 @@ async function main() {
                 _pureAnimDeltaMin = Infinity;
                 _pureAnimDeltaMax = -Infinity;
                 _lastAnimFrameTime = null;
+                _scrubTickMsTotal = 0;
+                _scrubRenderMsTotal = 0;
+                _scrubBodyFrameCount = 0;
                 console.log('[scrub-perf] Scrubbing session started.');
             }
 
@@ -1044,7 +1054,10 @@ async function main() {
                 `  - Pure Animation Frame Stats (N = ${_pureAnimCount}):\n` +
                 `    - CPU execution: avg ${avgCpu}ms (min: ${minCpu}ms, max: ${maxCpu}ms)\n` +
                 `    - GPU flush/render: avg ${avgGpu}ms (min: ${minGpu}ms, max: ${maxGpu}ms)\n` +
-                `    - Inter-frame interval: avg ${avgDelta}ms (min: ${minDelta}ms, max: ${maxDelta}ms) -> equivalent to ${avgAnimFps} FPS`
+                `    - Inter-frame interval: avg ${avgDelta}ms (min: ${minDelta}ms, max: ${maxDelta}ms) -> equivalent to ${avgAnimFps} FPS\n` +
+                `  - Frame CPU split (all ${_scrubBodyFrameCount} scrub frames): ` +
+                `tick(update+astro+animate) avg ${(_scrubBodyFrameCount ? _scrubTickMsTotal / _scrubBodyFrameCount : 0).toFixed(2)}ms, ` +
+                `render(draw issuance) avg ${(_scrubBodyFrameCount ? _scrubRenderMsTotal / _scrubBodyFrameCount : 0).toFixed(2)}ms`
             );
         }
 
@@ -1070,6 +1083,7 @@ async function main() {
         const deltaSec = rate !== null ? displaySecondsPerTick(rate.unit) : 0;
 
         let renderMs = 0;
+        let tickCpuMs = 0;
         let animatingFaceCount = 0;
 
         const isPureAnimFrame = isScrubbing && !willTick;
@@ -1083,7 +1097,9 @@ async function main() {
             if (!face.enabled || !face.cachesBuilt) continue;
             // Drive all ObsValues for this face — hands, wheels, dials, wedges,
             // masterOffset, and the terminator leaves (all on the per-face Updater).
+            const tickStart = performance.now();
             face.updater.tick(face.env, now, face.getNow, face.withDisplayTime, timingCtx);
+            tickCpuMs += performance.now() - tickStart;
 
             const renderStart = performance.now();
             renderFrame(face.ctx, face.watch, face.env, face.scale, face.images, face.terminatorLeaves, face.analemmaState);
@@ -1095,6 +1111,13 @@ async function main() {
                 stillAnimating = true;
                 animatingFaceCount++;
             }
+        }
+
+        // Accumulate the tick/render CPU split across all scrub frames.
+        if (isScrubbing) {
+            _scrubTickMsTotal += tickCpuMs;
+            _scrubRenderMsTotal += renderMs;
+            _scrubBodyFrameCount++;
         }
 
         if (isPureAnimFrame) {
