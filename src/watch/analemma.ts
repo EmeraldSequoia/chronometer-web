@@ -17,7 +17,7 @@
  */
 
 import type { AnalemmaPart } from './types.js';
-import type { Environment } from '../expr/evaluator.js';
+import type { Environment } from '../expr/env.js';
 import { evalAttr, evalColor } from '../shared/astro-env.js';
 import type { LoadedImage } from './image-loader.js';
 import { dateToDateInterval } from '../astronomy/es-time.js';

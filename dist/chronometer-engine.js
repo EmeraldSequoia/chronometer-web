@@ -1,426 +1,5 @@
 "use strict";
 (() => {
-  // src/expr/tokenizer.ts
-  var TokenizerError = class extends Error {
-    constructor(message, position) {
-      super(message);
-      this.position = position;
-      this.name = "TokenizerError";
-    }
-  };
-  function tokenize(source) {
-    const tokens = [];
-    let pos = 0;
-    while (pos < source.length) {
-      if (isWhitespace(source[pos])) {
-        pos++;
-        continue;
-      }
-      if (source[pos] === "/" && pos + 1 < source.length && source[pos + 1] === "*") {
-        pos += 2;
-        while (pos + 1 < source.length && !(source[pos] === "*" && source[pos + 1] === "/")) {
-          pos++;
-        }
-        if (pos + 1 >= source.length) {
-          throw new TokenizerError("Unterminated comment", pos);
-        }
-        pos += 2;
-        continue;
-      }
-      const start = pos;
-      if (isDigit(source[pos]) || source[pos] === "." && pos + 1 < source.length && isDigit(source[pos + 1])) {
-        const tok = readNumber(source, pos);
-        tokens.push(tok);
-        pos = start + tok.value.length;
-        continue;
-      }
-      if (isIdentStart(source[pos])) {
-        while (pos < source.length && isIdentChar(source[pos])) {
-          pos++;
-        }
-        tokens.push({ type: "Identifier" /* Identifier */, value: source.slice(start, pos), position: start });
-        continue;
-      }
-      if (pos + 1 < source.length) {
-        const two = source.slice(pos, pos + 2);
-        const twoCharType = TWO_CHAR_OPS[two];
-        if (twoCharType !== void 0) {
-          tokens.push({ type: twoCharType, value: two, position: start });
-          pos += 2;
-          continue;
-        }
-      }
-      const oneCharType = ONE_CHAR_OPS[source[pos]];
-      if (oneCharType !== void 0) {
-        tokens.push({ type: oneCharType, value: source[pos], position: start });
-        pos++;
-        continue;
-      }
-      pos++;
-    }
-    tokens.push({ type: "EOF" /* EOF */, value: "", position: pos });
-    return tokens;
-  }
-  function readNumber(source, pos) {
-    const start = pos;
-    if (source[pos] === "0" && pos + 1 < source.length && (source[pos + 1] === "x" || source[pos + 1] === "X")) {
-      pos += 2;
-      while (pos < source.length && isHexDigit(source[pos])) {
-        pos++;
-      }
-      return { type: "Integer" /* Integer */, value: source.slice(start, pos), position: start };
-    }
-    const hasLeadingDigits = isDigit(source[pos]);
-    if (hasLeadingDigits) {
-      while (pos < source.length && isDigit(source[pos])) {
-        pos++;
-      }
-    }
-    const hasDot = pos < source.length && source[pos] === ".";
-    if (hasDot) {
-      pos++;
-      while (pos < source.length && isDigit(source[pos])) {
-        pos++;
-      }
-    }
-    if (pos < source.length && (source[pos] === "e" || source[pos] === "E")) {
-      pos++;
-      if (pos < source.length && (source[pos] === "+" || source[pos] === "-")) {
-        pos++;
-      }
-      while (pos < source.length && isDigit(source[pos])) {
-        pos++;
-      }
-      return { type: "DoubleE" /* DoubleE */, value: source.slice(start, pos), position: start };
-    }
-    if (hasDot) {
-      return { type: "Double" /* Double */, value: source.slice(start, pos), position: start };
-    }
-    return { type: "Integer" /* Integer */, value: source.slice(start, pos), position: start };
-  }
-  var TWO_CHAR_OPS = {
-    "<<": "<<" /* LeftShift */,
-    ">>": ">>" /* RightShift */,
-    "<=": "<=" /* LessEqual */,
-    ">=": ">=" /* GreaterEqual */,
-    "==": "==" /* EqualEqual */,
-    "!=": "!=" /* BangEqual */,
-    "&&": "&&" /* AmpAmp */,
-    "||": "||" /* PipePipe */,
-    "+=": "+=" /* PlusEquals */,
-    "-=": "-=" /* MinusEquals */,
-    "*=": "*=" /* StarEquals */,
-    "/=": "/=" /* SlashEquals */
-  };
-  var ONE_CHAR_OPS = {
-    "(": "(" /* LParen */,
-    ")": ")" /* RParen */,
-    ",": "," /* Comma */,
-    ":": ":" /* Colon */,
-    "?": "?" /* Question */,
-    "+": "+" /* Plus */,
-    "-": "-" /* Minus */,
-    "*": "*" /* Star */,
-    "/": "/" /* Slash */,
-    "%": "%" /* Percent */,
-    "&": "&" /* Ampersand */,
-    "|": "|" /* Pipe */,
-    "^": "^" /* Caret */,
-    "~": "~" /* Tilde */,
-    "!": "!" /* Bang */,
-    "<": "<" /* LessThan */,
-    ">": ">" /* GreaterThan */,
-    "=": "=" /* Equals */
-  };
-  function isWhitespace(ch) {
-    return ch === " " || ch === "	" || ch === "\n" || ch === "\r" || ch === "\f" || ch === "\v";
-  }
-  function isDigit(ch) {
-    return ch >= "0" && ch <= "9";
-  }
-  function isHexDigit(ch) {
-    return ch >= "0" && ch <= "9" || ch >= "a" && ch <= "f" || ch >= "A" && ch <= "F";
-  }
-  function isIdentStart(ch) {
-    return ch >= "a" && ch <= "z" || ch >= "A" && ch <= "Z" || ch === "_";
-  }
-  function isIdentChar(ch) {
-    return isIdentStart(ch) || isDigit(ch);
-  }
-
-  // src/expr/parser.ts
-  var ParseError = class extends Error {
-    constructor(message, position) {
-      super(message);
-      this.position = position;
-      this.name = "ParseError";
-    }
-  };
-  function parse(source) {
-    const tokens = tokenize(source);
-    const parser = new Parser(tokens);
-    const result = parser.parseExpression();
-    parser.expect("EOF" /* EOF */);
-    return result;
-  }
-  var Parser = class {
-    constructor(tokens) {
-      this.tokens = tokens;
-      this.pos = 0;
-    }
-    // Current token
-    peek() {
-      return this.tokens[this.pos];
-    }
-    // Advance and return the consumed token
-    advance() {
-      const tok = this.tokens[this.pos];
-      this.pos++;
-      return tok;
-    }
-    // Expect a specific token type, advance, and return the token
-    expect(type) {
-      const tok = this.peek();
-      if (tok.type !== type) {
-        throw new ParseError(
-          `Expected ${type} but got ${tok.type} ('${tok.value}')`,
-          tok.position
-        );
-      }
-      return this.advance();
-    }
-    // Check if current token is a specific type (optionally with a specific value)
-    match(type, value) {
-      const tok = this.peek();
-      if (tok.type !== type) return false;
-      if (value !== void 0 && tok.value !== value) return false;
-      return true;
-    }
-    // Save/restore for backtracking
-    save() {
-      return this.pos;
-    }
-    restore(saved) {
-      this.pos = saved;
-    }
-    // ========================================================================
-    // Grammar rules — following c.y precedence exactly
-    // ========================================================================
-    // expression → assignment_expression (',' assignment_expression)*
-    parseExpression() {
-      const first = this.parseAssignment();
-      if (!this.match("," /* Comma */)) {
-        return first;
-      }
-      const expressions = [first];
-      while (this.match("," /* Comma */)) {
-        this.advance();
-        expressions.push(this.parseAssignment());
-      }
-      return { kind: "ExpressionList", expressions };
-    }
-    // assignment_expression → IDENTIFIER ('='|'+='|'-='|'*='|'/=') assignment_expression
-    //                       | conditional_expression
-    parseAssignment() {
-      if (this.match("Identifier" /* Identifier */)) {
-        const saved = this.save();
-        const idTok = this.advance();
-        const tok = this.peek();
-        if (tok.type === "=" /* Equals */ || tok.type === "+=" /* PlusEquals */ || tok.type === "-=" /* MinusEquals */ || tok.type === "*=" /* StarEquals */ || tok.type === "/=" /* SlashEquals */) {
-          const op = this.advance();
-          const value = this.parseAssignment();
-          return {
-            kind: "Assignment",
-            name: idTok.value,
-            operator: op.value,
-            value
-          };
-        }
-        this.restore(saved);
-      }
-      return this.parseConditional();
-    }
-    // conditional_expression → logical_or ('?' expression ':' conditional_expression)?
-    parseConditional() {
-      let node = this.parseLogicalOr();
-      if (this.match("?" /* Question */)) {
-        this.advance();
-        const consequent = this.parseExpression();
-        this.expect(":" /* Colon */);
-        const alternate = this.parseConditional();
-        node = { kind: "Ternary", condition: node, consequent, alternate };
-      }
-      return node;
-    }
-    // logical_or → logical_and ('||' logical_and)*
-    parseLogicalOr() {
-      let node = this.parseLogicalAnd();
-      while (this.match("||" /* PipePipe */)) {
-        this.advance();
-        const right = this.parseLogicalAnd();
-        node = { kind: "BinaryOp", operator: "||", left: node, right };
-      }
-      return node;
-    }
-    // logical_and → inclusive_or ('&&' inclusive_or)*
-    parseLogicalAnd() {
-      let node = this.parseBitwiseOr();
-      while (this.match("&&" /* AmpAmp */)) {
-        this.advance();
-        const right = this.parseBitwiseOr();
-        node = { kind: "BinaryOp", operator: "&&", left: node, right };
-      }
-      return node;
-    }
-    // inclusive_or → exclusive_or ('|' exclusive_or)*
-    parseBitwiseOr() {
-      let node = this.parseBitwiseXor();
-      while (this.match("|" /* Pipe */)) {
-        this.advance();
-        const right = this.parseBitwiseXor();
-        node = { kind: "BinaryOp", operator: "|", left: node, right };
-      }
-      return node;
-    }
-    // exclusive_or → and_expression ('^' and_expression)*
-    parseBitwiseXor() {
-      let node = this.parseBitwiseAnd();
-      while (this.match("^" /* Caret */)) {
-        this.advance();
-        const right = this.parseBitwiseAnd();
-        node = { kind: "BinaryOp", operator: "^", left: node, right };
-      }
-      return node;
-    }
-    // and_expression → equality ('&' equality)*
-    parseBitwiseAnd() {
-      let node = this.parseEquality();
-      while (this.match("&" /* Ampersand */)) {
-        this.advance();
-        const right = this.parseEquality();
-        node = { kind: "BinaryOp", operator: "&", left: node, right };
-      }
-      return node;
-    }
-    // equality → relational (('=='|'!=') relational)*
-    parseEquality() {
-      let node = this.parseRelational();
-      while (this.match("==" /* EqualEqual */) || this.match("!=" /* BangEqual */)) {
-        const op = this.advance();
-        const right = this.parseRelational();
-        node = { kind: "BinaryOp", operator: op.value, left: node, right };
-      }
-      return node;
-    }
-    // relational → shift (('<'|'>'|'<='|'>=') shift)*
-    parseRelational() {
-      let node = this.parseShift();
-      while (this.match("<" /* LessThan */) || this.match(">" /* GreaterThan */) || this.match("<=" /* LessEqual */) || this.match(">=" /* GreaterEqual */)) {
-        const op = this.advance();
-        const right = this.parseShift();
-        node = { kind: "BinaryOp", operator: op.value, left: node, right };
-      }
-      return node;
-    }
-    // shift → additive (('<<'|'>>') additive)*
-    parseShift() {
-      let node = this.parseAdditive();
-      while (this.match("<<" /* LeftShift */) || this.match(">>" /* RightShift */)) {
-        const op = this.advance();
-        const right = this.parseAdditive();
-        node = { kind: "BinaryOp", operator: op.value, left: node, right };
-      }
-      return node;
-    }
-    // additive → multiplicative (('+'|'-') multiplicative)*
-    parseAdditive() {
-      let node = this.parseMultiplicative();
-      while (this.match("+" /* Plus */) || this.match("-" /* Minus */)) {
-        const op = this.advance();
-        const right = this.parseMultiplicative();
-        node = { kind: "BinaryOp", operator: op.value, left: node, right };
-      }
-      return node;
-    }
-    // multiplicative → unary (('*'|'/'|'%') unary)*
-    parseMultiplicative() {
-      let node = this.parseUnary();
-      while (this.match("*" /* Star */) || this.match("/" /* Slash */) || this.match("%" /* Percent */)) {
-        const op = this.advance();
-        const right = this.parseUnary();
-        node = { kind: "BinaryOp", operator: op.value, left: node, right };
-      }
-      return node;
-    }
-    // unary → ('+'|'-'|'~'|'!') unary | postfix
-    parseUnary() {
-      if (this.match("+" /* Plus */) || this.match("-" /* Minus */) || this.match("~" /* Tilde */) || this.match("!" /* Bang */)) {
-        const op = this.advance();
-        const operand = this.parseUnary();
-        return { kind: "UnaryOp", operator: op.value, operand };
-      }
-      return this.parsePostfix();
-    }
-    // postfix → IDENTIFIER '(' argList? ')' | primary
-    parsePostfix() {
-      if (this.match("Identifier" /* Identifier */)) {
-        const saved = this.save();
-        const idTok = this.advance();
-        if (this.match("(" /* LParen */)) {
-          this.advance();
-          if (this.match(")" /* RParen */)) {
-            this.advance();
-            return { kind: "FunctionCall", name: idTok.value, args: [] };
-          }
-          const args = [this.parseAssignment()];
-          while (this.match("," /* Comma */)) {
-            this.advance();
-            args.push(this.parseAssignment());
-          }
-          this.expect(")" /* RParen */);
-          return { kind: "FunctionCall", name: idTok.value, args };
-        }
-        this.restore(saved);
-      }
-      return this.parsePrimary();
-    }
-    // primary → NUMBER | IDENTIFIER | '(' expression ')'
-    parsePrimary() {
-      const tok = this.peek();
-      if (tok.type === "Integer" /* Integer */ || tok.type === "Double" /* Double */ || tok.type === "DoubleE" /* DoubleE */) {
-        this.advance();
-        return { kind: "NumberLiteral", value: parseNumericLiteral(tok) };
-      }
-      if (tok.type === "Identifier" /* Identifier */) {
-        this.advance();
-        return { kind: "Identifier", name: tok.value };
-      }
-      if (tok.type === "(" /* LParen */) {
-        this.advance();
-        const expr = this.parseExpression();
-        this.expect(")" /* RParen */);
-        return expr;
-      }
-      throw new ParseError(
-        `Unexpected token ${tok.type} ('${tok.value}')`,
-        tok.position
-      );
-    }
-  };
-  function parseNumericLiteral(tok) {
-    const s = tok.value;
-    if (tok.type === "Integer" /* Integer */) {
-      if (s.startsWith("0x") || s.startsWith("0X")) {
-        return Number(BigInt(s) & BigInt(4294967295));
-      }
-      if (s.length > 1 && s.startsWith("0")) {
-        return parseInt(s, 8);
-      }
-      return parseInt(s, 10);
-    }
-    return parseFloat(s);
-  }
-
   // src/watch/xml-parser.ts
   function parseWatchXML(xmlText, mode, domParser) {
     const parser = domParser ?? new DOMParser();
@@ -458,11 +37,7 @@
         {
           const exprStr = attr(el, "expr");
           if (exprStr) {
-            try {
-              initExprs.push(parse(exprStr));
-            } catch (e) {
-              console.error(`Failed to parse <init expr="${exprStr}">`, e);
-            }
+            initExprs.push(exprStr);
           }
         }
         break;
@@ -920,14 +495,7 @@
     return val !== null ? val.trim() : void 0;
   }
   function attrExpr(el, name) {
-    const val = attr(el, name);
-    if (!val) return void 0;
-    try {
-      return parse(val);
-    } catch (e) {
-      console.warn(`[xml-parser] Failed to parse AST for attribute: ${name}="${val}"`, e);
-      return void 0;
-    }
+    return attr(el, name) || void 0;
   }
   function partName(el) {
     return attr(el, "name") ?? attr(el, "refName") ?? "";
@@ -942,13 +510,11 @@
     return lower.split("|").some((m) => m.trim() === desiredMode);
   }
 
-  // src/expr/evaluator.ts
+  // src/expr/env.ts
   function createDefaultEnvironment() {
     const variables = /* @__PURE__ */ new Map();
     const functions = /* @__PURE__ */ new Map();
     variables.set("pi", Math.PI);
-    variables.set("true", 1);
-    variables.set("false", 0);
     variables.set("black", 4278190080 >>> 0);
     variables.set("white", 4294967295 >>> 0);
     variables.set("red", 4294901760 >>> 0);
@@ -993,141 +559,87 @@
     functions.set("fmod", (a, b) => a - Math.trunc(a / b) * b);
     return { variables, functions, kyHandMode: 0 };
   }
-  var EvalError = class extends Error {
-    constructor(message) {
-      super(message);
-      this.name = "EvalError";
-    }
-  };
-  function evaluate(node, env) {
-    switch (node.kind) {
-      case "NumberLiteral":
-        return node.value;
-      case "Identifier": {
-        const val = env.variables.get(node.name);
-        if (val === void 0) {
-          throw new EvalError(`Undefined variable: ${node.name}`);
-        }
-        return val;
-      }
-      case "UnaryOp": {
-        const operand = evaluate(node.operand, env);
-        switch (node.operator) {
-          case "+":
-            return operand;
-          case "-":
-            return -operand;
-          case "~":
-            return ~operand;
-          case "!":
-            return operand ? 0 : 1;
-        }
-        break;
-      }
-      case "BinaryOp":
-        return evaluateBinaryOp(node.operator, node.left, node.right, env);
-      case "Ternary": {
-        const cond = evaluate(node.condition, env);
-        return cond ? evaluate(node.consequent, env) : evaluate(node.alternate, env);
-      }
-      case "Assignment": {
-        const value = evaluate(node.value, env);
-        const name = node.name;
-        switch (node.operator) {
-          case "=":
-            env.variables.set(name, value);
-            return value;
-          case "+=": {
-            const cur = env.variables.get(name) ?? 0;
-            const result = cur + value;
-            env.variables.set(name, result);
-            return result;
-          }
-          case "-=": {
-            const cur = env.variables.get(name) ?? 0;
-            const result = cur - value;
-            env.variables.set(name, result);
-            return result;
-          }
-          case "*=": {
-            const cur = env.variables.get(name) ?? 0;
-            const result = cur * value;
-            env.variables.set(name, result);
-            return result;
-          }
-          case "/=": {
-            const cur = env.variables.get(name) ?? 0;
-            const result = cur / value;
-            env.variables.set(name, result);
-            return result;
-          }
-        }
-        break;
-      }
-      case "FunctionCall": {
-        const fn = env.functions.get(node.name);
-        if (!fn) {
-          throw new EvalError(`Undefined function: ${node.name}`);
-        }
-        const args = node.args.map((arg) => evaluate(arg, env));
-        return fn(...args);
-      }
-      case "ExpressionList": {
-        let result = 0;
-        for (const expr of node.expressions) {
-          result = evaluate(expr, env);
-        }
-        return result;
-      }
-    }
-    throw new EvalError(`Unknown node kind: ${node.kind}`);
+
+  // src/expr/compile.ts
+  var JS_RESERVED = /* @__PURE__ */ new Set([
+    "true",
+    "false",
+    "null",
+    "undefined",
+    "NaN",
+    "Infinity",
+    "in",
+    "of",
+    "new",
+    "typeof",
+    "void",
+    "delete",
+    "instanceof",
+    "this",
+    "function",
+    "return",
+    "if",
+    "else",
+    "var",
+    "let",
+    "const",
+    "do",
+    "while",
+    "for",
+    "class",
+    "with",
+    "switch",
+    "case",
+    "break",
+    "continue",
+    "default",
+    "throw",
+    "try",
+    "catch",
+    "finally",
+    "yield",
+    "await",
+    "enum",
+    "export",
+    "import",
+    "extends",
+    "super",
+    "debugger"
+  ]);
+  function referencedNames(src) {
+    const toks = src.match(
+      /[A-Za-z_$][\w$]*|0[xX][0-9a-fA-F]+|\d*\.?\d+(?:[eE][+-]?\d+)?/g
+    ) ?? [];
+    const ids = toks.filter((t) => /^[A-Za-z_$]/.test(t));
+    return [...new Set(ids)].filter((n) => !JS_RESERVED.has(n));
   }
-  function evaluateBinaryOp(operator, left, right, env) {
-    if (operator === "&&") {
-      const l2 = evaluate(left, env);
-      return l2 ? evaluate(right, env) : 0;
-    }
-    if (operator === "||") {
-      const l2 = evaluate(left, env);
-      return l2 ? l2 : evaluate(right, env);
-    }
-    const l = evaluate(left, env);
-    const r = evaluate(right, env);
-    switch (operator) {
-      case "+":
-        return l + r;
-      case "-":
-        return l - r;
-      case "*":
-        return l * r;
-      case "/":
-        return l / r;
-      case "%":
-        return l % r;
-      case "<<":
-        return l << r;
-      case ">>":
-        return l >> r;
-      case "<":
-        return l < r ? 1 : 0;
-      case ">":
-        return l > r ? 1 : 0;
-      case "<=":
-        return l <= r ? 1 : 0;
-      case ">=":
-        return l >= r ? 1 : 0;
-      case "==":
-        return l === r ? 1 : 0;
-      case "!=":
-        return l !== r ? 1 : 0;
-      case "&":
-        return l & r;
-      case "^":
-        return l ^ r;
-      case "|":
-        return l | r;
-      default:
-        throw new EvalError(`Unknown binary operator: ${operator}`);
+  function calledNames(src) {
+    return new Set(src.match(/[A-Za-z_$][\w$]*(?=\s*\()/g) ?? []);
+  }
+  function bindsFunction(name, called, hasVar, hasFn) {
+    return hasFn && (called.has(name) || !hasVar);
+  }
+  function compileExpr(src) {
+    const names2 = referencedNames(src);
+    const called = calledNames(src);
+    const compiled = new Function(...names2, `return +(${src});`);
+    return (env) => compiled(
+      ...names2.map(
+        (n) => bindsFunction(n, called, env.variables.has(n), env.functions.has(n)) ? env.functions.get(n) : env.variables.get(n)
+      )
+    );
+  }
+  function runInit(src, vars, fns) {
+    const names2 = referencedNames(src);
+    const called = calledNames(src);
+    const args = names2.map(
+      (n) => bindsFunction(n, called, vars.has(n), fns.has(n)) ? fns.get(n) : vars.get(n)
+    );
+    const body = `${src};
+return {${names2.join(",")}};`;
+    const out = new Function(...names2, body)(...args);
+    for (const n of names2) {
+      if (!fns.has(n)) vars.set(n, out[n]);
     }
   }
 
@@ -13043,23 +12555,23 @@
     return returnAngle;
   }
   function expandTerminatorToLeaves(part, env) {
-    const radius = part.radius ? evaluate(part.radius, env) : 20;
-    const leavesPerQuadrant = part.leavesPerQuadrant ? Math.round(evaluate(part.leavesPerQuadrant, env)) : 6;
-    const incremental = part.incremental ? evaluate(part.incremental, env) !== 0 : false;
-    const anchorEdgeRadius = part.leafAnchorRadius ? evaluate(part.leafAnchorRadius, env) : 0;
-    const leafFillColor = part.leafFillColor ? hexToCSS(evaluate(part.leafFillColor, env)) : "#080808";
-    const leafBorderColor = part.leafBorderColor ? hexToCSS(evaluate(part.leafBorderColor, env)) : "#383838";
-    const centerX = part.x ? evaluate(part.x, env) : 0;
-    const centerY = part.y ? evaluate(part.y, env) : 0;
+    const radius = part.radius ? evalAttr(part.radius, env) : 20;
+    const leavesPerQuadrant = part.leavesPerQuadrant ? Math.round(evalAttr(part.leavesPerQuadrant, env)) : 6;
+    const incremental = part.incremental ? evalAttr(part.incremental, env) !== 0 : false;
+    const anchorEdgeRadius = part.leafAnchorRadius ? evalAttr(part.leafAnchorRadius, env) : 0;
+    const leafFillColor = part.leafFillColor ? hexToCSS(evalAttr(part.leafFillColor, env)) : "#080808";
+    const leafBorderColor = part.leafBorderColor ? hexToCSS(evalAttr(part.leafBorderColor, env)) : "#383838";
+    const centerX = part.x ? evalAttr(part.x, env) : 0;
+    const centerY = part.y ? evalAttr(part.y, env) : 0;
     const offsetRadius = radius + anchorEdgeRadius;
-    const updateIntervalSec2 = part.update ? evaluate(part.update, env) : 60;
+    const updateIntervalSec2 = part.update ? evalAttr(part.update, env) : 60;
     const leaves = [];
     for (let i = 0; i < leavesPerQuadrant; i++) {
       for (let q = 0; q < 4; q++) {
         const quadrant = quadrantOrder(i, q);
         const baseOffsetAngle = isUpper(quadrant) ? 0 : Math.PI;
-        const initialPhase = part.phaseAngle ? evaluate(part.phaseAngle, env) : 0;
-        const initialRotation = part.rotation ? evaluate(part.rotation, env) : 0;
+        const initialPhase = part.phaseAngle ? evalAttr(part.phaseAngle, env) : 0;
+        const initialRotation = part.rotation ? evalAttr(part.rotation, env) : 0;
         let initialAngle = terminatorAngle(
           initialPhase,
           quadrant,
@@ -13095,8 +12607,8 @@
   }
   function updateLeafAngles(leaves, env) {
     if (leaves.length === 0) return;
-    const phase = leaves[0].phaseExpr ? evaluate(leaves[0].phaseExpr, env) : 0;
-    const rotation = leaves[0].rotationExpr ? evaluate(leaves[0].rotationExpr, env) : 0;
+    const phase = leaves[0].phaseExpr ? evalAttr(leaves[0].phaseExpr, env) : 0;
+    const rotation = leaves[0].rotationExpr ? evalAttr(leaves[0].rotationExpr, env) : 0;
     for (const leaf of leaves) {
       let angle = terminatorAngle(
         phase,
@@ -13242,14 +12754,22 @@
     }
     return (targetOffsetSec - browserOffsetSec) * 1e3;
   }
+  var exprCache = /* @__PURE__ */ new Map();
+  function compiledFor(src) {
+    let fn = exprCache.get(src);
+    if (!fn) {
+      fn = compileExpr(src);
+      exprCache.set(src, fn);
+    }
+    return fn;
+  }
   function evalAttr(expr, env) {
     if (!expr) return 0;
-    return evaluate(expr, env);
+    return compiledFor(expr)(env);
   }
   function evalColor(expr, env) {
     if (!expr) return "rgba(0,0,0,0)";
-    const val = evaluate(expr, env);
-    return argbToCSS(val);
+    return argbToCSS(compiledFor(expr)(env));
   }
   function argbToCSS(argb) {
     const v = argb >>> 0;
@@ -15512,7 +15032,7 @@
       olsonTimezone
     );
     for (const expr of watch.initExprs) {
-      evaluate(expr, env);
+      runInit(expr, env.variables, env.functions);
     }
     env.kyHandMode = 0;
     if (typeof window !== "undefined") {
@@ -18981,7 +18501,7 @@
     };
   }
   function updateObsValueDiscrete(v, env, perfNow, getNow, timeDirection, tickIntervalMs) {
-    const newTarget = evalAttr(v.expr, env);
+    const newTarget = v.evalFn(env);
     if (timeDirection === 0) {
       v.nextUpdateTime = perfNow + 100;
     } else if (tickIntervalMs !== null && tickIntervalMs > 0) {
@@ -19010,7 +18530,7 @@
       budgetMs = v.nextUpdateTime - perfNow;
     }
     v.nextUpdateDisplayTime = nextDisplayMs;
-    const target = withDisplayTime ? withDisplayTime(nextDisplayMs, () => evalAttr(v.expr, env)) : evalAttr(v.expr, env);
+    const target = withDisplayTime ? withDisplayTime(nextDisplayMs, () => v.evalFn(env)) : v.evalFn(env);
     v.pendingSweep = null;
     const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
     if (budgetMs > 0 && isFinite(budgetMs)) {
@@ -19020,7 +18540,7 @@
     }
   }
   function updateNaturalSpeedValue(v, env, perfNow, getNow, timeDirection) {
-    const currentCorrectAngle = evalAttr(v.expr, env);
+    const currentCorrectAngle = v.evalFn(env);
     const nextDisplayMs = computeNextBoundary(
       v.updateInterval * 1e3,
       getNow,
@@ -19115,7 +18635,7 @@
     };
   }
   function updateObsValueScrub(v, env, perfNow, getNow, timeDirection, tickIntervalMs, displayDeltaPerTickSec) {
-    const newTarget = evalAttr(v.expr, env);
+    const newTarget = v.evalFn(env);
     const nextDisplayMs = computeNextBoundary(
       v.updateInterval * 1e3,
       getNow,
@@ -19173,7 +18693,7 @@
     v.pendingSweep = null;
   }
   function settleAtNow(v, env, perfNow) {
-    const newTarget = evalAttr(v.expr, env);
+    const newTarget = v.evalFn(env);
     v.nextUpdateTime = perfNow + 100;
     v.pendingSweep = null;
     startAnimationRaw(
@@ -19186,7 +18706,7 @@
     );
   }
   function updateObsValueFixedDuration(v, env, perfNow, durationMs) {
-    const newTarget = evalAttr(v.expr, env);
+    const newTarget = v.evalFn(env);
     v.nextUpdateTime = 0;
     v.pendingSweep = null;
     if (v.discrete) {
@@ -19199,7 +18719,7 @@
     startAnimationRaw(v.anim, newTarget, perfNow, multiplier, durationMs, v.period);
   }
   function snapToTargetAtBoundary(v, env, perfNow, getNow, timeDirection) {
-    const newTarget = evalAttr(v.expr, env);
+    const newTarget = v.evalFn(env);
     const nextDisplayMs = computeNextBoundary(v.updateInterval * 1e3, getNow, timeDirection, env);
     v.nextUpdateDisplayTime = nextDisplayMs;
     v.nextUpdateTime = displayTimeToPerfNow(nextDisplayMs, getNow);
@@ -19242,7 +18762,7 @@
       boundaryRealMs = displayTimeToPerfNow(nextDisplayMs, getNow);
     }
     const _e0 = profileEnabled ? performance.now() : 0;
-    const target = withDisplayTime ? withDisplayTime(nextDisplayMs, () => evalAttr(v.expr, env)) : evalAttr(v.expr, env);
+    const target = withDisplayTime ? withDisplayTime(nextDisplayMs, () => v.evalFn(env)) : v.evalFn(env);
     if (profileEnabled) {
       tickProfile.evalMs += performance.now() - _e0;
       tickProfile.evalCalls++;
@@ -19275,7 +18795,7 @@
     }
     if (timeDirection === 0) {
       if (!v.anim.animating) {
-        const target = evalAttr(v.expr, env);
+        const target = v.evalFn(env);
         startAnimationRaw(v.anim, target, perfNow, multiplier, void 0, v.period);
         v.pendingTarget = null;
         v.nextUpdateDisplayTime = Infinity;
@@ -19510,7 +19030,7 @@
       for (const v of this.values) {
         v.pendingSweep = null;
         v.pendingTarget = null;
-        let target = v.onBeat && env ? evalAttr(v.expr, env) : v.anim.targetValue;
+        let target = v.onBeat && env ? v.evalFn(env) : v.anim.targetValue;
         if (isFinite(v.period)) {
           target = (target % v.period + v.period) % v.period;
         }
@@ -19560,12 +19080,10 @@
   };
 
   // src/shared/obs-value.ts
-  function createObsValue(def, env, perfNow, getNow) {
-    return createObsValueFromAST({ ...def, expr: parse(def.expr) }, env, perfNow, getNow);
-  }
-  function createObsValueFromAST(def, env, perfNow, _getNow) {
+  function createObsValue(def, env, perfNow, _getNow) {
     const expr = def.expr;
-    const initialValue = evalAttr(expr, env);
+    const evalFn = compileExpr(expr);
+    const initialValue = evalFn(env);
     const animSpeed = def.animSpeed ?? 2;
     const naturalSpeed = def.naturalSpeed ?? 0;
     const linear = def.linear ?? false;
@@ -19573,6 +19091,7 @@
     return {
       name: def.name,
       expr,
+      evalFn,
       updateInterval: def.updateInterval,
       animSpeed,
       naturalSpeed,
@@ -19622,7 +19141,7 @@
     return part.update ? evalAttr(part.update, env) : def;
   }
   function addAngleValue(updater, name, expr, env, perfNow, updateInterval, animSpeedRadPerSec) {
-    return updater.add(createObsValueFromAST({
+    return updater.add(createObsValue({
       name,
       expr,
       updateInterval,
@@ -19631,7 +19150,7 @@
     }, env, perfNow));
   }
   function addLinearValue(updater, name, expr, env, perfNow, updateInterval, animSpeedPxPerSec) {
-    return updater.add(createObsValueFromAST({
+    return updater.add(createObsValue({
       name,
       expr,
       updateInterval,
@@ -19724,7 +19243,7 @@
     const interval = updateIntervalSec(part, env, 5);
     const ringAnimS = 1;
     if (part.masterOffset) {
-      part._obsMasterOffset = updater.add(createObsValueFromAST({
+      part._obsMasterOffset = updater.add(createObsValue({
         name: key("masterOffset"),
         expr: part.masterOffset,
         updateInterval: interval,
@@ -19772,16 +19291,13 @@
     part._obsWedgeAngles = angles;
     if (slideDistance > 0) part._obsWedgeSlides = slides;
   }
-  function lit(value) {
-    return { kind: "NumberLiteral", value };
-  }
   function buildTerminatorValues(updater, faceName, leaves, env, perfNow) {
     if (leaves.length === 0) return;
     const rotExpr = leaves[0].rotationExpr;
     const interval = leaves[0].updateIntervalSec;
     let rotation;
     if (rotExpr) {
-      rotation = updater.add(createObsValueFromAST({
+      rotation = updater.add(createObsValue({
         name: `${faceName}.terminator.rotation`,
         expr: rotExpr,
         updateInterval: interval,
@@ -19790,18 +19306,10 @@
       }, env, perfNow));
     }
     leaves.forEach((leaf, i) => {
-      const angleExpr = {
-        kind: "FunctionCall",
-        name: "terminatorLeafAngle",
-        args: [
-          leaf.phaseExpr ?? lit(0),
-          lit(leaf.quadrant),
-          lit(leaf.indexWithinQuadrant),
-          lit(leaf.leavesPerQuadrant),
-          lit(leaf.incremental ? 1 : 0)
-        ]
-      };
-      leaf._obsAngle = updater.add(createObsValueFromAST({
+      const phase = leaf.phaseExpr ? `(${leaf.phaseExpr})` : "0";
+      const incr = leaf.incremental ? 1 : 0;
+      const angleExpr = `terminatorLeafAngle(${phase}, ${leaf.quadrant}, ${leaf.indexWithinQuadrant}, ${leaf.leavesPerQuadrant}, ${incr})`;
+      leaf._obsAngle = updater.add(createObsValue({
         name: `${faceName}.termLeaf.${i}.angle`,
         expr: angleExpr,
         updateInterval: leaf.updateIntervalSec,

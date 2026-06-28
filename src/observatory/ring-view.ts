@@ -26,7 +26,7 @@
  */
 
 import type { LayoutParams } from './layout.js';
-import type { Environment } from '../expr/evaluator.js';
+import type { Environment } from '../expr/env.js';
 import type { ObsValueName, RingPlanetKey } from './obs-values.js';
 import { SUN_RING_NAMES } from './obs-values.js';
 import type { Updater } from '../shared/updater.js';

@@ -12,7 +12,7 @@
  */
 
 import { createAstroEnvironment, computeTzDeltaMs } from '../shared/astro-env.js';
-import type { Environment } from '../expr/evaluator.js';
+import type { Environment } from '../expr/env.js';
 import { getState, setState, initAppState, onSharedChange, isPersistentMode } from '../shared/app-state.js';
 import { resolveTimezone } from '../shared/tz-resolve.js';
 import { findClosestCity, findLargestCityNear, prefetchCityData, loadCityData, releaseCityData, isCityDataLoaded } from '../shared/city-search.js';

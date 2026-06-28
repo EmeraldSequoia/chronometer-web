@@ -13,8 +13,7 @@
  * glue); for now it is just the passes plus the time helper.
  */
 
-import type { Environment } from '../expr/evaluator.js';
-import { evalAttr } from './astro-env.js';
+import type { Environment } from '../expr/env.js';
 import {
     startAnimationRaw,
     interpolateValue,
@@ -141,7 +140,7 @@ function updateObsValueDiscrete(
     timeDirection: 0 | 1 | -1,
     tickIntervalMs: number | null,
 ): void {
-    const newTarget = evalAttr(v.expr, env);
+    const newTarget = v.evalFn(env);
 
     // Cadence is the only mode dependence — the value is always evaluated at the
     // *current* display time and snapped.
@@ -211,8 +210,8 @@ function updateObsValueEvalAhead(
     // Evaluate the target AT the next point's display time (eval-ahead). The
     // override only applies during this evaluation; scheduling above used real time.
     const target = withDisplayTime
-        ? withDisplayTime(nextDisplayMs, () => evalAttr(v.expr, env))
-        : evalAttr(v.expr, env);
+        ? withDisplayTime(nextDisplayMs, () => v.evalFn(env))
+        : v.evalFn(env);
 
     v.pendingSweep = null;
     const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
@@ -244,7 +243,7 @@ function updateNaturalSpeedValue(
     getNow: () => Date,
     timeDirection: 1 | -1,
 ): void {
-    const currentCorrectAngle = evalAttr(v.expr, env);
+    const currentCorrectAngle = v.evalFn(env);
 
     // Schedule next update
     const nextDisplayMs = computeNextBoundary(
@@ -347,7 +346,7 @@ function updateObsValueScrub(
     tickIntervalMs: number,
     displayDeltaPerTickSec: number,
 ): void {
-    const newTarget = evalAttr(v.expr, env);
+    const newTarget = v.evalFn(env);
 
     // Compute next boundary in display time
     const nextDisplayMs = computeNextBoundary(
@@ -407,7 +406,7 @@ function updateObsValueScrub(
  * time and animate to it, re-checking shortly in case time resumes. No look-ahead.
  */
 function settleAtNow(v: ObsValue, env: Environment, perfNow: number): void {
-    const newTarget = evalAttr(v.expr, env);
+    const newTarget = v.evalFn(env);
     v.nextUpdateTime = perfNow + 100;
     v.pendingSweep = null;
     startAnimationRaw(v.anim, newTarget, perfNow,
@@ -428,7 +427,7 @@ function settleAtNow(v: ObsValue, env: Environment, perfNow: number): void {
 function updateObsValueFixedDuration(
     v: ObsValue, env: Environment, perfNow: number, durationMs: number,
 ): void {
-    const newTarget = evalAttr(v.expr, env);
+    const newTarget = v.evalFn(env);
     v.nextUpdateTime = 0;  // re-evaluate every frame
     v.pendingSweep = null;
 
@@ -453,7 +452,7 @@ function snapToTargetAtBoundary(
     v: ObsValue, env: Environment, perfNow: number,
     getNow: () => Date, timeDirection: 1 | -1,
 ): void {
-    const newTarget = evalAttr(v.expr, env);
+    const newTarget = v.evalFn(env);
     const nextDisplayMs = computeNextBoundary(v.updateInterval * 1000, getNow, timeDirection, env);
     v.nextUpdateDisplayTime = nextDisplayMs;
     v.nextUpdateTime = displayTimeToPerfNow(nextDisplayMs, getNow);
@@ -530,8 +529,8 @@ function onArrivalOnBeat(
     // Evaluate the target AT the future boundary's display time (eval-ahead).
     const _e0 = profileEnabled ? performance.now() : 0;
     const target = withDisplayTime
-        ? withDisplayTime(nextDisplayMs, () => evalAttr(v.expr, env))
-        : evalAttr(v.expr, env);
+        ? withDisplayTime(nextDisplayMs, () => v.evalFn(env))
+        : v.evalFn(env);
     if (profileEnabled) { tickProfile.evalMs += performance.now() - _e0; tickProfile.evalCalls++; }
 
     // Sweep duration d = distance / speed (0 when NaN/instant → snap on boundary).
@@ -612,7 +611,7 @@ function onBeatStep(
     // Stopped: settle to A(current display time) once (animating there), then freeze.
     if (timeDirection === 0) {
         if (!v.anim.animating) {
-            const target = evalAttr(v.expr, env);
+            const target = v.evalFn(env);
             startAnimationRaw(v.anim, target, perfNow, multiplier, undefined, v.period);
             v.pendingTarget = null;
             v.nextUpdateDisplayTime = Infinity;
@@ -886,7 +885,7 @@ export class Updater<K extends string = string> {
         for (const v of this.values) {
             v.pendingSweep = null;
             v.pendingTarget = null;
-            let target = (v.onBeat && env) ? evalAttr(v.expr, env) : v.anim.targetValue;
+            let target = (v.onBeat && env) ? v.evalFn(env) : v.anim.targetValue;
             if (isFinite(v.period)) {
                 target = ((target % v.period) + v.period) % v.period;
             }

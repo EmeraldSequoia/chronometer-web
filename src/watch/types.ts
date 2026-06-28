@@ -6,7 +6,8 @@
  * so the rendering layer can re-evaluate dynamic attributes per-frame.
  */
 
-import type { ASTNode } from '../expr/parser.js';
+// Expression-valued attributes are raw source strings (compiled on demand by
+// the expr layer); `initExprs` are raw `<init>` block strings.
 
 // ============================================================================
 // Watch (top level)
@@ -38,7 +39,7 @@ export interface Watch {
     /** Two-letter URL abbreviation for compact picks parameter encoding. */
     urlAbbrev: string;
     /** All `<init expr="...">` blocks in document order. */
-    initExprs: ASTNode[];
+    initExprs: string[];
     /** All parts included for the selected mode, in document order. */
     parts: WatchPart[];
 }
@@ -75,12 +76,12 @@ export type WatchPart =
  */
 export interface PartBase {
     name: string;
-    x?: ASTNode;
-    y?: ASTNode;
+    x?: string;
+    y?: string;
     modes?: string;
     special?: string;
-    specialParam?: ASTNode;
-    envSlot?: ASTNode;
+    specialParam?: string;
+    envSlot?: string;
     /** ObsValue handles for the animation values driven by the per-face Updater
      *  (the renderer reads `.currentValue` directly). Populated by buildHandValues,
      *  not by XML parsing. */
@@ -96,32 +97,32 @@ export interface PartBase {
 
 export interface QDialPart extends PartBase {
     type: 'QDial';
-    radius?: ASTNode;
-    radius2?: ASTNode;
-    clipRadius?: ASTNode;
+    radius?: string;
+    radius2?: string;
+    clipRadius?: string;
     orientation?: string;     // 'upright' | 'demi' | 'radial' etc.
-    demiTweak?: ASTNode;
+    demiTweak?: string;
     text?: string;
-    fontSize?: ASTNode;
+    fontSize?: string;
     fontName?: string;
-    bgColor?: ASTNode;
-    strokeColor?: ASTNode;
-    fillColor1?: ASTNode;
-    fillColor2?: ASTNode;
+    bgColor?: string;
+    strokeColor?: string;
+    fillColor1?: string;
+    fillColor2?: string;
     marks?: string;           // 'outer' | 'center' | 'tickOut' | 'dot' | 'none' etc.
-    markWidth?: ASTNode;
-    nMarks?: ASTNode;
-    mSize?: ASTNode;
-    angle?: ASTNode;
-    angle0?: ASTNode;
-    angle1?: ASTNode;
-    angle2?: ASTNode;
-    update?: ASTNode;
-    updateOffset?: ASTNode;
+    markWidth?: string;
+    nMarks?: string;
+    mSize?: string;
+    angle?: string;
+    angle0?: string;
+    angle1?: string;
+    angle2?: string;
+    update?: string;
+    updateOffset?: string;
     kind?: string;
-    z?: ASTNode;
-    thick?: ASTNode;
-    animSpeed?: ASTNode;
+    z?: string;
+    thick?: string;
+    animSpeed?: string;
 }
 
 // ============================================================================
@@ -130,58 +131,58 @@ export interface QDialPart extends PartBase {
 
 export interface QHandPart extends PartBase {
     type: 'QHand';
-    angle?: ASTNode;
-    length?: ASTNode;
-    length2?: ASTNode;
-    width?: ASTNode;
-    tail?: ASTNode;
+    angle?: string;
+    length?: string;
+    length2?: string;
+    width?: string;
+    tail?: string;
     handType?: string;         // 'rect' | 'tri' (stored from XML `type` attr)
-    strokeColor?: ASTNode;
-    fillColor?: ASTNode;
-    lineWidth?: ASTNode;
+    strokeColor?: string;
+    fillColor?: string;
+    lineWidth?: string;
     kind?: string;             // 'hour12Kind' | 'minuteKind' | 'secondKind' etc.
-    update?: ASTNode;
-    updateOffset?: ASTNode;
-    z?: ASTNode;
-    thick?: ASTNode;
-    animSpeed?: ASTNode;
+    update?: string;
+    updateOffset?: string;
+    z?: string;
+    thick?: string;
+    animSpeed?: string;
     dragAnimationType?: string;
     // Arrow overlay attributes
-    oLength?: ASTNode;
-    oWidth?: ASTNode;
-    oTail?: ASTNode;
-    oLineWidth?: ASTNode;
-    oStrokeColor?: ASTNode;
-    oFillColor?: ASTNode;
-    oCenter?: ASTNode;
-    oRadius?: ASTNode;
-    tFillColor?: ASTNode;
-    tStrokeColor?: ASTNode;
-    tLineWidth?: ASTNode;
+    oLength?: string;
+    oWidth?: string;
+    oTail?: string;
+    oLineWidth?: string;
+    oStrokeColor?: string;
+    oFillColor?: string;
+    oCenter?: string;
+    oRadius?: string;
+    tFillColor?: string;
+    tStrokeColor?: string;
+    tLineWidth?: string;
     /** Image source path (for image-based `hand` elements). */
     src?: string;
     /** Image anchor X offset in XML coords. */
-    xAnchor?: ASTNode;
+    xAnchor?: string;
     /** Image anchor Y offset in XML coords. */
-    yAnchor?: ASTNode;
+    yAnchor?: string;
     /** Polar offset radius (e.g. moon orbiting 24-hr dial). */
-    offsetRadius?: ASTNode;
+    offsetRadius?: string;
     /** Polar offset angle expression. */
-    offsetAngle?: ASTNode;
+    offsetAngle?: string;
     /** Number of rays for 'sun' hand type. */
-    nRays?: ASTNode;
+    nRays?: string;
     /** Text label (for 'spoke' hand type — e.g. AM/PM indicators). */
     text?: string;
     /** Font size for spoke text. */
-    fontSize?: ASTNode;
+    fontSize?: string;
     /** Font name for spoke text. */
     fontName?: string;
     /** X-axis linear motion expression (calendar day-indicator wires). */
-    xMotion?: ASTNode;
+    xMotion?: string;
     /** Y-axis linear motion expression (calendar day-indicator wires). */
-    yMotion?: ASTNode;
+    yMotion?: string;
     /** Alpha/opacity expression (0 = invisible, 1 = fully opaque). */
-    alpha?: ASTNode;
+    alpha?: string;
     /** Text orientation (e.g. 'radial' for bottom-facing-center text). */
     orientation?: string;
     // --- Pre-rendered shadow cache (not from XML) ---
@@ -204,43 +205,43 @@ export interface QHandPart extends PartBase {
 export interface WheelPart extends PartBase {
     type: 'Wheel';
     wheelVariant: 'SWheel' | 'QWheel' | 'TWheel';
-    angle?: ASTNode;
-    angle1?: ASTNode;
-    angle2?: ASTNode;
-    radius?: ASTNode;
+    angle?: string;
+    angle1?: string;
+    angle2?: string;
+    radius?: string;
     orientation?: string;     // 'three' | 'six' | 'nine' | 'twelve'
     text?: string;
-    fontSize?: ASTNode;
+    fontSize?: string;
     fontName?: string;
-    strokeColor?: ASTNode;
-    bgColor?: ASTNode;
-    bgColor2?: ASTNode;       // TWheel: second background color (halfAndHalf mode)
-    update?: ASTNode;
-    updateOffset?: ASTNode;
-    animSpeed?: ASTNode;
+    strokeColor?: string;
+    bgColor?: string;
+    bgColor2?: string;       // TWheel: second background color (halfAndHalf mode)
+    update?: string;
+    updateOffset?: string;
+    animSpeed?: string;
     dragAnimationType?: string;
     marks?: string;
     refName?: string;
     /** Separate text radius (QWheel only). */
-    tradius?: ASTNode;
+    tradius?: string;
     /** Tick mark style (e.g. 'tick288', 'tick96'). */
     tick?: string;
     /** Kind indicator (e.g. 'reverseHour24Kind'). */
     kind?: string;
     /** If set, wheel is split into two halves with different background colors. */
-    halfAndHalf?: ASTNode;
+    halfAndHalf?: string;
     /** Number of tick marks around the wheel. */
-    ticks?: ASTNode;
+    ticks?: string;
     /** Width of tick marks. */
-    tickWidth?: ASTNode;
+    tickWidth?: string;
     /** Calendar wheel type: 'calendarWheel3456' | 'calendarWheel012B' | 'calendarWheelOct1582'. */
     calendar?: string;
     /** Which weekday the calendar grid starts on (0=Sunday). */
     calendarStartDay?: string;
     /** Color for weekend day numbers in the calendar grid. */
-    calendarWeekendColor?: ASTNode;
+    calendarWeekendColor?: string;
     /** Height above dial surface (for shadow casting). */
-    z?: ASTNode;
+    z?: string;
 }
 
 // ============================================================================
@@ -250,11 +251,11 @@ export interface WheelPart extends PartBase {
 export interface QTextPart extends PartBase {
     type: 'QText';
     text?: string;
-    fontSize?: ASTNode;
+    fontSize?: string;
     fontName?: string;
-    strokeColor?: ASTNode;
-    radius?: ASTNode;       // If set, text is drawn along a circular arc
-    startAngle?: ASTNode;   // Center angle for curved text (radians, 0=top)
+    strokeColor?: string;
+    radius?: string;       // If set, text is drawn along a circular arc
+    startAngle?: string;   // Center angle for curved text (radians, 0=top)
     orientation?: string;   // 'demi' = text along arc, tops inward
 }
 
@@ -265,8 +266,8 @@ export interface QTextPart extends PartBase {
 export interface ImagePart extends PartBase {
     type: 'Image';
     src?: string;
-    alpha?: ASTNode;
-    scale?: ASTNode;
+    alpha?: string;
+    scale?: string;
 }
 
 // ============================================================================
@@ -276,16 +277,16 @@ export interface ImagePart extends PartBase {
 export interface ButtonPart extends PartBase {
     type: 'Button';
     action?: string;
-    enabled?: ASTNode;
+    enabled?: string;
     src?: string;
-    motion?: ASTNode;
-    xMotion?: ASTNode;
-    yMotion?: ASTNode;
-    w?: ASTNode;
-    h?: ASTNode;
-    opacity?: ASTNode;
-    rotation?: ASTNode;
-    expanded?: ASTNode;
+    motion?: string;
+    xMotion?: string;
+    yMotion?: string;
+    w?: string;
+    h?: string;
+    opacity?: string;
+    rotation?: string;
+    expanded?: string;
     immediate?: string;
     repeatStrategy?: string;
     grabPrio?: string;
@@ -297,15 +298,15 @@ export interface ButtonPart extends PartBase {
 
 export interface WindowPart extends PartBase {
     type: 'Window';
-    w?: ASTNode;
-    h?: ASTNode;
+    w?: string;
+    h?: string;
     windowType?: string;       // 'porthole' | 'rect' (stored from XML `type` attr)
-    border?: ASTNode;
-    strokeColor?: ASTNode;
-    shadowOpacity?: ASTNode;
-    shadowSigma?: ASTNode;
-    shadowOffset?: ASTNode;
-    shadowOffsetX?: ASTNode;
+    border?: string;
+    strokeColor?: string;
+    shadowOpacity?: string;
+    shadowSigma?: string;
+    shadowOffset?: string;
+    shadowOffsetX?: string;
 }
 
 // ============================================================================
@@ -327,10 +328,10 @@ export interface StaticPart extends PartBase {
 
 export interface QRectPart extends PartBase {
     type: 'QRect';
-    w?: ASTNode;
-    h?: ASTNode;
-    bgColor?: ASTNode;
-    panes?: ASTNode;
+    w?: string;
+    h?: string;
+    bgColor?: string;
+    panes?: string;
 }
 
 // ============================================================================
@@ -339,16 +340,16 @@ export interface QRectPart extends PartBase {
 
 export interface TerminatorPart extends PartBase {
     type: 'Terminator';
-    radius?: ASTNode;
-    leavesPerQuadrant?: ASTNode;
-    incremental?: ASTNode;
-    leafBorderColor?: ASTNode;
-    leafFillColor?: ASTNode;
-    leafAnchorRadius?: ASTNode;
-    update?: ASTNode;
-    updateOffset?: ASTNode;
-    phaseAngle?: ASTNode;       // expression: moonAgeAngle()
-    rotation?: ASTNode;         // expression: moonRelativePositionAngle()
+    radius?: string;
+    leavesPerQuadrant?: string;
+    incremental?: string;
+    leafBorderColor?: string;
+    leafFillColor?: string;
+    leafAnchorRadius?: string;
+    update?: string;
+    updateOffset?: string;
+    phaseAngle?: string;       // expression: moonAgeAngle()
+    rotation?: string;         // expression: moonRelativePositionAngle()
 }
 
 // ============================================================================
@@ -357,19 +358,19 @@ export interface TerminatorPart extends PartBase {
 
 export interface QWedgePart extends PartBase {
     type: 'QWedge';
-    outerRadius?: ASTNode;
-    innerRadius?: ASTNode;
-    angleSpan?: ASTNode;
-    angle?: ASTNode;
-    strokeColor?: ASTNode;
-    fillColor?: ASTNode;
+    outerRadius?: string;
+    innerRadius?: string;
+    angleSpan?: string;
+    angle?: string;
+    strokeColor?: string;
+    fillColor?: string;
     opaque?: number;
-    update?: ASTNode;
+    update?: string;
     /** Polar offset radius (e.g. Terra date wedges orbiting the worldtime ring). */
-    offsetRadius?: ASTNode;
+    offsetRadius?: string;
     /** Polar offset angle expression. */
-    offsetAngle?: ASTNode;
-    animSpeed?: ASTNode;
+    offsetAngle?: string;
+    animSpeed?: string;
     dragAnimationType?: string;
 }
 
@@ -379,24 +380,24 @@ export interface QWedgePart extends PartBase {
 
 export interface QDayNightRingPart extends PartBase {
     type: 'QDayNightRing';
-    outerRadius?: ASTNode;
-    innerRadius?: ASTNode;
-    numWedges?: ASTNode;
-    planetNumber?: ASTNode;
-    masterOffset?: ASTNode;
-    strokeColor?: ASTNode;
-    fillColor?: ASTNode;
-    update?: ASTNode;
+    outerRadius?: string;
+    innerRadius?: string;
+    numWedges?: string;
+    planetNumber?: string;
+    masterOffset?: string;
+    strokeColor?: string;
+    fillColor?: string;
+    update?: string;
     timeBase?: string;         // 'LST' for Local Sidereal Time, omitted for local time
-    envSlot?: ASTNode;         // env slot number — routes astronomy to slot's city lat/lon
+    envSlot?: string;         // env slot number — routes astronomy to slot's city lat/lon
     /** Optional override: raw sunset angle expression for slide-mode wedge positioning. */
-    sunsetAngle?: ASTNode;
+    sunsetAngle?: string;
     /** Optional override: raw sunrise angle expression for slide-mode wedge positioning. */
-    sunriseAngle?: ASTNode;
+    sunriseAngle?: string;
     /** Wadokei slide: distance (px) to translate hidden wedges inward past center. */
-    slideDistance?: ASTNode;
+    slideDistance?: string;
     /** Wadokei slide: animation speed multiplier (default 1.0 = kECGLLinearAnimationSpeed). */
-    slideAnimSpeed?: ASTNode;
+    slideAnimSpeed?: string;
     // --- ObsValue handles (driven by the per-face Updater; renderer reads .currentValue) ---
     /** masterOffset ObsValue (ring rotation; Vienna noon/midnight, Kyoto mode). */
     _obsMasterOffset?: import('../shared/obs-value.js').ObsValue;
@@ -415,13 +416,13 @@ export interface CalendarRowCoverPart extends PartBase {
     /** Cover type: 'row1Left' | 'row1Right' | 'row6Left' | 'row56Right'. */
     coverType?: string;
     fontName?: string;
-    fontSize?: ASTNode;
-    fontColor?: ASTNode;
-    bgColor?: ASTNode;
-    calendarRadius?: ASTNode;
-    update?: ASTNode;
-    animSpeed?: ASTNode;
-    z?: ASTNode;
+    fontSize?: string;
+    fontColor?: string;
+    bgColor?: string;
+    calendarRadius?: string;
+    update?: string;
+    animSpeed?: string;
+    z?: string;
 }
 
 // ============================================================================
@@ -432,14 +433,14 @@ export interface CalendarHeaderPart extends PartBase {
     type: 'CalendarHeader';
     /** Which weekday the header starts on (0=Sunday, 1=Monday, 6=Saturday). */
     weekdayStart?: string;
-    weekdayColor?: ASTNode;
-    weekendColor?: ASTNode;
-    bodyFontSize?: ASTNode;
+    weekdayColor?: string;
+    weekendColor?: string;
+    bodyFontSize?: string;
     bodyFontName?: string;
-    fontSize?: ASTNode;
+    fontSize?: string;
     fontName?: string;
-    parkX?: ASTNode;
-    parkY?: ASTNode;
+    parkX?: string;
+    parkY?: string;
 }
 
 // ============================================================================
@@ -449,23 +450,23 @@ export interface CalendarHeaderPart extends PartBase {
 export interface AnalemmaPart extends PartBase {
     type: 'Analemma';
     /** Radius of the circular disc in XML units. */
-    radius?: ASTNode;
+    radius?: string;
     /** Radius of the Sun marker dot. */
-    sunRadius?: ASTNode;
+    sunRadius?: string;
     /** Fill color for the Sun marker. */
-    sunFillColor?: ASTNode;
+    sunFillColor?: string;
     /** Stroke color for the Sun marker. */
-    sunStrokeColor?: ASTNode;
+    sunStrokeColor?: string;
     /** Color of the analemma path/channel line. */
-    channelColor?: ASTNode;
+    channelColor?: string;
     /** Width of the path/channel line. */
-    channelWidth?: ASTNode;
+    channelWidth?: string;
     /** Image filename for the background disc (e.g. miniature of face image). */
     bgSrc?: string;
     /** 0 = background stays fixed while channel rotates; 1 = background rotates with channel. */
-    bgRotates?: ASTNode;
+    bgRotates?: string;
     /** Update interval in seconds (default 300 = 5 minutes). */
-    update?: ASTNode;
+    update?: string;
 }
 
 // ============================================================================
@@ -475,17 +476,17 @@ export interface AnalemmaPart extends PartBase {
 export interface EotDialPart extends PartBase {
     type: 'EotDial';
     /** Radius of the tick-mark arc in XML units. */
-    radius?: ASTNode;
+    radius?: string;
     /** Total arc span in radians (default 7π/6 ≈ 210°). */
-    arcSpan?: ASTNode;
+    arcSpan?: string;
     /** Color for tick marks, arc, and labels. */
-    strokeColor?: ASTNode;
+    strokeColor?: string;
     /** Font size for the +/- symbols and tick labels. */
-    fontSize?: ASTNode;
+    fontSize?: string;
     /** Font size for the title label (default: fontSize * 3). */
-    titleFontSize?: ASTNode;
+    titleFontSize?: string;
     /** Title label text (default "Equation of Time"). */
     labelText?: string;
     /** Y offset for the title label in XML units (positive = up). */
-    titleYOffset?: ASTNode;
+    titleYOffset?: string;
 }

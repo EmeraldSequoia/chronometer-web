@@ -14,9 +14,9 @@
 
 import {
     createDefaultEnvironment,
-    evaluate,
-    Environment,
-} from '../expr/evaluator.js';
+    type Environment,
+} from '../expr/env.js';
+import { runInit } from '../expr/compile.js';
 import type { Watch } from './types.js';
 import {
     EC_UPDATE_NEXT_SUNRISE,
@@ -214,9 +214,9 @@ export function createWatchEnvironment(
         env, OBSERVER_LAT, OBSERVER_LON, getNow, olsonTimezone,
     );
 
-    // Evaluate all init blocks in document order
+    // Evaluate all init blocks in document order (assignments merge into env.variables)
     for (const expr of watch.initExprs) {
-        evaluate(expr, env);
+        runInit(expr, env.variables, env.functions);
     }
 
     // --- Chronometer-specific: Kyoto hand mode ---

@@ -1,12 +1,27 @@
 # Replacing the Custom Expression Parser with `eval()`
 
 **Date:** 2026-06-15  
-**Status:** Investigation complete; **Step 0 benchmark gate FAILED (2026-06-28) — the
-performance motivation is disproven.** This migration is now a **simplification-only**
-proposal, not a perf play, and is **not currently scheduled** (a separate effort — the
-day/night wedge memoization in
-[2026-06-28-daynight-wedge-memo.md](2026-06-28-daynight-wedge-memo.md) — is the real
-scrub-tick lever).
+**Status:** ✅ **IMPLEMENTED 2026-06-28 as a simplification** (Step 0 gate had FAILED, so
+this carried **no** performance benefit — it was done purely to delete the custom
+front-end). The ~940-line tokenizer/parser/evaluator + `ASTNode` are gone; the JS engine
+(`new Function`) is the only parser. Full suite **8504 green** (regression goldens, captured
+from the old evaluator, all pass bit-identical). New code: `src/expr/compile.ts`
+(`compileExpr`/`runInit`/`referencedNames`) + `src/expr/env.ts`. The real scrub-tick lever
+remains the separate day/night wedge memoization in
+[2026-06-28-daynight-wedge-memo.md](2026-06-28-daynight-wedge-memo.md).
+
+> **Three bugs surfaced during implementation that this plan did NOT anticipate** (all fixed;
+> each is now covered by a regression case):
+> 1. **`referencedNames` "strip numbers first" is wrong** — it splits digit-bearing
+>    identifiers like `hour24ValueAngle`. Replaced with a single identifier-first scan.
+> 2. **Variable values are NOT static after init** — runtime toggles mutate them (Vienna
+>    `dialFlip`/`noonOnTop`, Kyoto `kyMode`), so closures must read variables live, not snapshot.
+> 3. **A name can be BOTH a variable and a function** (`calendarWeekdayStart`) — bare
+>    identifier → variable, call `name()` → function, resolved by syntactic position.
+> 4. **The env is rebuilt every step/scrub while ObsValues persist** — so `CompiledExpr` must
+>    be **env-parameterized** (`evalFn(env)`), resolving against the env passed at call time,
+>    exactly like the old `evalAttr(expr, env)`. (This was the subtle one — it only manifested
+>    on the time-override paths, never on idle frames.)
 
 > **What changed.** The plan originally opened with a performance hypothesis: profiling
 > showed the AST evaluator is ~92–95% of the scrub tick, and a `new Function`-compiled

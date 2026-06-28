@@ -35,7 +35,7 @@ import { SCHEDULER_LOOKAHEAD_MS } from './shared/animation.js';
 import { Updater, makeOverridableGetNow, timingContextForFrame, tickProfile, resetTickProfile, setTickProfiling, type WithDisplayTime } from './shared/updater.js';
 import { buildHandValues } from './watch/hand-values.js';
 import type { Watch } from './watch/types.js';
-import type { Environment } from './expr/evaluator.js';
+import type { Environment } from './expr/env.js';
 import type { TerminatorLeafState } from './watch/terminator.js';
 import { expandTerminatorToLeaves, updateLeafAngles } from './watch/terminator.js';
 import { buildTerminatorValues, buildAnalemmaValues } from './watch/hand-values.js';

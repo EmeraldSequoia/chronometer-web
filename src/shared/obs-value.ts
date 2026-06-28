@@ -13,10 +13,8 @@
  * Modeled after the watch-face HandState/AnimatingValue system in animation.ts.
  */
 
-import type { ASTNode } from '../expr/parser.js';
-import { parse } from '../expr/parser.js';
-import type { Environment } from '../expr/evaluator.js';
-import { evalAttr } from './astro-env.js';
+import type { Environment } from '../expr/env.js';
+import { compileExpr, type CompiledExpr } from '../expr/compile.js';
 import { type AnimatingValue, makeAnimatingValue } from './animation.js';
 
 /**
@@ -37,8 +35,15 @@ export interface ObsValue {
     /** Human-readable name for debugging. */
     name: string;
 
-    /** Parsed AST for computing this value's current target. */
-    expr: ASTNode;
+    /** Source expression string for computing this value's target (kept for
+     *  debugging; the actual evaluation goes through {@link evalFn}). */
+    expr: string;
+
+    /** Compiled closure that evaluates {@link expr} in this value's environment.
+     *  Captured once at construction; recomputed whenever the env is rebuilt
+     *  (which reconstructs the ObsValue). Named `evalFn`, not `eval`, to avoid
+     *  shadowing the global. */
+    evalFn: CompiledExpr;
 
     /** Update interval in seconds.
      *  Positive: epoch-aligned boundary (e.g., 3600 = hourly, 1 = per second,
@@ -152,36 +157,22 @@ export interface ObsValueDef {
     discrete?: boolean;      // if true, evaluate at current time and snap (no interpolation)
 }
 
-/** Like {@link ObsValueDef} but with a pre-parsed AST expression. Used by clients
- *  (Chronometer) whose part attributes are already parsed to `ASTNode`s, avoiding
- *  a re-parse. */
-export interface ObsValueDefAST extends Omit<ObsValueDef, 'expr'> {
-    expr: ASTNode;
-}
-
 // ============================================================================
 // Construction
 // ============================================================================
 
-/** Create a single ObsValue from a definition with a string expression. */
+/** Create a single ObsValue from a definition with a string expression. The
+ *  expression is compiled once here; the closure is stored on {@link ObsValue.evalFn}
+ *  and called by the updater each frame. */
 export function createObsValue(
     def: ObsValueDef,
-    env: Environment,
-    perfNow: number,
-    getNow?: () => Date,
-): ObsValue {
-    return createObsValueFromAST({ ...def, expr: parse(def.expr) }, env, perfNow, getNow);
-}
-
-/** Create a single ObsValue from a definition with a pre-parsed AST expression. */
-export function createObsValueFromAST(
-    def: ObsValueDefAST,
     env: Environment,
     perfNow: number,
     _getNow?: () => Date,
 ): ObsValue {
     const expr = def.expr;
-    const initialValue = evalAttr(expr, env);
+    const evalFn = compileExpr(expr);
+    const initialValue = evalFn(env);
     const animSpeed = def.animSpeed ?? 2.0;      // rad/s
     const naturalSpeed = def.naturalSpeed ?? 0;   // rad/s
     const linear = def.linear ?? false;
@@ -191,6 +182,7 @@ export function createObsValueFromAST(
     return {
         name: def.name,
         expr,
+        evalFn,
         updateInterval: def.updateInterval,
         animSpeed,
         naturalSpeed,

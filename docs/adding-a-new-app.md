@@ -205,8 +205,8 @@ Key patterns from Inspector:
 | `shared/mini-map.ts` | Globe renderer | `MiniMap` class |
 | `shared/tz-resolve.ts` | Timezone resolution | `resolveTimezone()` |
 | `shared/dst-detect.ts` | DST detection | `findDSTTransitions()` |
-| `expr/evaluator.ts` | Expression evaluation | `evaluate()`, `createDefaultEnvironment()`, `Environment` type |
-| `expr/parser.ts` | Expression parsing | `parse()`, `ASTNode` type |
+| `expr/compile.ts` | Expression compilation | `compileExpr()`, `runInit()`, `referencedNames()` |
+| `expr/env.ts` | Expression environment | `createDefaultEnvironment()`, `Environment`/`ExprFunction` types |
 
 ---
 

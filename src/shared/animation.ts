@@ -18,7 +18,7 @@
  * obsvalue-port.md); per-frame driving now lives in shared/updater.ts.
  */
 
-import type { Environment } from '../expr/evaluator.js';
+import type { Environment } from '../expr/env.js';
 import { dateToDateInterval } from '../astronomy/es-time.js';
 import { sunRAandDecl } from '../astronomy/es-coordinates.js';
 import { calculateEclipse } from '../astronomy/es-astro.js';

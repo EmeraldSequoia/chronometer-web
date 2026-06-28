@@ -10,8 +10,6 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { JSDOM } from 'jsdom';
 import { parseWatchXML } from '../xml-parser.js';
-import { parse } from '../../expr/parser.js';
-import type { ASTNode } from '../../expr/parser.js';
 import type {
     QDialPart,
     QHandPart,
@@ -42,34 +40,20 @@ function makeDOMParser() {
 }
 
 /**
- * Assert that a parsed ASTNode matches the expected expression string.
- * Parses the expected string into an AST and compares structurally.
+ * Assert that a parsed attribute expression (now the raw source string) matches
+ * the expected expression, ignoring insignificant whitespace.
  */
-function expectExpr(node: ASTNode | undefined, exprStr: string) {
+function expectExpr(node: string | undefined, exprStr: string) {
     expect(node).toBeDefined();
-    expect(node).toEqual(parse(exprStr));
+    expect(node!.replace(/\s+/g, '')).toBe(exprStr.replace(/\s+/g, ''));
 }
 
 /**
- * Assert that a parsed ASTNode contains the given substring when
- * the source expression is examined. This handles cases like
- * `.toContain('fmod')` by re-serializing the AST isn't practical,
- * so we check specific structural properties instead.
+ * Assert that an attribute expression string references the given function name.
  */
-function expectExprContains(node: ASTNode | undefined, funcName: string) {
+function expectExprContains(node: string | undefined, funcName: string) {
     expect(node).toBeDefined();
-    // For function calls, check the name
-    function containsFunc(n: ASTNode): boolean {
-        if (n.kind === 'FunctionCall' && n.name === funcName) return true;
-        if (n.kind === 'BinaryOp') return containsFunc(n.left) || containsFunc(n.right);
-        if (n.kind === 'UnaryOp') return containsFunc(n.operand);
-        if (n.kind === 'Ternary') return containsFunc(n.condition) || containsFunc(n.consequent) || containsFunc(n.alternate);
-        if (n.kind === 'FunctionCall') return n.args.some(containsFunc);
-        if (n.kind === 'ExpressionList') return n.expressions.some(containsFunc);
-        if (n.kind === 'Assignment') return containsFunc(n.value);
-        return false;
-    }
-    expect(containsFunc(node!)).toBe(true);
+    expect(node!).toContain(funcName);
 }
 
 // ============================================================================
@@ -130,36 +114,10 @@ describe('parseWatchXML: Haleakala front side', () => {
     test('collects all init expressions', () => {
         // There are 7 <init> blocks in Haleakala.xml (6 near the top + 1 before hands)
         expect(watch.initExprs.length).toBe(7);
-        // initExprs are now ASTNodes — check structural properties
-        // First block contains 'hairline=0.25' as one of its assignments
-        const first = watch.initExprs[0];
-        expect(first.kind).toBe('ExpressionList');
-        if (first.kind === 'ExpressionList') {
-            const hairline = first.expressions.find(
-                e => e.kind === 'Assignment' && e.name === 'hairline',
-            );
-            expect(hairline).toBeDefined();
-        }
-        // Second block contains 'azR=130'
-        const second = watch.initExprs[1];
-        if (second.kind === 'ExpressionList') {
-            const azR = second.expressions.find(
-                e => e.kind === 'Assignment' && e.name === 'azR',
-            );
-            expect(azR).toBeDefined();
-        } else if (second.kind === 'Assignment') {
-            expect(second.name).toBe('azR');
-        }
-        // Last block contains 'handStrokeColor=black'
-        const last = watch.initExprs[6];
-        if (last.kind === 'ExpressionList') {
-            const hsc = last.expressions.find(
-                e => e.kind === 'Assignment' && e.name === 'handStrokeColor',
-            );
-            expect(hsc).toBeDefined();
-        } else if (last.kind === 'Assignment') {
-            expect(last.name).toBe('handStrokeColor');
-        }
+        // initExprs are now raw source strings — check they contain the expected assignments.
+        expect(watch.initExprs[0]).toContain('hairline=0.25');
+        expect(watch.initExprs[1]).toContain('azR=130');
+        expect(watch.initExprs[6]).toContain('handStrokeColor=black');
     });
 
     // --- Mode filtering ---
@@ -439,9 +397,9 @@ describe('parseWatchXML: small examples', () => {
         </watch>`;
         const watch = parseWatchXML(xml, 'front', makeDOMParser());
         expect(watch.name).toBe('Test');
-        // initExprs are now ASTNodes
+        // initExprs are now raw source strings
         expect(watch.initExprs.length).toBe(1);
-        expect(watch.initExprs[0]).toEqual(parse('r=100'));
+        expect(watch.initExprs[0]).toBe('r=100');
         expect(watch.parts.length).toBe(1);
         expect(watch.parts[0].type).toBe('QDial');
     });

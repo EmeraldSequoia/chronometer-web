@@ -14,7 +14,7 @@
  * Parts are always rendered in XML document order — no sorting or z-index.
  */
 
-import type { Environment } from '../expr/evaluator.js';
+import type { Environment } from '../expr/env.js';
 import type {
     Watch,
     WatchPart,

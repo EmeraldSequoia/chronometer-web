@@ -11,10 +11,9 @@
 
 import {
     createDefaultEnvironment,
-    evaluate,
-    Environment,
-} from '../expr/evaluator.js';
-import type { ASTNode } from '../expr/parser.js';
+    type Environment,
+} from '../expr/env.js';
+import { compileExpr, type CompiledExpr } from '../expr/compile.js';
 import { dateToDateInterval } from '../astronomy/es-time.js';
 import {
     utcComponentsFromTimeInterval, localComponentsFromTimeInterval,
@@ -123,22 +122,39 @@ export function computeTzDeltaMs(olsonTimezone: string | undefined, referenceDat
 }
 
 /**
- * Evaluate a single attribute expression in the given env.
- * Returns 0 for undefined expressions.
+ * Compile-and-memo cache for attribute/color expressions evaluated on the render
+ * pass. A {@link CompiledExpr} is env-independent (it resolves names from the env
+ * passed at call time), so one global cache keyed by source string serves every
+ * coexisting env (e.g. the ~16 faces on `all.html`) — each call supplies its own
+ * env, so there is no cross-face leakage.
  */
-export function evalAttr(expr: ASTNode | undefined, env: Environment): number {
+const exprCache = new Map<string, CompiledExpr>();
+
+function compiledFor(src: string): CompiledExpr {
+    let fn = exprCache.get(src);
+    if (!fn) {
+        fn = compileExpr(src);
+        exprCache.set(src, fn);
+    }
+    return fn;
+}
+
+/**
+ * Evaluate a single attribute expression in the given env.
+ * Returns 0 for undefined/empty expressions.
+ */
+export function evalAttr(expr: string | undefined, env: Environment): number {
     if (!expr) return 0;
-    return evaluate(expr, env);
+    return compiledFor(expr)(env);
 }
 
 /**
  * Evaluate a color expression and return a CSS color string.
  * The XML uses 0xAARRGGBB format (matching iOS UIColor).
  */
-export function evalColor(expr: ASTNode | undefined, env: Environment): string {
+export function evalColor(expr: string | undefined, env: Environment): string {
     if (!expr) return 'rgba(0,0,0,0)';
-    const val = evaluate(expr, env);
-    return argbToCSS(val);
+    return argbToCSS(compiledFor(expr)(env));
 }
 
 /**

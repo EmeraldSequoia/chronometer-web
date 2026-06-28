@@ -25,8 +25,7 @@ import type {
     Watch, WatchPart, QHandPart, WheelPart, QWedgePart, QDialPart,
     CalendarRowCoverPart, QDayNightRingPart,
 } from './types.js';
-import type { ASTNode } from '../expr/parser.js';
-import type { Environment } from '../expr/evaluator.js';
+import type { Environment } from '../expr/env.js';
 import { evalAttr } from '../shared/astro-env.js';
 import { CALENDAR_COVER_CODES } from './watch-env.js';
 import type { TerminatorLeafState } from './terminator.js';
@@ -34,7 +33,7 @@ import type { AnalemmaState } from './analemma.js';
 import { PATH_SAMPLE_COUNT } from './analemma.js';
 import { Updater } from '../shared/updater.js';
 import {
-    type ObsValue, createObsValue, createObsValueFromAST,
+    type ObsValue, createObsValue,
 } from '../shared/obs-value.js';
 
 /** Base angular animation speed (rad/s) — must match kECGLAngleAnimationSpeed. */
@@ -109,33 +108,33 @@ function collectValues(
 }
 
 /** XML `animSpeed` attribute (default 1.0). */
-function xmlAnimSpeed(part: { animSpeed?: ASTNode }, env: Environment): number {
+function xmlAnimSpeed(part: { animSpeed?: string }, env: Environment): number {
     return part.animSpeed ? evalAttr(part.animSpeed, env) : 1.0;
 }
 
 /** Update interval (seconds) from the part's `update` attribute, or a default. */
-function updateIntervalSec(part: { update?: ASTNode }, env: Environment, def: number): number {
+function updateIntervalSec(part: { update?: string }, env: Environment, def: number): number {
     return part.update ? evalAttr(part.update, env) : def;
 }
 
-/** Create an angle ObsValue (period 2π) from a pre-parsed AST, register it, return it. */
+/** Create an angle ObsValue (period 2π) from an expression string, register it, return it. */
 function addAngleValue(
-    updater: Updater, name: string, expr: ASTNode, env: Environment, perfNow: number,
+    updater: Updater, name: string, expr: string, env: Environment, perfNow: number,
     updateInterval: number, animSpeedRadPerSec: number,
 ): ObsValue {
-    return updater.add(createObsValueFromAST({
+    return updater.add(createObsValue({
         name, expr, updateInterval,
         animSpeed: animSpeedRadPerSec,
         onBeat: ON_BEAT,
     }, env, perfNow));
 }
 
-/** Create a linear ObsValue (no wrap) from a pre-parsed AST, register it, return it. */
+/** Create a linear ObsValue (no wrap) from an expression string, register it, return it. */
 function addLinearValue(
-    updater: Updater, name: string, expr: ASTNode, env: Environment, perfNow: number,
+    updater: Updater, name: string, expr: string, env: Environment, perfNow: number,
     updateInterval: number, animSpeedPxPerSec: number,
 ): ObsValue {
-    return updater.add(createObsValueFromAST({
+    return updater.add(createObsValue({
         name, expr, updateInterval, linear: true,
         animSpeed: animSpeedPxPerSec,
         onBeat: ON_BEAT,
@@ -217,7 +216,7 @@ function buildDayNightRing(
     // (which use update='0' ⇒ constant-speed flip). Eval-ahead would tie the flip
     // duration to the ring's update interval (≤5s on Vienna), desyncing them.
     if (part.masterOffset) {
-        part._obsMasterOffset = updater.add(createObsValueFromAST({
+        part._obsMasterOffset = updater.add(createObsValue({
             name: key('masterOffset'), expr: part.masterOffset, updateInterval: interval,
             animSpeed: ANGLE_BASE_SPEED * ringAnimS,
             evalAhead: false,
@@ -273,11 +272,6 @@ function buildDayNightRing(
     if (slideDistance > 0) part._obsWedgeSlides = slides;
 }
 
-/** A NumberLiteral AST node for the given constant. */
-function lit(value: number): ASTNode {
-    return { kind: 'NumberLiteral', value };
-}
-
 /**
  * Register ObsValues for a face's expanded terminator leaves on the given Updater
  * (Phase 7). Each leaf gets an `angle` ObsValue whose expression composes the
@@ -303,25 +297,21 @@ export function buildTerminatorValues(
     const interval = leaves[0].updateIntervalSec;
     let rotation: ObsValue | undefined;
     if (rotExpr) {
-        rotation = updater.add(createObsValueFromAST({
+        rotation = updater.add(createObsValue({
             name: `${faceName}.terminator.rotation`, expr: rotExpr,
             updateInterval: interval, animSpeed: ANGLE_BASE_SPEED, onBeat: ON_BEAT,
         }, env, perfNow));
     }
 
     leaves.forEach((leaf, i) => {
-        const angleExpr: ASTNode = {
-            kind: 'FunctionCall',
-            name: 'terminatorLeafAngle',
-            args: [
-                leaf.phaseExpr ?? lit(0),
-                lit(leaf.quadrant),
-                lit(leaf.indexWithinQuadrant),
-                lit(leaf.leavesPerQuadrant),
-                lit(leaf.incremental ? 1 : 0),
-            ],
-        };
-        leaf._obsAngle = updater.add(createObsValueFromAST({
+        // Compose the per-leaf terminator angle as a string. The phase sub-expr
+        // is parenthesized to preserve precedence inside the argument list.
+        const phase = leaf.phaseExpr ? `(${leaf.phaseExpr})` : '0';
+        const incr = leaf.incremental ? 1 : 0;
+        const angleExpr =
+            `terminatorLeafAngle(${phase}, ${leaf.quadrant}, ${leaf.indexWithinQuadrant}, `
+            + `${leaf.leavesPerQuadrant}, ${incr})`;
+        leaf._obsAngle = updater.add(createObsValue({
             name: `${faceName}.termLeaf.${i}.angle`, expr: angleExpr,
             updateInterval: leaf.updateIntervalSec,
             animSpeed: ANGLE_BASE_SPEED, onBeat: ON_BEAT,

@@ -21,9 +21,8 @@
  */
 
 import type { TerminatorPart } from './types.js';
-import type { ASTNode } from '../expr/parser.js';
-import type { Environment } from '../expr/evaluator.js';
-import { evaluate } from '../expr/evaluator.js';
+import type { Environment } from '../expr/env.js';
+import { evalAttr } from '../shared/astro-env.js';
 
 // ============================================================================
 // Quadrant enum
@@ -230,10 +229,10 @@ export interface TerminatorLeafState {
     currentAngle: number;
     /** Current rotation (moonRelativePositionAngle — added to offset angle) */
     currentRotation: number;
-    /** The phase angle expression AST */
-    phaseExpr: ASTNode | undefined;
-    /** The rotation expression AST */
-    rotationExpr: ASTNode | undefined;
+    /** The phase angle expression string */
+    phaseExpr: string | undefined;
+    /** The rotation expression string */
+    rotationExpr: string | undefined;
     /** Update interval in seconds (from XML update attr) */
     updateIntervalSec: number;
     /** Next time to re-evaluate expressions (performance.now()). */
@@ -255,16 +254,16 @@ export function expandTerminatorToLeaves(
     part: TerminatorPart,
     env: Environment,
 ): TerminatorLeafState[] {
-    const radius = part.radius ? evaluate(part.radius, env) : 20;
-    const leavesPerQuadrant = part.leavesPerQuadrant ? Math.round(evaluate(part.leavesPerQuadrant, env)) : 6;
-    const incremental = part.incremental ? evaluate(part.incremental, env) !== 0 : false;
-    const anchorEdgeRadius = part.leafAnchorRadius ? evaluate(part.leafAnchorRadius, env) : 0;
-    const leafFillColor = part.leafFillColor ? hexToCSS(evaluate(part.leafFillColor, env)) : '#080808';
-    const leafBorderColor = part.leafBorderColor ? hexToCSS(evaluate(part.leafBorderColor, env)) : '#383838';
-    const centerX = part.x ? evaluate(part.x, env) : 0;
-    const centerY = part.y ? evaluate(part.y, env) : 0;
+    const radius = part.radius ? evalAttr(part.radius, env) : 20;
+    const leavesPerQuadrant = part.leavesPerQuadrant ? Math.round(evalAttr(part.leavesPerQuadrant, env)) : 6;
+    const incremental = part.incremental ? evalAttr(part.incremental, env) !== 0 : false;
+    const anchorEdgeRadius = part.leafAnchorRadius ? evalAttr(part.leafAnchorRadius, env) : 0;
+    const leafFillColor = part.leafFillColor ? hexToCSS(evalAttr(part.leafFillColor, env)) : '#080808';
+    const leafBorderColor = part.leafBorderColor ? hexToCSS(evalAttr(part.leafBorderColor, env)) : '#383838';
+    const centerX = part.x ? evalAttr(part.x, env) : 0;
+    const centerY = part.y ? evalAttr(part.y, env) : 0;
     const offsetRadius = radius + anchorEdgeRadius;
-    const updateIntervalSec = part.update ? evaluate(part.update, env) : 60;
+    const updateIntervalSec = part.update ? evalAttr(part.update, env) : 60;
 
     const leaves: TerminatorLeafState[] = [];
 
@@ -276,8 +275,8 @@ export function expandTerminatorToLeaves(
             const baseOffsetAngle = isUpper(quadrant) ? 0 : Math.PI;
 
             // Compute initial values for animation state
-            const initialPhase = part.phaseAngle ? evaluate(part.phaseAngle, env) : 0;
-            const initialRotation = part.rotation ? evaluate(part.rotation, env) : 0;
+            const initialPhase = part.phaseAngle ? evalAttr(part.phaseAngle, env) : 0;
+            const initialRotation = part.rotation ? evalAttr(part.rotation, env) : 0;
             let initialAngle = terminatorAngle(
                 initialPhase, quadrant, i, leavesPerQuadrant,
                 incremental ? 1 : 0,
@@ -317,8 +316,8 @@ export function expandTerminatorToLeaves(
  */
 export function updateLeafAngles(leaves: TerminatorLeafState[], env: Environment): void {
     if (leaves.length === 0) return;
-    const phase = leaves[0].phaseExpr ? evaluate(leaves[0].phaseExpr, env) : 0;
-    const rotation = leaves[0].rotationExpr ? evaluate(leaves[0].rotationExpr, env) : 0;
+    const phase = leaves[0].phaseExpr ? evalAttr(leaves[0].phaseExpr, env) : 0;
+    const rotation = leaves[0].rotationExpr ? evalAttr(leaves[0].rotationExpr, env) : 0;
 
     for (const leaf of leaves) {
         let angle = terminatorAngle(

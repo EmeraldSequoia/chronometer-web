@@ -25,8 +25,6 @@ import type {
     AnalemmaPart,
     EotDialPart,
 } from './types.js';
-import { parse } from '../expr/parser.js';
-import type { ASTNode } from '../expr/parser.js';
 
 // ============================================================================
 // Public API
@@ -87,7 +85,7 @@ export function parseWatchXML(
 function processElement(
     el: Element,
     mode: ModeFilter,
-    initExprs: ASTNode[],
+    initExprs: string[],
     parts: WatchPart[],
 ): void {
     const tag = el.tagName.toLowerCase();
@@ -98,11 +96,7 @@ function processElement(
             {
                 const exprStr = attr(el, 'expr');
                 if (exprStr) {
-                    try {
-                        initExprs.push(parse(exprStr));
-                    } catch (e) {
-                        console.error(`Failed to parse <init expr="${exprStr}">`, e);
-                    }
+                    initExprs.push(exprStr);
                 }
             }
             break;
@@ -226,7 +220,7 @@ function processElement(
 function processStatic(
     el: Element,
     mode: ModeFilter,
-    initExprs: ASTNode[],
+    initExprs: string[],
     parts: WatchPart[],
 ): void {
     // If the static element itself doesn't match the mode, skip entirely
@@ -626,17 +620,11 @@ function attr(el: Element, name: string): string | undefined {
 }
 
 /**
- * Get an attribute and eagerly compile it to an ASTNode.
+ * Get an attribute as a raw expression string (compiled on demand by the expr
+ * layer). Returns undefined when the attribute is absent or empty.
  */
-function attrExpr(el: Element, name: string): ASTNode | undefined {
-    const val = attr(el, name);
-    if (!val) return undefined;
-    try {
-        return parse(val);
-    } catch (e) {
-        console.warn(`[xml-parser] Failed to parse AST for attribute: ${name}="${val}"`, e);
-        return undefined;
-    }
+function attrExpr(el: Element, name: string): string | undefined {
+    return attr(el, name) || undefined;
 }
 
 /**

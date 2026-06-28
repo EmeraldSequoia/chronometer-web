@@ -29,7 +29,7 @@ import {
 import { parseWatchXML } from '../watch/xml-parser.js';
 import { createWatchEnvironment } from '../watch/watch-env.js';
 import type { Watch, WatchPart, QDialPart } from '../watch/types.js';
-import type { Environment } from '../expr/evaluator.js';
+import type { Environment } from '../expr/env.js';
 import {
     Updater, makeOverridableGetNow, type WithDisplayTime, type TimingContext,
 } from '../shared/updater.js';

@@ -64,17 +64,15 @@ These are parsed into the `Watch` interface and used to gate feature-specific lo
 
 ### `attrExpr()` Helper
 
-The parser uses an `attrExpr(element, name)` helper that immediately parses string attributes into `ASTNode` objects:
+The parser uses an `attrExpr(element, name)` helper that returns the raw expression string (compiled on demand later by the expr layer; see [Expressions](expressions.md)):
 
 ```typescript
-function attrExpr(el: Element, name: string): ASTNode | undefined {
-    const val = el.getAttribute(name);
-    if (!val || val.trim() === '') return undefined;
-    return parse(val.trim());
+function attrExpr(el: Element, name: string): string | undefined {
+    return attr(el, name) || undefined;
 }
 ```
 
-All numeric attributes use `attrExpr` instead of raw `getAttribute`.
+All numeric/expression attributes use `attrExpr` instead of raw `getAttribute`.
 
 ### Window Parsing
 

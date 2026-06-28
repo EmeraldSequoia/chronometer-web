@@ -249,8 +249,8 @@ environment and refresh all displays, and live-sync across tabs via
 | `src/shared/obs-value.ts` | ObsValue type + `createObsValue` (shared with Observatory) |
 | `src/shared/updater.ts` | ObsValue update/animate passes + `makeOverridableGetNow` (eval-ahead) |
 | `src/shared/astro-env.ts` | Astronomy environment factory (shared with Chronometer and Observatory) |
-| `src/expr/parser.ts` | Expression parser |
-| `src/expr/evaluator.ts` | Expression evaluator |
+| `src/expr/compile.ts` | Expression compiler (`new Function`) + `runInit` |
+| `src/expr/env.ts` | Expression environment + `createDefaultEnvironment` |
 
 ## Related Docs
 

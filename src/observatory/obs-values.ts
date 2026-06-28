@@ -22,7 +22,7 @@
  *   4. **Draw pass** — renderers read `updater.get(name).currentValue`.
  */
 
-import type { Environment } from '../expr/evaluator.js';
+import type { Environment } from '../expr/env.js';
 import {
     EC_UPDATE_NEXT_SUNRISE,
     EC_UPDATE_NEXT_SUNSET,

@@ -15,7 +15,7 @@ This repository is a monorepo containing multiple web apps that share a common a
 ```
 src/
 ├── astronomy/           # Shared: astronomical computations (WB series, rise/set, etc.)
-├── expr/                # Shared: expression tokenizer, parser, evaluator
+├── expr/                # Shared: expression compiler (compile.ts via new Function) + env
 ├── shared/              # Shared: infrastructure modules used by multiple apps
 │   ├── astro-env.ts         # Astronomy function registry + createAstroEnvironment() factory
 │   ├── animation.ts         # Animation primitives (AnimatingValue, startAnimationRaw, interpolateValue) + update-interval sentinel scheduling
@@ -88,7 +88,7 @@ The original iOS app used a two-part architecture:
 The web app chose **direct XML-to-Canvas rendering**, eliminating Henry entirely:
 
 - The Cocoa drawing primitives used by Henry map directly to Canvas 2D APIs
-- C expressions are simple enough to parse and evaluate at runtime in TypeScript
+- C expressions are valid JavaScript, so the JS engine compiles and evaluates them at runtime (via `new Function`) — no custom parser needed
 - No iOS SDK / Xcode dependency for watch face changes — just edit the XML
 - The binary archive format was an optimization for 128MB iPhones and early OpenGL, neither of which applies to modern browsers
 
