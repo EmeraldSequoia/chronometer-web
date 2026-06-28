@@ -1,7 +1,10 @@
 # Replacing the Custom Expression Parser with `eval()`
 
 **Date:** 2026-06-15  
-**Status:** Analysis / Investigation
+**Status:** Analysis / Investigation. **Performance motivation upgraded by direct
+profiling (2026-06-28): the AST evaluator is the dominant scrub-time cost (~92–95%
+of the tick), not the "wash or slight win" Assertion 4 originally estimated — see
+*“Profiling evidence”* below.**
 
 ## Background
 
@@ -14,6 +17,62 @@ In JavaScript/TypeScript, the situation is fundamentally different — a built-i
 interpreter is available via `eval()` or `new Function()`. This document
 evaluates whether switching to the JS interpreter is sound, practical, and net
 beneficial.
+
+---
+
+## Profiling evidence (2026-06-28): the AST evaluator IS the scrub bottleneck
+
+A perf investigation (originally chasing scrub frame rate; it considered and
+**shelved** a worker-threaded astronomy offload — branch `worker-eval-ahead`)
+pinned the cost precisely. **The custom AST evaluator (`evalAttr` →
+`evaluate()`) dominates scrub-time CPU.** This is the strongest motivation for this
+migration and supersedes Assertion 4's "wash / slight win" estimate.
+
+**Workload:** `all.html` (every face in a grid — the heaviest case), scrubbing
+1 day/tick. **1563 obsValues across 16 built faces (~98/face)**, the bulk being
+day/night-ring wedges (~96 obsValues per ring), each re-evaluating its expression
+every scrub tick.
+
+**Tick attribution (avg per scrub frame, `?tickprofile`):**
+
+| Engine | update pass | **eval** | boundary | interp | rest | 2nd-interp pass | per-eval |
+|---|---|---|---|---|---|---|---|
+| Chrome / V8 | 22.5ms | **20.4ms (≈92%)** | 1.1ms | 0.17ms | 0.7ms | 0.02ms | 26.2µs |
+| Safari / JSC | 28.5ms | **27.0ms (≈95%)** | 0.9ms | 0.16ms | 0.4ms | 0.00ms | 26.6µs |
+
+Corroborating facts:
+- **Window-independent.** The tick is flat across an 88px↔224px canvas (6.5× pixel
+  area) → the cost is per-part computation, **not pixels/rendering**. (Render —
+  draw-command issuance — is a separate ~13ms and also part-count-bound; the large
+  pixel-dependent number is GPU rasterization, which is fast on real hardware but
+  slow under the headless software renderer used for some of these measurements.)
+- **Not interpolation / not the on-beat machinery.** Interpolation ≈0.17ms, the
+  second interpolation pass ≈0.02ms (sitting values no-op it), `computeNextBoundary`
+  ≈1ms — all negligible vs eval.
+- **Not astronomy.** The shelved worker experiment offloaded *all* astronomy to a
+  thread and cut the tick by only ~1ms — the `AstroCachePool` already minimizes it.
+  So the ~26µs/eval is the interpreter machinery (tree-walk + variable/function
+  `Map` lookups + per-call dispatch over ~1563 values/tick), not the work inside the
+  env functions.
+- **Browser spread is interpreter-shaped.** The per-eval cost is ~26µs on both
+  engines; differences in *total* scrub cost across browsers track JS-interpreter
+  behavior, consistent with "this is the AST walker," not arithmetic or GPU.
+
+**Implication for this plan:** compiling each expression once to a closure
+(`new Function`) and calling it directly should collapse the ~26µs/eval to low
+single-digit µs, i.e. cut the dominant ~20–27ms tick by most of itself. *Caveat to
+verify during implementation:* a residual of the 26µs is the env-function bodies
+invoked by each eval (e.g. the day/night wedge functions), which compilation does
+**not** remove — measure the post-compile per-eval to see whether function-body
+work (or the sheer ~1563-evals/tick count, e.g. the wedges) becomes the next target.
+
+**Reproduce / measure (instrumentation landed on `main`):**
+- `[scrub-perf]` console summary (always on) reports the **tick vs render split** and
+  `Ticked: <N> obsValues across <M> faces · canvas <px>`.
+- **`?tickprofile`** adds the per-value attribution above (eval/boundary/interp/rest
+  + µs/eval). It is **off by default** because the per-value `performance.now()`
+  calls tax the very hot path being measured. Scrub a heavy face (e.g. all.html,
+  hold `1d ▶`) and read the line printed on scrub end.
 
 ---
 
@@ -159,7 +218,9 @@ directionally correct and contribute to the overall simplification.
 
 ## Assertion 4: Performance Savings
 
-**Verdict: ✅ True, with nuance.**
+**Verdict: ✅ True — and far larger than estimated here.** The "wash or slight win"
+analysis below was wrong: profiling shows the AST evaluator is ~92–95% of the scrub
+tick (see *“Profiling evidence”* above). Treat this section as superseded.
 
 ### Parse-time savings
 Startup is faster because parsing XML attributes no longer requires a recursive-
