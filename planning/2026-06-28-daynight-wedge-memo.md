@@ -1,7 +1,8 @@
 # Day/Night Ring Wedges: Memoize the Rise/Set Search (and unify on the slot cache)
 
 **Date:** 2026-06-28
-**Status:** Diagnosis complete; implementation not started.
+**Status:** Diagnosis complete; cache mechanism verified and slop decided with Steve
+(2026-06-28, keep existing 0.5 s default); implementation not started.
 **Supersedes** (as the real scrub-perf lever) the perf motivation in
 [2026-06-15-eval-vs-custom-parser.md](2026-06-15-eval-vs-custom-parser.md), whose
 Step 0 gate failed — see that doc's "Step 0 RESULTS" section.
@@ -86,33 +87,59 @@ So: memoize the **six raw search outputs** (numLeaves-independent); keep all
 
 ## Why a second (Map) cache exists today — the crux for unifying
 
-The slot cache (`AstroCache` / `AstroCachePool`) requires `pool.currentCache` to be
-pushed for the *current* date (`initializeCachePool` / `pushECAstroCacheInPool`) before
-slot reads/writes are valid. But that setup runs **once at env-build time**
+**Verified (2026-06-28, git + code).** The `PlanetRiseSetCache` Map was introduced in
+commit **b0171c9 "Fix planet rings in polar regions"** (2026-05-30) — a **correctness
+fix, not a perf optimization**. Its purpose is to let three *sibling* expression
+functions that the evaluator calls independently and in arbitrary order —
+`dayNightLeafAngle` (indicator), `dayNightLeafAngleIsRiseSet`,
+`dayNightLeafAngleAboveHorizon` — share one expensive rise/set computation. The commit's
+own comment: *"Each independently checks the cache and computes if needed — no ordering
+dependency."*
+
+**Why a Map and not the slot cache — confirmed.** The slot cache (`AstroCache` /
+`AstroCachePool`) requires `pool.currentCache` to be pushed for the *current* date
+(`initializeCachePool` / `pushECAstroCacheInPool`) before slot reads/writes are valid.
+But that setup runs **once at env-build time**
 ([astro-env.ts:453](../src/shared/astro-env.ts:453),
-[watch-env.ts:456](../src/watch/watch-env.ts:456)) and is then **released** — there is
-**no per-tick re-push** of `finalCache` with the live display time. During a scrub the
-slot cache is therefore keyed to a stale build-time date, so naïve master-angle slots
-would never validate.
+[watch-env.ts:456](../src/watch/watch-env.ts:456)) and is then immediately **released to
+`null`** ([astro-env.ts:247](../src/shared/astro-env.ts:247)). So during a tick there is
+no established current-cache keyed to the live display time; a master-angle slot
+read/write would hit a stale (build-time) or null cache. The Map self-validates against
+`calcDate` (`existing.cachedDateInterval === calcDate`, **exact equality — effectively
+slop 0**) on every call, sidestepping the un-pushed slot cache. *(The wedge path,
+`numLeaves > 0`, never used the Map at all — it calls `nextPrevRiseSetInternal`
+directly, which is why it works during scrub despite the released `finalCache`, and also
+why it's expensive: the search is self-contained, pushing `refinementCache` with slop 0
+per try-date at [es-riseset.ts:295](../src/astronomy/es-riseset.ts:295).)*
 
-This is almost certainly why a prior porting step introduced the `PlanetRiseSetCache`
-**Map**: it self-validates against `calcDate` (`existing.cachedDateInterval === calcDate`)
-on every call, sidestepping the un-pushed slot cache. *(Confirm rather than assume —
-check git history / original intent before deleting; per repo convention, ask Steve if
-the reason isn't clear from the code.)*
+**The env-build "problem" is self-healing — it is NOT a blocker.** Because the slot
+cache is lazy (a push beyond slop bumps a flag rather than clearing arrays — see
+[astro-cache.ts:498](../src/astronomy/astro-cache.ts:498),
+[astro-cache.ts:399](../src/astronomy/astro-cache.ts:399)), a stale build-time date
+heals itself on the **first push at the live time**: that push exceeds slop → one lazy
+invalidation → master slots recompute and store; remaining wedges/siblings in the same
+tick push the identical `getNow()` value → within slop → reuse; next tick beyond slop →
+auto-invalidate again. There is nothing to "clear at the right time" — the slop
+comparison at push *is* the clearing.
 
-**Implication:** unifying on the slot cache is not just "write to the slots." It
-requires establishing the current cache with the **live display `dateInterval` and a
-chosen slop** at the right scope so master-angle slots are valid across all wedges in a
-tick — either:
-- (i) a **per-tick push**: before the update/render pass evaluates obsValues, push
-  `finalCache` for the current display time; pop after; or
-- (ii) a **push/pop inside the wedge helper**, around the master-angle read/write,
-  keyed to `calcDate` with explicit slop.
+`getNow()` is **frozen per tick**: the updater wraps evaluation in
+[`withDisplayTime(displayMs, fn)`](../src/shared/updater.ts:82), so every `getNow()` in
+a frame returns the same instant. That is why all wedges/siblings share within a tick
+regardless of slop (the `calcDate` is identical), and it is the precondition the Map
+already relies on.
 
-Option (i) is the more idiomatic "one cache, controlled slop, cleared at tick
-boundaries" model Steve asked for; (ii) is a more contained change. Decide during
-implementation.
+**Implication:** unifying on the slot cache is therefore just two small things, not a
+risky re-architecture:
+1. **Re-establish `currentCache = finalCache`** (it is released to `null` after build).
+2. **Push `finalCache` with the live display `dateInterval` + slop** around the
+   master-angle read/write — either:
+   - (i) a **per-tick push**: before the update/render pass evaluates obsValues, push
+     `finalCache` for the current display time; pop after; or
+   - (ii) a **push/pop inside the wedge helper**, around the master-angle read/write,
+     keyed to `calcDate`.
+
+Option (ii) is the contained change and is sufficient. Decide during implementation;
+either way, the slop value is governed by the constraints in "Slop & clearing" below.
 
 ## Proposed work
 
@@ -130,8 +157,11 @@ implementation.
    `getPlanetRiseSetCache` / `computeAndCachePlanetRiseSet`.
 4. **Delete `PlanetRiseSetCache`, `planetRiseSetCaches`, `riseSetCacheKey`,
    `computeAndCachePlanetRiseSet`, `getPlanetRiseSetCache`** — one mechanism remains.
-5. **Establish the per-tick (or per-helper) current-cache push** with controlled slop
-   (the prerequisite from "the crux" above).
+5. **Establish the per-tick (or per-helper) current-cache push** (re-point
+   `currentCache` at `finalCache`, then push with the live display time) via the standard
+   `pushECAstroCacheInPool` — i.e. the **existing default 0.5 s slop**, no custom value
+   (see "Slop & clearing"). This is the only real prerequisite from "the crux" above; the
+   build-time staleness heals itself on first push.
 
 ## Unify scan (sub-task: one caching mechanism)
 
@@ -157,14 +187,31 @@ implementation** (in case new memos have landed) and add a lint/grep guard if us
   `computeDayNightLeafAngle` across a corpus of `(planet, date, lat, lon, numLeaves,
   leafNumber)` — **including a polar latitude** (where the `leafWidth`-dependent polar
   branches live) and the **MidnightSun/nightTime** inversion.
+- **Do NOT pick the slop to make the regression guard pass.** Choose the slop on the
+  merits (see below). If an existing regression test then fails, that is a signal to
+  **confirm the expected-value update with Steve before changing the test** — per
+  [[ask-user-before-deep-archaeology]], surface the diff and its cause rather than
+  silently re-baselining.
 - **MidnightSun/nightTime:** `nightTime` is derived from the *original* planet then the
   planet is substituted to Sun for the search; the memo key must use the **substituted**
   planet (as `computeAndCachePlanetRiseSet` already does), and `nightTime` is applied in
   the cheap per-call tail.
-- **Slop & clearing (the point of unifying):** choose the slop for the master-angle
-  cache deliberately, and ensure it clears on date-beyond-slop, **location change**, and
-  **body/face switch** — the slot cache's flag mechanism already gives location/global
-  invalidation; the per-tick push gives time invalidation.
+- **Slop & clearing (the point of unifying) — DECIDED: use the existing default
+  `ASTRO_SLOP_RAW = 0.5 s`** ([astro-cache.ts:341](../src/astronomy/astro-cache.ts:341)),
+  i.e. push via the standard `pushECAstroCacheInPool` — **no custom slop**. This is the
+  same slop every other slot-cached quantity already uses, so the day/night master angles
+  stay consistent with the rest of the cache. Per Steve (2026-06-28): do **not** widen it
+  — a wide slop is unsafe for *any* quantity (e.g. at 1 s before vs 1 s after local
+  midnight the answer can flip; a 2 s slop would reuse the wrong side of the boundary).
+  **Cross-tick recompute-avoidance is the job of update sentinels, not of a wide slop** —
+  sentinels schedule a recompute exactly when a value changes. The 0.5 s slop only needs
+  to cover within-push tolerance, and within a tick `getNow()` is frozen so the
+  `calcDate` is *identical* across all wedges/siblings — so 0.5 s already gives full
+  within-tick sharing and is no looser than the rest of the system.
+- **Clearing on location / body / face switch** still comes for free from the slot
+  cache's flag mechanism (`globalValidFlag` bump on location/direction change,
+  [astro-cache.ts:450](../src/astronomy/astro-cache.ts:450)); the per-tick push gives
+  time invalidation.
 
 ## Expected payoff
 
