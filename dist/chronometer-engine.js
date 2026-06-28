@@ -18804,6 +18804,15 @@ return {${names2.join(",")}};`;
       v.currentValue = interpolateValue(v.anim, perfNow);
       return;
     }
+    if (v.nextUpdateTime === 0 && !v.anim.animating && (tickIntervalMs === null || tickIntervalMs <= 0)) {
+      const target = v.evalFn(env);
+      startAnimationRaw(v.anim, target, perfNow, multiplier, void 0, v.period);
+      v.pendingTarget = null;
+      v.nextUpdateDisplayTime = Infinity;
+      v.nextUpdateTime = perfNow;
+      v.currentValue = interpolateValue(v.anim, perfNow);
+      return;
+    }
     const dir = timeDirection === -1 ? -1 : 1;
     const _i0 = profileEnabled ? performance.now() : 0;
     v.currentValue = interpolateValue(v.anim, perfNow);

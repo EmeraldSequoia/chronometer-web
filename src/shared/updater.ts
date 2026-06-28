@@ -620,6 +620,37 @@ function onBeatStep(
         v.currentValue = interpolateValue(v.anim, perfNow);
         return;
     }
+
+    // Fresh re-arm after reset()/construction while *running* (resume, Now,
+    // location/mode/rate/direction change): respond instantly. Do one synchronous
+    // eval at the *current* display time and settle there, rather than sitting at
+    // the now-stale position until the next beat. Without this, onArrivalOnBeat
+    // below schedules the next-boundary target and sits at the old position until
+    // `boundaryRealMs − d`; since boundary spacing is the value's update interval,
+    // slow hands (large intervals — planet hands) lag many seconds behind fast
+    // ones after a scrub+resume. The settle's completion is an arrival, so the
+    // normal on-beat scheduling re-arms the cadence from the fresh state. Mirrors
+    // the stopped-settle above and the worker-pipeline reset rule "respond now,
+    // then re-arm the cadence" (planning/2026-06-26-worker-eval-ahead-pipeline.md,
+    // §reset step 4). `nextUpdateTime === 0` is the reset/creation sentinel; a real
+    // arrival sets it to a boundary timestamp, never 0. Scrub (tickIntervalMs > 0)
+    // is excluded: there onArrivalOnBeat already re-evaluates on every compressed
+    // beat, so a separate instant settle isn't needed and would perturb the tick
+    // trajectory.
+    if (v.nextUpdateTime === 0 && !v.anim.animating
+        && (tickIntervalMs === null || tickIntervalMs <= 0)) {
+        const target = v.evalFn(env);
+        startAnimationRaw(v.anim, target, perfNow, multiplier, undefined, v.period);
+        v.pendingTarget = null;
+        // No display-time boundary is scheduled yet — the settle's *arrival* re-arms
+        // the beat (onArrivalOnBeat below, on a later frame). Clear the reset
+        // sentinel so neither this branch nor the frozen-check re-fires meanwhile.
+        v.nextUpdateDisplayTime = Infinity;
+        v.nextUpdateTime = perfNow;
+        v.currentValue = interpolateValue(v.anim, perfNow);
+        return;
+    }
+
     const dir: 1 | -1 = timeDirection === -1 ? -1 : 1;
 
     // Advance any in-flight snap (may flip animating→false, i.e. arrive).
