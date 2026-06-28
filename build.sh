@@ -73,6 +73,11 @@ echo "=== Building engine ==="
 $ESBUILD "$SRC/engine-entry.ts" --bundle $LOADER_FLAGS $COMMON_FLAGS \
   --outfile="$DIST/chronometer-engine.js"
 
+echo "=== Building eval-ahead worker ==="
+$ESBUILD "$SRC/watch/eval-worker.ts" --bundle $LOADER_FLAGS $COMMON_FLAGS \
+  --outfile="$DIST/chronometer-worker.js"
+echo "  → chronometer-worker.js"
+
 echo "=== Building face data modules ==="
 for face in "${FACES[@]}"; do
   echo "  → face-$face.js"

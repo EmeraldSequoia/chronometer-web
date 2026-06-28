@@ -25,15 +25,19 @@ declare global {
 }
 
 import { parseWatchXML } from './watch/xml-parser.js';
-import { createWatchEnvironment, computeTzDeltaMs, GAIA_SUBDIAL_DEFAULTS } from './watch/watch-env.js';
+import { createWatchEnvironment, computeTzDeltaMs, GAIA_SUBDIAL_DEFAULTS, type WatchEnvOverrides } from './watch/watch-env.js';
+import { ECPlanetNumber } from './astronomy/astro-constants.js';
+import { quantizeGetNow } from './shared/time-quantize.js';
 import type { TerraSlot } from './watch/watch-env.js';
 import { TERRA_RING_DEFAULTS } from './watch/watch-env.js';
 import { validSlotsForTz, formatSlotOffset, getStandardOffsetMinutes, olsonIdToCityName } from './watch/terra-slots.js';
 import { buildStaticBlockCaches, renderFrame, buildHandShadowCaches, BEZEL_THICKNESS_XML } from './watch/renderer.js';
 import type { LoadedImage } from './watch/image-loader.js';
 import { SCHEDULER_LOOKAHEAD_MS } from './shared/animation.js';
-import { Updater, makeOverridableGetNow, timingContextForFrame, type WithDisplayTime } from './shared/updater.js';
+import { Updater, makeOverridableGetNow, timingContextForFrame, fileObsAheadResult, type WithDisplayTime } from './shared/updater.js';
+import type { ObsValue } from './shared/obs-value.js';
 import { buildHandValues } from './watch/hand-values.js';
+import { WorkerEvalClient } from './watch/worker-client.js';
 import type { Watch } from './watch/types.js';
 import type { Environment } from './expr/evaluator.js';
 import type { TerminatorLeafState } from './watch/terminator.js';
@@ -63,6 +67,35 @@ import { getBezelBackgroundColor, updateDynamicCompositeIcon } from './shared/co
 // Select the state backend before any getState()/setState() call. Phase 1-2
 // keeps the URL backend active (behavior-preserving); Phase 3 enables storage.
 initAppState({ app: 'chronometer' });
+
+/**
+ * Read the persisted UI overrides (body / vnoon / kmode / kyhand) from app-state
+ * and resolve them into a {@link WatchEnvOverrides} for `createWatchEnvironment`.
+ *
+ * This is the *main-thread* source of these overrides — `createWatchEnvironment`
+ * itself is pure (no `getState`/DOM) so it can also run in the eval-ahead worker,
+ * which will supply the same shape from its mirrored state. Read fresh at each env
+ * rebuild so toggles (body switch, noon-on-top, wadokei) take effect.
+ */
+function readPersistedOverrides(): WatchEnvOverrides {
+    const p = getState();
+    const ov: WatchEnvOverrides = {};
+    if (p.body) {
+        const bodyMap: Record<string, number> = {
+            sun: ECPlanetNumber.Sun, moon: ECPlanetNumber.Moon,
+            mercury: ECPlanetNumber.Mercury, venus: ECPlanetNumber.Venus,
+            earth: ECPlanetNumber.Earth, mars: ECPlanetNumber.Mars,
+            jupiter: ECPlanetNumber.Jupiter, saturn: ECPlanetNumber.Saturn,
+            uranus: ECPlanetNumber.Uranus, neptune: ECPlanetNumber.Neptune,
+        };
+        const planet = bodyMap[p.body.toLowerCase()];
+        if (planet !== undefined) ov.body = planet;
+    }
+    if (p.vnoon) ov.noonOnTop = true;
+    if (p.kmode === '1' || p.kmode === '0') ov.kyMode = parseInt(p.kmode, 10);
+    if (p.kyhand === '1') ov.kyHandMode = 1;
+    return ov;
+}
 
 /** Convert a face name like "Mauna Kea" or "Haleakalā" to a filename like "mauna-kea" */
 function faceNameToSlug(name: string): string {
@@ -202,6 +235,13 @@ interface FaceInstance {
     terraSlotOverrides?: Record<number, TerraSlot>;
     /** For worldTimeRing faces: which ring slot holds the global location (1–24). */
     globalLocationSlot?: number;
+    /** Eval-ahead worker (Phase B): the generation this face was last `init`ed under
+     *  on the worker; bumped on every re-init so stale results are dropped. */
+    workerGen: number;
+    /** Fingerprint of the worker-relevant state (location/tz/mode/overrides/bps) the
+     *  worker was last initialized for; a change triggers re-init. Undefined ⇒ not
+     *  yet wired (or worker unavailable → sync fallback). */
+    workerFingerprint?: string;
 }
 
 // ============================================================================
@@ -538,13 +578,9 @@ async function main() {
      * quantized time. Defaults to the global rawGetNow.
      */
     function makeGetNow(bps: number, base: () => Date = rawGetNow): () => Date {
-        if (bps <= 0) return base;
-        return () => {
-            const d = base();
-            const ms = d.getTime();
-            const quantizedMs = Math.round(ms / 1000 * bps) / bps * 1000;
-            return new Date(quantizedMs);
-        };
+        // Shared with the eval-ahead worker (worker-core) so both threads quantize
+        // display time identically — see src/shared/time-quantize.ts.
+        return quantizeGetNow(base, bps);
     }
 
     // --- Per-face slot overrides helper ---
@@ -718,7 +754,7 @@ async function main() {
         // withDisplayTime() shifts the env's evaluation time (see makeGetNow).
         const { getNow: faceRawGetNow, withDisplayTime } = makeOverridableGetNow(rawGetNow);
         const faceGetNow = makeGetNow(watch.beatsPerSecond, faceRawGetNow);
-        const env = createWatchEnvironment(watch, lat, lon, faceGetNow, locationTimezone, faceOverrides, slotResult?.globalLocationSlot);
+        const env = createWatchEnvironment(watch, lat, lon, faceGetNow, locationTimezone, faceOverrides, slotResult?.globalLocationSlot, readPersistedOverrides());
 
         const face: FaceInstance = {
             watch,
@@ -738,6 +774,7 @@ async function main() {
             faceDataIndex: i,
             terraSlotOverrides: faceOverrides,
             globalLocationSlot: slotResult?.globalLocationSlot,
+            workerGen: 0,
         };
         faces.push(face);
     }
@@ -843,7 +880,7 @@ async function main() {
             const oldTzOffset = face.env.tzOffsetSec;
 
             // Rebuild the environment but keep the same watch/parts
-            face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+            face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot, readPersistedOverrides());
                     restoreKyotoState(face);
             if (oldKnockout) (face.env as any)._terraCityKnockout = oldKnockout;
             // Invalidate QDayNightRing render caches so astronomy values
@@ -874,6 +911,108 @@ async function main() {
 
 
     timeController.onTick = rebuildEnvironments;
+
+    // =========================================================================
+    // Eval-ahead worker (Phase B) — optional off-thread astronomy/expression eval
+    // =========================================================================
+
+    // One shared worker for all faces. If it can't spawn (e.g. file:// blocks
+    // new Worker(url) and no inline source is provided), `available` is false and
+    // the engine uses the Phase-A synchronous on-beat path unchanged.
+    const workerDisabled = typeof location !== 'undefined'
+        && new URLSearchParams(location.search).has('noworker');
+    const evalWorker = new WorkerEvalClient({ url: 'chronometer-worker.js', disabled: workerDisabled });
+    if (evalWorker.available) {
+        console.log('[eval-worker] ENABLED — astronomy/expression eval offloaded to a worker thread.');
+    } else {
+        console.log(`[eval-worker] DISABLED — using the synchronous on-beat path. Reason: ${evalWorker.unavailableReason}`);
+    }
+
+    // Route computed targets into the right value's `ahead` buffer, dropping
+    // stale-generation / unknown-face results.
+    evalWorker.setResultHandler((res) => {
+        const face = faces.find(f => f.watch.name === res.faceId);
+        if (!face || res.generation !== face.workerGen) return;
+        for (const r of res.results) {
+            const v = face.updater.all[Number(r.valueId)];
+            if (v) fileObsAheadResult(v, r.boundaryDisplayMs, r.target);
+        }
+    });
+
+    /**
+     * Fingerprint of the worker-relevant state — location / DST tz offset / mode
+     * overrides / bps / Terra slots. The worker is re-`init`ed only when this
+     * changes, NOT on the per-tick env rebuild (which only advances display time;
+     * the worker handles time via `withDisplayTime` per request).
+     */
+    function faceWorkerFingerprint(face: FaceInstance): string {
+        return JSON.stringify([
+            lat, lon, face.env.tzOffsetSec ?? 0, face.watch.beatsPerSecond,
+            readPersistedOverrides(),
+            face.terraSlotOverrides ?? null, face.globalLocationSlot ?? null,
+        ]);
+    }
+
+    /**
+     * Which values are worth offloading. Only on-beat values whose update interval
+     * is coarse enough that (a) the worker round-trip comfortably stays ahead and
+     * (b) the value is actually expensive: astronomy values use coarse intervals
+     * (≥ a few seconds) or astronomical-event sentinels (negative interval), while
+     * cheap time hands (`secondValueAngle` at `update='.1'`, etc.) use sub-second
+     * intervals — those stay on the synchronous path (offloading a 10 Hz arithmetic
+     * value just floods the worker and misses every beat). This is the gate the
+     * plan deferred ("add later if it helps") — empirically required.
+     */
+    function isWorkerEligible(v: ObsValue): boolean {
+        // Offload all on-beat values (decision #3: "offload all, simpler"). A
+        // postMessage round-trip easily fits even a 0.1 s value's interval, so no
+        // interval gate is needed for correctness; misses are rare and self-heal.
+        // (A cheap-value gate could cut pointless message traffic later if wanted —
+        // cheap hands gain nothing from offloading — but it is not required.)
+        return v.onBeat;
+    }
+
+    /** (Re)build a face's env on the worker (new generation) and wire each eligible
+     *  value's `requestAhead` so on-beat arrival consumes worker-precomputed targets.
+     *  Ineligible (cheap/fast) values keep `requestAhead` unset → synchronous path. */
+    function initFaceWorker(face: FaceInstance): void {
+        face.workerGen++;
+        const values = face.updater.all.map((v, i) => ({ id: String(i), expr: v.expr }));
+        evalWorker.init({
+            type: 'init', faceId: face.watch.name, generation: face.workerGen,
+            initExprs: face.watch.initExprs, nowMs: face.getNow().getTime(),
+            lat, lon, tz: locationTimezone, bps: face.watch.beatsPerSecond,
+            overrides: readPersistedOverrides(), values,
+        });
+        face.updater.all.forEach((v, i) => {
+            v.ahead.length = 0;
+            v.aheadPending.length = 0;
+            if (!isWorkerEligible(v)) { v.requestAhead = undefined; return; }
+            v.requestAhead = (boundaries: number[]): void => {
+                evalWorker.request({
+                    type: 'req', faceId: face.watch.name, generation: face.workerGen,
+                    reqs: boundaries.map(b => ({ valueId: String(i), boundaryDisplayMs: b })),
+                });
+            };
+        });
+    }
+
+    /** Per-frame: keep the worker in sync with the face's state, or fall back to the
+     *  synchronous path if the worker isn't available. */
+    function maybeReinitWorker(face: FaceInstance): void {
+        if (!evalWorker.available) {
+            if (face.workerFingerprint !== undefined) {
+                for (const v of face.updater.all) v.requestAhead = undefined;
+                face.workerFingerprint = undefined;
+            }
+            return;
+        }
+        const fp = faceWorkerFingerprint(face);
+        if (fp !== face.workerFingerprint) {
+            face.workerFingerprint = fp;
+            initFaceWorker(face);
+        }
+    }
 
     // =========================================================================
     // Scheduler
@@ -923,6 +1062,13 @@ async function main() {
     let _pureAnimDeltaMax = -Infinity;
     let _lastAnimFrameTime: number | null = null;
 
+    // Per-frame CPU breakdown across ALL scrub frames (tick = updater update+animate,
+    // incl. astronomy on tick frames; render = renderFrame draw-command issuance).
+    // Answers "where does the frame CPU go — astronomy or rendering?".
+    let _scrubTickMsTotal = 0;
+    let _scrubRenderMsTotal = 0;
+    let _scrubBodyFrameCount = 0;
+
     function frame() {
         rafId = null;
         const now = performance.now();
@@ -956,6 +1102,9 @@ async function main() {
                 _pureAnimDeltaMin = Infinity;
                 _pureAnimDeltaMax = -Infinity;
                 _lastAnimFrameTime = null;
+                _scrubTickMsTotal = 0;
+                _scrubRenderMsTotal = 0;
+                _scrubBodyFrameCount = 0;
                 console.log('[scrub-perf] Scrubbing session started.');
             }
 
@@ -1044,7 +1193,10 @@ async function main() {
                 `  - Pure Animation Frame Stats (N = ${_pureAnimCount}):\n` +
                 `    - CPU execution: avg ${avgCpu}ms (min: ${minCpu}ms, max: ${maxCpu}ms)\n` +
                 `    - GPU flush/render: avg ${avgGpu}ms (min: ${minGpu}ms, max: ${maxGpu}ms)\n` +
-                `    - Inter-frame interval: avg ${avgDelta}ms (min: ${minDelta}ms, max: ${maxDelta}ms) -> equivalent to ${avgAnimFps} FPS`
+                `    - Inter-frame interval: avg ${avgDelta}ms (min: ${minDelta}ms, max: ${maxDelta}ms) -> equivalent to ${avgAnimFps} FPS\n` +
+                `  - Frame CPU split (all ${_scrubBodyFrameCount} scrub frames): ` +
+                `tick(update+astro+animate) avg ${(_scrubBodyFrameCount ? _scrubTickMsTotal / _scrubBodyFrameCount : 0).toFixed(2)}ms, ` +
+                `render(draw issuance) avg ${(_scrubBodyFrameCount ? _scrubRenderMsTotal / _scrubBodyFrameCount : 0).toFixed(2)}ms`
             );
         }
 
@@ -1070,6 +1222,7 @@ async function main() {
         const deltaSec = rate !== null ? displaySecondsPerTick(rate.unit) : 0;
 
         let renderMs = 0;
+        let tickCpuMs = 0;
         let animatingFaceCount = 0;
 
         const isPureAnimFrame = isScrubbing && !willTick;
@@ -1081,9 +1234,14 @@ async function main() {
 
         for (const face of faces) {
             if (!face.enabled || !face.cachesBuilt) continue;
+            // Keep the eval-ahead worker in sync (or fall back to sync); must run
+            // before tick() so on-beat arrivals this frame consume worker targets.
+            maybeReinitWorker(face);
             // Drive all ObsValues for this face — hands, wheels, dials, wedges,
             // masterOffset, and the terminator leaves (all on the per-face Updater).
+            const tickStart = performance.now();
             face.updater.tick(face.env, now, face.getNow, face.withDisplayTime, timingCtx);
+            tickCpuMs += performance.now() - tickStart;
 
             const renderStart = performance.now();
             renderFrame(face.ctx, face.watch, face.env, face.scale, face.images, face.terminatorLeaves, face.analemmaState);
@@ -1095,6 +1253,13 @@ async function main() {
                 stillAnimating = true;
                 animatingFaceCount++;
             }
+        }
+
+        // Accumulate the tick/render CPU split across all scrub frames.
+        if (isScrubbing) {
+            _scrubTickMsTotal += tickCpuMs;
+            _scrubRenderMsTotal += renderMs;
+            _scrubBodyFrameCount++;
         }
 
         if (isPureAnimFrame) {
@@ -1203,7 +1368,7 @@ async function main() {
         for (const face of faces) {
             if (!face.enabled) continue;
             const oldKnockout = (face.env as any)._terraCityKnockout;
-            face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+            face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot, readPersistedOverrides());
                     restoreKyotoState(face);
             if (oldKnockout) (face.env as any)._terraCityKnockout = oldKnockout;
             if (face.terminatorLeaves.length > 0) {
@@ -1793,7 +1958,7 @@ async function main() {
                 };
             }
             // Fresh environment with new lat/lon/tz — same watch/parts
-            face.env = createWatchEnvironment(face.watch, newLat, newLon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+            face.env = createWatchEnvironment(face.watch, newLat, newLon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot, readPersistedOverrides());
             restoreKyotoState(face);
             // Update terminator leaves (preserve for animation interpolation)
             if (face.terminatorLeaves.length > 0) {
@@ -2604,7 +2769,7 @@ async function main() {
                 for (const face of faces) {
                     if (!face.enabled) continue;
                     // Rebuild environment (picks up new body URL param)
-                    face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+                    face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot, readPersistedOverrides());
                     restoreKyotoState(face);
                     // Update terminator leaf angles for the new planet's phase
                     // (keep existing leaves so the animation system can interpolate)
@@ -2885,7 +3050,7 @@ async function main() {
                 }
                 for (const face of faces) {
                     if (!face.enabled) continue;
-                    face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+                    face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot, readPersistedOverrides());
                     restoreKyotoState(face);
                     if (face.terminatorLeaves.length > 0) {
                         updateLeafAngles(face.terminatorLeaves, face.env);
@@ -3191,7 +3356,7 @@ async function main() {
             function rebuildGaiaForSlotChange() {
                 for (const face of faces) {
                     if (!face.enabled) continue;
-                    face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+                    face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot, readPersistedOverrides());
                     restoreKyotoState(face);
                     if (face.terminatorLeaves.length > 0) {
                         updateLeafAngles(face.terminatorLeaves, face.env);

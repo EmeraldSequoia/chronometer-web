@@ -92,6 +92,21 @@ export interface ObsValue {
      *  sitting ⇒ `pendingTarget != null && !anim.animating`. */
     pendingTarget: { target: number; boundaryRealMs: number; startTime: number } | null;
 
+    /** Phase B (worker eval-ahead): worker-precomputed targets for upcoming
+     *  boundaries, filed by the engine from worker results. FIFO; consumed by
+     *  on-beat arrival when {@link requestAhead} is set. Empty in sync mode. */
+    ahead: { boundaryDisplayMs: number; target: number }[];
+
+    /** Boundaries (display ms) requested from the worker but not yet received —
+     *  prevents re-requesting the same boundary every frame. */
+    aheadPending: number[];
+
+    /** Phase B: when set, on-beat arrival **consumes** a worker-precomputed target
+     *  from {@link ahead} (instead of evaluating synchronously) and calls this to
+     *  **request** upcoming boundaries. Unset ⇒ synchronous eval (the Phase-A path
+     *  / no-worker fallback). Set per value by the engine when a worker is available. */
+    requestAhead?: (boundariesDisplayMs: number[]) => void;
+
     /** If true, this value is linear (not an angle) — skip fmod wrapping.
      *  Used for earth view values like sun declination, and for the Inspector's
      *  raw-number / date readouts. Def-level input; the updater drives animation
@@ -201,6 +216,8 @@ export function createObsValueFromAST(
         nextUpdateTime: 0,
         pendingSweep: null,
         pendingTarget: null,
+        ahead: [],
+        aheadPending: [],
         linear,
         period,
         evalAhead: def.evalAhead ?? false,

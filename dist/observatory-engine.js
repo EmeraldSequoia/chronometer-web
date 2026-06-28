@@ -19251,6 +19251,8 @@
       nextUpdateTime: 0,
       pendingSweep: null,
       pendingTarget: null,
+      ahead: [],
+      aheadPending: [],
       linear,
       period,
       evalAhead: def.evalAhead ?? false,
@@ -19262,6 +19264,9 @@
   // src/shared/updater.ts
   var K_ANGLE_ANIM_SPEED = 2;
   var NATURAL_ERROR_THRESHOLD = 2e-3;
+  var AHEAD_DEPTH = 2;
+  var WORKER_MISS_RETRY_MS = 33;
+  var lastWorkerMissWarnMs = -Infinity;
   function makeOverridableGetNow(base) {
     let overrideMs = null;
     const getNow2 = () => overrideMs != null ? new Date(overrideMs) : base();
@@ -19526,6 +19531,43 @@
     delta = delta - P * Math.round(delta / P);
     return Math.abs(delta);
   }
+  function upcomingBoundaries(v, getNow2, dir, env2, count) {
+    const out = [];
+    let cursorMs = getNow2().getTime();
+    const cursorGetNow = () => new Date(cursorMs);
+    for (let i = 0; i < count; i++) {
+      const b = computeNextBoundary(v.updateInterval * 1e3, cursorGetNow, dir, env2);
+      if (!isFinite(b)) break;
+      out.push(b);
+      cursorMs = b + dir;
+    }
+    return out;
+  }
+  function ensureRequested(v, getNow2, dir, env2) {
+    if (!v.requestAhead) return;
+    const wanted = upcomingBoundaries(v, getNow2, dir, env2, AHEAD_DEPTH + 1);
+    const need = [];
+    for (const b of wanted) {
+      if (v.ahead.some((e) => e.boundaryDisplayMs === b)) continue;
+      if (v.aheadPending.includes(b)) continue;
+      v.aheadPending.push(b);
+      need.push(b);
+    }
+    if (need.length > 0) v.requestAhead(need);
+  }
+  function consumeAhead(v, boundaryMs) {
+    const i = v.ahead.findIndex((e) => e.boundaryDisplayMs === boundaryMs);
+    if (i < 0) return void 0;
+    const target = v.ahead[i].target;
+    v.ahead.splice(i, 1);
+    return target;
+  }
+  function noteWorkerMiss(v, boundaryMs, perfNow) {
+    if (perfNow - lastWorkerMissWarnMs > 1e3) {
+      lastWorkerMissWarnMs = perfNow;
+      console.warn(`[eval-worker] target not ready for ${v.name} @${boundaryMs} \u2014 sitting a beat`);
+    }
+  }
   function onArrivalOnBeat(v, env2, perfNow, getNow2, timeDirection, tickIntervalMs, displayDeltaPerTickSec, withDisplayTime2) {
     const nextDisplayMs = computeNextBoundary(
       v.updateInterval * 1e3,
@@ -19543,7 +19585,20 @@
     } else {
       boundaryRealMs = displayTimeToPerfNow(nextDisplayMs, getNow2);
     }
-    const target = withDisplayTime2 ? withDisplayTime2(nextDisplayMs, () => evalAttr(v.expr, env2)) : evalAttr(v.expr, env2);
+    let target;
+    if (v.requestAhead) {
+      ensureRequested(v, getNow2, timeDirection, env2);
+      const hit = consumeAhead(v, nextDisplayMs);
+      if (hit === void 0) {
+        noteWorkerMiss(v, nextDisplayMs, perfNow);
+        v.nextUpdateDisplayTime = nextDisplayMs;
+        v.nextUpdateTime = perfNow + WORKER_MISS_RETRY_MS;
+        return false;
+      }
+      target = hit;
+    } else {
+      target = withDisplayTime2 ? withDisplayTime2(nextDisplayMs, () => evalAttr(v.expr, env2)) : evalAttr(v.expr, env2);
+    }
     const dist = shortestPathDistance(v.anim.currentValue, target, v.period);
     const d = v.animSpeed > 0 && isFinite(dist) ? dist / v.animSpeed * 1e3 : 0;
     let startTime = isFinite(boundaryRealMs) ? boundaryRealMs - d : Infinity;
@@ -19551,6 +19606,7 @@
     v.pendingTarget = { target, boundaryRealMs, startTime };
     v.nextUpdateDisplayTime = nextDisplayMs;
     v.nextUpdateTime = startTime;
+    return true;
   }
   function startOnBeatSweep(v, perfNow) {
     const pt = v.pendingTarget;
@@ -19586,7 +19642,7 @@
     let started = false;
     for (let guard = 0; guard < 4 && !v.anim.animating; guard++) {
       if (v.pendingTarget === null) {
-        onArrivalOnBeat(
+        const scheduled = onArrivalOnBeat(
           v,
           env2,
           perfNow,
@@ -19596,6 +19652,7 @@
           displayDeltaPerTickSec,
           withDisplayTime2
         );
+        if (!scheduled) break;
       } else if (perfNow >= v.pendingTarget.startTime) {
         startOnBeatSweep(v, perfNow);
         started = true;
@@ -19691,6 +19748,8 @@
       v.nextUpdateDisplayTime = 0;
       v.nextUpdateTime = 0;
       v.pendingTarget = null;
+      v.ahead.length = 0;
+      v.aheadPending.length = 0;
     }
   }
   function anyObsAnimating(values) {
@@ -19787,6 +19846,8 @@
       for (const v of this.values) {
         v.pendingSweep = null;
         v.pendingTarget = null;
+        v.ahead.length = 0;
+        v.aheadPending.length = 0;
         let target = v.onBeat && env2 ? evalAttr(v.expr, env2) : v.anim.targetValue;
         if (isFinite(v.period)) {
           target = (target % v.period + v.period) % v.period;

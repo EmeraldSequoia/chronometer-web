@@ -1,426 +1,5 @@
 "use strict";
 (() => {
-  // src/expr/tokenizer.ts
-  var TokenizerError = class extends Error {
-    constructor(message, position) {
-      super(message);
-      this.position = position;
-      this.name = "TokenizerError";
-    }
-  };
-  function tokenize(source) {
-    const tokens = [];
-    let pos = 0;
-    while (pos < source.length) {
-      if (isWhitespace(source[pos])) {
-        pos++;
-        continue;
-      }
-      if (source[pos] === "/" && pos + 1 < source.length && source[pos + 1] === "*") {
-        pos += 2;
-        while (pos + 1 < source.length && !(source[pos] === "*" && source[pos + 1] === "/")) {
-          pos++;
-        }
-        if (pos + 1 >= source.length) {
-          throw new TokenizerError("Unterminated comment", pos);
-        }
-        pos += 2;
-        continue;
-      }
-      const start = pos;
-      if (isDigit(source[pos]) || source[pos] === "." && pos + 1 < source.length && isDigit(source[pos + 1])) {
-        const tok = readNumber(source, pos);
-        tokens.push(tok);
-        pos = start + tok.value.length;
-        continue;
-      }
-      if (isIdentStart(source[pos])) {
-        while (pos < source.length && isIdentChar(source[pos])) {
-          pos++;
-        }
-        tokens.push({ type: "Identifier" /* Identifier */, value: source.slice(start, pos), position: start });
-        continue;
-      }
-      if (pos + 1 < source.length) {
-        const two = source.slice(pos, pos + 2);
-        const twoCharType = TWO_CHAR_OPS[two];
-        if (twoCharType !== void 0) {
-          tokens.push({ type: twoCharType, value: two, position: start });
-          pos += 2;
-          continue;
-        }
-      }
-      const oneCharType = ONE_CHAR_OPS[source[pos]];
-      if (oneCharType !== void 0) {
-        tokens.push({ type: oneCharType, value: source[pos], position: start });
-        pos++;
-        continue;
-      }
-      pos++;
-    }
-    tokens.push({ type: "EOF" /* EOF */, value: "", position: pos });
-    return tokens;
-  }
-  function readNumber(source, pos) {
-    const start = pos;
-    if (source[pos] === "0" && pos + 1 < source.length && (source[pos + 1] === "x" || source[pos + 1] === "X")) {
-      pos += 2;
-      while (pos < source.length && isHexDigit(source[pos])) {
-        pos++;
-      }
-      return { type: "Integer" /* Integer */, value: source.slice(start, pos), position: start };
-    }
-    const hasLeadingDigits = isDigit(source[pos]);
-    if (hasLeadingDigits) {
-      while (pos < source.length && isDigit(source[pos])) {
-        pos++;
-      }
-    }
-    const hasDot = pos < source.length && source[pos] === ".";
-    if (hasDot) {
-      pos++;
-      while (pos < source.length && isDigit(source[pos])) {
-        pos++;
-      }
-    }
-    if (pos < source.length && (source[pos] === "e" || source[pos] === "E")) {
-      pos++;
-      if (pos < source.length && (source[pos] === "+" || source[pos] === "-")) {
-        pos++;
-      }
-      while (pos < source.length && isDigit(source[pos])) {
-        pos++;
-      }
-      return { type: "DoubleE" /* DoubleE */, value: source.slice(start, pos), position: start };
-    }
-    if (hasDot) {
-      return { type: "Double" /* Double */, value: source.slice(start, pos), position: start };
-    }
-    return { type: "Integer" /* Integer */, value: source.slice(start, pos), position: start };
-  }
-  var TWO_CHAR_OPS = {
-    "<<": "<<" /* LeftShift */,
-    ">>": ">>" /* RightShift */,
-    "<=": "<=" /* LessEqual */,
-    ">=": ">=" /* GreaterEqual */,
-    "==": "==" /* EqualEqual */,
-    "!=": "!=" /* BangEqual */,
-    "&&": "&&" /* AmpAmp */,
-    "||": "||" /* PipePipe */,
-    "+=": "+=" /* PlusEquals */,
-    "-=": "-=" /* MinusEquals */,
-    "*=": "*=" /* StarEquals */,
-    "/=": "/=" /* SlashEquals */
-  };
-  var ONE_CHAR_OPS = {
-    "(": "(" /* LParen */,
-    ")": ")" /* RParen */,
-    ",": "," /* Comma */,
-    ":": ":" /* Colon */,
-    "?": "?" /* Question */,
-    "+": "+" /* Plus */,
-    "-": "-" /* Minus */,
-    "*": "*" /* Star */,
-    "/": "/" /* Slash */,
-    "%": "%" /* Percent */,
-    "&": "&" /* Ampersand */,
-    "|": "|" /* Pipe */,
-    "^": "^" /* Caret */,
-    "~": "~" /* Tilde */,
-    "!": "!" /* Bang */,
-    "<": "<" /* LessThan */,
-    ">": ">" /* GreaterThan */,
-    "=": "=" /* Equals */
-  };
-  function isWhitespace(ch) {
-    return ch === " " || ch === "	" || ch === "\n" || ch === "\r" || ch === "\f" || ch === "\v";
-  }
-  function isDigit(ch) {
-    return ch >= "0" && ch <= "9";
-  }
-  function isHexDigit(ch) {
-    return ch >= "0" && ch <= "9" || ch >= "a" && ch <= "f" || ch >= "A" && ch <= "F";
-  }
-  function isIdentStart(ch) {
-    return ch >= "a" && ch <= "z" || ch >= "A" && ch <= "Z" || ch === "_";
-  }
-  function isIdentChar(ch) {
-    return isIdentStart(ch) || isDigit(ch);
-  }
-
-  // src/expr/parser.ts
-  var ParseError = class extends Error {
-    constructor(message, position) {
-      super(message);
-      this.position = position;
-      this.name = "ParseError";
-    }
-  };
-  function parse(source) {
-    const tokens = tokenize(source);
-    const parser = new Parser(tokens);
-    const result = parser.parseExpression();
-    parser.expect("EOF" /* EOF */);
-    return result;
-  }
-  var Parser = class {
-    constructor(tokens) {
-      this.tokens = tokens;
-      this.pos = 0;
-    }
-    // Current token
-    peek() {
-      return this.tokens[this.pos];
-    }
-    // Advance and return the consumed token
-    advance() {
-      const tok = this.tokens[this.pos];
-      this.pos++;
-      return tok;
-    }
-    // Expect a specific token type, advance, and return the token
-    expect(type) {
-      const tok = this.peek();
-      if (tok.type !== type) {
-        throw new ParseError(
-          `Expected ${type} but got ${tok.type} ('${tok.value}')`,
-          tok.position
-        );
-      }
-      return this.advance();
-    }
-    // Check if current token is a specific type (optionally with a specific value)
-    match(type, value) {
-      const tok = this.peek();
-      if (tok.type !== type) return false;
-      if (value !== void 0 && tok.value !== value) return false;
-      return true;
-    }
-    // Save/restore for backtracking
-    save() {
-      return this.pos;
-    }
-    restore(saved) {
-      this.pos = saved;
-    }
-    // ========================================================================
-    // Grammar rules — following c.y precedence exactly
-    // ========================================================================
-    // expression → assignment_expression (',' assignment_expression)*
-    parseExpression() {
-      const first = this.parseAssignment();
-      if (!this.match("," /* Comma */)) {
-        return first;
-      }
-      const expressions = [first];
-      while (this.match("," /* Comma */)) {
-        this.advance();
-        expressions.push(this.parseAssignment());
-      }
-      return { kind: "ExpressionList", expressions };
-    }
-    // assignment_expression → IDENTIFIER ('='|'+='|'-='|'*='|'/=') assignment_expression
-    //                       | conditional_expression
-    parseAssignment() {
-      if (this.match("Identifier" /* Identifier */)) {
-        const saved = this.save();
-        const idTok = this.advance();
-        const tok = this.peek();
-        if (tok.type === "=" /* Equals */ || tok.type === "+=" /* PlusEquals */ || tok.type === "-=" /* MinusEquals */ || tok.type === "*=" /* StarEquals */ || tok.type === "/=" /* SlashEquals */) {
-          const op = this.advance();
-          const value = this.parseAssignment();
-          return {
-            kind: "Assignment",
-            name: idTok.value,
-            operator: op.value,
-            value
-          };
-        }
-        this.restore(saved);
-      }
-      return this.parseConditional();
-    }
-    // conditional_expression → logical_or ('?' expression ':' conditional_expression)?
-    parseConditional() {
-      let node = this.parseLogicalOr();
-      if (this.match("?" /* Question */)) {
-        this.advance();
-        const consequent = this.parseExpression();
-        this.expect(":" /* Colon */);
-        const alternate = this.parseConditional();
-        node = { kind: "Ternary", condition: node, consequent, alternate };
-      }
-      return node;
-    }
-    // logical_or → logical_and ('||' logical_and)*
-    parseLogicalOr() {
-      let node = this.parseLogicalAnd();
-      while (this.match("||" /* PipePipe */)) {
-        this.advance();
-        const right = this.parseLogicalAnd();
-        node = { kind: "BinaryOp", operator: "||", left: node, right };
-      }
-      return node;
-    }
-    // logical_and → inclusive_or ('&&' inclusive_or)*
-    parseLogicalAnd() {
-      let node = this.parseBitwiseOr();
-      while (this.match("&&" /* AmpAmp */)) {
-        this.advance();
-        const right = this.parseBitwiseOr();
-        node = { kind: "BinaryOp", operator: "&&", left: node, right };
-      }
-      return node;
-    }
-    // inclusive_or → exclusive_or ('|' exclusive_or)*
-    parseBitwiseOr() {
-      let node = this.parseBitwiseXor();
-      while (this.match("|" /* Pipe */)) {
-        this.advance();
-        const right = this.parseBitwiseXor();
-        node = { kind: "BinaryOp", operator: "|", left: node, right };
-      }
-      return node;
-    }
-    // exclusive_or → and_expression ('^' and_expression)*
-    parseBitwiseXor() {
-      let node = this.parseBitwiseAnd();
-      while (this.match("^" /* Caret */)) {
-        this.advance();
-        const right = this.parseBitwiseAnd();
-        node = { kind: "BinaryOp", operator: "^", left: node, right };
-      }
-      return node;
-    }
-    // and_expression → equality ('&' equality)*
-    parseBitwiseAnd() {
-      let node = this.parseEquality();
-      while (this.match("&" /* Ampersand */)) {
-        this.advance();
-        const right = this.parseEquality();
-        node = { kind: "BinaryOp", operator: "&", left: node, right };
-      }
-      return node;
-    }
-    // equality → relational (('=='|'!=') relational)*
-    parseEquality() {
-      let node = this.parseRelational();
-      while (this.match("==" /* EqualEqual */) || this.match("!=" /* BangEqual */)) {
-        const op = this.advance();
-        const right = this.parseRelational();
-        node = { kind: "BinaryOp", operator: op.value, left: node, right };
-      }
-      return node;
-    }
-    // relational → shift (('<'|'>'|'<='|'>=') shift)*
-    parseRelational() {
-      let node = this.parseShift();
-      while (this.match("<" /* LessThan */) || this.match(">" /* GreaterThan */) || this.match("<=" /* LessEqual */) || this.match(">=" /* GreaterEqual */)) {
-        const op = this.advance();
-        const right = this.parseShift();
-        node = { kind: "BinaryOp", operator: op.value, left: node, right };
-      }
-      return node;
-    }
-    // shift → additive (('<<'|'>>') additive)*
-    parseShift() {
-      let node = this.parseAdditive();
-      while (this.match("<<" /* LeftShift */) || this.match(">>" /* RightShift */)) {
-        const op = this.advance();
-        const right = this.parseAdditive();
-        node = { kind: "BinaryOp", operator: op.value, left: node, right };
-      }
-      return node;
-    }
-    // additive → multiplicative (('+'|'-') multiplicative)*
-    parseAdditive() {
-      let node = this.parseMultiplicative();
-      while (this.match("+" /* Plus */) || this.match("-" /* Minus */)) {
-        const op = this.advance();
-        const right = this.parseMultiplicative();
-        node = { kind: "BinaryOp", operator: op.value, left: node, right };
-      }
-      return node;
-    }
-    // multiplicative → unary (('*'|'/'|'%') unary)*
-    parseMultiplicative() {
-      let node = this.parseUnary();
-      while (this.match("*" /* Star */) || this.match("/" /* Slash */) || this.match("%" /* Percent */)) {
-        const op = this.advance();
-        const right = this.parseUnary();
-        node = { kind: "BinaryOp", operator: op.value, left: node, right };
-      }
-      return node;
-    }
-    // unary → ('+'|'-'|'~'|'!') unary | postfix
-    parseUnary() {
-      if (this.match("+" /* Plus */) || this.match("-" /* Minus */) || this.match("~" /* Tilde */) || this.match("!" /* Bang */)) {
-        const op = this.advance();
-        const operand = this.parseUnary();
-        return { kind: "UnaryOp", operator: op.value, operand };
-      }
-      return this.parsePostfix();
-    }
-    // postfix → IDENTIFIER '(' argList? ')' | primary
-    parsePostfix() {
-      if (this.match("Identifier" /* Identifier */)) {
-        const saved = this.save();
-        const idTok = this.advance();
-        if (this.match("(" /* LParen */)) {
-          this.advance();
-          if (this.match(")" /* RParen */)) {
-            this.advance();
-            return { kind: "FunctionCall", name: idTok.value, args: [] };
-          }
-          const args = [this.parseAssignment()];
-          while (this.match("," /* Comma */)) {
-            this.advance();
-            args.push(this.parseAssignment());
-          }
-          this.expect(")" /* RParen */);
-          return { kind: "FunctionCall", name: idTok.value, args };
-        }
-        this.restore(saved);
-      }
-      return this.parsePrimary();
-    }
-    // primary → NUMBER | IDENTIFIER | '(' expression ')'
-    parsePrimary() {
-      const tok = this.peek();
-      if (tok.type === "Integer" /* Integer */ || tok.type === "Double" /* Double */ || tok.type === "DoubleE" /* DoubleE */) {
-        this.advance();
-        return { kind: "NumberLiteral", value: parseNumericLiteral(tok) };
-      }
-      if (tok.type === "Identifier" /* Identifier */) {
-        this.advance();
-        return { kind: "Identifier", name: tok.value };
-      }
-      if (tok.type === "(" /* LParen */) {
-        this.advance();
-        const expr = this.parseExpression();
-        this.expect(")" /* RParen */);
-        return expr;
-      }
-      throw new ParseError(
-        `Unexpected token ${tok.type} ('${tok.value}')`,
-        tok.position
-      );
-    }
-  };
-  function parseNumericLiteral(tok) {
-    const s = tok.value;
-    if (tok.type === "Integer" /* Integer */) {
-      if (s.startsWith("0x") || s.startsWith("0X")) {
-        return Number(BigInt(s) & BigInt(4294967295));
-      }
-      if (s.length > 1 && s.startsWith("0")) {
-        return parseInt(s, 8);
-      }
-      return parseInt(s, 10);
-    }
-    return parseFloat(s);
-  }
-
   // src/expr/evaluator.ts
   function createDefaultEnvironment() {
     const variables = /* @__PURE__ */ new Map();
@@ -478,19 +57,19 @@
       this.name = "EvalError";
     }
   };
-  function evaluate(node, env2) {
+  function evaluate(node, env) {
     switch (node.kind) {
       case "NumberLiteral":
         return node.value;
       case "Identifier": {
-        const val = env2.variables.get(node.name);
+        const val = env.variables.get(node.name);
         if (val === void 0) {
           throw new EvalError(`Undefined variable: ${node.name}`);
         }
         return val;
       }
       case "UnaryOp": {
-        const operand = evaluate(node.operand, env2);
+        const operand = evaluate(node.operand, env);
         switch (node.operator) {
           case "+":
             return operand;
@@ -504,74 +83,74 @@
         break;
       }
       case "BinaryOp":
-        return evaluateBinaryOp(node.operator, node.left, node.right, env2);
+        return evaluateBinaryOp(node.operator, node.left, node.right, env);
       case "Ternary": {
-        const cond = evaluate(node.condition, env2);
-        return cond ? evaluate(node.consequent, env2) : evaluate(node.alternate, env2);
+        const cond = evaluate(node.condition, env);
+        return cond ? evaluate(node.consequent, env) : evaluate(node.alternate, env);
       }
       case "Assignment": {
-        const value = evaluate(node.value, env2);
+        const value = evaluate(node.value, env);
         const name = node.name;
         switch (node.operator) {
           case "=":
-            env2.variables.set(name, value);
+            env.variables.set(name, value);
             return value;
           case "+=": {
-            const cur = env2.variables.get(name) ?? 0;
+            const cur = env.variables.get(name) ?? 0;
             const result = cur + value;
-            env2.variables.set(name, result);
+            env.variables.set(name, result);
             return result;
           }
           case "-=": {
-            const cur = env2.variables.get(name) ?? 0;
+            const cur = env.variables.get(name) ?? 0;
             const result = cur - value;
-            env2.variables.set(name, result);
+            env.variables.set(name, result);
             return result;
           }
           case "*=": {
-            const cur = env2.variables.get(name) ?? 0;
+            const cur = env.variables.get(name) ?? 0;
             const result = cur * value;
-            env2.variables.set(name, result);
+            env.variables.set(name, result);
             return result;
           }
           case "/=": {
-            const cur = env2.variables.get(name) ?? 0;
+            const cur = env.variables.get(name) ?? 0;
             const result = cur / value;
-            env2.variables.set(name, result);
+            env.variables.set(name, result);
             return result;
           }
         }
         break;
       }
       case "FunctionCall": {
-        const fn = env2.functions.get(node.name);
+        const fn = env.functions.get(node.name);
         if (!fn) {
           throw new EvalError(`Undefined function: ${node.name}`);
         }
-        const args = node.args.map((arg) => evaluate(arg, env2));
+        const args = node.args.map((arg) => evaluate(arg, env));
         return fn(...args);
       }
       case "ExpressionList": {
         let result = 0;
         for (const expr of node.expressions) {
-          result = evaluate(expr, env2);
+          result = evaluate(expr, env);
         }
         return result;
       }
     }
     throw new EvalError(`Unknown node kind: ${node.kind}`);
   }
-  function evaluateBinaryOp(operator, left, right, env2) {
+  function evaluateBinaryOp(operator, left, right, env) {
     if (operator === "&&") {
-      const l2 = evaluate(left, env2);
-      return l2 ? evaluate(right, env2) : 0;
+      const l2 = evaluate(left, env);
+      return l2 ? evaluate(right, env) : 0;
     }
     if (operator === "||") {
-      const l2 = evaluate(left, env2);
-      return l2 ? l2 : evaluate(right, env2);
+      const l2 = evaluate(left, env);
+      return l2 ? l2 : evaluate(right, env);
     }
-    const l = evaluate(left, env2);
-    const r = evaluate(right, env2);
+    const l = evaluate(left, env);
+    const r = evaluate(right, env);
     switch (operator) {
       case "+":
         return l + r;
@@ -932,187 +511,6 @@
   }
   function dateToDateInterval(date) {
     return date.getTime() / 1e3 - 978307200;
-  }
-  function dateIntervalToDate(dateInterval) {
-    return new Date((dateInterval + 978307200) * 1e3);
-  }
-
-  // src/astronomy/es-calendar.ts
-  var kECJulianDayOf1990Epoch = 24478915e-1;
-  var kEC1990Epoch2 = -347241600;
-  var kECAverageDaysInGregorianYear = 365.2425;
-  var kECDaysInGregorianCycle = kECAverageDaysInGregorianYear * 400;
-  var kECDaysInJulianCycle = 365.25 * 4;
-  var kECDaysInNonLeapCentury = 36525;
-  var kECJulianGregorianSwitchoverTimeInterval = -131976e5;
-  function utcComponentsFromTimeInterval(timeInterval) {
-    let xRemainder;
-    let signedYear;
-    let x0;
-    if (timeInterval < kECJulianGregorianSwitchoverTimeInterval) {
-      const x1F = 730793 + timeInterval / (24 * 3600);
-      const x1 = Math.floor(x1F);
-      xRemainder = x1F - x1;
-      signedYear = Math.floor((4 * x1 + 3) / kECDaysInJulianCycle);
-      x0 = x1 - Math.floor(kECDaysInJulianCycle * signedYear / 4);
-    } else {
-      const x2F = 730791 + timeInterval / (24 * 3600);
-      const x2 = Math.floor(x2F);
-      xRemainder = x2F - x2;
-      const century = Math.floor((4 * x2 + 3) / kECDaysInGregorianCycle);
-      const x1 = x2 - Math.floor(kECDaysInGregorianCycle * century / 4);
-      const yearWithinCentury = Math.floor((100 * x1 + 99) / kECDaysInNonLeapCentury);
-      signedYear = 100 * century + yearWithinCentury;
-      x0 = x1 - Math.floor(kECDaysInNonLeapCentury * yearWithinCentury / 100);
-    }
-    let monthI = Math.floor((5 * x0 + 461) / 153);
-    let month;
-    if (monthI > 12) {
-      month = monthI - 12;
-      signedYear++;
-    } else {
-      month = monthI;
-    }
-    let era;
-    let year;
-    if (signedYear <= 0) {
-      era = 0;
-      year = 1 - signedYear;
-    } else {
-      era = 1;
-      year = signedYear;
-    }
-    const dayF = x0 - Math.floor((153 * monthI - 457) / 5) + 1;
-    const day = Math.round(dayF);
-    const hoursF = xRemainder * 24;
-    const hoursI = Math.floor(hoursF);
-    const minutesF = (hoursF - hoursI) * 60;
-    const minutesI = Math.floor(minutesF);
-    const seconds = (minutesF - minutesI) * 60;
-    return { era, year, month, day, hour: hoursI, minute: minutesI, seconds };
-  }
-  function timeIntervalFromUTCComponents(era, year, month, day, hour, minute, seconds) {
-    let signedYear = era === 0 ? 1 - year : year;
-    let monthI;
-    if (month < 3) {
-      monthI = month + 12;
-      signedYear--;
-    } else {
-      monthI = month;
-    }
-    let J;
-    if (era === 0 || year < 1582 || year === 1582 && (month < 10 || month === 10 && day < 15)) {
-      J = 17211165e-1 + Math.floor(1461 * signedYear / 4);
-    } else {
-      const c = Math.floor(signedYear / 100);
-      const x = signedYear - 100 * c;
-      J = 17211185e-1 + Math.floor(146097 * c / 4) + Math.floor(36525 * x / 100);
-    }
-    J += Math.floor((153 * monthI - 457) / 5) + day;
-    return (J - kECJulianDayOf1990Epoch) * 24 * 3600 + kEC1990Epoch2 + hour * 3600 + minute * 60 + seconds;
-  }
-  function daysInMonth(eraNumber, yearNumber, monthNumber) {
-    switch (monthNumber) {
-      case 1:
-        return 31;
-      // Jan
-      case 2: {
-        const firstOfFeb = timeIntervalFromUTCComponents(eraNumber, yearNumber, 2, 1, 0, 0, 0);
-        const firstOfMar = timeIntervalFromUTCComponents(eraNumber, yearNumber, 3, 1, 0, 0, 0);
-        return Math.round((firstOfMar - firstOfFeb) / (24 * 3600));
-      }
-      case 3:
-        return 31;
-      case 4:
-        return 30;
-      case 5:
-        return 31;
-      case 6:
-        return 30;
-      case 7:
-        return 31;
-      case 8:
-        return 31;
-      case 9:
-        return 30;
-      case 10:
-        return 31;
-      case 11:
-        return 30;
-      case 12:
-        return 31;
-      default:
-        return 0;
-    }
-  }
-  function localComponentsFromTimeInterval(timeInterval, tzOffsetSeconds) {
-    return utcComponentsFromTimeInterval(timeInterval + tzOffsetSeconds);
-  }
-  function timeIntervalFromLocalComponents(tzOffsetSeconds, era, year, month, day, hour, minute, seconds) {
-    const localT = timeIntervalFromUTCComponents(era, year, month, day, hour, minute, seconds);
-    return localT - tzOffsetSeconds;
-  }
-  function weekdayFromTimeInterval(dateInterval, tzOffsetSeconds) {
-    const localNow = dateInterval + tzOffsetSeconds;
-    const localNowDays = localNow / (24 * 3600);
-    const weekday = ((localNowDays + 1) % 7 + 7) % 7;
-    return Math.floor(weekday);
-  }
-  function addMonthsToTimeInterval(now, tzOffsetSeconds, months) {
-    const cs = localComponentsFromTimeInterval(now, tzOffsetSeconds);
-    const signedYearNow = cs.era === 0 ? 1 - cs.year : cs.year;
-    const zeroMonthNow = cs.month - 1;
-    const yearMonthThen = signedYearNow + (zeroMonthNow + months) / 12;
-    const signedYearThen = Math.floor(yearMonthThen);
-    const zeroMonthThen = Math.round((yearMonthThen - signedYearThen) * 12);
-    const monthThen = zeroMonthThen + 1;
-    let eraThen;
-    let yearThen;
-    if (signedYearThen <= 0) {
-      eraThen = 0;
-      yearThen = 1 - signedYearThen;
-    } else {
-      eraThen = 1;
-      yearThen = signedYearThen;
-    }
-    const daysInMonthThen = daysInMonth(eraThen, yearThen, monthThen);
-    const dayThen = Math.min(cs.day, daysInMonthThen);
-    return timeIntervalFromLocalComponents(
-      tzOffsetSeconds,
-      eraThen,
-      yearThen,
-      monthThen,
-      dayThen,
-      cs.hour,
-      cs.minute,
-      cs.seconds
-    );
-  }
-  function addYearsToTimeInterval(now, tzOffsetSeconds, years) {
-    const cs = localComponentsFromTimeInterval(now, tzOffsetSeconds);
-    const signedYearNow = cs.era === 0 ? 1 - cs.year : cs.year;
-    const signedYearThen = signedYearNow + years;
-    let eraThen;
-    let yearThen;
-    if (signedYearThen <= 0) {
-      eraThen = 0;
-      yearThen = 1 - signedYearThen;
-    } else {
-      eraThen = 1;
-      yearThen = signedYearThen;
-    }
-    const daysInTargetMonth = daysInMonth(eraThen, yearThen, cs.month);
-    const dayThen = Math.min(cs.day, daysInTargetMonth);
-    return timeIntervalFromLocalComponents(
-      tzOffsetSeconds,
-      eraThen,
-      yearThen,
-      cs.month,
-      dayThen,
-      cs.hour,
-      cs.minute,
-      cs.seconds
-    );
   }
 
   // src/astronomy/planet-tables.ts
@@ -10717,6 +10115,43 @@
     return fmod(omegaDeg * Math.PI / 180, TWO_PI3);
   }
   var MEAN_TROPICAL_YEAR_SECONDS = 365.2421897 * 86400;
+  function sunApparentLongitudeAt(dateInterval) {
+    const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(dateInterval, null);
+    return WB_sunLongitudeApparent(julianCenturiesSince2000Epoch / 100);
+  }
+  function solarLongitudeCrossingTime(targetLongitudeRad, approxDateInterval, _cache) {
+    const meanMotion = TWO_PI3 / MEAN_TROPICAL_YEAR_SECONDS;
+    let di = approxDateInterval;
+    for (let iter = 0; iter < 12; iter++) {
+      const lon = sunApparentLongitudeAt(di);
+      let diff = (lon - targetLongitudeRad) % TWO_PI3;
+      if (diff > Math.PI) diff -= TWO_PI3;
+      if (diff < -Math.PI) diff += TWO_PI3;
+      const step = diff / meanMotion;
+      di -= step;
+      if (Math.abs(step) < 0.5) break;
+    }
+    return di;
+  }
+  function vernalEquinoxOnOrBefore(dateInterval, cache) {
+    let ve = solarLongitudeCrossingTime(0, dateInterval, cache);
+    if (ve > dateInterval) {
+      ve = solarLongitudeCrossingTime(0, dateInterval - MEAN_TROPICAL_YEAR_SECONDS, cache);
+    }
+    return ve;
+  }
+  function vernalEquinoxAfter(dateInterval, cache) {
+    let ve = solarLongitudeCrossingTime(0, dateInterval, cache);
+    if (ve <= dateInterval) {
+      ve = solarLongitudeCrossingTime(0, dateInterval + MEAN_TROPICAL_YEAR_SECONDS, cache);
+    }
+    return ve;
+  }
+  function fractionOfVernalEquinoxYear(dateInterval, cache) {
+    const prev = vernalEquinoxOnOrBefore(dateInterval, cache);
+    const next = vernalEquinoxAfter(dateInterval, cache);
+    return (dateInterval - prev) / (next - prev);
+  }
 
   // src/astronomy/es-riseset.ts
   var TWO_PI4 = Math.PI * 2;
@@ -11156,7 +10591,6 @@
   }
 
   // src/shared/animation.ts
-  var kECGLAngleAnimationSpeed = 2;
   var kECGLFrameRate = 1 / 240;
   var EC_UPDATE_NEXT_SUNRISE = -1001;
   var EC_UPDATE_NEXT_SUNSET = -1002;
@@ -11169,320 +10603,128 @@
   var EC_UPDATE_ENV_CHANGE_ONLY = -1013;
   var EC_UPDATE_NEXT_SUNRISE_OR_SUNSET = -1016;
   var EC_UPDATE_NEXT_MOONRISE_OR_MOONSET = -1017;
-  var EC_UPDATE_NEXT_SSLAT_CHANGE = -1018;
-  var EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION = -1019;
-  var PLANET_SENTINEL_BASE = -2e3;
-  function isPlanetRiseSetSentinel(sentinel) {
-    return sentinel <= PLANET_SENTINEL_BASE;
-  }
-  function decodePlanetSentinel(sentinel) {
-    const offset = -sentinel + PLANET_SENTINEL_BASE;
-    return { planet: offset >> 1, isRise: (offset & 1) === 0 };
-  }
-  function makeAnimatingValue(initial, now) {
-    return {
-      currentValue: initial,
-      targetValue: initial,
-      lastAnimationTime: now,
-      animationStopTime: now,
-      animating: false
-    };
-  }
-  function startValueAnimation(val, newTarget, now, speed, durationOverrideMs) {
-    if (speed === 0) {
-      val.currentValue = newTarget;
-      val.targetValue = newTarget;
-      val.animating = false;
-      return;
-    }
-    if (val.animating && val.targetValue === newTarget) return;
-    if (val.animating) {
-      interpolateValue(val, now);
-    }
-    if (val.currentValue === newTarget) {
-      val.animating = false;
-      return;
-    }
-    val.targetValue = newTarget;
-    const delta = Math.abs(newTarget - val.currentValue);
-    const durationMs = durationOverrideMs ?? delta / speed * 1e3;
-    if (durationMs < kECGLFrameRate * 1e3) {
-      val.currentValue = newTarget;
-      val.animating = false;
-      return;
-    }
-    val.lastAnimationTime = now;
-    val.animating = true;
-    val.animationStopTime = now + durationMs;
-  }
-  function interpolateValue(val, now) {
-    if (!val.animating) {
-      return val.currentValue;
-    }
-    if (now >= val.animationStopTime) {
-      val.animating = false;
-      val.currentValue = val.targetValue;
-      return val.currentValue;
-    }
-    const fraction = (now - val.lastAnimationTime) / (val.animationStopTime - val.lastAnimationTime);
-    val.currentValue += (val.targetValue - val.currentValue) * fraction;
-    val.lastAnimationTime = now;
-    return val.currentValue;
-  }
-  function startAnimationRaw(val, newTarget, now, animSpeed = 1, durationOverrideMs, period = 2 * Math.PI) {
-    const speed = kECGLAngleAnimationSpeed * animSpeed;
-    const wraps = isFinite(period);
-    if (wraps) {
-      newTarget = fmod2(newTarget, period);
-    }
-    if (isNaN(newTarget) || isNaN(val.currentValue)) {
-      val.currentValue = newTarget;
-      val.targetValue = newTarget;
-      val.animating = false;
-      return;
-    }
-    if (speed === 0) {
-      val.currentValue = newTarget;
-      val.targetValue = newTarget;
-      val.animating = false;
-      return;
-    }
-    if (val.animating && val.targetValue === newTarget) return;
-    if (val.animating) {
-      interpolateValue(val, now);
-    }
-    if (val.currentValue === newTarget) {
-      val.animating = false;
-      return;
-    }
-    if (wraps) {
-      let delta = newTarget - val.currentValue;
-      delta = delta - period * Math.round(delta / period);
-      val.currentValue = newTarget - delta;
-    }
-    startValueAnimation(val, newTarget, now, speed, durationOverrideMs);
-  }
-  function computeNextBoundary(updateIntervalMs, getNow2, timeDirection, env2) {
-    if (updateIntervalMs > 0) {
-      const tzOffsetMs = (env2.tzOffsetSec ?? 0) * 1e3;
-      const displayNowMs = getNow2().getTime();
-      const localNowMs = displayNowMs + tzOffsetMs;
-      if (timeDirection === -1) {
-        const localBoundary = Math.floor(localNowMs / updateIntervalMs) * updateIntervalMs;
-        const boundary = (localBoundary === localNowMs ? localBoundary - updateIntervalMs : localBoundary) - tzOffsetMs;
-        return boundary;
-      } else {
-        const localBoundary = Math.ceil(localNowMs / updateIntervalMs) * updateIntervalMs;
-        return localBoundary - tzOffsetMs;
-      }
-    }
-    const sentinel = updateIntervalMs / 1e3;
-    const eventDI = resolveSentinel(sentinel, getNow2, env2, timeDirection);
-    if (!isFinite(eventDI)) {
-      return Infinity;
-    }
-    return (eventDI + 978307200) * 1e3;
-  }
-  function displayTimeToPerfNow(displayTimeMs, getNow2) {
-    if (!isFinite(displayTimeMs)) return Infinity;
-    const deltaMs = Math.abs(displayTimeMs - getNow2().getTime());
-    return performance.now() + deltaMs;
-  }
-  var SENTINEL_FUDGE_SECONDS = 5;
   var SENTINEL_LOOKAHEAD_SECONDS = 3600 * 13.2;
-  function nextPlanetRiseSet(riseNotSet, planetNumber, getNow2, lat2, lon2, timeDirection) {
-    const calculationDI = dateToDateInterval(getNow2());
-    const searchForward = timeDirection === 1;
-    const fudge = searchForward ? SENTINEL_FUDGE_SECONDS : -SENTINEL_FUDGE_SECONDS;
-    const lookahead = searchForward ? SENTINEL_LOOKAHEAD_SECONDS : -SENTINEL_LOOKAHEAD_SECONDS;
-    const fudgeDate = calculationDI + fudge;
-    const pool = new AstroCachePool();
-    initializeCachePool(pool, fudgeDate, lat2, lon2, !searchForward);
-    try {
-      const result = planetaryRiseSetTimeRefined(
-        fudgeDate,
-        lat2,
-        lon2,
-        riseNotSet,
-        planetNumber,
-        NaN,
-        pool
-      );
-      if (isNoRiseSet(result.riseSetTime)) {
-        return NaN;
-      }
-      const inRightDirection = searchForward ? result.transitTime >= fudgeDate : result.transitTime < fudgeDate;
-      if (inRightDirection) {
-        return result.riseSetTime;
-      }
-      const tryDate = fudgeDate + lookahead;
-      releaseCachePool(pool);
-      initializeCachePool(pool, tryDate, lat2, lon2, !searchForward);
-      const result2 = planetaryRiseSetTimeRefined(
-        tryDate,
-        lat2,
-        lon2,
-        riseNotSet,
-        planetNumber,
-        NaN,
-        pool
-      );
-      if (isNoRiseSet(result2.riseSetTime)) {
-        return NaN;
-      }
-      return result2.riseSetTime;
-    } finally {
-      releaseCachePool(pool);
-    }
-  }
-  function nextOrMidnight(eventDI, getNow2, tzOffsetSec, timeDirection) {
-    if (isNaN(eventDI)) {
-      return nextMidnightDI(getNow2, tzOffsetSec, timeDirection);
-    }
-    const nowDI = dateToDateInterval(getNow2());
-    const localNowSec = nowDI + tzOffsetSec;
-    const dayStartLocal = Math.floor(localNowSec / 86400) * 86400;
-    const todayMidnightDI = dayStartLocal - tzOffsetSec;
-    if (timeDirection === -1) {
-      if (eventDI < todayMidnightDI) {
-        return todayMidnightDI;
-      }
-    } else {
-      const tomorrowMidnightDI = todayMidnightDI + 86400;
-      if (eventDI > tomorrowMidnightDI) {
-        return tomorrowMidnightDI;
-      }
-    }
-    return eventDI;
-  }
-  function nextMidnightDI(getNow2, tzOffsetSec, timeDirection) {
-    const nowDI = dateToDateInterval(getNow2());
-    const localNowSec = nowDI + tzOffsetSec;
-    const dayStartLocal = Math.floor(localNowSec / 86400) * 86400;
-    const todayMidnightDI = dayStartLocal - tzOffsetSec;
-    if (timeDirection === -1) {
-      return todayMidnightDI;
-    } else {
-      return todayMidnightDI + 86400;
-    }
-  }
   var SSLAT_THRESHOLD = 0.1 * Math.PI / 180;
   var SSLAT_SEARCH_RANGE = 2 * 86400;
-  var SSLAT_SEARCH_GRANULARITY = 3600;
-  function nextSslatChange(getNow2, timeDirection) {
-    const nowDI = dateToDateInterval(getNow2());
-    const currentDecl = sunRAandDecl(nowDI, null).declination;
-    const boundaryDI = nowDI + timeDirection * SSLAT_SEARCH_RANGE;
-    const boundaryDecl = sunRAandDecl(boundaryDI, null).declination;
-    if (Math.abs(boundaryDecl - currentDecl) < SSLAT_THRESHOLD) {
-      return boundaryDI;
-    }
-    let loDI = nowDI;
-    let hiDI = boundaryDI;
-    while (Math.abs(hiDI - loDI) > SSLAT_SEARCH_GRANULARITY) {
-      const midDI = (loDI + hiDI) / 2;
-      const midDecl = sunRAandDecl(midDI, null).declination;
-      if (Math.abs(midDecl - currentDecl) >= SSLAT_THRESHOLD) {
-        hiDI = midDI;
-      } else {
-        loDI = midDI;
-      }
-    }
-    return hiDI;
-  }
   var ECLIPSE_THRESHOLD = Math.PI / 18;
   var ECLIPSE_MAX_CLOSING_RATE = Math.PI / 180 / 3600;
-  var ECLIPSE_MAX_INTERVAL = 3600;
-  function nextInterestingEclipseMotion(getNow2, lat2, lon2, timeDirection) {
-    const nowDI = dateToDateInterval(getNow2());
-    const sep = calculateEclipse(nowDI, lat2, lon2, null).angularSeparation;
-    let intervalSec = (sep - ECLIPSE_THRESHOLD) / ECLIPSE_MAX_CLOSING_RATE;
-    if (intervalSec < 1) intervalSec = 1;
-    if (intervalSec > ECLIPSE_MAX_INTERVAL) intervalSec = ECLIPSE_MAX_INTERVAL;
-    return nowDI + timeDirection * intervalSec;
+
+  // src/astronomy/es-calendar.ts
+  var kECJulianDayOf1990Epoch = 24478915e-1;
+  var kEC1990Epoch2 = -347241600;
+  var kECAverageDaysInGregorianYear = 365.2425;
+  var kECDaysInGregorianCycle = kECAverageDaysInGregorianYear * 400;
+  var kECDaysInJulianCycle = 365.25 * 4;
+  var kECDaysInNonLeapCentury = 36525;
+  var kECJulianGregorianSwitchoverTimeInterval = -131976e5;
+  function utcComponentsFromTimeInterval(timeInterval) {
+    let xRemainder;
+    let signedYear;
+    let x0;
+    if (timeInterval < kECJulianGregorianSwitchoverTimeInterval) {
+      const x1F = 730793 + timeInterval / (24 * 3600);
+      const x1 = Math.floor(x1F);
+      xRemainder = x1F - x1;
+      signedYear = Math.floor((4 * x1 + 3) / kECDaysInJulianCycle);
+      x0 = x1 - Math.floor(kECDaysInJulianCycle * signedYear / 4);
+    } else {
+      const x2F = 730791 + timeInterval / (24 * 3600);
+      const x2 = Math.floor(x2F);
+      xRemainder = x2F - x2;
+      const century = Math.floor((4 * x2 + 3) / kECDaysInGregorianCycle);
+      const x1 = x2 - Math.floor(kECDaysInGregorianCycle * century / 4);
+      const yearWithinCentury = Math.floor((100 * x1 + 99) / kECDaysInNonLeapCentury);
+      signedYear = 100 * century + yearWithinCentury;
+      x0 = x1 - Math.floor(kECDaysInNonLeapCentury * yearWithinCentury / 100);
+    }
+    let monthI = Math.floor((5 * x0 + 461) / 153);
+    let month;
+    if (monthI > 12) {
+      month = monthI - 12;
+      signedYear++;
+    } else {
+      month = monthI;
+    }
+    let era;
+    let year;
+    if (signedYear <= 0) {
+      era = 0;
+      year = 1 - signedYear;
+    } else {
+      era = 1;
+      year = signedYear;
+    }
+    const dayF = x0 - Math.floor((153 * monthI - 457) / 5) + 1;
+    const day = Math.round(dayF);
+    const hoursF = xRemainder * 24;
+    const hoursI = Math.floor(hoursF);
+    const minutesF = (hoursF - hoursI) * 60;
+    const minutesI = Math.floor(minutesF);
+    const seconds = (minutesF - minutesI) * 60;
+    return { era, year, month, day, hour: hoursI, minute: minutesI, seconds };
   }
-  function resolveSentinel(sentinel, getNow2, env2, timeDirection) {
-    const lat2 = env2.observerLatRad ?? 0;
-    const lon2 = env2.observerLonRad ?? 0;
-    const tzOff = env2.tzOffsetSec ?? 0;
-    switch (sentinel) {
-      // Bare rise/set (no midnight clamp)
-      case EC_UPDATE_NEXT_SUNRISE:
-        return nextPlanetRiseSet(true, 0 /* Sun */, getNow2, lat2, lon2, timeDirection);
-      case EC_UPDATE_NEXT_SUNSET:
-        return nextPlanetRiseSet(false, 0 /* Sun */, getNow2, lat2, lon2, timeDirection);
-      case EC_UPDATE_NEXT_MOONRISE:
-        return nextPlanetRiseSet(true, 1 /* Moon */, getNow2, lat2, lon2, timeDirection);
-      case EC_UPDATE_NEXT_MOONSET:
-        return nextPlanetRiseSet(false, 1 /* Moon */, getNow2, lat2, lon2, timeDirection);
-      // Rise/set clamped to midnight
-      case EC_UPDATE_NEXT_SUNRISE_OR_MIDNIGHT:
-        return nextOrMidnight(
-          nextPlanetRiseSet(true, 0 /* Sun */, getNow2, lat2, lon2, timeDirection),
-          getNow2,
-          tzOff,
-          timeDirection
-        );
-      case EC_UPDATE_NEXT_SUNSET_OR_MIDNIGHT:
-        return nextOrMidnight(
-          nextPlanetRiseSet(false, 0 /* Sun */, getNow2, lat2, lon2, timeDirection),
-          getNow2,
-          tzOff,
-          timeDirection
-        );
-      case EC_UPDATE_NEXT_MOONRISE_OR_MIDNIGHT:
-        return nextOrMidnight(
-          nextPlanetRiseSet(true, 1 /* Moon */, getNow2, lat2, lon2, timeDirection),
-          getNow2,
-          tzOff,
-          timeDirection
-        );
-      case EC_UPDATE_NEXT_MOONSET_OR_MIDNIGHT:
-        return nextOrMidnight(
-          nextPlanetRiseSet(false, 1 /* Moon */, getNow2, lat2, lon2, timeDirection),
-          getNow2,
-          tzOff,
-          timeDirection
-        );
-      // Combined: whichever comes first in the direction of flow
-      case EC_UPDATE_NEXT_SUNRISE_OR_SUNSET: {
-        const rise = nextPlanetRiseSet(true, 0 /* Sun */, getNow2, lat2, lon2, timeDirection);
-        const set = nextPlanetRiseSet(false, 0 /* Sun */, getNow2, lat2, lon2, timeDirection);
-        return closerInTimeDirection(rise, set, timeDirection);
+  function timeIntervalFromUTCComponents(era, year, month, day, hour, minute, seconds) {
+    let signedYear = era === 0 ? 1 - year : year;
+    let monthI;
+    if (month < 3) {
+      monthI = month + 12;
+      signedYear--;
+    } else {
+      monthI = month;
+    }
+    let J;
+    if (era === 0 || year < 1582 || year === 1582 && (month < 10 || month === 10 && day < 15)) {
+      J = 17211165e-1 + Math.floor(1461 * signedYear / 4);
+    } else {
+      const c = Math.floor(signedYear / 100);
+      const x = signedYear - 100 * c;
+      J = 17211185e-1 + Math.floor(146097 * c / 4) + Math.floor(36525 * x / 100);
+    }
+    J += Math.floor((153 * monthI - 457) / 5) + day;
+    return (J - kECJulianDayOf1990Epoch) * 24 * 3600 + kEC1990Epoch2 + hour * 3600 + minute * 60 + seconds;
+  }
+  function daysInMonth(eraNumber, yearNumber, monthNumber) {
+    switch (monthNumber) {
+      case 1:
+        return 31;
+      // Jan
+      case 2: {
+        const firstOfFeb = timeIntervalFromUTCComponents(eraNumber, yearNumber, 2, 1, 0, 0, 0);
+        const firstOfMar = timeIntervalFromUTCComponents(eraNumber, yearNumber, 3, 1, 0, 0, 0);
+        return Math.round((firstOfMar - firstOfFeb) / (24 * 3600));
       }
-      case EC_UPDATE_NEXT_MOONRISE_OR_MOONSET: {
-        const rise = nextPlanetRiseSet(true, 1 /* Moon */, getNow2, lat2, lon2, timeDirection);
-        const set = nextPlanetRiseSet(false, 1 /* Moon */, getNow2, lat2, lon2, timeDirection);
-        return closerInTimeDirection(rise, set, timeDirection);
-      }
-      // Adaptive sslat (sun declination) change sentinel for earth view
-      case EC_UPDATE_NEXT_SSLAT_CHANGE:
-        return nextSslatChange(getNow2, timeDirection);
-      // Adaptive eclipse-simulator cadence: ~1 s while the disc is drawn,
-      // capped at 1 h while only the caption shows.
-      case EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION:
-        return nextInterestingEclipseMotion(getNow2, lat2, lon2, timeDirection);
-      // Environment change only — effectively never (only explicit reset)
-      case 0:
-      case EC_UPDATE_ENV_CHANGE_ONLY:
-        return Infinity;
+      case 3:
+        return 31;
+      case 4:
+        return 30;
+      case 5:
+        return 31;
+      case 6:
+        return 30;
+      case 7:
+        return 31;
+      case 8:
+        return 31;
+      case 9:
+        return 30;
+      case 10:
+        return 31;
+      case 11:
+        return 30;
+      case 12:
+        return 31;
       default:
-        if (isPlanetRiseSetSentinel(sentinel)) {
-          const { planet, isRise } = decodePlanetSentinel(sentinel);
-          return nextPlanetRiseSet(isRise, planet, getNow2, lat2, lon2, timeDirection);
-        }
-        console.warn(`Unknown update sentinel: ${sentinel}, defaulting to daily`);
-        return nextMidnightDI(getNow2, tzOff, timeDirection);
+        return 0;
     }
   }
-  function closerInTimeDirection(a, b, timeDirection) {
-    if (isNaN(a)) return b;
-    if (isNaN(b)) return a;
-    return timeDirection === 1 ? Math.min(a, b) : Math.max(a, b);
+  function localComponentsFromTimeInterval(timeInterval, tzOffsetSeconds) {
+    return utcComponentsFromTimeInterval(timeInterval + tzOffsetSeconds);
   }
-  function fmod2(value, modulus) {
-    const result = value % modulus;
-    return result < 0 ? result + modulus : result;
+  function weekdayFromTimeInterval(dateInterval, tzOffsetSeconds) {
+    const localNow = dateInterval + tzOffsetSeconds;
+    const localNowDays = localNow / (24 * 3600);
+    const weekday = ((localNowDays + 1) % 7 + 7) % 7;
+    return Math.floor(weekday);
   }
 
   // src/watch/terminator.ts
@@ -11506,7 +10748,7 @@
       return 0 + indexWithinQuadrant / leavesPerQuadrant * (Math.PI / 2);
     }
   }
-  function fmod3(a, b) {
+  function fmod2(a, b) {
     return (a % b + b) % b;
   }
   function terminatorAngle(phase, quad, indexWithinQuad, leavesPerQuad, incr) {
@@ -11514,7 +10756,7 @@
     const indexWithinQuadrant = indexWithinQuad;
     const leavesPerQuadrant = leavesPerQuad;
     const incremental = incr;
-    phase = fmod3(phase, Math.PI * 2);
+    phase = fmod2(phase, Math.PI * 2);
     const halfLeafSpan = 0.5 / leavesPerQuadrant * (Math.PI / 2);
     if (phase > Math.PI) {
       phase -= halfLeafSpan;
@@ -11571,23 +10813,7 @@
   }
 
   // src/shared/astro-env.ts
-  var DEFAULT_LAT_DEG = 37.205;
-  var DEFAULT_LON_DEG = -121.954;
   var cachedBatteryLevel = 1;
-  var batteryInitialized = false;
-  function initBatteryState() {
-    if (batteryInitialized) return;
-    if (typeof navigator !== "undefined" && "getBattery" in navigator) {
-      batteryInitialized = true;
-      navigator.getBattery().then((battery) => {
-        cachedBatteryLevel = battery.level;
-        battery.addEventListener("levelchange", () => {
-          cachedBatteryLevel = battery.level;
-        });
-      }).catch(() => {
-      });
-    }
-  }
   function computeTzDeltaMs(olsonTimezone, referenceDate) {
     if (!olsonTimezone) return 0;
     const ref = referenceDate || /* @__PURE__ */ new Date();
@@ -11616,61 +10842,21 @@
     }
     return (targetOffsetSec - browserOffsetSec) * 1e3;
   }
-  function evalAttr(expr, env2) {
+  function evalAttr(expr, env) {
     if (!expr) return 0;
-    return evaluate(expr, env2);
+    return evaluate(expr, env);
   }
-  function createAstroEnvironment(observerLatDeg = DEFAULT_LAT_DEG, observerLonDeg = DEFAULT_LON_DEG, getNow2 = () => /* @__PURE__ */ new Date(), olsonTimezone) {
-    const OBSERVER_LAT = observerLatDeg * Math.PI / 180;
-    const OBSERVER_LON = observerLonDeg * Math.PI / 180;
-    initBatteryState();
-    const env2 = createDefaultEnvironment();
-    env2.observerLatRad = OBSERVER_LAT;
-    env2.observerLonRad = OBSERVER_LON;
-    env2.getNow = getNow2;
-    env2.variables.set("updateAtNextSunrise", EC_UPDATE_NEXT_SUNRISE);
-    env2.variables.set("updateAtNextSunset", EC_UPDATE_NEXT_SUNSET);
-    env2.variables.set("updateAtNextMoonrise", EC_UPDATE_NEXT_MOONRISE);
-    env2.variables.set("updateAtNextMoonset", EC_UPDATE_NEXT_MOONSET);
-    env2.variables.set("updateAtNextSunriseOrMidnight", EC_UPDATE_NEXT_SUNRISE_OR_MIDNIGHT);
-    env2.variables.set("updateAtNextSunsetOrMidnight", EC_UPDATE_NEXT_SUNSET_OR_MIDNIGHT);
-    env2.variables.set("updateAtNextMoonriseOrMidnight", EC_UPDATE_NEXT_MOONRISE_OR_MIDNIGHT);
-    env2.variables.set("updateAtNextMoonsetOrMidnight", EC_UPDATE_NEXT_MOONSET_OR_MIDNIGHT);
-    env2.variables.set("updateAtEnvChangeOnly", EC_UPDATE_ENV_CHANGE_ONLY);
-    env2.variables.set("updateAtNextSunriseOrSunset", EC_UPDATE_NEXT_SUNRISE_OR_SUNSET);
-    env2.variables.set("updateAtNextMoonriseOrMoonset", EC_UPDATE_NEXT_MOONRISE_OR_MOONSET);
-    env2.variables.set("updateForTimeSyncIndicator", EC_UPDATE_ENV_CHANGE_ONLY);
-    env2.variables.set("updateForLocSyncIndicator", EC_UPDATE_ENV_CHANGE_ONLY);
-    env2.variables.set("planetSun", 0 /* Sun */);
-    env2.variables.set("planetMoon", 1 /* Moon */);
-    env2.variables.set("planetMercury", 2 /* Mercury */);
-    env2.variables.set("planetVenus", 3 /* Venus */);
-    env2.variables.set("planetEarth", 4 /* Earth */);
-    env2.variables.set("planetMars", 5 /* Mars */);
-    env2.variables.set("planetJupiter", 6 /* Jupiter */);
-    env2.variables.set("planetSaturn", 7 /* Saturn */);
-    env2.variables.set("planetUranus", 8 /* Uranus */);
-    env2.variables.set("planetNeptune", 9 /* Neptune */);
-    env2.variables.set("planetMidnightSun", 11 /* MidnightSun */);
-    env2.variables.set("topAnchorClockNoon", 0);
-    env2.variables.set("topAnchorClockMidnight", 1);
-    env2.variables.set("topAnchorSolarNoon", 2);
-    env2.variables.set("topAnchorSolarMidnight", 3);
-    const internals = registerAstroFunctions(env2, OBSERVER_LAT, OBSERVER_LON, getNow2, olsonTimezone);
-    releaseCachePool(internals.pool);
-    return env2;
-  }
-  function registerAstroFunctions(env2, OBSERVER_LAT, OBSERVER_LON, getNow2 = () => /* @__PURE__ */ new Date(), olsonTimezone) {
-    const { functions } = env2;
-    const now = getNow2();
+  function registerAstroFunctions(env, OBSERVER_LAT, OBSERVER_LON, getNow = () => /* @__PURE__ */ new Date(), olsonTimezone) {
+    const { functions } = env;
+    const now = getNow();
     const dateInterval = dateToDateInterval(now);
-    const tzDeltaMs2 = computeTzDeltaMs(olsonTimezone, now);
+    const tzDeltaMs = computeTzDeltaMs(olsonTimezone, now);
     const browserOffsetSec = -now.getTimezoneOffset() * 60;
-    const tzOffsetSeconds = browserOffsetSec + tzDeltaMs2 / 1e3;
-    env2.tzOffsetSec = tzOffsetSeconds;
+    const tzOffsetSeconds = browserOffsetSec + tzDeltaMs / 1e3;
+    env.tzOffsetSec = tzOffsetSeconds;
     const liveDate = () => {
-      const raw = getNow2();
-      return tzDeltaMs2 !== 0 ? new Date(raw.getTime() + tzDeltaMs2) : raw;
+      const raw = getNow();
+      return tzDeltaMs !== 0 ? new Date(raw.getTime() + tzDeltaMs) : raw;
     };
     const liveTime = () => {
       const t = liveDate();
@@ -11698,7 +10884,7 @@
       return tzOffsetSeconds * Math.PI / (3600 * 12);
     });
     const getLocalComponents = () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return localComponentsFromTimeInterval(di, tzOffsetSeconds);
     };
     functions.set("dayNumber", () => getLocalComponents().day - 1);
@@ -11709,11 +10895,11 @@
     functions.set("monthNumber", () => getLocalComponents().month - 1);
     functions.set("monthNumberAngle", () => (getLocalComponents().month - 1) * 2 * Math.PI / 12);
     functions.set("weekdayNumberAngle", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return weekdayFromTimeInterval(di, tzOffsetSeconds) * 2 * Math.PI / 7;
     });
     functions.set("weekdayNumber", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return weekdayFromTimeInterval(di, tzOffsetSeconds);
     });
     functions.set("yearNumber", () => {
@@ -11722,19 +10908,19 @@
     });
     functions.set("eraNumber", () => getLocalComponents().era);
     functions.set("GregorianEra", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return di > kECJulianGregorianSwitchoverTimeInterval ? 1 : 0;
     });
     functions.set("DSTNumber", () => {
       if (olsonTimezone) {
-        const now3 = getNow2();
+        const now3 = getNow();
         const yr = liveDate().getFullYear();
         const janDelta = computeTzDeltaMs(olsonTimezone, new Date(yr, 0, 1));
         const julDelta = computeTzDeltaMs(olsonTimezone, new Date(yr, 6, 1));
         const stdDelta = Math.min(janDelta, julDelta);
-        return tzDeltaMs2 > stdDelta ? 1 : 0;
+        return tzDeltaMs > stdDelta ? 1 : 0;
       }
-      const now2 = getNow2();
+      const now2 = getNow();
       const jan = new Date(now2.getFullYear(), 0, 1);
       const jul = new Date(now2.getFullYear(), 6, 1);
       const stdOffset = Math.max(jan.getTimezoneOffset(), jul.getTimezoneOffset());
@@ -11763,7 +10949,7 @@
     });
     functions.set("season", () => {
       const north = OBSERVER_LAT >= 0;
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       const sunLong = planetEclipticLongitude(0 /* Sun */, di, null);
       if (sunLong > Math.PI * 3 / 2) return north ? 3 : 1;
       else if (sunLong > Math.PI) return north ? 2 : 0;
@@ -11771,7 +10957,7 @@
       else return north ? 0 : 2;
     });
     functions.set("offsetOfWinterSolsticeFromDec31Midnight", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       const todaysLongitude = planetEclipticLongitude(0 /* Sun */, di, null);
       const cs = utcComponentsFromTimeInterval(di);
       const thisDay2001 = timeIntervalFromUTCComponents(1, 2001, cs.month, cs.day, cs.hour, cs.minute, cs.seconds);
@@ -11789,19 +10975,19 @@
     const pool = new AstroCachePool();
     initializeCachePool(pool, dateInterval, OBSERVER_LAT, OBSERVER_LON, false, tzOffsetSeconds);
     functions.set("sunAltitude", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return sunAltitude(di, OBSERVER_LAT, OBSERVER_LON, null);
     });
     functions.set("sunAzimuth", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return sunAzimuth(di, OBSERVER_LAT, OBSERVER_LON, null);
     });
     functions.set("sunSkyOrientationAngle", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return sunSkyOrientationAngle(di, OBSERVER_LAT, OBSERVER_LON, null);
     });
     function riseSetForDay(riseNotSet, planetNumber) {
-      const now2 = getNow2();
+      const now2 = getNow();
       const calcDate = dateToDateInterval(now2);
       const ld = liveDate();
       const localNoon = new Date(
@@ -11812,7 +10998,7 @@
         0,
         0
       );
-      const noonDI = dateToDateInterval(new Date(localNoon.getTime() - tzDeltaMs2));
+      const noonDI = dateToDateInterval(new Date(localNoon.getTime() - tzDeltaMs));
       const fwdResult = planetaryRiseSetTimeRefined(
         noonDI,
         OBSERVER_LAT,
@@ -11840,12 +11026,12 @@
       return NaN;
     }
     function isSameLocalDay(di1, di2) {
-      const d1 = new Date((di1 + 978307200) * 1e3 + tzDeltaMs2);
-      const d2 = new Date((di2 + 978307200) * 1e3 + tzDeltaMs2);
+      const d1 = new Date((di1 + 978307200) * 1e3 + tzDeltaMs);
+      const d2 = new Date((di2 + 978307200) * 1e3 + tzDeltaMs);
       return d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
     }
     function riseSetAngles(di) {
-      const d = new Date((di + 978307200) * 1e3 + tzDeltaMs2);
+      const d = new Date((di + 978307200) * 1e3 + tzDeltaMs);
       return {
         hour12: d.getHours() % 12 + d.getMinutes() / 60 + d.getSeconds() / 3600,
         minute: d.getMinutes() + d.getSeconds() / 60,
@@ -11875,78 +11061,78 @@
       return isNaN(ss) ? 0 : riseSetAngles(ss).minute * 2 * Math.PI / 60;
     });
     functions.set("moonAltitude", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return moonAltitude(di, OBSERVER_LAT, OBSERVER_LON, null);
     });
     functions.set("moonAzimuth", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return moonAzimuth(di, OBSERVER_LAT, OBSERVER_LON, null);
     });
     functions.set("moonAgeAngle", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return moonAge(di, null).age;
     });
     functions.set("moonRelativePositionAngle", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return moonRelativePositionAngle(di, OBSERVER_LAT, OBSERVER_LON, null);
     });
     functions.set("moonRelativeAngle", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return moonRelativeAngle(di, OBSERVER_LAT, OBSERVER_LON, null);
     });
     functions.set("realMoonAgeAngle", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       const ageRadians = moonAge(di, null).age;
       const kECLunarCycleInDays = 29.530588;
       return ageRadians / (2 * Math.PI) * kECLunarCycleInDays;
     });
     functions.set("moonElongation", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return moonElongation(di, OBSERVER_LAT, OBSERVER_LON, null);
     });
     functions.set("closestNewMoonDayNumber", () => {
-      return closestPhaseDayNumber(0, dateToDateInterval(getNow2())) - 1;
+      return closestPhaseDayNumber(0, dateToDateInterval(getNow())) - 1;
     });
     functions.set("closestFirstQuarterDayNumber", () => {
-      return closestPhaseDayNumber(Math.PI / 2, dateToDateInterval(getNow2())) - 1;
+      return closestPhaseDayNumber(Math.PI / 2, dateToDateInterval(getNow())) - 1;
     });
     functions.set("closestFullMoonDayNumber", () => {
-      return closestPhaseDayNumber(Math.PI, dateToDateInterval(getNow2())) - 1;
+      return closestPhaseDayNumber(Math.PI, dateToDateInterval(getNow())) - 1;
     });
     functions.set("closestThirdQuarterDayNumber", () => {
-      return closestPhaseDayNumber(3 * Math.PI / 2, dateToDateInterval(getNow2())) - 1;
+      return closestPhaseDayNumber(3 * Math.PI / 2, dateToDateInterval(getNow())) - 1;
     });
     functions.set("ELongitudeOfPlanet", (n) => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return planetEclipticLongitude(n, di, null);
     });
     functions.set("HLongitudeOfPlanet", (n) => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, null);
       return WB_planetHeliocentricLongitude(n, julianCenturiesSince2000Epoch / 100);
     });
     functions.set("ELatitudeOfPlanet", (n) => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return planetEclipticLatitude(n, di, null);
     });
     functions.set("distanceFromEarthOfPlanet", (n) => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return planetGeocentricDistance(n, di, null);
     });
     functions.set("azimuthOfPlanet", (planetNumber) => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       if (planetNumber === 0 /* Sun */) return sunAzimuth(di, OBSERVER_LAT, OBSERVER_LON, null);
       if (planetNumber === 1 /* Moon */) return moonAzimuth(di, OBSERVER_LAT, OBSERVER_LON, null);
       return planetAltAz(planetNumber, di, OBSERVER_LAT, OBSERVER_LON, true, false, null);
     });
     functions.set("altitudeOfPlanet", (planetNumber) => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       if (planetNumber === 0 /* Sun */) return sunAltitude(di, OBSERVER_LAT, OBSERVER_LON, null);
       if (planetNumber === 1 /* Moon */) return moonAltitude(di, OBSERVER_LAT, OBSERVER_LON, null);
       return planetAltAz(planetNumber, di, OBSERVER_LAT, OBSERVER_LON, true, true, null);
     });
     functions.set("RAOfPlanet", (planetNumber) => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, null);
       if (planetNumber === 0 /* Sun */) {
         return sunRAandDecl(di, null).rightAscension;
@@ -11958,7 +11144,7 @@
       return pos.apparentRightAscension;
     });
     functions.set("declinationOfPlanet", (planetNumber) => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, null);
       if (planetNumber === 0 /* Sun */) {
         return sunRAandDecl(di, null).declination;
@@ -11970,12 +11156,12 @@
       return pos.apparentDeclination;
     });
     functions.set("HLatitudeOfPlanet", (n) => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, null);
       return WB_planetHeliocentricLatitude(n, julianCenturiesSince2000Epoch / 100);
     });
     function transitForDay(planetNumber) {
-      const now2 = getNow2();
+      const now2 = getNow();
       const di = dateToDateInterval(now2);
       const utcNowSec = di + 978307200;
       const localNowSec = utcNowSec + tzOffsetSeconds;
@@ -12060,7 +11246,7 @@
       return transitForDay(planetNumber);
     });
     function nextRiseSet(riseNotSet, planetNumber) {
-      const now2 = getNow2();
+      const now2 = getNow();
       const calcDate = dateToDateInterval(now2);
       const fudgeDate = calcDate + 60;
       const result1 = planetaryRiseSetTimeRefined(
@@ -12102,7 +11288,7 @@
       return NaN;
     }
     function nextTransit(planetNumber) {
-      const now2 = getNow2();
+      const now2 = getNow();
       const calcDate = dateToDateInterval(now2);
       const result1 = planettransitTimeRefined(
         calcDate + 60,
@@ -12140,7 +11326,7 @@
       return nextTransit(planetNumber);
     });
     function prevRiseSet(riseNotSet, planetNumber) {
-      const now2 = getNow2();
+      const now2 = getNow();
       const calcDate = dateToDateInterval(now2);
       const fudgeDate = calcDate - 60;
       const result1 = planetaryRiseSetTimeRefined(
@@ -12182,7 +11368,7 @@
       return NaN;
     }
     function prevTransit(planetNumber) {
-      const now2 = getNow2();
+      const now2 = getNow();
       const calcDate = dateToDateInterval(now2);
       const result1 = planettransitTimeRefined(
         calcDate - 60,
@@ -12220,7 +11406,7 @@
       return prevTransit(planetNumber);
     });
     functions.set("planetMoonAgeAngle", (planetNumber) => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       if (planetNumber === 0 /* Sun */) return Math.PI;
       if (planetNumber === 1 /* Moon */) return moonAge(di, null).age;
       const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, null);
@@ -12241,7 +11427,7 @@
       return moonAgeVal;
     });
     functions.set("planetRelativePositionAngle", (planetNumber) => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       if (planetNumber === 1 /* Moon */) {
         return moonRelativePositionAngle(di, OBSERVER_LAT, OBSERVER_LON, null);
       }
@@ -12285,29 +11471,29 @@
     functions.set("VeneziaTapsEnabled", () => 0);
     functions.set("saveBody", (_n) => 0);
     functions.set("lunarAscendingNodeLongitude", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return lunarAscendingNodeLongitude(di, null);
     });
     functions.set("moonDeltaEclipticLongitudeAtDeltaDay", (n) => {
       const nowDate = liveDate();
       const targetMidnight = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() + n);
-      const requestedDI = dateToDateInterval(new Date(targetMidnight.getTime() - tzDeltaMs2));
+      const requestedDI = dateToDateInterval(new Date(targetMidnight.getTime() - tzDeltaMs));
       return moonAge(requestedDI, null).age;
     });
     const MS_PER_DAY = 864e5;
     const tzOffsetMs = tzOffsetSeconds * 1e3;
-    const localDayNum = () => Math.floor((getNow2().getTime() + tzOffsetMs) / MS_PER_DAY);
+    const localDayNum = () => Math.floor((getNow().getTime() + tzOffsetMs) / MS_PER_DAY);
     functions.set("delOnDayTintColor", (n) => {
-      return (localDayNum() + n) % 2 === 0 ? env2.variables.get("delOnDayTintColorA") : env2.variables.get("delOnDayTintColorB");
+      return (localDayNum() + n) % 2 === 0 ? env.variables.get("delOnDayTintColorA") : env.variables.get("delOnDayTintColorB");
     });
     functions.set("delOnDayStrokeColor", (n) => {
-      return (localDayNum() + n) % 2 === 0 ? env2.variables.get("delOnDayStrokeColorA") : env2.variables.get("delOnDayStrokeColorB");
+      return (localDayNum() + n) % 2 === 0 ? env.variables.get("delOnDayStrokeColorA") : env.variables.get("delOnDayStrokeColorB");
     });
     functions.set("delOnDayTintNColor", (n) => {
-      return (localDayNum() + n) % 2 === 0 ? env2.variables.get("delOnDayTintNColorA") : env2.variables.get("delOnDayTintNColorB");
+      return (localDayNum() + n) % 2 === 0 ? env.variables.get("delOnDayTintNColorA") : env.variables.get("delOnDayTintNColorB");
     });
     functions.set("delOnDayStrokeNColor", (n) => {
-      return (localDayNum() + n) % 2 === 0 ? env2.variables.get("delOnDayStrokeNColorA") : env2.variables.get("delOnDayStrokeNColorB");
+      return (localDayNum() + n) % 2 === 0 ? env.variables.get("delOnDayStrokeNColorA") : env.variables.get("delOnDayStrokeNColorB");
     });
     functions.set("moonriseForDayValid", () => {
       return isNaN(riseSetForDay(true, 1 /* Moon */)) ? 0 : 1;
@@ -12379,10 +11565,10 @@
       }
     } catch {
     }
-    env2.variables.set("calendarWeekdayStart", calendarWeekdayStart);
+    env.variables.set("calendarWeekdayStart", calendarWeekdayStart);
     functions.set("calendarWeekdayStart", () => calendarWeekdayStart);
     const weekdayNumber = () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return weekdayFromTimeInterval(di, tzOffsetSeconds);
     };
     const weekdayNumberAsCalendarColumn = () => {
@@ -12432,17 +11618,17 @@
     });
     functions.set("terminatorAngle", terminatorAngle);
     functions.set("EOTAngle", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       const eotSec = EOTSeconds(di, null);
       return eotSec * Math.PI / (12 * 3600);
     });
-    functions.set("EOTSeconds", () => EOTSeconds(dateToDateInterval(getNow2()), null));
+    functions.set("EOTSeconds", () => EOTSeconds(dateToDateInterval(getNow()), null));
     functions.set("vernalEquinoxAngle", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return GSTDifferenceForDate(di, null);
     });
     functions.set("J2000RAofVernalEquinoxOfDateAngle", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, null);
       return -generalPrecessionSinceJ2000(julianCenturiesSince2000Epoch);
     });
@@ -12451,7 +11637,7 @@
         0 /* Sun */,
         0,
         0,
-        getNow2,
+        getNow,
         OBSERVER_LAT,
         OBSERVER_LON,
         pool,
@@ -12463,7 +11649,7 @@
         0 /* Sun */,
         1,
         0,
-        getNow2,
+        getNow,
         OBSERVER_LAT,
         OBSERVER_LON,
         pool,
@@ -12475,7 +11661,7 @@
         0 /* Sun */,
         2,
         0,
-        getNow2,
+        getNow,
         OBSERVER_LAT,
         OBSERVER_LON,
         pool,
@@ -12487,7 +11673,7 @@
         0 /* Sun */,
         3,
         0,
-        getNow2,
+        getNow,
         OBSERVER_LAT,
         OBSERVER_LON,
         pool,
@@ -12501,7 +11687,7 @@
       return isNaN(riseSetForDay(false, 0 /* Sun */)) ? 0 : 1;
     });
     functions.set("planetIsUp", (n) => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return planetIsUpForRiseSet(n, di, OBSERVER_LAT, OBSERVER_LON) ? 1 : 0;
     });
     function sunriseHour24ForDay() {
@@ -12509,7 +11695,7 @@
       if (isNaN(sr)) {
         return 6;
       }
-      const d = new Date((sr + 978307200) * 1e3 + tzDeltaMs2);
+      const d = new Date((sr + 978307200) * 1e3 + tzDeltaMs);
       return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
     }
     function sunsetHour24ForDay() {
@@ -12517,11 +11703,11 @@
       if (isNaN(ss)) {
         return 18;
       }
-      const d = new Date((ss + 978307200) * 1e3 + tzDeltaMs2);
+      const d = new Date((ss + 978307200) * 1e3 + tzDeltaMs);
       return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
     }
     function sunriseSunsetBracketing() {
-      const calcDate = dateToDateInterval(getNow2());
+      const calcDate = dateToDateInterval(getNow());
       const fudgeFactorSeconds = 5;
       const lookahead = 3600 * 13.2;
       const planetIsUp = planetIsUpForRiseSet(0 /* Sun */, calcDate, OBSERVER_LAT, OBSERVER_LON);
@@ -12550,7 +11736,7 @@
       const riseDI = riseResult.eventTime;
       const setDI = setResult.eventTime;
       function diToHour24(di) {
-        const d = new Date((di + 978307200) * 1e3 + tzDeltaMs2);
+        const d = new Date((di + 978307200) * 1e3 + tzDeltaMs);
         return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
       }
       if (isNoRiseSet(riseDI) && isNoRiseSet(setDI)) {
@@ -12618,7 +11804,7 @@
       }
     });
     functions.set("solarNoonAngle", () => {
-      const calcDate = dateToDateInterval(getNow2());
+      const calcDate = dateToDateInterval(getNow());
       const transitDI = planettransitTimeRefined(
         calcDate,
         OBSERVER_LAT,
@@ -12696,11 +11882,11 @@
     functions.set("locationIndicatorColor", () => 0);
     functions.set("skew", () => 0);
     functions.set("sunRA", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return sunRAandDecl(di, null).rightAscension;
     });
     functions.set("moonRA", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return moonRAAndDecl(di, null).rightAscension;
     });
     functions.set("minuteValue", () => {
@@ -12714,12 +11900,12 @@
       return fmod(secSinceMidnight / 60, 60) * 2 * Math.PI / 60;
     });
     functions.set("lstValue", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       const lstRadians = localSiderealTime(di, OBSERVER_LON, null);
       return lstRadians * (12 * 3600) / Math.PI;
     });
     functions.set("lunarAscendingNodeRA", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, null);
       const longitude = WB_MoonAscendingNodeLongitude(julianCenturiesSince2000Epoch);
       const { nutation, obliquity } = WB_nutationObliquity(julianCenturiesSince2000Epoch / 100);
@@ -12729,45 +11915,45 @@
       return ra;
     });
     functions.set("eclipseSeparation", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return calculateEclipse(di, OBSERVER_LAT, OBSERVER_LON, null).abstractSeparation;
     });
     functions.set("eclipseKind", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       let value = calculateEclipse(di, OBSERVER_LAT, OBSERVER_LON, null).eclipseKind;
       if (value > 0) value--;
       return value;
     });
     functions.set("legacyEclipseKind", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       let value = calculateEclipse(di, OBSERVER_LAT, OBSERVER_LON, null).eclipseKind;
       if (value > 0) value--;
       return value;
     });
     functions.set("eclipseAngularSeparation", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return calculateEclipse(di, OBSERVER_LAT, OBSERVER_LON, null).angularSeparation;
     });
     functions.set("eclipseShadowAngularSize", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return calculateEclipse(di, OBSERVER_LAT, OBSERVER_LON, null).shadowAngularSize;
     });
     functions.set("eclipseKindRaw", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return calculateEclipse(di, OBSERVER_LAT, OBSERVER_LON, null).eclipseKind;
     });
     functions.set("year366IndicatorAngle", () => {
       return computeYear366IndicatorFraction(liveDate()) * 2 * Math.PI;
     });
     functions.set("closestSunEclipticLongitudeQuarter366IndicatorAngle", (quarterNumber) => {
-      return computeClosestSunEclipticLongQuarter366Angle(quarterNumber, getNow2(), tzDeltaMs2);
+      return computeClosestSunEclipticLongQuarter366Angle(quarterNumber, getNow(), tzDeltaMs);
     });
     functions.set("planetrise24HourIndicatorAngleLST", (planetNumber) => {
       return computeDayNightLeafAngleLST(
         planetNumber,
         0,
         0,
-        getNow2,
+        getNow,
         OBSERVER_LAT,
         OBSERVER_LON,
         pool,
@@ -12779,7 +11965,7 @@
         planetNumber,
         1,
         0,
-        getNow2,
+        getNow,
         OBSERVER_LAT,
         OBSERVER_LON,
         pool,
@@ -12790,7 +11976,7 @@
       if (numLeaves === 0 && (leafNumber === 0 || leafNumber === 1)) {
         const cache = getPlanetRiseSetCache(
           planetNumber,
-          getNow2,
+          getNow,
           OBSERVER_LAT,
           OBSERVER_LON,
           pool,
@@ -12802,7 +11988,7 @@
         planetNumber,
         leafNumber,
         numLeaves,
-        getNow2,
+        getNow,
         OBSERVER_LAT,
         OBSERVER_LON,
         pool,
@@ -12814,7 +12000,7 @@
         planetNumber,
         leafNumber,
         numLeaves,
-        getNow2,
+        getNow,
         OBSERVER_LAT,
         OBSERVER_LON,
         pool,
@@ -12826,7 +12012,7 @@
         planetNumber,
         4,
         0,
-        getNow2,
+        getNow,
         OBSERVER_LAT,
         OBSERVER_LON,
         pool,
@@ -12836,7 +12022,7 @@
     functions.set("dayNightLeafAngleIsRiseSet", (planetNumber, leafNumber) => {
       const cache = getPlanetRiseSetCache(
         planetNumber,
-        getNow2,
+        getNow,
         OBSERVER_LAT,
         OBSERVER_LON,
         pool,
@@ -12847,7 +12033,7 @@
     functions.set("dayNightLeafAngleAboveHorizon", (planetNumber, leafNumber) => {
       const cache = getPlanetRiseSetCache(
         planetNumber,
-        getNow2,
+        getNow,
         OBSERVER_LAT,
         OBSERVER_LON,
         pool,
@@ -12858,7 +12044,7 @@
     functions.set("sunSpecialAngle", (kind) => {
       const result = computeSunSpecial24HourAngle(
         kind,
-        getNow2,
+        getNow,
         OBSERVER_LAT,
         OBSERVER_LON,
         pool,
@@ -12867,7 +12053,7 @@
       return result.valid ? result.angle : NaN;
     });
     functions.set("solarNoonAngle24h", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       const transitDI = planettransitTimeRefined(
         di,
         OBSERVER_LAT,
@@ -12879,16 +12065,16 @@
       return angle24HourForDate(transitDI, tzOffsetSeconds);
     });
     functions.set("solarTimeSec", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       const eotSec = EOTSeconds(di, null);
-      const utcMs = getNow2().getTime();
+      const utcMs = getNow().getTime();
       const localSeconds = (utcMs / 1e3 + tzOffsetSeconds) % 86400;
       const secSinceMidnight = (localSeconds % 86400 + 86400) % 86400;
       const solarSec = secSinceMidnight + OBSERVER_LON * 86400 / (2 * Math.PI) - tzOffsetSeconds + eotSec;
       return (solarSec % 86400 + 86400) % 86400;
     });
     functions.set("planetTransitAngle", (planetNumber) => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       const transitDI = planettransitTimeRefined(
         di,
         OBSERVER_LAT,
@@ -12908,13 +12094,13 @@
     functions.set("utcSecondAngle", () => liveTime().s * 2 * Math.PI / 60);
     functions.set("tzOffset", () => tzOffsetSeconds);
     functions.set("subSolarLatitude", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       return sunRAandDecl(di, null).declination;
     });
     functions.set("subSolarLongitude", () => {
-      const di = dateToDateInterval(getNow2());
+      const di = dateToDateInterval(getNow());
       const eotSec = EOTSeconds(di, null);
-      const utcMs = getNow2().getTime();
+      const utcMs = getNow().getTime();
       const localSeconds = (utcMs / 1e3 + tzOffsetSeconds) % 86400;
       const secSinceMidnight = (localSeconds % 86400 + 86400) % 86400;
       const solarTimeAtGreenwich = secSinceMidnight - tzOffsetSeconds + eotSec;
@@ -12923,10 +12109,10 @@
       while (sslng > Math.PI) sslng -= 2 * Math.PI;
       return sslng;
     });
-    if (!env2.variables.has("noonOnTop")) {
-      env2.variables.set("noonOnTop", 0);
+    if (!env.variables.has("noonOnTop")) {
+      env.variables.set("noonOnTop", 0);
     }
-    return { pool, tzDeltaMs: tzDeltaMs2, tzOffsetSeconds };
+    return { pool, tzDeltaMs, tzOffsetSeconds };
   }
   function angle24HourForDate(dateInterval, tzOffsetSeconds) {
     const utcSeconds = dateInterval + 978307200;
@@ -13055,11 +12241,11 @@
     planetRiseSetCaches.set(key, cache);
     return cache;
   }
-  function getPlanetRiseSetCache(planetNumber, getNow2, observerLat, observerLon, pool, tzOffsetSeconds) {
+  function getPlanetRiseSetCache(planetNumber, getNow, observerLat, observerLon, pool, tzOffsetSeconds) {
     if (planetNumber === 11 /* MidnightSun */) {
       planetNumber = 0 /* Sun */;
     }
-    const calcDate = dateToDateInterval(getNow2());
+    const calcDate = dateToDateInterval(getNow());
     const key = riseSetCacheKey(planetNumber, observerLat, observerLon, tzOffsetSeconds);
     const existing = planetRiseSetCaches.get(key);
     if (existing && existing.cachedDateInterval === calcDate) {
@@ -13074,8 +12260,8 @@
       tzOffsetSeconds
     );
   }
-  function computeDayNightLeafAngle(planetNumber, leafNumber, numLeaves, getNow2, observerLat, observerLon, pool, tzOffsetSeconds) {
-    const calcDate = dateToDateInterval(getNow2());
+  function computeDayNightLeafAngle(planetNumber, leafNumber, numLeaves, getNow, observerLat, observerLon, pool, tzOffsetSeconds) {
+    const calcDate = dateToDateInterval(getNow());
     const fudgeFactorSeconds = 5;
     const lookahead = 3600 * 13.2;
     const nightTime = planetNumber === 11 /* MidnightSun */;
@@ -13085,7 +12271,7 @@
     if (numLeaves === 0) {
       const cache = getPlanetRiseSetCache(
         planetNumber,
-        getNow2,
+        getNow,
         observerLat,
         observerLon,
         pool,
@@ -13267,9 +12453,9 @@
         return { altitude: 30 * Math.PI / 180, riseNotSet: false };
     }
   }
-  function computeSunSpecial24HourAngle(altitudeKind, getNow2, observerLat, observerLon, pool, tzOffsetSeconds) {
+  function computeSunSpecial24HourAngle(altitudeKind, getNow, observerLat, observerLon, pool, tzOffsetSeconds) {
     const { altitude, riseNotSet } = getParamsForAltitudeKind(altitudeKind);
-    const calcDate = dateToDateInterval(getNow2());
+    const calcDate = dateToDateInterval(getNow());
     const fudgeFactorSeconds = 5;
     const lookahead = 3600 * 13.2;
     if (altitudeKind === 0 /* SunRiseMorning */ || altitudeKind === 1 /* SunSetEvening */) {
@@ -13395,22 +12581,22 @@
     const kECSecondsInTropicalYear = 3600 * 24 * 365.2422;
     return tryDate + deltaAngleToTarget * kECSecondsInTropicalYear / (2 * Math.PI);
   }
-  function computeClosestSunEclipticLongQuarter366Angle(quarterNumber, nowDate, tzDeltaMs2) {
+  function computeClosestSunEclipticLongQuarter366Angle(quarterNumber, nowDate, tzDeltaMs) {
     const calcDate = dateToDateInterval(nowDate);
     const targetSunLong = quarterNumber * Math.PI / 2;
     let tryDate = timeOfClosestSunEclipticLongitude(targetSunLong, calcDate);
     tryDate = timeOfClosestSunEclipticLongitude(targetSunLong, tryDate);
     tryDate = timeOfClosestSunEclipticLongitude(targetSunLong, tryDate);
     const targetTime = timeOfClosestSunEclipticLongitude(targetSunLong, tryDate);
-    const targetDate = new Date((targetTime + 978307200) * 1e3 + tzDeltaMs2);
+    const targetDate = new Date((targetTime + 978307200) * 1e3 + tzDeltaMs);
     return computeYear366IndicatorFraction(targetDate) * 2 * Math.PI;
   }
   function angle24HourLSTForDate(dateInterval, observerLon) {
     const lstRadians = localSiderealTime(dateInterval, observerLon, null);
     return fmod(lstRadians, 2 * Math.PI);
   }
-  function computeDayNightLeafAngleLST(planetNumber, leafNumber, numLeaves, getNow2, observerLat, observerLon, pool, tzOffsetSeconds) {
-    const calcDate = dateToDateInterval(getNow2());
+  function computeDayNightLeafAngleLST(planetNumber, leafNumber, numLeaves, getNow, observerLat, observerLon, pool, tzOffsetSeconds) {
+    const calcDate = dateToDateInterval(getNow());
     const fudgeFactorSeconds = 5;
     const lookahead = 3600 * 13.2;
     const planetIsUp = planetIsUpForRiseSet(planetNumber, calcDate, observerLat, observerLon);
@@ -13509,468 +12695,594 @@
     return leafCenterAngle;
   }
 
-  // src/shared/obs-value.ts
-  var JUMP = Infinity;
-  function createObsValue(def, env2, perfNow, getNow2) {
-    return createObsValueFromAST({ ...def, expr: parse(def.expr) }, env2, perfNow, getNow2);
-  }
-  function createObsValueFromAST(def, env2, perfNow, _getNow) {
-    const expr = def.expr;
-    const initialValue = evalAttr(expr, env2);
-    const animSpeed = def.animSpeed ?? 2;
-    const naturalSpeed = def.naturalSpeed ?? 0;
-    const linear = def.linear ?? false;
-    const period = linear ? Infinity : def.period ?? 2 * Math.PI;
-    return {
-      name: def.name,
-      expr,
-      updateInterval: def.updateInterval,
-      animSpeed,
-      naturalSpeed,
-      currentValue: initialValue,
-      anim: makeAnimatingValue(initialValue, perfNow),
-      // Schedule immediate update on first frame so animation starts right away.
-      nextUpdateDisplayTime: 0,
-      nextUpdateTime: 0,
-      pendingSweep: null,
-      pendingTarget: null,
-      ahead: [],
-      aheadPending: [],
-      linear,
-      period,
-      evalAhead: def.evalAhead ?? false,
-      onBeat: def.onBeat ?? false,
-      discrete: def.discrete ?? false
-    };
-  }
-
-  // src/shared/time-controller.ts
-  var RATE_OPTIONS = [
-    { label: "10\xD7", unit: "second" },
-    { label: "10 min/s", unit: "minute" },
-    { label: "10 hr/s", unit: "hour" },
-    { label: "10 day/s", unit: "day" },
-    { label: "10 mo/s", unit: "month" },
-    { label: "10 yr/s", unit: "year" }
+  // src/watch/analemma.ts
+  var REF_LAT_RAD = 45 * Math.PI / 180;
+  var REF_EPOCH_SECONDS = (() => {
+    const d = new Date(Date.UTC(2024, 2, 20, 12, 0, 0));
+    return d.getTime() / 1e3 - 978307200;
+  })();
+  var PATH_SAMPLE_COUNT = 1e3;
+  var MEAN_TROPICAL_YEAR_SECONDS2 = 365.2421897 * 86400;
+  var SEASON_TARGETS = [
+    { longitude: 0, color: "#22aa22" },
+    // Vernal equinox — green
+    { longitude: Math.PI / 2, color: "#ddcc00" },
+    // Summer solstice — yellow
+    { longitude: Math.PI, color: "#ee7722" },
+    // Autumnal equinox — orange
+    { longitude: 3 * Math.PI / 2, color: "#2266cc" }
+    // Winter solstice — blue
   ];
-  var TICK_INTERVAL_MS = 100;
-  function displaySecondsPerTick(unit) {
-    switch (unit) {
-      case "second":
-        return 1;
-      case "minute":
-        return 60;
-      case "hour":
-        return 3600;
-      case "day":
-        return 86400;
-      case "month":
-        return 30 * 86400;
-      // approximate
-      case "year":
-        return 365 * 86400;
-    }
-  }
-  function advanceByUnit(date, unit, direction) {
-    switch (unit) {
-      case "second":
-        return new Date(date.getTime() + direction * 1e3);
-      case "minute":
-        return new Date(date.getTime() + direction * 6e4);
-      case "hour":
-        return new Date(date.getTime() + direction * 36e5);
-      case "day":
-        return new Date(date.getTime() + direction * 864e5);
-      case "month": {
-        const di = dateToDateInterval(date);
-        const newDI = addMonthsToTimeInterval(di, 0, direction);
-        return dateIntervalToDate(newDI);
-      }
-      case "year": {
-        const di = dateToDateInterval(date);
-        const newDI = addYearsToTimeInterval(di, 0, direction);
-        return dateIntervalToDate(newDI);
-      }
-    }
-  }
-  function snapToUnit(date, unit, direction) {
-    const d = new Date(date.getTime());
-    switch (unit) {
-      case "second":
-        d.setMilliseconds(0);
-        if (direction > 0 && date.getMilliseconds() > 0) {
-          d.setSeconds(d.getSeconds() + 1);
-        }
-        break;
-      case "minute":
-        d.setMilliseconds(0);
-        d.setSeconds(0);
-        if (direction > 0 && (date.getSeconds() > 0 || date.getMilliseconds() > 0)) {
-          d.setMinutes(d.getMinutes() + 1);
-        }
-        break;
-      case "hour":
-        d.setMilliseconds(0);
-        d.setSeconds(0);
-        d.setMinutes(0);
-        if (direction > 0 && (date.getMinutes() > 0 || date.getSeconds() > 0 || date.getMilliseconds() > 0)) {
-          d.setHours(d.getHours() + 1);
-        }
-        break;
-      case "day":
-        d.setMilliseconds(0);
-        d.setSeconds(0);
-        d.setMinutes(0);
-        d.setHours(0);
-        if (direction > 0 && (date.getHours() > 0 || date.getMinutes() > 0 || date.getSeconds() > 0 || date.getMilliseconds() > 0)) {
-          d.setDate(d.getDate() + 1);
-        }
-        break;
-      case "month": {
-        const di = dateToDateInterval(date);
-        const cs = localComponentsFromTimeInterval(di, 0);
-        const needAdvance = direction > 0 && (cs.day > 1 || cs.hour > 0 || cs.minute > 0 || cs.seconds > 0);
-        let snapDI = timeIntervalFromLocalComponents(0, cs.era, cs.year, cs.month, 1, 0, 0, 0);
-        if (needAdvance) {
-          snapDI = addMonthsToTimeInterval(snapDI, 0, 1);
-        }
-        return dateIntervalToDate(snapDI);
-      }
-      case "year": {
-        const di = dateToDateInterval(date);
-        const cs = localComponentsFromTimeInterval(di, 0);
-        const needAdvance = direction > 0 && (cs.month > 1 || cs.day > 1 || cs.hour > 0 || cs.minute > 0 || cs.seconds > 0);
-        let snapDI = timeIntervalFromLocalComponents(0, cs.era, cs.year, 1, 1, 0, 0, 0);
-        if (needAdvance) {
-          snapDI = addYearsToTimeInterval(snapDI, 0, 1);
-        }
-        return dateIntervalToDate(snapDI);
-      }
-    }
-    return d;
-  }
-  var TimeController = class {
-    constructor() {
-      // --- Offset mode (1× with offset) ---
-      /** Millisecond offset from real time (used in 1× and -1× modes) */
-      this.offsetMs = 0;
-      // --- Quantized tick mode ---
-      /** Current rate option, or null for 1×/-1× */
-      this.rate = null;
-      /** Direction: 1 = forward, -1 = reverse */
-      this.direction = 1;
-      /** Whether time is stopped */
-      this.stopped = false;
-      /** The simulated time at the most recent tick boundary */
-      this.tickTime = /* @__PURE__ */ new Date();
-      /** The next tick target (for interpolation) */
-      this.nextTickTime = /* @__PURE__ */ new Date();
-      /** performance.now() of the most recent tick */
-      this.lastTickRealMs = 0;
-      /** Callback fired on each tick (engine rebuilds caches, renders) */
-      this.onTick = null;
-      /**
-       * Per-frame snapshot: when set, getDisplayTime() returns this value
-       * instead of recomputing, ensuring all parts in a single render frame
-       * see exactly the same time.
-       */
-      this.frameSnapshot = null;
-      // ========================================================================
-      // Internal helpers
-      // ========================================================================
-      /**
-       * Set up offset for -1× mode. In -1× mode, time runs backward:
-       * each real ms that passes subtracts 1ms from the simulated time.
-       * We represent this as an offset that decreases by 2× real elapsed
-       * (since Date.now() increases by 1ms per ms, we need -2ms offset
-       * per ms to get net -1ms/ms).
-       *
-       * Actually, simpler approach: we store an anchor and compute
-       * the simulated time as: anchor - (realNow - anchorReal).
-       * This is equivalent to offsetMs decreasing by 2 per real ms.
-       *
-       * For simplicity, we'll track the offset differently for -1×:
-       * simTime = 2 * anchorReal - realNow + originalOffset
-       * i.e. offsetMs is set to 2 * anchorReal + originalOffset - Date.now()
-       * but this drifts... Let's just use a stable anchor approach.
-       */
-      this.reverseAnchorRealMs = 0;
-      this.reverseAnchorSimMs = 0;
-    }
-    // ========================================================================
-    // Public getters
-    // ========================================================================
-    /** Is this running at real time with no offset? */
-    get isRealTime() {
-      return this.rate === null && this.direction === 1 && !this.stopped && this.offsetMs === 0;
-    }
-    /** Get the current rate option (null = 1×) */
-    get currentRate() {
-      return this.rate;
-    }
-    /** Get the current direction */
-    get currentDirection() {
-      return this.direction;
-    }
-    /** Is time stopped? */
-    get isStopped() {
-      return this.stopped;
-    }
-    /** Millisecond offset from real time (used in 1× mode). */
-    get timeOffset() {
-      return this.offsetMs;
-    }
-    /** Human-readable status label */
-    get statusLabel() {
-      if (this.stopped) return "Stopped";
-      if (this.rate === null) {
-        if (this.direction === -1) return "1\xD7 \u25C0";
-        if (this.offsetMs !== 0) return "1\xD7";
-        return "1\xD7 (real time)";
-      }
-      return `${this.rate.label} ${this.direction === 1 ? "\u25B6" : "\u25C0"}`;
-    }
-    // ========================================================================
-    // Core time computation
-    // ========================================================================
-    /**
-     * Get the current display time.
-     *
-     * If beginFrame() has been called, returns the frozen snapshot so all
-     * parts within a single render frame see exactly the same time.
-     *
-     * Otherwise computes the time:
-     * - In 1× mode: real time + offset
-     * - In -1× mode: time flows backward from an anchor
-     * - In stopped mode: frozen tickTime
-     * - In quantized mode: interpolation between tickTime and nextTickTime
-     */
-    getDisplayTime() {
-      if (this.frameSnapshot !== null) {
-        return this.frameSnapshot;
-      }
-      return this._computeDisplayTime();
-    }
-    /**
-     * Snapshot the current display time for the duration of a render frame.
-     * All calls to getDisplayTime() will return this exact value until
-     * endFrame() is called.
-     */
-    beginFrame() {
-      this.frameSnapshot = this._computeDisplayTime();
-    }
-    /**
-     * Release the per-frame snapshot, allowing getDisplayTime() to
-     * compute fresh values again.
-     */
-    endFrame() {
-      this.frameSnapshot = null;
-    }
-    /** Internal: compute the display time without snapshotting. */
-    _computeDisplayTime() {
-      if (this.rate === null && !this.stopped) {
-        if (this.direction === -1) {
-          const realNow = Date.now();
-          const elapsed = realNow - this.reverseAnchorRealMs;
-          return new Date(this.reverseAnchorSimMs - elapsed);
-        }
-        return new Date(Date.now() + this.offsetMs);
-      }
-      if (this.stopped) {
-        return new Date(this.tickTime.getTime());
-      }
-      return new Date(this.tickTime.getTime());
-    }
-    // ========================================================================
-    // Tick logic (called from RAF loop)
-    // ========================================================================
-    /**
-     * Called every animation frame. Checks if a tick boundary has been
-     * crossed and fires the tick if so. Returns true if a tick occurred.
-     */
-    checkTick(nowPerfMs) {
-      if (this.rate === null || this.stopped) return false;
-      if (nowPerfMs - this.lastTickRealMs >= TICK_INTERVAL_MS) {
-        this.tickTime = new Date(this.nextTickTime.getTime());
-        this.nextTickTime = advanceByUnit(this.tickTime, this.rate.unit, this.direction);
-        this.lastTickRealMs = nowPerfMs;
-        this.onTick?.();
-        this.clampDisplayTime();
-        return true;
-      }
-      return false;
-    }
-    /**
-     * Whether the render loop should run continuously.
-     * True for quantized rates; false for stopped and 1×/-1× (which use
-     * idle-timeout scheduling with direction-aware boundary alignment).
-     */
-    get needsContinuousRender() {
-      if (this.stopped) return false;
-      if (this.rate !== null) return true;
-      return false;
-    }
-    // ========================================================================
-    // Rate / direction / time control
-    // ========================================================================
-    /**
-     * Set a quantized rate. Pass null for 1×.
-     * When activating a quantized rate, snaps time to the unit boundary.
-     */
-    setRate(rate) {
-      const prevTime = this.getDisplayTime();
-      this.stopped = false;
-      if (rate === null) {
-        this.rate = null;
-        this.offsetMs = prevTime.getTime() - Date.now();
-        if (this.direction === -1) {
-          this._setupReverseOneX(prevTime);
-        }
-        return;
-      }
-      this.rate = rate;
-      if (rate.unit === "second") {
-        this.tickTime = snapToUnit(prevTime, rate.unit, this.direction);
-      } else {
-        this.tickTime = prevTime;
-      }
-      this.nextTickTime = advanceByUnit(this.tickTime, rate.unit, this.direction);
-      this.lastTickRealMs = performance.now();
-      this.clampDisplayTime();
-      this.onTick?.();
-    }
-    /** Set direction (forward or reverse). Preserves current rate. */
-    setDirection(dir) {
-      if (dir === this.direction) return;
-      const prevTime = this.getDisplayTime();
-      this.direction = dir;
-      this.stopped = false;
-      if (this.rate === null) {
-        this._setupReverseOneX(prevTime);
-      } else {
-        this.tickTime = snapToUnit(prevTime, this.rate.unit, dir);
-        this.nextTickTime = advanceByUnit(this.tickTime, this.rate.unit, dir);
-        this.lastTickRealMs = performance.now();
-      }
-      this.clampDisplayTime();
-      this.onTick?.();
-    }
-    /** Stop time. */
-    stop() {
-      if (this.stopped) return;
-      const prevTime = this.getDisplayTime();
-      this.stopped = true;
-      this.tickTime = prevTime;
-      this.nextTickTime = prevTime;
-      this.offsetMs = prevTime.getTime() - Date.now();
-    }
-    /**
-     * Step by one calendar unit. Works whether stopped or running.
-     * While running at a quantized rate, this is an additional jump
-     * on top of the tick rhythm.
-     */
-    step(unit, dir) {
-      const prevTime = this.getDisplayTime();
-      const newTime = advanceByUnit(prevTime, unit, dir);
-      if (this.stopped || this.rate === null) {
-        this.tickTime = newTime;
-        this.nextTickTime = newTime;
-        this.offsetMs = newTime.getTime() - Date.now();
-      } else {
-        this.tickTime = snapToUnit(newTime, this.rate.unit, this.direction);
-        this.nextTickTime = advanceByUnit(this.tickTime, this.rate.unit, this.direction);
-        this.lastTickRealMs = performance.now();
-      }
-      this.clampDisplayTime();
-      this.onTick?.();
-    }
-    /** Set an exact date/time. Stops the clock. */
-    setTime(date) {
-      this.stopped = true;
-      this.tickTime = date;
-      this.nextTickTime = date;
-      this.offsetMs = date.getTime() - Date.now();
-      this.clampDisplayTime();
-      this.onTick?.();
-    }
-    /** Reset to real time, 1× forward. */
-    reset() {
-      this.offsetMs = 0;
-      this.rate = null;
-      this.direction = 1;
-      this.stopped = false;
-      this.tickTime = /* @__PURE__ */ new Date();
-      this.nextTickTime = /* @__PURE__ */ new Date();
-      this.lastTickRealMs = 0;
-      this.onTick?.();
-    }
-    /** Set millisecond offset from real time, running 1× forward. */
-    setOffset(ms) {
-      this.offsetMs = ms;
-      this.rate = null;
-      this.direction = 1;
-      this.stopped = false;
-      this.tickTime = new Date(Date.now() + ms);
-      this.nextTickTime = new Date(Date.now() + ms);
-      this.lastTickRealMs = 0;
-      this.clampDisplayTime();
-      this.onTick?.();
-    }
-    // ========================================================================
-    // Date range constraint
-    // ========================================================================
-    /**
-     * Check if the current display time exceeds the supported astronomical
-     * range (4000 BCE – 2800 CE) and constrain it. Returns true if clamping
-     * occurred.
-     *
-     * Mirrors iOS ESWatchTime::checkAndConstrainAbsoluteTime:
-     * - If time is running, stop the clock at the boundary
-     * - If time is stopped, clamp the frozen value to the boundary
-     */
-    clampDisplayTime() {
-      const t = this.getDisplayTime().getTime();
-      if (t <= MIN_DISPLAY_DATE_MS) {
-        if (!this.stopped) {
-          this.stop();
-        }
-        this.tickTime = new Date(MIN_DISPLAY_DATE_MS);
-        this.nextTickTime = new Date(MIN_DISPLAY_DATE_MS);
-        this.offsetMs = MIN_DISPLAY_DATE_MS - Date.now();
-        return true;
-      }
-      if (t >= MAX_DISPLAY_DATE_MS) {
-        if (!this.stopped) {
-          this.stop();
-        }
-        this.tickTime = new Date(MAX_DISPLAY_DATE_MS);
-        this.nextTickTime = new Date(MAX_DISPLAY_DATE_MS);
-        this.offsetMs = MAX_DISPLAY_DATE_MS - Date.now();
-        return true;
-      }
-      return false;
-    }
-    _setupReverseOneX(prevTime) {
-      if (this.direction === -1) {
-        this.reverseAnchorRealMs = Date.now();
-        this.reverseAnchorSimMs = prevTime.getTime();
-        this.offsetMs = NaN;
-      } else {
-        this.offsetMs = prevTime.getTime() - Date.now();
-      }
-    }
+
+  // src/watch/watch-env.ts
+  var CALENDAR_COVER_CODES = {
+    row1Left: 0,
+    row1Right: 1,
+    row6Left: 2,
+    row56Right: 3
   };
+  var DEFAULT_LAT_DEG = 37.205;
+  var DEFAULT_LON_DEG = -121.954;
+  var cachedBatteryLevel2 = 1;
+  var batteryInitialized = false;
+  function initBatteryState() {
+    if (batteryInitialized) return;
+    if (typeof navigator !== "undefined" && "getBattery" in navigator) {
+      batteryInitialized = true;
+      navigator.getBattery().then((battery) => {
+        cachedBatteryLevel2 = battery.level;
+        battery.addEventListener("levelchange", () => {
+          cachedBatteryLevel2 = battery.level;
+        });
+      }).catch(() => {
+      });
+    }
+  }
+  var TERRA_RING_DEFAULTS = {
+    1: { cityName: "Pago Pago", olsonId: "Pacific/Pago_Pago", lat: -14.27806, lon: -170.7025 },
+    2: { cityName: "Honolulu", olsonId: "Pacific/Honolulu", lat: 21.30694, lon: -157.85834 },
+    3: { cityName: "Anchorage", olsonId: "America/Juneau", lat: 61.21806, lon: -149.90028 },
+    4: { cityName: "Los Angeles", olsonId: "America/Los_Angeles", lat: 34.05223, lon: -118.24368 },
+    5: { cityName: "Denver", olsonId: "America/Denver", lat: 39.73915, lon: -104.9847 },
+    6: { cityName: "Chicago", olsonId: "America/Chicago", lat: 41.85003, lon: -87.65005 },
+    7: { cityName: "New York", olsonId: "America/New_York", lat: 40.71427, lon: -74.00597 },
+    8: { cityName: "Santiago", olsonId: "America/Santiago", lat: -33.42628, lon: -70.56655 },
+    9: { cityName: "Rio de Janeiro", olsonId: "America/Sao_Paulo", lat: -22.90278, lon: -43.2075 },
+    10: { cityName: "Grytviken", olsonId: "Atlantic/South_Georgia", lat: -54.27667, lon: -36.51167 },
+    11: { cityName: "Dakar", olsonId: "Africa/Dakar", lat: 14.74208, lon: -17.43978 },
+    12: { cityName: "London", olsonId: "Europe/London", lat: 51.50842, lon: -0.12553 },
+    13: { cityName: "Paris", olsonId: "Europe/Paris", lat: 48.85341, lon: 2.3488 },
+    14: { cityName: "Cairo", olsonId: "Africa/Cairo", lat: 30.05, lon: 31.25 },
+    15: { cityName: "Moscow", olsonId: "Europe/Moscow", lat: 55.75222, lon: 37.61555 },
+    16: { cityName: "Dubai", olsonId: "Asia/Dubai", lat: 25.25222, lon: 55.28 },
+    17: { cityName: "Delhi", olsonId: "Asia/Kolkata", lat: 28.66667, lon: 77.21666 },
+    18: { cityName: "Dhaka", olsonId: "Asia/Dhaka", lat: 23.72305, lon: 90.40861 },
+    19: { cityName: "Bangkok", olsonId: "Asia/Bangkok", lat: 13.75, lon: 100.51667 },
+    20: { cityName: "Hong Kong", olsonId: "Asia/Hong_Kong", lat: 22.28401, lon: 114.15007 },
+    21: { cityName: "Tokyo", olsonId: "Asia/Tokyo", lat: 35.68953, lon: 139.69168 },
+    22: { cityName: "Sydney", olsonId: "Australia/Sydney", lat: -33.86785, lon: 151.20732 },
+    23: { cityName: "Noum\xE9a", olsonId: "Pacific/Noumea", lat: -22.26667, lon: 166.45 },
+    24: { cityName: "Auckland", olsonId: "Pacific/Auckland", lat: -36.86666, lon: 174.76666 }
+  };
+  function createWatchEnvironment(watch, observerLatDeg = DEFAULT_LAT_DEG, observerLonDeg = DEFAULT_LON_DEG, getNow = () => /* @__PURE__ */ new Date(), olsonTimezone, slotOverrides, globalLocationSlot, overrides) {
+    const OBSERVER_LAT = observerLatDeg * Math.PI / 180;
+    const OBSERVER_LON = observerLonDeg * Math.PI / 180;
+    initBatteryState();
+    const env = createDefaultEnvironment();
+    env.observerLatRad = OBSERVER_LAT;
+    env.observerLonRad = OBSERVER_LON;
+    env.getNow = getNow;
+    env.variables.set("updateAtNextSunrise", EC_UPDATE_NEXT_SUNRISE);
+    env.variables.set("updateAtNextSunset", EC_UPDATE_NEXT_SUNSET);
+    env.variables.set("updateAtNextMoonrise", EC_UPDATE_NEXT_MOONRISE);
+    env.variables.set("updateAtNextMoonset", EC_UPDATE_NEXT_MOONSET);
+    env.variables.set("updateAtNextSunriseOrMidnight", EC_UPDATE_NEXT_SUNRISE_OR_MIDNIGHT);
+    env.variables.set("updateAtNextSunsetOrMidnight", EC_UPDATE_NEXT_SUNSET_OR_MIDNIGHT);
+    env.variables.set("updateAtNextMoonriseOrMidnight", EC_UPDATE_NEXT_MOONRISE_OR_MIDNIGHT);
+    env.variables.set("updateAtNextMoonsetOrMidnight", EC_UPDATE_NEXT_MOONSET_OR_MIDNIGHT);
+    env.variables.set("updateAtEnvChangeOnly", EC_UPDATE_ENV_CHANGE_ONLY);
+    env.variables.set("updateAtNextSunriseOrSunset", EC_UPDATE_NEXT_SUNRISE_OR_SUNSET);
+    env.variables.set("updateAtNextMoonriseOrMoonset", EC_UPDATE_NEXT_MOONRISE_OR_MOONSET);
+    env.variables.set("updateForTimeSyncIndicator", EC_UPDATE_ENV_CHANGE_ONLY);
+    env.variables.set("updateForLocSyncIndicator", EC_UPDATE_ENV_CHANGE_ONLY);
+    env.variables.set("planetSun", 0 /* Sun */);
+    env.variables.set("planetMoon", 1 /* Moon */);
+    env.variables.set("planetMercury", 2 /* Mercury */);
+    env.variables.set("planetVenus", 3 /* Venus */);
+    env.variables.set("planetEarth", 4 /* Earth */);
+    env.variables.set("planetMars", 5 /* Mars */);
+    env.variables.set("planetJupiter", 6 /* Jupiter */);
+    env.variables.set("planetSaturn", 7 /* Saturn */);
+    env.variables.set("planetUranus", 8 /* Uranus */);
+    env.variables.set("planetNeptune", 9 /* Neptune */);
+    env.variables.set("planetMidnightSun", 11 /* MidnightSun */);
+    env.variables.set("topAnchorClockNoon", 0);
+    env.variables.set("topAnchorClockMidnight", 1);
+    env.variables.set("topAnchorSolarNoon", 2);
+    env.variables.set("topAnchorSolarMidnight", 3);
+    const { pool, tzDeltaMs, tzOffsetSeconds } = registerAstroFunctions(
+      env,
+      OBSERVER_LAT,
+      OBSERVER_LON,
+      getNow,
+      olsonTimezone
+    );
+    for (const expr of watch.initExprs) {
+      evaluate(expr, env);
+    }
+    env.kyHandMode = 0;
+    if (overrides) {
+      if (overrides.body !== void 0) {
+        const body = overrides.body;
+        env.variables.set("body", body);
+        const bodySlot = body === 1 /* Moon */ ? 0 : body === 2 /* Mercury */ ? 1 : body === 3 /* Venus */ ? 2 : body === 5 /* Mars */ ? 3 : body === 6 /* Jupiter */ ? 4 : body === 7 /* Saturn */ ? 5 : body === 8 /* Uranus */ ? 6 : body === 9 /* Neptune */ ? 7 : body === 0 /* Sun */ ? 8 : 0.5;
+        env.variables.set("bodySlot", bodySlot);
+      }
+      if (overrides.noonOnTop) {
+        env.variables.set("noonOnTop", 1);
+        env.variables.set("dialFlip", Math.PI);
+      }
+      if (overrides.kyMode !== void 0) {
+        env.variables.set("kyMode", overrides.kyMode);
+      }
+      if (overrides.kyHandMode !== void 0) {
+        env.kyHandMode = overrides.kyHandMode;
+      }
+    }
+    env.functions.set("kyotoHandMode", () => env.kyHandMode);
+    env.functions.set("kyotoMasterRotation", () => {
+      if (env.kyHandMode === 0) {
+        return 0;
+      }
+      const kmode = env.variables.get("kyMode") || 0;
+      if (kmode === 0) {
+        const h24 = env.functions.get("hour24ValueAngle")?.() || 0;
+        const sn = env.functions.get("solarNoonAngle")?.() || 0;
+        return h24 + Math.PI - sn;
+      } else {
+        return env.functions.get("japanHourValueAngle")?.() || 0;
+      }
+    });
+    function wadokeiDNAngles() {
+      const leafAngleFn = env.functions.get("dayNightLeafAngle");
+      if (!leafAngleFn) return null;
+      const kyMode = env.variables.get("kyMode") ?? 0;
+      if (kyMode === 1) {
+        return { sunsetAngle: 3 * Math.PI / 2, sunriseAngle: Math.PI / 2 };
+      }
+      const ECPlanetMidnightSun = env.variables.get("planetMidnightSun") ?? 10;
+      const isPolarSummer = leafAngleFn(ECPlanetMidnightSun, 2, 0) > 0.5;
+      const isPolarWinter = leafAngleFn(ECPlanetMidnightSun, 3, 0) > 0.5;
+      if (isPolarSummer) {
+        return { sunsetAngle: 0, sunriseAngle: 0 };
+      }
+      if (isPolarWinter) {
+        return { sunsetAngle: 0, sunriseAngle: 2 * Math.PI - 1e-3 };
+      }
+      const sunriseAngle = leafAngleFn(ECPlanetMidnightSun, 0, 0);
+      const sunsetAngle = leafAngleFn(ECPlanetMidnightSun, 1, 0);
+      return { sunsetAngle, sunriseAngle };
+    }
+    env.functions.set("wadokeiDNNumVisible", (numWedges) => {
+      if (numWedges <= 0) return 0;
+      const angles = wadokeiDNAngles();
+      if (!angles) return 0;
+      let nightArc = angles.sunriseAngle - angles.sunsetAngle;
+      if (nightArc < 0) nightArc += 2 * Math.PI;
+      if (nightArc < 0.01) return 0;
+      if (nightArc > 2 * Math.PI - 0.01) return numWedges;
+      const wedgeSpan = 2 * Math.PI / numWedges;
+      return Math.min(numWedges, Math.max(1, Math.ceil(nightArc / wedgeSpan)));
+    });
+    env.functions.set("wadokeiDNSunsetAngle", () => {
+      return wadokeiDNAngles()?.sunsetAngle ?? 0;
+    });
+    env.functions.set("wadokeiDNSunriseAngle", () => {
+      return wadokeiDNAngles()?.sunriseAngle ?? 0;
+    });
+    env.functions.set(
+      "dayNightWedgeSlideAngle",
+      (_planet, wedgeIndex, numWedges, _slideDistance) => {
+        const TWO_PI5 = 2 * Math.PI;
+        const numVisFn = env.functions.get("wadokeiDNNumVisible");
+        const numVis = numVisFn ? numVisFn(numWedges) : numWedges;
+        const wedgeSpan = (TWO_PI5 + 0.2) / numWedges;
+        if (numVis > 0 && numVis < numWedges) {
+          const a = wadokeiDNAngles();
+          const sunsetAngle = a?.sunsetAngle ?? 0;
+          const sunriseAngle = a?.sunriseAngle ?? 0;
+          let nightArc = sunriseAngle - sunsetAngle;
+          if (nightArc < 0) nightArc += TWO_PI5;
+          const adjustedStart = sunsetAngle + wedgeSpan / 2;
+          const adjustedArc = nightArc - wedgeSpan;
+          const step = numVis > 1 ? adjustedArc / (numVis - 1) : 0;
+          if (wedgeIndex < numVis) {
+            const raw = adjustedStart + step * wedgeIndex;
+            return (raw % TWO_PI5 + TWO_PI5) % TWO_PI5;
+          }
+          return adjustedStart + step * (numVis - 1);
+        }
+        if (numVis === 0) {
+          return 0;
+        }
+        return TWO_PI5 * wedgeIndex / numWedges;
+      }
+    );
+    env.functions.set(
+      "dayNightWedgeSlideOffset",
+      (wedgeIndex, numWedges, slideDistance) => {
+        const numVisFn = env.functions.get("wadokeiDNNumVisible");
+        const numVis = numVisFn ? numVisFn(numWedges) : numWedges;
+        return wedgeIndex < numVis ? 0 : slideDistance;
+      }
+    );
+    env.functions.set("calendarCoverOffset", (coverTypeCode) => {
+      return computeCalendarCoverOffsetForEnv(env, coverTypeCode);
+    });
+    env.functions.set(
+      "terminatorLeafAngle",
+      (phase, quad, idx, leavesPerQuad, incr) => {
+        let a = terminatorAngle(phase, quad, idx, leavesPerQuad, incr);
+        const isUpper = quad === 0 || quad === 3;
+        if (!isUpper) a += Math.PI;
+        return a;
+      }
+    );
+    env.functions.set("analemmaPathParameter", () => {
+      const di = dateToDateInterval(getNow());
+      return fractionOfVernalEquinoxYear(di, null) * PATH_SAMPLE_COUNT;
+    });
+    env.functions.set("analemmaRotation", () => {
+      const di = dateToDateInterval(getNow());
+      return sunSkyOrientationAngle(di, OBSERVER_LAT, OBSERVER_LON, null);
+    });
+    registerTerraFunctions(env, OBSERVER_LAT, OBSERVER_LON, getNow, pool, tzOffsetSeconds, slotOverrides, globalLocationSlot, olsonTimezone);
+    releaseCachePool(pool);
+    return env;
+  }
+  function computeCalendarCoverOffsetForEnv(env, coverTypeCode) {
+    const calendarWeekdayStart = env.functions.get("calendarWeekdayStart")?.() ?? 0;
+    const cellWidth = env.variables.get("calendarCellWidth") ?? 13.3;
+    const monthNum = (env.functions.get("monthNumber")?.() ?? 0) + 1;
+    const yearNum = env.functions.get("yearNumber")?.() ?? 2024;
+    const era = env.functions.get("eraNumber")?.() ?? 1;
+    const absYear = yearNum;
+    const firstOfMonthDI = timeIntervalFromUTCComponents(era, absYear, monthNum, 1, 12, 0, 0);
+    const thisMonthStartCol = (7 + weekdayFromTimeInterval(firstOfMonthDI, 0) - calendarWeekdayStart) % 7;
+    const dim = daysInMonth(era, absYear, monthNum);
+    let prevEra = era;
+    let prevYear = absYear;
+    let prevMonth = monthNum - 1;
+    if (prevMonth < 1) {
+      prevMonth = 12;
+      if (era === 1 && absYear === 1) {
+        prevEra = 0;
+        prevYear = 1;
+      } else if (era === 0) {
+        prevYear = absYear + 1;
+      } else {
+        prevYear = absYear - 1;
+      }
+    }
+    const daysInPrevMonth = daysInMonth(prevEra, prevYear, prevMonth);
+    let nextEra = era;
+    let nextYear = absYear;
+    let nextMonth = monthNum + 1;
+    if (nextMonth > 12) {
+      nextMonth = 1;
+      if (era === 0 && absYear === 1) {
+        nextEra = 1;
+        nextYear = 1;
+      } else if (era === 0) {
+        nextYear = absYear - 1;
+      } else {
+        nextYear = absYear + 1;
+      }
+    }
+    const nextMonthFirstDI = timeIntervalFromUTCComponents(nextEra, nextYear, nextMonth, 1, 12, 0, 0);
+    const nextMonthStartCol = (7 + weekdayFromTimeInterval(nextMonthFirstDI, 0) - calendarWeekdayStart) % 7;
+    const nextMonthStartRow = Math.floor((dim + thisMonthStartCol) / 7);
+    let columnMotion = 7;
+    if (coverTypeCode === CALENDAR_COVER_CODES.row1Left) {
+      columnMotion = thisMonthStartCol + 22 - daysInPrevMonth;
+      if (columnMotion < -4) columnMotion = -4;
+    } else if (coverTypeCode === CALENDAR_COVER_CODES.row1Right) {
+      columnMotion = thisMonthStartCol + 26 - daysInPrevMonth;
+      if (columnMotion < -5) columnMotion = -5;
+    } else if (coverTypeCode === CALENDAR_COVER_CODES.row56Right) {
+      columnMotion = nextMonthStartRow === 4 ? nextMonthStartCol : 7;
+    } else if (coverTypeCode === CALENDAR_COVER_CODES.row6Left) {
+      if (nextMonthStartRow === 5) {
+        columnMotion = nextMonthStartCol;
+      } else if (nextMonthStartRow === 4) {
+        columnMotion = nextMonthStartCol - 7;
+      } else {
+        columnMotion = 7;
+      }
+    }
+    return Math.round(columnMotion * cellWidth);
+  }
+  function registerTerraFunctions(env, OBSERVER_LAT, OBSERVER_LON, getNow, pool, tzOffsetSeconds, slotOverrides, globalLocationSlot, olsonTimezone) {
+    const { functions } = env;
+    const terraRingDefaults = {};
+    for (const [k, v] of Object.entries(TERRA_RING_DEFAULTS)) {
+      terraRingDefaults[Number(k)] = { ...v };
+    }
+    if (slotOverrides) {
+      for (const [k, v] of Object.entries(slotOverrides)) {
+        terraRingDefaults[Number(k)] = { ...v };
+      }
+    }
+    env._terraSlots = terraRingDefaults;
+    env._getNow = getNow;
+    env._getDSTRange = (slotNum) => {
+      const slot = terraRingDefaults[slotNum];
+      if (!slot) return null;
+      const now = getNow();
+      const jan = new Date(now.getFullYear(), 0, 1);
+      const jul = new Date(now.getFullYear(), 6, 1);
+      const janOff = getTzOffsetSeconds(slot.olsonId, jan);
+      const julOff = getTzOffsetSeconds(slot.olsonId, jul);
+      if (janOff === julOff) return null;
+      return {
+        lowHours: Math.min(janOff, julOff) / 3600,
+        highHours: Math.max(janOff, julOff) / 3600
+      };
+    };
+    const UTCSectorNumber = 11;
+    function getTzOffsetSeconds(olsonId, date) {
+      try {
+        const fmt = new Intl.DateTimeFormat("en-US", {
+          timeZone: olsonId,
+          timeZoneName: "longOffset"
+        });
+        const parts = fmt.formatToParts(date);
+        const tzPart = parts.find((p) => p.type === "timeZoneName");
+        if (!tzPart) return 0;
+        const tzStr = tzPart.value;
+        if (tzStr === "GMT" || tzStr === "UTC") return 0;
+        const m = tzStr.match(/GMT([+-])(\d{1,2}):?(\d{2})?/);
+        if (!m) return 0;
+        const sign = m[1] === "+" ? 1 : -1;
+        const hours = parseInt(m[2], 10);
+        const minutes = m[3] ? parseInt(m[3], 10) : 0;
+        return sign * (hours * 3600 + minutes * 60);
+      } catch {
+        return 0;
+      }
+    }
+    function getLocalTimeInZone(olsonId, date) {
+      try {
+        const fmt = new Intl.DateTimeFormat("en-US", {
+          timeZone: olsonId,
+          hour: "numeric",
+          minute: "numeric",
+          second: "numeric",
+          day: "numeric",
+          month: "numeric",
+          weekday: "short",
+          hour12: false
+        });
+        const parts = fmt.formatToParts(date);
+        let h24 = 0, min = 0, sec = 0, day = 1, month = 0, weekday = 0;
+        for (const p of parts) {
+          if (p.type === "hour") h24 = parseInt(p.value, 10);
+          else if (p.type === "minute") min = parseInt(p.value, 10);
+          else if (p.type === "second") sec = parseInt(p.value, 10);
+          else if (p.type === "day") day = parseInt(p.value, 10);
+          else if (p.type === "month") month = parseInt(p.value, 10) - 1;
+          else if (p.type === "weekday") {
+            const wdMap = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+            weekday = wdMap[p.value] ?? 0;
+          }
+        }
+        if (h24 === 24) h24 = 0;
+        return { h24, min, sec, day, month, weekday };
+      } catch {
+        return {
+          h24: date.getHours(),
+          min: date.getMinutes(),
+          sec: date.getSeconds(),
+          day: date.getDate(),
+          month: date.getMonth(),
+          weekday: date.getDay()
+        };
+      }
+    }
+    let detectedTopSlot = 12;
+    if (globalLocationSlot !== void 0) {
+      detectedTopSlot = globalLocationSlot;
+    } else {
+      try {
+        const targetTz = olsonTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+        for (const [slotStr, data] of Object.entries(terraRingDefaults)) {
+          if (data.olsonId === targetTz) {
+            detectedTopSlot = parseInt(slotStr, 10);
+            break;
+          }
+        }
+        if (detectedTopSlot === 12 && targetTz !== "Europe/London" && targetTz !== "UTC") {
+          const nowDate = getNow();
+          const targetOffset = getTzOffsetSeconds(targetTz, nowDate);
+          let bestDiff = Infinity;
+          for (const [slotStr, data] of Object.entries(terraRingDefaults)) {
+            const slotOffset = getTzOffsetSeconds(data.olsonId, nowDate);
+            const diff = Math.abs(slotOffset - targetOffset);
+            if (diff < bestDiff) {
+              bestDiff = diff;
+              detectedTopSlot = parseInt(slotStr, 10);
+            }
+          }
+        }
+      } catch {
+      }
+    }
+    functions.set("terraIDeviceSlot", () => detectedTopSlot);
+    functions.set("overrideTerraITopSlot", (_n) => 0);
+    functions.set("sectorAngle", (slot, topSlot) => {
+      return (slot - topSlot) * Math.PI / 12;
+    });
+    functions.set("UTCSectorOffset", () => UTCSectorNumber - 0.5);
+    functions.set("cityIndicatorOffset", (_topSlot, _firstRingSlot) => 0);
+    functions.set("city24HrDialOffset", (topSlot, firstRingSlot) => {
+      const slot = terraRingDefaults[topSlot];
+      if (!slot) return 0;
+      const offsetSec = getTzOffsetSeconds(slot.olsonId, getNow());
+      return offsetSec * Math.PI / (12 * 3600) + (firstRingSlot - topSlot + UTCSectorNumber - 0.5) * Math.PI / 12;
+    });
+    functions.set("tzOffsetAngleN", (slot) => {
+      const data = terraRingDefaults[slot];
+      if (!data) return 0;
+      const offsetSec = getTzOffsetSeconds(data.olsonId, getNow());
+      return offsetSec * Math.PI / (12 * 3600);
+    });
+    functions.set("isDST", (slot) => {
+      const data = terraRingDefaults[slot];
+      if (!data) return 0;
+      const nowDate = getNow();
+      const currentOffset = getTzOffsetSeconds(data.olsonId, nowDate);
+      const jan = new Date(nowDate.getFullYear(), 0, 1);
+      const janOffset = getTzOffsetSeconds(data.olsonId, jan);
+      const jul = new Date(nowDate.getFullYear(), 6, 1);
+      const julOffset = getTzOffsetSeconds(data.olsonId, jul);
+      const stdOffset = Math.min(janOffset, julOffset);
+      return currentOffset !== stdOffset ? 1 : 0;
+    });
+    functions.set("moreDay", (slot, topSlot) => {
+      const slotData = terraRingDefaults[slot];
+      const topData = terraRingDefaults[topSlot];
+      if (!slotData || !topData) return 0;
+      const nowDate = getNow();
+      const slotTime = getLocalTimeInZone(slotData.olsonId, nowDate);
+      const topTime = getLocalTimeInZone(topData.olsonId, nowDate);
+      if (slotTime.month !== topTime.month) {
+        const slotM = slotTime.month;
+        const topM = topTime.month;
+        if (slotM === 0 && topM === 11) return 1;
+        if (slotM === 11 && topM === 0) return 0;
+        return slotM > topM ? 1 : 0;
+      }
+      return slotTime.day > topTime.day ? 1 : 0;
+    });
+    functions.set("lessDay", (slot, topSlot) => {
+      const slotData = terraRingDefaults[slot];
+      const topData = terraRingDefaults[topSlot];
+      if (!slotData || !topData) return 0;
+      const nowDate = getNow();
+      const slotTime = getLocalTimeInZone(slotData.olsonId, nowDate);
+      const topTime = getLocalTimeInZone(topData.olsonId, nowDate);
+      if (slotTime.month !== topTime.month) {
+        const slotM = slotTime.month;
+        const topM = topTime.month;
+        if (slotM === 0 && topM === 11) return 0;
+        if (slotM === 11 && topM === 0) return 1;
+        return slotM < topM ? 1 : 0;
+      }
+      return slotTime.day < topTime.day ? 1 : 0;
+    });
+    functions.set("hour12ValueAngleN", (slot) => {
+      const data = terraRingDefaults[slot];
+      if (!data) return 0;
+      const t = getLocalTimeInZone(data.olsonId, getNow());
+      const ms = getNow().getMilliseconds();
+      const s = t.sec + ms / 1e3;
+      const m = t.min + s / 60;
+      const h = t.h24 % 12 + m / 60;
+      return h * 2 * Math.PI / 12;
+    });
+    functions.set("minuteValueAngleN", (slot) => {
+      const data = terraRingDefaults[slot];
+      if (!data) return 0;
+      const t = getLocalTimeInZone(data.olsonId, getNow());
+      const ms = getNow().getMilliseconds();
+      const s = t.sec + ms / 1e3;
+      const m = t.min + s / 60;
+      return m * 2 * Math.PI / 60;
+    });
+    functions.set("secondValueAngleN", (slot) => {
+      const data = terraRingDefaults[slot];
+      if (!data) return 0;
+      const t = getLocalTimeInZone(data.olsonId, getNow());
+      const ms = getNow().getMilliseconds();
+      const s = t.sec + ms / 1e3;
+      return s * 2 * Math.PI / 60;
+    });
+    functions.set("dayNumberN", (slot) => {
+      const data = terraRingDefaults[slot];
+      if (!data) return 0;
+      const t = getLocalTimeInZone(data.olsonId, getNow());
+      return t.day - 1;
+    });
+    functions.set("monthNumberAngleN", (slot) => {
+      const data = terraRingDefaults[slot];
+      if (!data) return 0;
+      const t = getLocalTimeInZone(data.olsonId, getNow());
+      return t.month * 2 * Math.PI / 12;
+    });
+    functions.set("weekdayNumberAngleN", (slot) => {
+      const data = terraRingDefaults[slot];
+      if (!data) return 0;
+      const t = getLocalTimeInZone(data.olsonId, getNow());
+      return t.weekday * 2 * Math.PI / 7;
+    });
+    functions.set("weekdayNumberN", (slot) => {
+      const data = terraRingDefaults[slot];
+      if (!data) return 0;
+      return getLocalTimeInZone(data.olsonId, getNow()).weekday;
+    });
+    functions.set("hour24NumberN", (slot) => {
+      const data = terraRingDefaults[slot];
+      if (!data) return 0;
+      return getLocalTimeInZone(data.olsonId, getNow()).h24;
+    });
+    functions.set("hour24ValueAngleN", (slot) => {
+      const data = terraRingDefaults[slot];
+      if (!data) return 0;
+      const t = getLocalTimeInZone(data.olsonId, getNow());
+      const ms = getNow().getMilliseconds();
+      const s = t.sec + ms / 1e3;
+      const m = t.min + s / 60;
+      const h = t.h24 + m / 60;
+      return h * 2 * Math.PI / 24;
+    });
+    functions.set(
+      "dayNightLeafAngleForSlot",
+      (planetNumber, leafNumber, numLeaves, slotNumber) => {
+        const slot = terraRingDefaults[slotNumber];
+        if (!slot) {
+          return computeDayNightLeafAngle(
+            planetNumber,
+            leafNumber,
+            numLeaves,
+            getNow,
+            OBSERVER_LAT,
+            OBSERVER_LON,
+            pool,
+            tzOffsetSeconds
+          ).angle;
+        }
+        const slotLat = slot.lat * Math.PI / 180;
+        const slotLon = slot.lon * Math.PI / 180;
+        const slotTzOffset = getTzOffsetSeconds(slot.olsonId, getNow());
+        return computeDayNightLeafAngle(
+          planetNumber,
+          leafNumber,
+          numLeaves,
+          getNow,
+          slotLat,
+          slotLon,
+          pool,
+          slotTzOffset
+        ).angle;
+      }
+    );
+  }
 
   // src/shared/updater.ts
-  var K_ANGLE_ANIM_SPEED = 2;
-  var NATURAL_ERROR_THRESHOLD = 2e-3;
-  var AHEAD_DEPTH = 2;
-  var WORKER_MISS_RETRY_MS = 33;
-  var lastWorkerMissWarnMs = -Infinity;
   function makeOverridableGetNow(base) {
     let overrideMs = null;
-    const getNow2 = () => overrideMs != null ? new Date(overrideMs) : base();
-    function withDisplayTime2(displayMs, fn) {
+    const getNow = () => overrideMs != null ? new Date(overrideMs) : base();
+    function withDisplayTime(displayMs, fn) {
       const prev = overrideMs;
       overrideMs = displayMs;
       try {
@@ -13979,4569 +13291,87 @@
         overrideMs = prev;
       }
     }
-    return { getNow: getNow2, withDisplayTime: withDisplayTime2 };
+    return { getNow, withDisplayTime };
   }
-  function timingContextForFrame(tc) {
-    const rate = tc.currentRate;
-    return {
-      tickIntervalMs: rate ? TICK_INTERVAL_MS : null,
-      displayDeltaSec: rate ? displaySecondsPerTick(rate.unit) : 0,
-      direction: tc.isStopped ? 0 : tc.currentDirection
+
+  // src/shared/time-quantize.ts
+  function quantizeGetNow(base, bps) {
+    if (bps <= 0) return base;
+    return () => {
+      const ms = base().getTime();
+      return new Date(Math.round(ms / 1e3 * bps) / bps * 1e3);
     };
   }
-  function updateObsValueDiscrete(v, env2, perfNow, getNow2, timeDirection, tickIntervalMs) {
-    const newTarget = evalAttr(v.expr, env2);
-    if (timeDirection === 0) {
-      v.nextUpdateTime = perfNow + 100;
-    } else if (tickIntervalMs !== null && tickIntervalMs > 0) {
-      v.nextUpdateTime = perfNow + tickIntervalMs;
-    } else {
-      const dir = timeDirection === -1 ? -1 : 1;
-      const nextDisplayMs = computeNextBoundary(v.updateInterval * 1e3, getNow2, dir, env2);
-      v.nextUpdateDisplayTime = nextDisplayMs;
-      v.nextUpdateTime = displayTimeToPerfNow(nextDisplayMs, getNow2);
-    }
-    v.pendingSweep = null;
-    v.anim.currentValue = newTarget;
-    v.anim.targetValue = newTarget;
-    v.anim.animating = false;
-  }
-  function updateObsValueEvalAhead(v, env2, perfNow, getNow2, timeDirection, tickIntervalMs, displayDeltaSec, withDisplayTime2) {
-    let nextDisplayMs;
-    let budgetMs;
-    if (tickIntervalMs !== null && tickIntervalMs > 0) {
-      nextDisplayMs = getNow2().getTime() + displayDeltaSec * 1e3 * timeDirection;
-      budgetMs = tickIntervalMs;
-      v.nextUpdateTime = perfNow + tickIntervalMs;
-    } else {
-      nextDisplayMs = computeNextBoundary(v.updateInterval * 1e3, getNow2, timeDirection, env2);
-      v.nextUpdateTime = displayTimeToPerfNow(nextDisplayMs, getNow2);
-      budgetMs = v.nextUpdateTime - perfNow;
-    }
-    v.nextUpdateDisplayTime = nextDisplayMs;
-    const target = withDisplayTime2 ? withDisplayTime2(nextDisplayMs, () => evalAttr(v.expr, env2)) : evalAttr(v.expr, env2);
-    v.pendingSweep = null;
-    const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
-    if (budgetMs > 0 && isFinite(budgetMs)) {
-      startAnimationRaw(v.anim, target, perfNow, multiplier, budgetMs, v.period);
-    } else {
-      startAnimationRaw(v.anim, target, perfNow, multiplier, void 0, v.period);
-    }
-  }
-  function updateNaturalSpeedValue(v, env2, perfNow, getNow2, timeDirection) {
-    const currentCorrectAngle = evalAttr(v.expr, env2);
-    const nextDisplayMs = computeNextBoundary(
-      v.updateInterval * 1e3,
-      getNow2,
-      timeDirection,
-      env2
-    );
-    v.nextUpdateDisplayTime = nextDisplayMs;
-    v.nextUpdateTime = displayTimeToPerfNow(nextDisplayMs, getNow2);
-    const dtToNextUpdateMs = v.nextUpdateTime - perfNow;
-    const dtToNextUpdateSec = dtToNextUpdateMs / 1e3;
-    if (dtToNextUpdateSec <= 0 || !isFinite(dtToNextUpdateSec)) {
-      startAnimationRaw(
-        v.anim,
-        currentCorrectAngle,
-        perfNow,
-        v.animSpeed / K_ANGLE_ANIM_SPEED,
-        void 0,
-        v.period
-      );
-      v.pendingSweep = null;
-      return;
-    }
-    const effNaturalSpeed = v.naturalSpeed * timeDirection;
-    const TWO_PI6 = 2 * Math.PI;
-    let error;
-    if (timeDirection === 1) {
-      error = currentCorrectAngle - v.anim.currentValue;
-      error = (error % TWO_PI6 + TWO_PI6) % TWO_PI6;
-    } else {
-      error = v.anim.currentValue - currentCorrectAngle;
-      error = (error % TWO_PI6 + TWO_PI6) % TWO_PI6;
-    }
-    if (error < NATURAL_ERROR_THRESHOLD) {
-      const sweepAngle2 = effNaturalSpeed * dtToNextUpdateSec;
-      const finalTarget = currentCorrectAngle + sweepAngle2;
-      startAnimationRaw(
-        v.anim,
-        finalTarget,
-        perfNow,
-        v.naturalSpeed / K_ANGLE_ANIM_SPEED,
-        dtToNextUpdateMs,
-        v.period
-      );
-      v.pendingSweep = null;
-      return;
-    }
-    const differentialSpeed = v.animSpeed - v.naturalSpeed;
-    if (differentialSpeed <= 0) {
-      const sweepAngle2 = effNaturalSpeed * dtToNextUpdateSec;
-      const finalTarget = currentCorrectAngle + sweepAngle2;
-      startAnimationRaw(
-        v.anim,
-        finalTarget,
-        perfNow,
-        v.animSpeed / K_ANGLE_ANIM_SPEED,
-        dtToNextUpdateMs,
-        v.period
-      );
-      v.pendingSweep = null;
-      return;
-    }
-    const catchUpSec = error / differentialSpeed;
-    const catchUpMs = catchUpSec * 1e3;
-    if (catchUpMs >= dtToNextUpdateMs) {
-      const sweepAngle2 = effNaturalSpeed * dtToNextUpdateSec;
-      const finalTarget = currentCorrectAngle + sweepAngle2;
-      startAnimationRaw(
-        v.anim,
-        finalTarget,
-        perfNow,
-        v.animSpeed / K_ANGLE_ANIM_SPEED,
-        dtToNextUpdateMs,
-        v.period
-      );
-      v.pendingSweep = null;
-      return;
-    }
-    const catchUpTarget = currentCorrectAngle + effNaturalSpeed * catchUpSec;
-    startAnimationRaw(
-      v.anim,
-      catchUpTarget,
-      perfNow,
-      v.animSpeed / K_ANGLE_ANIM_SPEED,
-      catchUpMs,
-      v.period
-    );
-    const remainingMs = dtToNextUpdateMs - catchUpMs;
-    const sweepAngle = effNaturalSpeed * (remainingMs / 1e3);
-    v.pendingSweep = {
-      target: catchUpTarget + sweepAngle,
-      durationMs: remainingMs
-    };
-  }
-  function updateObsValueScrub(v, env2, perfNow, getNow2, timeDirection, tickIntervalMs, displayDeltaPerTickSec) {
-    const newTarget = evalAttr(v.expr, env2);
-    const nextDisplayMs = computeNextBoundary(
-      v.updateInterval * 1e3,
-      getNow2,
-      timeDirection,
-      env2
-    );
-    v.nextUpdateDisplayTime = nextDisplayMs;
-    const displayNowMs = getNow2().getTime();
-    const displayDeltaMs = Math.abs(nextDisplayMs - displayNowMs);
-    const displayDeltaPerTickMs = displayDeltaPerTickSec * 1e3;
-    const ticksUntilUpdate = displayDeltaPerTickMs > 0 ? Math.max(1, Math.ceil(displayDeltaMs / displayDeltaPerTickMs)) : 1;
-    const timeUntilNextUpdateMs = ticksUntilUpdate * tickIntervalMs;
-    v.nextUpdateTime = perfNow + timeUntilNextUpdateMs;
-    const speed = v.animSpeed;
-    let angleDelta;
-    if (!isFinite(v.period)) {
-      angleDelta = Math.abs(newTarget - v.anim.currentValue);
-    } else {
-      const P = v.period;
-      const normalizedTarget = (newTarget % P + P) % P;
-      const normalizedCurrent = (v.anim.currentValue % P + P) % P;
-      angleDelta = Math.abs(normalizedTarget - normalizedCurrent);
-      if (angleDelta > P / 2) angleDelta = P - angleDelta;
-    }
-    const naturalDurationMs = speed > 0 ? angleDelta / speed * 1e3 : 0;
-    const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
-    if (naturalDurationMs > timeUntilNextUpdateMs) {
-      startAnimationRaw(
-        v.anim,
-        newTarget,
-        perfNow,
-        multiplier,
-        timeUntilNextUpdateMs,
-        v.period
-      );
-    } else if (naturalDurationMs < tickIntervalMs) {
-      startAnimationRaw(
-        v.anim,
-        newTarget,
-        perfNow,
-        multiplier,
-        tickIntervalMs,
-        v.period
-      );
-    } else {
-      startAnimationRaw(
-        v.anim,
-        newTarget,
-        perfNow,
-        multiplier,
-        void 0,
-        v.period
-      );
-    }
-    v.pendingSweep = null;
-  }
-  function settleAtNow(v, env2, perfNow) {
-    const newTarget = evalAttr(v.expr, env2);
-    v.nextUpdateTime = perfNow + 100;
-    v.pendingSweep = null;
-    startAnimationRaw(
-      v.anim,
-      newTarget,
-      perfNow,
-      v.animSpeed / K_ANGLE_ANIM_SPEED,
+
+  // src/watch/worker-core.ts
+  function initWorkerFace(init) {
+    const { getNow, withDisplayTime } = makeOverridableGetNow(() => new Date(init.nowMs));
+    const faceGetNow = quantizeGetNow(getNow, init.bps);
+    const env = createWatchEnvironment(
+      { initExprs: init.initExprs },
+      init.lat,
+      init.lon,
+      faceGetNow,
+      init.tz,
       void 0,
-      v.period
-    );
-  }
-  function updateObsValueFixedDuration(v, env2, perfNow, durationMs) {
-    const newTarget = evalAttr(v.expr, env2);
-    v.nextUpdateTime = 0;
-    v.pendingSweep = null;
-    if (v.discrete) {
-      v.anim.currentValue = newTarget;
-      v.anim.targetValue = newTarget;
-      v.anim.animating = false;
-      return;
-    }
-    const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
-    startAnimationRaw(v.anim, newTarget, perfNow, multiplier, durationMs, v.period);
-  }
-  function snapToTargetAtBoundary(v, env2, perfNow, getNow2, timeDirection) {
-    const newTarget = evalAttr(v.expr, env2);
-    const nextDisplayMs = computeNextBoundary(v.updateInterval * 1e3, getNow2, timeDirection, env2);
-    v.nextUpdateDisplayTime = nextDisplayMs;
-    v.nextUpdateTime = displayTimeToPerfNow(nextDisplayMs, getNow2);
-    v.pendingSweep = null;
-    startAnimationRaw(
-      v.anim,
-      newTarget,
-      perfNow,
-      v.animSpeed / K_ANGLE_ANIM_SPEED,
       void 0,
-      v.period
+      init.overrides
     );
+    const values = /* @__PURE__ */ new Map();
+    for (const v of init.values) values.set(v.id, v.expr);
+    return { env, withDisplayTime, values };
   }
-  function shortestPathDistance(current, target, period) {
-    if (isNaN(current) || isNaN(target)) return NaN;
-    if (!isFinite(period)) return Math.abs(target - current);
-    const P = period;
-    const normTarget = (target % P + P) % P;
-    let delta = normTarget - current;
-    delta = delta - P * Math.round(delta / P);
-    return Math.abs(delta);
+  function evalWorkerValue(face, id, boundaryDisplayMs) {
+    const expr = face.values.get(id);
+    if (!expr) return NaN;
+    return face.withDisplayTime(boundaryDisplayMs, () => evalAttr(expr, face.env));
   }
-  function upcomingBoundaries(v, getNow2, dir, env2, count) {
-    const out = [];
-    let cursorMs = getNow2().getTime();
-    const cursorGetNow = () => new Date(cursorMs);
-    for (let i = 0; i < count; i++) {
-      const b = computeNextBoundary(v.updateInterval * 1e3, cursorGetNow, dir, env2);
-      if (!isFinite(b)) break;
-      out.push(b);
-      cursorMs = b + dir;
-    }
-    return out;
-  }
-  function ensureRequested(v, getNow2, dir, env2) {
-    if (!v.requestAhead) return;
-    const wanted = upcomingBoundaries(v, getNow2, dir, env2, AHEAD_DEPTH + 1);
-    const need = [];
-    for (const b of wanted) {
-      if (v.ahead.some((e) => e.boundaryDisplayMs === b)) continue;
-      if (v.aheadPending.includes(b)) continue;
-      v.aheadPending.push(b);
-      need.push(b);
-    }
-    if (need.length > 0) v.requestAhead(need);
-  }
-  function consumeAhead(v, boundaryMs) {
-    const i = v.ahead.findIndex((e) => e.boundaryDisplayMs === boundaryMs);
-    if (i < 0) return void 0;
-    const target = v.ahead[i].target;
-    v.ahead.splice(i, 1);
-    return target;
-  }
-  function noteWorkerMiss(v, boundaryMs, perfNow) {
-    if (perfNow - lastWorkerMissWarnMs > 1e3) {
-      lastWorkerMissWarnMs = perfNow;
-      console.warn(`[eval-worker] target not ready for ${v.name} @${boundaryMs} \u2014 sitting a beat`);
-    }
-  }
-  function onArrivalOnBeat(v, env2, perfNow, getNow2, timeDirection, tickIntervalMs, displayDeltaPerTickSec, withDisplayTime2) {
-    const nextDisplayMs = computeNextBoundary(
-      v.updateInterval * 1e3,
-      getNow2,
-      timeDirection,
-      env2
-    );
-    let boundaryRealMs;
-    if (tickIntervalMs !== null && tickIntervalMs > 0) {
-      const displayNowMs = getNow2().getTime();
-      const displayDeltaMs = Math.abs(nextDisplayMs - displayNowMs);
-      const perTickMs = displayDeltaPerTickSec * 1e3;
-      const ticksUntilUpdate = perTickMs > 0 ? Math.max(1, Math.ceil(displayDeltaMs / perTickMs)) : 1;
-      boundaryRealMs = perfNow + ticksUntilUpdate * tickIntervalMs;
-    } else {
-      boundaryRealMs = displayTimeToPerfNow(nextDisplayMs, getNow2);
-    }
-    let target;
-    if (v.requestAhead) {
-      ensureRequested(v, getNow2, timeDirection, env2);
-      const hit = consumeAhead(v, nextDisplayMs);
-      if (hit === void 0) {
-        noteWorkerMiss(v, nextDisplayMs, perfNow);
-        v.nextUpdateDisplayTime = nextDisplayMs;
-        v.nextUpdateTime = perfNow + WORKER_MISS_RETRY_MS;
-        return false;
-      }
-      target = hit;
-    } else {
-      target = withDisplayTime2 ? withDisplayTime2(nextDisplayMs, () => evalAttr(v.expr, env2)) : evalAttr(v.expr, env2);
-    }
-    const dist = shortestPathDistance(v.anim.currentValue, target, v.period);
-    const d = v.animSpeed > 0 && isFinite(dist) ? dist / v.animSpeed * 1e3 : 0;
-    let startTime = isFinite(boundaryRealMs) ? boundaryRealMs - d : Infinity;
-    if (startTime < perfNow) startTime = perfNow;
-    v.pendingTarget = { target, boundaryRealMs, startTime };
-    v.nextUpdateDisplayTime = nextDisplayMs;
-    v.nextUpdateTime = startTime;
-    return true;
-  }
-  function startOnBeatSweep(v, perfNow) {
-    const pt = v.pendingTarget;
-    v.pendingTarget = null;
-    const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
-    const budgetMs = pt.boundaryRealMs - perfNow;
-    if (isFinite(budgetMs) && budgetMs > 0) {
-      startAnimationRaw(v.anim, pt.target, perfNow, multiplier, budgetMs, v.period);
-    } else {
-      startAnimationRaw(v.anim, pt.target, perfNow, multiplier, void 0, v.period);
-    }
-    v.nextUpdateTime = isFinite(pt.boundaryRealMs) ? pt.boundaryRealMs : Infinity;
-  }
-  function onBeatStep(v, env2, perfNow, getNow2, timeDirection, tickIntervalMs, displayDeltaPerTickSec, withDisplayTime2) {
-    const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
-    if (v.nextUpdateTime === Infinity && v.pendingTarget === null && !v.anim.animating) {
-      v.currentValue = v.anim.currentValue;
-      return;
-    }
-    if (timeDirection === 0) {
-      if (!v.anim.animating) {
-        const target = evalAttr(v.expr, env2);
-        startAnimationRaw(v.anim, target, perfNow, multiplier, void 0, v.period);
-        v.pendingTarget = null;
-        v.nextUpdateDisplayTime = Infinity;
-        v.nextUpdateTime = Infinity;
-      }
-      v.currentValue = interpolateValue(v.anim, perfNow);
-      return;
-    }
-    const dir = timeDirection === -1 ? -1 : 1;
-    v.currentValue = interpolateValue(v.anim, perfNow);
-    let started = false;
-    for (let guard = 0; guard < 4 && !v.anim.animating; guard++) {
-      if (v.pendingTarget === null) {
-        const scheduled = onArrivalOnBeat(
-          v,
-          env2,
-          perfNow,
-          getNow2,
-          dir,
-          tickIntervalMs,
-          displayDeltaPerTickSec,
-          withDisplayTime2
-        );
-        if (!scheduled) break;
-      } else if (perfNow >= v.pendingTarget.startTime) {
-        startOnBeatSweep(v, perfNow);
-        started = true;
-      } else {
-        break;
-      }
-    }
-    if (started) v.currentValue = interpolateValue(v.anim, perfNow);
-  }
-  function updateObsValue(v, env2, perfNow, getNow2, tickIntervalMs, displayDeltaPerTickSec, timeDirection, withDisplayTime2) {
-    if (v.discrete) {
-      updateObsValueDiscrete(v, env2, perfNow, getNow2, timeDirection, tickIntervalMs);
-    } else if (timeDirection === 0) {
-      settleAtNow(v, env2, perfNow);
-    } else if (v.evalAhead) {
-      updateObsValueEvalAhead(
-        v,
-        env2,
-        perfNow,
-        getNow2,
-        timeDirection,
-        tickIntervalMs,
-        displayDeltaPerTickSec,
-        withDisplayTime2
-      );
-    } else if (tickIntervalMs !== null && tickIntervalMs > 0) {
-      updateObsValueScrub(
-        v,
-        env2,
-        perfNow,
-        getNow2,
-        timeDirection,
-        tickIntervalMs,
-        displayDeltaPerTickSec
-      );
-    } else if (v.naturalSpeed > 0) {
-      updateNaturalSpeedValue(v, env2, perfNow, getNow2, timeDirection);
-    } else {
-      snapToTargetAtBoundary(v, env2, perfNow, getNow2, timeDirection);
-    }
-  }
-  function updateObsValues(values, env2, perfNow, getNow2, tickIntervalMs = null, displayDeltaPerTickSec = 0, timeDirection = 1, withDisplayTime2) {
-    for (const v of values) {
-      if (v.onBeat && !v.discrete) {
-        onBeatStep(
-          v,
-          env2,
-          perfNow,
-          getNow2,
-          timeDirection,
-          tickIntervalMs,
-          displayDeltaPerTickSec,
-          withDisplayTime2
-        );
-      } else if (perfNow >= v.nextUpdateTime) {
-        updateObsValue(
-          v,
-          env2,
-          perfNow,
-          getNow2,
-          tickIntervalMs,
-          displayDeltaPerTickSec,
-          timeDirection,
-          withDisplayTime2
-        );
-      }
-    }
-  }
-  function animateObsValue(v, perfNow) {
-    v.currentValue = interpolateValue(v.anim, perfNow);
-    if (!v.anim.animating && v.pendingSweep) {
-      const sweep = v.pendingSweep;
-      v.pendingSweep = null;
-      const sweepMultiplier = v.naturalSpeed / K_ANGLE_ANIM_SPEED;
-      startAnimationRaw(
-        v.anim,
-        sweep.target,
-        perfNow,
-        sweepMultiplier,
-        sweep.durationMs,
-        v.period
-      );
-      v.currentValue = interpolateValue(v.anim, perfNow);
-    }
-  }
-  function animateObsValues(values, perfNow) {
-    for (const v of values) {
-      animateObsValue(v, perfNow);
-    }
-  }
-  function resetObsValueSchedules(values) {
-    for (const v of values) {
-      v.nextUpdateDisplayTime = 0;
-      v.nextUpdateTime = 0;
-      v.pendingTarget = null;
-      v.ahead.length = 0;
-      v.aheadPending.length = 0;
-    }
-  }
-  function anyObsAnimating(values) {
-    for (const v of values) {
-      if (v.anim.animating || v.pendingSweep) return true;
-    }
-    return false;
-  }
-  var Updater = class {
+  var WorkerDispatcher = class {
     constructor() {
-      this.values = [];
-      this.byName = /* @__PURE__ */ new Map();
+      this.faces = /* @__PURE__ */ new Map();
     }
-    /** Register a value; returns it for convenient handle capture. */
-    add(v) {
-      this.values.push(v);
-      this.byName.set(v.name, v);
-      return v;
+    /** Build/replace a face's env at the given generation. */
+    handleInit(msg) {
+      const face = initWorkerFace({
+        initExprs: msg.initExprs,
+        nowMs: msg.nowMs,
+        lat: msg.lat,
+        lon: msg.lon,
+        tz: msg.tz,
+        bps: msg.bps,
+        overrides: msg.overrides,
+        values: msg.values
+      });
+      this.faces.set(msg.faceId, { face, generation: msg.generation });
     }
-    addAll(vs) {
-      for (const v of vs) this.add(v);
+    /** Evaluate a batch of requests; returns `null` for unknown/stale-generation. */
+    handleReq(msg) {
+      const entry = this.faces.get(msg.faceId);
+      if (!entry || entry.generation !== msg.generation) return null;
+      const results = msg.reqs.map((r) => ({
+        valueId: r.valueId,
+        boundaryDisplayMs: r.boundaryDisplayMs,
+        target: evalWorkerValue(entry.face, r.valueId, r.boundaryDisplayMs)
+      }));
+      return { type: "res", faceId: msg.faceId, generation: msg.generation, results };
     }
-    remove(v) {
-      const i = this.values.indexOf(v);
-      if (i >= 0) this.values.splice(i, 1);
-      this.byName.delete(v.name);
-    }
-    clear() {
-      this.values.length = 0;
-      this.byName.clear();
-    }
-    get all() {
-      return this.values;
-    }
-    /** Look up a registered value by name; throws if no such value exists. */
-    get(name) {
-      const v = this.byName.get(name);
-      if (!v) throw new Error(`Updater.get: no value named "${name}"`);
-      return v;
-    }
-    /** True if a value with this name is registered. */
-    has(name) {
-      return this.byName.has(name);
-    }
-    /** Per-frame: re-evaluate expired values + animate the whole collection. */
-    tick(env2, perfNow, getNow2, withDisplayTime2, ctx) {
-      updateObsValues(
-        this.values,
-        env2,
-        perfNow,
-        getNow2,
-        ctx.tickIntervalMs,
-        ctx.displayDeltaSec,
-        ctx.direction,
-        withDisplayTime2
-      );
-      animateObsValues(this.values, perfNow);
-    }
-    /** True while any value is mid-animation (for idle-scheduler decisions). */
-    anyAnimating() {
-      return anyObsAnimating(this.values);
-    }
-    /**
-     * Re-evaluate every value on the next frame. Bind the time-controls transition
-     * callbacks (scrub start/end, step, now, transport change) to this — clients
-     * "react to transitions" without computing how the controller affects values.
-     */
-    reset() {
-      resetObsValueSchedules(this.values);
-    }
-    /**
-     * Snap every in-flight animation to its target and freeze schedules.
-     *
-     * For each value: clear any pending Phase-2 sweep, set the animation (and the
-     * displayed `currentValue`) to the target — wrapped to `[0, period)` for cyclic
-     * values, left as-is for linear ones — stop animating, and freeze the schedule
-     * (`nextUpdateTime = Infinity`) so nothing re-evaluates until `reset()`.
-     *
-     * Used for step / transport / scrub-end transitions where the system must
-     * settle immediately, and (with the freeze) to hold the stopped-clock state
-     * idle. Generalizes the legacy `finishAnimations`/`finishLeafAnimations` to the
-     * ObsValue fields and the `period` wrap.
-     *
-     * **`env` (on-beat freeze paths).** When `env` is supplied, on-beat values snap
-     * to `A(current display time)` instead of `anim.targetValue` — so a clock frozen
-     * *between beats* reads the exact stopped time, not the last/next beat position.
-     * Pass `env` on the no-reset freeze paths (pause, scrub-end while stopped). Omit
-     * it on paths that `reset()` afterward (step, Now, toggles): there `finish()`
-     * just snaps where the hand is, and the subsequent stopped-`onBeatStep` settle
-     * animates to `A(now)` (so those transitions still flip smoothly). Non-on-beat
-     * values always snap to `anim.targetValue` regardless of `env`.
-     */
-    finish(env2) {
-      for (const v of this.values) {
-        v.pendingSweep = null;
-        v.pendingTarget = null;
-        v.ahead.length = 0;
-        v.aheadPending.length = 0;
-        let target = v.onBeat && env2 ? evalAttr(v.expr, env2) : v.anim.targetValue;
-        if (isFinite(v.period)) {
-          target = (target % v.period + v.period) % v.period;
-        }
-        v.anim.currentValue = target;
-        v.anim.targetValue = target;
-        v.anim.animating = false;
-        v.currentValue = target;
-        v.nextUpdateDisplayTime = Infinity;
-        v.nextUpdateTime = Infinity;
-      }
-    }
-    /**
-     * Earliest `performance.now()` at which any value is scheduled to re-evaluate
-     * (`Infinity` if all are frozen). The idle scheduler uses this to set a precise
-     * wakeup `setTimeout`. Generalizes the legacy `nextWakeupTime(states)`.
-     */
-    nextWakeupTime() {
-      let earliest = Infinity;
-      for (const v of this.values) {
-        if (v.nextUpdateTime < earliest) earliest = v.nextUpdateTime;
-      }
-      return earliest;
-    }
-    /**
-     * Like `tick()`, but forces every value to animate over exactly
-     * `durationMs` of real time — no boundary scheduling, no two-phase
-     * sweep.  Used for drag-to-explore, where pointer events drive
-     * continuous re-evaluation at a fixed animation budget.
-     *
-     * Bypasses the `nextUpdateTime` gate (every value is always updated)
-     * and ignores the `TimingContext` entirely.
-     */
-    tickFixedDuration(env2, perfNow, durationMs) {
-      for (const v of this.values) {
-        updateObsValueFixedDuration(v, env2, perfNow, durationMs);
-      }
-      animateObsValues(this.values, perfNow);
-    }
-    /**
-     * Interpolation-only pass — advance in-flight animations without
-     * re-evaluating expressions.  Use on frames where the inputs (env)
-     * haven't changed but existing animations should keep progressing.
-     */
-    animateOnly(perfNow) {
-      animateObsValues(this.values, perfNow);
+    /** Forget a face (e.g. when it is disabled). */
+    drop(faceId) {
+      this.faces.delete(faceId);
     }
   };
 
-  // src/shared/astro-stepper.ts
-  var FUDGE_SECONDS = 5;
-  var TRANSIT_FUDGE_SECONDS = 12 * 3600;
-  var LOOKAHEAD_SECONDS = 3600 * 13.2;
-  var TWO_PI5 = 2 * Math.PI;
-  var HALF_PI = Math.PI / 2;
-  function findNextRiseSet(riseNotSet, planetNumber, displayTime, direction, lat2, lon2) {
-    const calculationDI = dateToDateInterval(displayTime);
-    const searchForward = direction === 1;
-    const fudge = searchForward ? FUDGE_SECONDS : -FUDGE_SECONDS;
-    const lookahead = searchForward ? LOOKAHEAD_SECONDS : -LOOKAHEAD_SECONDS;
-    const fudgeDate = calculationDI + fudge;
-    const pool = new AstroCachePool();
-    initializeCachePool(pool, fudgeDate, lat2, lon2, !searchForward);
-    try {
-      const result = planetaryRiseSetTimeRefined(
-        fudgeDate,
-        lat2,
-        lon2,
-        riseNotSet,
-        planetNumber,
-        NaN,
-        pool
-      );
-      if (isNoRiseSet(result.riseSetTime)) {
-        return null;
-      }
-      const inRightDirection = searchForward ? result.transitTime >= fudgeDate : result.transitTime < fudgeDate;
-      if (inRightDirection) {
-        return dateIntervalToDate(result.riseSetTime);
-      }
-      const tryDate = fudgeDate + lookahead;
-      releaseCachePool(pool);
-      initializeCachePool(pool, tryDate, lat2, lon2, !searchForward);
-      const result2 = planetaryRiseSetTimeRefined(
-        tryDate,
-        lat2,
-        lon2,
-        riseNotSet,
-        planetNumber,
-        NaN,
-        pool
-      );
-      if (isNoRiseSet(result2.riseSetTime)) {
-        return null;
-      }
-      return dateIntervalToDate(result2.riseSetTime);
-    } finally {
-      releaseCachePool(pool);
-    }
-  }
-  function findNextQuarterPhase(displayTime, direction) {
-    const di = dateToDateInterval(displayTime);
-    const { age } = moonAge(di, null);
-    const runningBackward = direction === -1;
-    const fudgeFactor = runningBackward ? -0.01 : 0.01;
-    const ageSinceQuarter = fmod(age + fudgeFactor, HALF_PI);
-    const ageAtLastQuarter = age + fudgeFactor - ageSinceQuarter;
-    let targetAge = runningBackward ? ageAtLastQuarter : ageAtLastQuarter + HALF_PI;
-    if (targetAge > 15 / 8 * Math.PI) {
-      targetAge -= TWO_PI5;
-    }
-    const phaseDI = refineMoonAgeTargetForDate(di, targetAge);
-    return dateIntervalToDate(phaseDI);
-  }
-  function findNextTransit(planetNumber, displayTime, direction, lat2, lon2) {
-    const di = dateToDateInterval(displayTime);
-    const fudgeDate = di + direction * TRANSIT_FUDGE_SECONDS;
-    const pool = new AstroCachePool();
-    initializeCachePool(pool, fudgeDate, lat2, lon2, direction === -1);
-    try {
-      const result = planettransitTimeRefined(
-        fudgeDate,
-        lat2,
-        lon2,
-        true,
-        planetNumber,
-        pool
-      );
-      const delta = result - di;
-      const inRightDirection = direction === 1 ? delta > 60 : delta < -60;
-      if (inRightDirection) {
-        return dateIntervalToDate(result);
-      }
-      releaseCachePool(pool);
-      const retryDate = di + direction * 86400;
-      initializeCachePool(pool, retryDate, lat2, lon2, direction === -1);
-      const result2 = planettransitTimeRefined(
-        retryDate,
-        lat2,
-        lon2,
-        true,
-        planetNumber,
-        pool
-      );
-      return dateIntervalToDate(result2);
-    } finally {
-      releaseCachePool(pool);
-    }
-  }
-  function computeAstroTarget(eventType, direction, displayTime, lat2, lon2, bodyPlanetNumber) {
-    switch (eventType) {
-      case "sunrise":
-        return findNextRiseSet(true, 0 /* Sun */, displayTime, direction, lat2, lon2);
-      case "sunset":
-        return findNextRiseSet(false, 0 /* Sun */, displayTime, direction, lat2, lon2);
-      case "moonrise":
-        return findNextRiseSet(true, 1 /* Moon */, displayTime, direction, lat2, lon2);
-      case "moonset":
-        return findNextRiseSet(false, 1 /* Moon */, displayTime, direction, lat2, lon2);
-      case "moonphase":
-        return findNextQuarterPhase(displayTime, direction);
-      case "sun-transit":
-        return findNextTransit(0 /* Sun */, displayTime, direction, lat2, lon2);
-      case "moon-transit":
-        return findNextTransit(1 /* Moon */, displayTime, direction, lat2, lon2);
-      case "body-rise":
-        if (bodyPlanetNumber === void 0) return null;
-        return findNextRiseSet(true, bodyPlanetNumber, displayTime, direction, lat2, lon2);
-      case "body-set":
-        if (bodyPlanetNumber === void 0) return null;
-        return findNextRiseSet(false, bodyPlanetNumber, displayTime, direction, lat2, lon2);
-      case "body-transit":
-        if (bodyPlanetNumber === void 0) return null;
-        return findNextTransit(bodyPlanetNumber, displayTime, direction, lat2, lon2);
-      default:
-        return null;
-    }
-  }
-
-  // src/shared/url-state.ts
-  function readUrlState() {
-    const params = new URLSearchParams(window.location.search);
-    const latStr = params.get("lat");
-    const lonStr = params.get("lon") || params.get("long");
-    const lat2 = latStr !== null ? parseFloat(latStr) : NaN;
-    const lon2 = lonStr !== null ? parseFloat(lonStr) : NaN;
-    const city = params.get("city");
-    const blocStr = params.get("bloc");
-    const tcStr = params.get("tc");
-    const tStr = params.get("t");
-    const offStr = params.get("off");
-    const dirStr = params.get("dir");
-    let dir = 1;
-    if (dirStr === "-1") dir = -1;
-    else if (dirStr === "0") dir = 0;
-    return {
-      lat: !isNaN(lat2) ? lat2 : null,
-      lon: !isNaN(lon2) ? lon2 : null,
-      city: city || null,
-      bloc: blocStr === "1",
-      tc: tcStr === "1",
-      t: tStr !== null ? parseInt(tStr, 10) : null,
-      off: offStr !== null ? parseInt(offStr, 10) : null,
-      dir,
-      tz: params.get("tz") || null,
-      picks: params.get("picks") || null,
-      tp: params.get("tp") === "a" ? "a" : "d",
-      embed: params.get("embed") === "1",
-      fps: params.has("fps"),
-      kyhand: params.get("kyhand"),
-      kmode: params.get("kmode"),
-      op: (() => {
-        const s = params.get("op");
-        const n = s !== null ? parseInt(s, 10) : NaN;
-        return Number.isFinite(n) ? n : null;
-      })(),
-      onoon: params.get("onoon") === "1",
-      body: params.get("body") || null,
-      vnoon: params.get("vnoon") === "1"
-    };
-  }
-  function writeUrlState(changes) {
-    const params = new URLSearchParams(window.location.search);
-    if ("lat" in changes) {
-      if (changes.lat !== null && changes.lat !== void 0) {
-        params.set("lat", changes.lat.toFixed(3));
-      } else {
-        params.delete("lat");
-      }
-    }
-    if ("lon" in changes) {
-      if (changes.lon !== null && changes.lon !== void 0) {
-        params.set("lon", changes.lon.toFixed(3));
-      } else {
-        params.delete("lon");
-      }
-    }
-    if ("picks" in changes) {
-      if (changes.picks) params.set("picks", changes.picks);
-      else params.delete("picks");
-    }
-    if ("kyhand" in changes) {
-      if (changes.kyhand) params.set("kyhand", changes.kyhand);
-      else params.delete("kyhand");
-    }
-    if ("kmode" in changes) {
-      if (changes.kmode) params.set("kmode", changes.kmode);
-      else params.delete("kmode");
-    }
-    if ("city" in changes) {
-      if (changes.city) {
-        params.set("city", changes.city);
-      } else {
-        params.delete("city");
-      }
-    }
-    if ("bloc" in changes) {
-      if (changes.bloc) {
-        params.set("bloc", "1");
-      } else {
-        params.delete("bloc");
-      }
-    }
-    if ("tc" in changes) {
-      if (changes.tc) {
-        params.set("tc", "1");
-      } else {
-        params.delete("tc");
-      }
-    }
-    if ("t" in changes) {
-      if (changes.t !== null && changes.t !== void 0) {
-        params.set("t", changes.t.toString());
-      } else {
-        params.delete("t");
-      }
-    }
-    if ("off" in changes) {
-      if (changes.off !== null && changes.off !== void 0) {
-        params.set("off", changes.off.toString());
-      } else {
-        params.delete("off");
-      }
-    }
-    if ("dir" in changes) {
-      if (changes.dir !== void 0 && changes.dir !== 1) {
-        params.set("dir", changes.dir.toString());
-      } else {
-        params.delete("dir");
-      }
-    }
-    if ("tz" in changes) {
-      if (changes.tz) {
-        params.set("tz", changes.tz);
-      } else {
-        params.delete("tz");
-      }
-    }
-    if ("tp" in changes) {
-      if (changes.tp === "a") {
-        params.set("tp", "a");
-      } else {
-        params.delete("tp");
-      }
-    }
-    if ("op" in changes) {
-      if (changes.op !== null && changes.op !== void 0 && changes.op !== 0) {
-        params.set("op", changes.op.toString());
-      } else {
-        params.delete("op");
-      }
-    }
-    if ("onoon" in changes) {
-      if (changes.onoon) {
-        params.set("onoon", "1");
-      } else {
-        params.delete("onoon");
-      }
-    }
-    if ("body" in changes) {
-      if (changes.body) params.set("body", changes.body);
-      else params.delete("body");
-    }
-    if ("vnoon" in changes) {
-      if (changes.vnoon) params.set("vnoon", "1");
-      else params.delete("vnoon");
-    }
-    params.delete("long");
-    params.delete("loc");
-    const qs = params.toString();
-    const newUrl = window.location.pathname + (qs ? "?" + qs : "");
-    history.replaceState(null, "", newUrl);
-    updateNavigationLinks();
-  }
-  function buildShareUrl(state, options = {}) {
-    const url = new URL(options.baseUrl ?? window.location.origin + window.location.pathname);
-    const p = url.searchParams;
-    if (state.lat !== null && state.lat !== void 0) p.set("lat", state.lat.toFixed(3));
-    if (state.lon !== null && state.lon !== void 0) p.set("lon", state.lon.toFixed(3));
-    if (state.city) p.set("city", state.city);
-    if (state.tz) p.set("tz", state.tz);
-    if (state.bloc) p.set("bloc", "1");
-    if (state.off !== null && state.off !== void 0) p.set("off", state.off.toString());
-    if (state.t !== null && state.t !== void 0) p.set("t", state.t.toString());
-    if (state.dir !== 1) p.set("dir", state.dir.toString());
-    if (state.picks) p.set("picks", state.picks);
-    if (state.kyhand) p.set("kyhand", state.kyhand);
-    if (state.kmode) p.set("kmode", state.kmode);
-    if (state.op !== null && state.op !== void 0 && state.op !== 0) p.set("op", state.op.toString());
-    if (state.onoon) p.set("onoon", "1");
-    if (state.body) p.set("body", state.body);
-    if (state.vnoon) p.set("vnoon", "1");
-    if (state.tp === "a") p.set("tp", "a");
-    if (options.slots) {
-      for (const [k, v] of Object.entries(options.slots)) p.set(k, v);
-    }
-    return url.toString();
-  }
-  var picksProvider = () => new URLSearchParams(window.location.search).get("picks");
-  function setPicksProvider(fn) {
-    picksProvider = fn;
-  }
-  function updateNavigationLinks() {
-    const search = window.location.search;
-    const backLink = document.getElementById("back-link");
-    if (backLink) {
-      const url = new URL(backLink.getAttribute("data-base-href") || "index.html", window.location.href);
-      url.search = search;
-      backLink.href = url.toString();
-    }
-    const allFacesLink = document.getElementById("all-faces-link");
-    if (allFacesLink) {
-      const url = new URL(allFacesLink.getAttribute("data-base-href") || "all.html", window.location.href);
-      url.search = search;
-      allFacesLink.href = url.toString();
-    }
-    const selectedLink = document.getElementById("selected-faces-link");
-    if (selectedLink) {
-      const hasPicks = !!picksProvider();
-      const baseHref = hasPicks ? "selected.html" : "pick.html";
-      const url = new URL(baseHref, window.location.href);
-      url.search = search;
-      selectedLink.href = url.toString();
-      selectedLink.title = hasPicks ? "Selected Faces" : "Pick Faces";
-    }
-    const editPicksLink = document.getElementById("edit-picks-link");
-    if (editPicksLink) {
-      const url = new URL("pick.html", window.location.href);
-      url.search = search;
-      editPicksLink.href = url.toString();
-    }
-    document.querySelectorAll("a.face-card").forEach((a) => {
-      const anchor = a;
-      const url = new URL(anchor.getAttribute("data-base-href") || anchor.getAttribute("href"), window.location.href);
-      url.search = search;
-      anchor.href = url.toString();
-    });
-  }
-
-  // src/shared/incoming-settings-dialog.ts
-  var STYLE_ID = "ec-settings-dialog-style";
-  var CSS = `
-.ec-modal-backdrop {
-    position: fixed; inset: 0; z-index: 1000;
-    display: flex; align-items: center; justify-content: center;
-    padding: 24px 16px;
-    background: rgba(0, 0, 0, 0.5);
-}
-.ec-modal {
-    position: relative;
-    background: rgba(26, 26, 46, 0.98);
-    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-    border: 1px solid #3a3a5e; border-radius: 14px;
-    padding: 26px 30px; min-width: 300px; max-width: 400px; width: 100%;
-    box-shadow: 0 8px 48px rgba(0, 0, 0, 0.6);
-    text-align: center;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-.ec-modal-title {
-    font-size: 16px; color: #e0d8c8; margin: 0 0 10px; font-weight: 400;
-}
-.ec-modal-text {
-    font-size: 13px; color: #aab; line-height: 1.5; margin: 0 0 20px;
-}
-.ec-modal-buttons { display: flex; flex-direction: column; gap: 8px; }
-.ec-modal-btn {
-    border-radius: 6px; font-size: 13px; padding: 9px 16px;
-    cursor: pointer; transition: background 0.15s, color 0.15s;
-    background: #2a2a4e; border: 1px solid #3a3a5e; color: #aac;
-}
-.ec-modal-btn:hover { background: #3a3a6e; color: #ddf; }
-.ec-modal-btn.ec-primary {
-    background: #34507a; border-color: #4a6fa5; color: #dde9ff;
-}
-.ec-modal-btn.ec-primary:hover { background: #3f5f92; color: #fff; }
-
-.ec-toast {
-    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
-    z-index: 1001; max-width: 340px;
-    background: rgba(26, 26, 46, 0.98); border: 1px solid #3a3a5e;
-    border-radius: 10px; padding: 12px 16px;
-    box-shadow: 0 6px 32px rgba(0, 0, 0, 0.5);
-    color: #ccd; font-size: 12.5px; line-height: 1.45;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    display: flex; align-items: center; gap: 12px;
-}
-.ec-toast-close {
-    background: none; border: none; color: #889; font-size: 18px;
-    cursor: pointer; padding: 0 2px; line-height: 1;
-}
-.ec-toast-close:hover { color: #ccd; }
-
-.ec-modal-input {
-    width: 100%; box-sizing: border-box;
-    background: #1d1d30; border: 1px solid #3a3a5e; border-radius: 6px;
-    color: #cdd; font-size: 12px; font-family: monospace;
-    padding: 8px 10px; margin: 0 0 14px;
-    text-align: left;
-}
-
-.ec-url-badge {
-    position: fixed; left: 10px; bottom: 8px; z-index: 999;
-    font-size: 11px; color: #99a; opacity: 0.7;
-    background: rgba(0, 0, 0, 0.3); padding: 2px 8px; border-radius: 6px;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    pointer-events: none; user-select: none;
-}
-`;
-  function ensureModalStyles() {
-    if (document.getElementById(STYLE_ID)) return;
-    const style = document.createElement("style");
-    style.id = STYLE_ID;
-    style.textContent = CSS;
-    document.head.appendChild(style);
-  }
-  var COPY = {
-    incoming: {
-      title: "Use these shared settings?",
-      text: "This link includes a saved time, location, or configuration. Save them as your default on this device, or use them just for this visit?",
-      save: "Save as my default",
-      session: "Use for this visit only"
-    },
-    reprompt: {
-      title: "Save your changes?",
-      text: "You changed a setting while viewing shared settings. Save your current settings as the default on this device, or keep them only for this visit?",
-      save: "Save as my default",
-      session: "Keep for this visit only"
+  // src/watch/eval-worker.ts
+  var workerScope = globalThis;
+  var dispatcher = new WorkerDispatcher();
+  workerScope.onmessage = (e) => {
+    const msg = e.data;
+    if (!msg) return;
+    if (msg.type === "init") {
+      dispatcher.handleInit(msg);
+    } else if (msg.type === "req") {
+      const res = dispatcher.handleReq(msg);
+      if (res) workerScope.postMessage(res);
     }
   };
-  function showIncomingSettingsDialog(options) {
-    ensureModalStyles();
-    const copy = COPY[options.mode];
-    return new Promise((resolve) => {
-      const backdrop = document.createElement("div");
-      backdrop.className = "ec-modal-backdrop";
-      const modal = document.createElement("div");
-      modal.className = "ec-modal";
-      modal.setAttribute("role", "dialog");
-      modal.setAttribute("aria-modal", "true");
-      const title = document.createElement("h2");
-      title.className = "ec-modal-title";
-      title.textContent = copy.title;
-      const text = document.createElement("p");
-      text.className = "ec-modal-text";
-      text.textContent = copy.text;
-      const buttons = document.createElement("div");
-      buttons.className = "ec-modal-buttons";
-      const saveBtn = document.createElement("button");
-      saveBtn.className = "ec-modal-btn ec-primary";
-      saveBtn.textContent = copy.save;
-      const sessionBtn = document.createElement("button");
-      sessionBtn.className = "ec-modal-btn";
-      sessionBtn.textContent = copy.session;
-      buttons.append(saveBtn, sessionBtn);
-      modal.append(title, text, buttons);
-      backdrop.append(modal);
-      document.body.appendChild(backdrop);
-      let done = false;
-      const finish = (choice) => {
-        if (done) return;
-        done = true;
-        document.removeEventListener("keydown", onKey);
-        backdrop.remove();
-        resolve(choice);
-      };
-      const onKey = (e) => {
-        if (e.key === "Escape") finish("session");
-      };
-      saveBtn.addEventListener("click", () => finish("save"));
-      sessionBtn.addEventListener("click", () => finish("session"));
-      backdrop.addEventListener("click", (e) => {
-        if (e.target === backdrop) finish("session");
-      });
-      document.addEventListener("keydown", onKey);
-      saveBtn.focus();
-    });
-  }
-  function showStorageWarning(message) {
-    ensureModalStyles();
-    const toast = document.createElement("div");
-    toast.className = "ec-toast";
-    const span = document.createElement("span");
-    span.textContent = message;
-    const close = document.createElement("button");
-    close.className = "ec-toast-close";
-    close.setAttribute("aria-label", "Dismiss");
-    close.textContent = "\xD7";
-    close.addEventListener("click", () => toast.remove());
-    toast.append(span, close);
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 12e3);
-  }
-  function showParadigmNotice() {
-    ensureModalStyles();
-    const toast = document.createElement("div");
-    toast.className = "ec-toast";
-    const span = document.createElement("span");
-    span.textContent = "Your settings now save in this browser instead of the URL. Use the Share button to copy a link to a view; local storage can be cleared along with your browser history.";
-    const close = document.createElement("button");
-    close.className = "ec-toast-close";
-    close.setAttribute("aria-label", "Dismiss");
-    close.textContent = "\xD7";
-    close.addEventListener("click", () => toast.remove());
-    toast.append(span, close);
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 16e3);
-  }
-  function showUrlModeBadge() {
-    ensureModalStyles();
-    if (document.getElementById("ec-url-badge")) return;
-    const badge = document.createElement("div");
-    badge.id = "ec-url-badge";
-    badge.className = "ec-url-badge";
-    badge.textContent = "(URL)";
-    badge.title = "Local storage is unavailable here, so settings are kept in the URL.";
-    document.body.appendChild(badge);
-  }
-
-  // src/shared/app-state.ts
-  var LOCALSTORAGE_ENABLED = true;
-  var SCHEMA_VERSION = 1;
-  var STORAGE_KEY_PREFIX = "ec:";
-  var SHARED_FIELDS = /* @__PURE__ */ new Set([
-    "lat",
-    "lon",
-    "city",
-    "tz",
-    "bloc",
-    "t",
-    "off",
-    "dir"
-  ]);
-  var URL_ONLY_FIELDS = /* @__PURE__ */ new Set([
-    "embed",
-    "fps",
-    "tc"
-  ]);
-  function namespaceOf(field, app) {
-    if (URL_ONLY_FIELDS.has(field)) return null;
-    if (SHARED_FIELDS.has(field)) return "shared";
-    switch (field) {
-      case "picks":
-      case "kyhand":
-      case "kmode":
-      case "body":
-      case "vnoon":
-        return "chronometer";
-      case "op":
-      case "onoon":
-        return "observatory";
-      case "tp":
-        return app === "index" || app === "pick" ? null : app;
-      default:
-        return null;
-    }
-  }
-  function defaultState() {
-    return {
-      lat: null,
-      lon: null,
-      city: null,
-      bloc: false,
-      tc: false,
-      t: null,
-      off: null,
-      dir: 1,
-      tz: null,
-      picks: null,
-      tp: "d",
-      embed: false,
-      fps: false,
-      kyhand: null,
-      kmode: null,
-      op: null,
-      onoon: false,
-      body: null,
-      vnoon: false
-    };
-  }
-  function isDefaultValue(field, value) {
-    if (value === null || value === void 0) return true;
-    switch (field) {
-      case "dir":
-        return value === 1;
-      case "tp":
-        return value === "d";
-      case "bloc":
-      case "tc":
-      case "embed":
-      case "fps":
-      case "onoon":
-      case "vnoon":
-        return value === false;
-      case "op":
-        return value === 0;
-      default:
-        return false;
-    }
-  }
-  var UrlBackend = class {
-    read() {
-      return readUrlState();
-    }
-    write(changes) {
-      writeUrlState(changes);
-    }
-  };
-  var LocalStorageBackend = class {
-    constructor(app) {
-      this.app = app;
-    }
-    read() {
-      const state = defaultState();
-      Object.assign(state, readNamespace("shared"));
-      const appNs = appNamespace(this.app);
-      if (appNs) Object.assign(state, readNamespace(appNs));
-      const url = readUrlState();
-      for (const field of URL_ONLY_FIELDS) {
-        state[field] = url[field];
-      }
-      return state;
-    }
-    write(changes) {
-      const buckets = /* @__PURE__ */ new Map();
-      for (const key of Object.keys(changes)) {
-        const ns = namespaceOf(key, this.app);
-        if (!ns) continue;
-        let bucket = buckets.get(ns);
-        if (!bucket) {
-          bucket = {};
-          buckets.set(ns, bucket);
-        }
-        bucket[key] = changes[key];
-      }
-      for (const [ns, bucket] of buckets) {
-        mergeNamespace(ns, bucket);
-      }
-    }
-  };
-  function appNamespace(app) {
-    switch (app) {
-      case "chronometer":
-        return "chronometer";
-      case "observatory":
-        return "observatory";
-      case "inspector":
-        return "inspector";
-      // The home and pick pages both surface the chronometer face set (the
-      // pick-card / selected-faces routing reads `picks`), so they read the
-      // chronometer namespace too.
-      case "pick":
-        return "chronometer";
-      case "index":
-        return "chronometer";
-    }
-  }
-  function readNamespace(ns) {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY_PREFIX + ns);
-      if (!raw) return {};
-      const obj = JSON.parse(raw);
-      delete obj.v;
-      return obj;
-    } catch {
-      return {};
-    }
-  }
-  function mergeNamespace(ns, changes) {
-    const key = STORAGE_KEY_PREFIX + ns;
-    let current;
-    try {
-      current = JSON.parse(localStorage.getItem(key) || "{}");
-    } catch {
-      current = {};
-    }
-    for (const field of Object.keys(changes)) {
-      const value = changes[field];
-      if (isDefaultValue(field, value)) {
-        delete current[field];
-      } else {
-        current[field] = value;
-      }
-    }
-    delete current.v;
-    if (Object.keys(current).length === 0) {
-      localStorage.removeItem(key);
-    } else {
-      current.v = SCHEMA_VERSION;
-      localStorage.setItem(key, JSON.stringify(current));
-    }
-  }
-  var InMemoryBackend = class {
-    constructor(seed) {
-      this.state = { ...defaultState(), ...seed || {} };
-    }
-    read() {
-      const url = readUrlState();
-      const state = { ...this.state };
-      for (const field of URL_ONLY_FIELDS) {
-        state[field] = url[field];
-      }
-      return state;
-    }
-    write(changes) {
-      for (const key of Object.keys(changes)) {
-        if (URL_ONLY_FIELDS.has(key)) continue;
-        this.state[key] = changes[key];
-      }
-    }
-  };
-  function storageWorks() {
-    try {
-      const k = STORAGE_KEY_PREFIX + "__probe__";
-      localStorage.setItem(k, "1");
-      const ok = localStorage.getItem(k) === "1";
-      localStorage.removeItem(k);
-      return ok;
-    } catch {
-      return false;
-    }
-  }
-  var TIME_FIELDS = /* @__PURE__ */ new Set(["t", "off", "dir"]);
-  var SHAREABLE_FIELDS = [
-    "lat",
-    "lon",
-    "city",
-    "tz",
-    "bloc",
-    "t",
-    "off",
-    "dir",
-    "picks",
-    "kyhand",
-    "kmode",
-    "op",
-    "onoon",
-    "body",
-    "vnoon",
-    "tp"
-  ];
-  var SHAREABLE_URL_KEYS = [
-    "lat",
-    "lon",
-    "long",
-    "city",
-    "loc",
-    "tz",
-    "bloc",
-    "t",
-    "off",
-    "dir",
-    "picks",
-    "kyhand",
-    "kmode",
-    "op",
-    "onoon",
-    "body",
-    "vnoon",
-    "tp"
-  ];
-  var CLEARED_URL_KEYS = [...SHAREABLE_URL_KEYS, "tc"];
-  var SLOT_STORAGE_KEY = STORAGE_KEY_PREFIX + "slots";
-  var SLOT_KEY_RE = /^[rd]\d+(tz|lat|lon)?$/;
-  function urlSlotMap() {
-    const out = {};
-    for (const [k, v] of new URLSearchParams(window.location.search)) {
-      if (SLOT_KEY_RE.test(k)) out[k] = v;
-    }
-    return out;
-  }
-  function storedSlotMap() {
-    try {
-      const obj = JSON.parse(localStorage.getItem(SLOT_STORAGE_KEY) || "{}");
-      delete obj.v;
-      return obj;
-    } catch {
-      return {};
-    }
-  }
-  function urlHasSlotParams() {
-    for (const k of new URLSearchParams(window.location.search).keys()) {
-      if (SLOT_KEY_RE.test(k)) return true;
-    }
-    return false;
-  }
-  function hasShareableParamsInUrl() {
-    const params = new URLSearchParams(window.location.search);
-    return SHAREABLE_URL_KEYS.some((k) => params.has(k)) || urlHasSlotParams();
-  }
-  function shareableUrlEqualsStored(ls) {
-    const url = readUrlState();
-    const stored = ls.read();
-    if (!SHAREABLE_FIELDS.every((f) => url[f] === stored[f])) return false;
-    const u = urlSlotMap();
-    const s = storedSlotMap();
-    const keys = /* @__PURE__ */ new Set([...Object.keys(u), ...Object.keys(s)]);
-    for (const k of keys) if (u[k] !== s[k]) return false;
-    return true;
-  }
-  function urlScalarOverrides() {
-    const params = new URLSearchParams(window.location.search);
-    const url = readUrlState();
-    const out = {};
-    const has = (...keys) => keys.some((k) => params.has(k));
-    if (has("lat")) out.lat = url.lat;
-    if (has("lon", "long")) out.lon = url.lon;
-    if (has("city")) out.city = url.city;
-    if (has("tz")) out.tz = url.tz;
-    if (has("bloc")) out.bloc = url.bloc;
-    if (has("t")) out.t = url.t;
-    if (has("off")) out.off = url.off;
-    if (has("dir")) out.dir = url.dir;
-    if (has("picks")) out.picks = url.picks;
-    if (has("kyhand")) out.kyhand = url.kyhand;
-    if (has("kmode")) out.kmode = url.kmode;
-    if (has("op")) out.op = url.op;
-    if (has("onoon")) out.onoon = url.onoon;
-    if (has("body")) out.body = url.body;
-    if (has("vnoon")) out.vnoon = url.vnoon;
-    if (has("tp")) out.tp = url.tp;
-    return out;
-  }
-  function clearShareableParamsFromUrl() {
-    const params = new URLSearchParams(window.location.search);
-    for (const k of CLEARED_URL_KEYS) params.delete(k);
-    for (const k of [...params.keys()]) if (SLOT_KEY_RE.test(k)) params.delete(k);
-    const qs = params.toString();
-    history.replaceState(null, "", window.location.pathname + (qs ? "?" + qs : ""));
-  }
-  var activeBackend = null;
-  var appName = "index";
-  var sessionRePromptArmed = false;
-  var warnedNoPersistence = false;
-  var inMemorySlots = {};
-  function initAppState(options) {
-    appName = options.app;
-    setPicksProvider(() => getState().picks);
-    if (!LOCALSTORAGE_ENABLED) {
-      activeBackend = new UrlBackend();
-      return;
-    }
-    if (readUrlState().embed) {
-      activeBackend = new UrlBackend();
-      return;
-    }
-    if (!storageWorks()) {
-      if (window.location.protocol === "file:") {
-        activeBackend = new UrlBackend();
-        showUrlModeBadge();
-      } else {
-        activeBackend = new InMemoryBackend(readUrlState());
-        warnNoPersistence();
-      }
-      return;
-    }
-    const ls = new LocalStorageBackend(appName);
-    if (!hasShareableParamsInUrl()) {
-      activeBackend = ls;
-      maybeShowParadigmNotice();
-      return;
-    }
-    if (shareableUrlEqualsStored(ls)) {
-      clearShareableParamsFromUrl();
-      activeBackend = ls;
-      maybeShowParadigmNotice();
-      return;
-    }
-    activeBackend = new UrlBackend();
-    void promptIncomingSettings(ls);
-  }
-  async function promptIncomingSettings(ls) {
-    const choice = await showIncomingSettingsDialog({ mode: "incoming" });
-    if (choice === "save") {
-      adoptCurrentStateAsDefault(ls);
-    } else {
-      sessionRePromptArmed = true;
-    }
-  }
-  function adoptCurrentStateAsDefault(ls) {
-    const overrides = urlScalarOverrides();
-    const slots = urlSlotMap();
-    activeBackend = ls;
-    ls.write(overrides);
-    if (Object.keys(slots).length > 0) setSlotOverrides(slots);
-    clearShareableParamsFromUrl();
-    sessionRePromptArmed = false;
-  }
-  function warnNoPersistence() {
-    if (warnedNoPersistence) return;
-    warnedNoPersistence = true;
-    showStorageWarning("Your settings can't be saved in this browser and won't persist after you reload.");
-  }
-  function maybeShowParadigmNotice() {
-    let meta = {};
-    try {
-      meta = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + "meta") || "{}");
-    } catch {
-    }
-    if (meta.noticeSeen) return;
-    try {
-      localStorage.setItem(STORAGE_KEY_PREFIX + "meta", JSON.stringify({ ...meta, noticeSeen: true, v: SCHEMA_VERSION }));
-    } catch {
-    }
-    showParadigmNotice();
-  }
-  function downgradeToInMemory() {
-    if (activeBackend instanceof InMemoryBackend) return;
-    const seed = activeBackend ? activeBackend.read() : void 0;
-    inMemorySlots = getSlotOverrides();
-    activeBackend = new InMemoryBackend(seed);
-    warnNoPersistence();
-  }
-  function backend() {
-    if (!activeBackend) activeBackend = new UrlBackend();
-    return activeBackend;
-  }
-  function hasNonTimePersistableChange(changes) {
-    return Object.keys(changes).some(
-      (k) => !TIME_FIELDS.has(k) && namespaceOf(k, appName) !== null
-    );
-  }
-  function getState() {
-    return backend().read();
-  }
-  function setState(changes) {
-    try {
-      backend().write(changes);
-    } catch {
-      downgradeToInMemory();
-      backend().write(changes);
-    }
-    if (sessionRePromptArmed && hasNonTimePersistableChange(changes)) {
-      sessionRePromptArmed = false;
-      void promptSessionReprompt();
-    }
-  }
-  function isPersistentMode() {
-    return backend() instanceof LocalStorageBackend;
-  }
-  function getSlotOverrides() {
-    const b = backend();
-    if (b instanceof LocalStorageBackend) return storedSlotMap();
-    if (b instanceof InMemoryBackend) return { ...inMemorySlots };
-    return urlSlotMap();
-  }
-  function setSlotOverrides(changes) {
-    const b = backend();
-    if (b instanceof InMemoryBackend) {
-      for (const [k, v] of Object.entries(changes)) {
-        if (v == null) delete inMemorySlots[k];
-        else inMemorySlots[k] = v;
-      }
-      return;
-    }
-    if (b instanceof LocalStorageBackend) {
-      const cur = storedSlotMap();
-      for (const [k, v] of Object.entries(changes)) {
-        if (v == null) delete cur[k];
-        else cur[k] = v;
-      }
-      delete cur.v;
-      try {
-        if (Object.keys(cur).length === 0) {
-          localStorage.removeItem(SLOT_STORAGE_KEY);
-        } else {
-          cur.v = SCHEMA_VERSION;
-          localStorage.setItem(SLOT_STORAGE_KEY, JSON.stringify(cur));
-        }
-      } catch {
-        downgradeToInMemory();
-        setSlotOverrides(changes);
-      }
-      return;
-    }
-    const params = new URLSearchParams(window.location.search);
-    for (const [k, v] of Object.entries(changes)) {
-      if (v == null) params.delete(k);
-      else params.set(k, v);
-    }
-    const qs = params.toString();
-    history.replaceState(null, "", window.location.pathname + (qs ? "?" + qs : ""));
-  }
-  async function promptSessionReprompt() {
-    const choice = await showIncomingSettingsDialog({ mode: "reprompt" });
-    if (choice === "save") {
-      adoptCurrentStateAsDefault(new LocalStorageBackend(appName));
-    }
-  }
-  function onSharedChange(callback) {
-    const handler = (e) => {
-      if (!(activeBackend instanceof LocalStorageBackend)) return;
-      if (e.key !== null && !e.key.startsWith(STORAGE_KEY_PREFIX)) return;
-      callback(getState());
-    };
-    window.addEventListener("storage", handler);
-    return () => window.removeEventListener("storage", handler);
-  }
-
-  // src/shared/time-controls-ui.ts
-  var unitToRateIndex = {
-    "minute": 1,
-    // 10 min/s
-    "hour": 2,
-    // 10 hr/s
-    "day": 3,
-    // 10 day/s
-    "month": 4,
-    // 10 mo/s
-    "year": 5
-    // 10 yr/s
-  };
-  var stepMap = {
-    "-year": ["year", -1],
-    "-month": ["month", -1],
-    "-day": ["day", -1],
-    "-hour": ["hour", -1],
-    "-minute": ["minute", -1],
-    "+minute": ["minute", 1],
-    "+hour": ["hour", 1],
-    "+day": ["day", 1],
-    "+month": ["month", 1],
-    "+year": ["year", 1]
-  };
-  function writeTimeStateToUrl(tc) {
-    if (tc.isRealTime) {
-      setState({ t: null, off: null, dir: 1 });
-    } else if (!tc.isStopped && tc.currentRate === null && tc.currentDirection === 1) {
-      setState({ off: tc.timeOffset, t: null, dir: 1 });
-    } else {
-      const dir = tc.isStopped ? 0 : tc.currentDirection;
-      setState({ t: tc.getDisplayTime().getTime(), off: null, dir });
-    }
-  }
-  function initTimeControls(config) {
-    const {
-      timeController: timeController2,
-      getTimezone,
-      getTzDeltaMs,
-      getLat,
-      getLon,
-      getSelectedBody,
-      updater: updater2,
-      onTimeStep = () => {
-      },
-      onScrubStart = () => {
-      },
-      onScrubEnd = () => {
-      },
-      onNowClicked = () => {
-      },
-      onTransportChange = () => {
-      },
-      ensureSchedulerRunning,
-      writeTimeState: writeTimeState2 = () => writeTimeStateToUrl(timeController2),
-      onPopoverToggle
-    } = config;
-    const _timeBar = document.getElementById("time-bar");
-    const _timeBarLabel = document.getElementById("time-bar-label");
-    const _timeBarDate = document.getElementById("time-bar-date");
-    const _timeBarOffset = document.getElementById("time-bar-offset");
-    const _timeBarRate = document.getElementById("time-bar-rate");
-    const _timeBarNow = document.getElementById("time-bar-now");
-    const _timePopover = document.getElementById("time-popover");
-    const _tpRateLabel = document.getElementById("tp-rate-label");
-    const _tpTransport = document.getElementById("tp-transport");
-    const _tpClose = document.getElementById("tp-close");
-    if (!_timeBar || !_timeBarLabel || !_timeBarDate || !_timeBarOffset || !_timeBarRate || !_timeBarNow || !_timePopover || !_tpRateLabel || !_tpTransport || !_tpClose) {
-      console.warn("[TimeControlsUI] Required DOM elements not found");
-      return null;
-    }
-    const timeBar = _timeBar;
-    const timeBarLabel = _timeBarLabel;
-    const timeBarDate = _timeBarDate;
-    const timeBarOffset = _timeBarOffset;
-    const timeBarRate = _timeBarRate;
-    const timeBarNow = _timeBarNow;
-    const timePopover = _timePopover;
-    const tpRateLabel = _tpRateLabel;
-    const tpTransport = _tpTransport;
-    const tpClose = _tpClose;
-    const locationTzLabel = document.getElementById("location-tz");
-    const lpLocationTz = document.getElementById("lp-location-tz");
-    let popoverOpen = false;
-    function toTzDate(d) {
-      const delta = getTzDeltaMs();
-      return delta !== 0 ? new Date(d.getTime() + delta) : d;
-    }
-    function fromTzDate(d) {
-      const delta = getTzDeltaMs();
-      return delta !== 0 ? new Date(d.getTime() - delta) : d;
-    }
-    function targetTzOffsetSec(d) {
-      return -d.getTimezoneOffset() * 60 + getTzDeltaMs() / 1e3;
-    }
-    function formatSimTime(d) {
-      const di = dateToDateInterval(d);
-      const cs = localComponentsFromTimeInterval(di, targetTzOffsetSec(d));
-      const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-      const mo = months[cs.month - 1] || "Jan";
-      const h = cs.hour.toString().padStart(2, "0");
-      const m = cs.minute.toString().padStart(2, "0");
-      const s = Math.floor(cs.seconds).toString().padStart(2, "0");
-      let suffix = "";
-      if (cs.era === 0) {
-        suffix = " BCE";
-      }
-      if (di < kECJulianGregorianSwitchoverTimeInterval) {
-        suffix += " (Julian)";
-      }
-      const ms = d.getTime();
-      if (ms <= MIN_DISPLAY_DATE_MS) {
-        suffix += " \u2014 AT LIMIT";
-      } else if (ms >= MAX_DISPLAY_DATE_MS) {
-        suffix += " \u2014 AT LIMIT";
-      }
-      return `${mo} ${cs.day}, ${cs.year}${suffix}  ${h}:${m}:${s}`;
-    }
-    function formatOffset(sim, real) {
-      const ms = sim.getTime() - real.getTime();
-      const sign = ms < 0 ? "-" : "+";
-      if (Math.abs(ms) < 2e3) return "";
-      const fromMs = (ms < 0 ? sim : real).getTime();
-      const toMs = (ms < 0 ? real : sim).getTime();
-      const from = new Date(Math.floor(fromMs / 1e3) * 1e3);
-      const to = new Date(Math.floor(toMs / 1e3) * 1e3);
-      const fromDI = dateToDateInterval(from);
-      const toDI = dateToDateInterval(to);
-      const fromCs = localComponentsFromTimeInterval(fromDI, 0);
-      const toCs = localComponentsFromTimeInterval(toDI, 0);
-      const fromSigned = fromCs.era === 0 ? -fromCs.year : fromCs.year;
-      const toSigned = toCs.era === 0 ? -toCs.year : toCs.year;
-      let years = toSigned - fromSigned;
-      let months = toCs.month - fromCs.month;
-      if (months < 0) {
-        years--;
-        months += 12;
-      }
-      let cursorDI = fromDI;
-      if (years > 0 || months > 0) {
-        let cursorSigned = fromSigned + years;
-        let cursorMonth = fromCs.month + months;
-        if (cursorMonth > 12) {
-          cursorSigned++;
-          cursorMonth -= 12;
-        }
-        const cursorEra = cursorSigned <= 0 ? 0 : 1;
-        const cursorYear = cursorSigned <= 0 ? 1 - cursorSigned : cursorSigned;
-        cursorDI = timeIntervalFromLocalComponents(
-          0,
-          cursorEra,
-          cursorYear,
-          cursorMonth,
-          fromCs.day,
-          fromCs.hour,
-          fromCs.minute,
-          fromCs.seconds
-        );
-        if (cursorDI > toDI) {
-          months--;
-          if (months < 0) {
-            years--;
-            months += 12;
-          }
-          cursorSigned = fromSigned + years;
-          cursorMonth = fromCs.month + months;
-          if (cursorMonth > 12) {
-            cursorSigned++;
-            cursorMonth -= 12;
-          }
-          if (cursorMonth < 1) {
-            cursorSigned--;
-            cursorMonth += 12;
-          }
-          const ce = cursorSigned <= 0 ? 0 : 1;
-          const cy = cursorSigned <= 0 ? 1 - cursorSigned : cursorSigned;
-          cursorDI = timeIntervalFromLocalComponents(
-            0,
-            ce,
-            cy,
-            cursorMonth,
-            fromCs.day,
-            fromCs.hour,
-            fromCs.minute,
-            fromCs.seconds
-          );
-        }
-      }
-      let remainSec = Math.round(toDI - cursorDI);
-      let days, hrs, mins, sec;
-      if (years > 0 || months > 0) {
-        remainSec = Math.round(remainSec / 3600) * 3600;
-        days = Math.floor(remainSec / 86400);
-        remainSec %= 86400;
-        hrs = Math.floor(remainSec / 3600);
-        mins = 0;
-        sec = 0;
-      } else if (remainSec >= 86400) {
-        remainSec = Math.round(remainSec / 60) * 60;
-        days = Math.floor(remainSec / 86400);
-        remainSec %= 86400;
-        hrs = Math.floor(remainSec / 3600);
-        remainSec %= 3600;
-        mins = Math.floor(remainSec / 60);
-        sec = 0;
-      } else {
-        days = 0;
-        hrs = Math.floor(remainSec / 3600);
-        remainSec %= 3600;
-        mins = Math.floor(remainSec / 60);
-        remainSec %= 60;
-        sec = remainSec;
-      }
-      if (hrs >= 24) {
-        days += Math.floor(hrs / 24);
-        hrs %= 24;
-      }
-      const parts = [];
-      if (years > 0) parts.push(`${years}y`);
-      if (months > 0) parts.push(`${months}mo`);
-      if (days > 0) parts.push(`${days}d`);
-      if (hrs > 0) parts.push(`${hrs}h`);
-      if (mins > 0) parts.push(`${mins}m`);
-      if (sec > 0) parts.push(`${sec}s`);
-      return parts.length > 0 ? `(${sign}${parts.join(" ")})` : "";
-    }
-    function formatTimezoneDisplay(olsonId, referenceDate) {
-      if (!olsonId) return "";
-      try {
-        const ref = referenceDate || /* @__PURE__ */ new Date();
-        const shortFmt = new Intl.DateTimeFormat("en-US", {
-          timeZone: olsonId,
-          timeZoneName: "short"
-        });
-        const shortParts = shortFmt.formatToParts(ref);
-        const abbr = shortParts.find((p) => p.type === "timeZoneName")?.value || "";
-        const longFmt = new Intl.DateTimeFormat("en-US", {
-          timeZone: olsonId,
-          timeZoneName: "longOffset"
-        });
-        const longParts = longFmt.formatToParts(ref);
-        const offsetStr = longParts.find((p) => p.type === "timeZoneName")?.value || "";
-        let utcStr = offsetStr.replace("GMT", "UTC");
-        utcStr = utcStr.replace(/([+-])0(\d)/, "$1$2");
-        return `${olsonId}\xA0(${abbr})\xA0${utcStr}`;
-      } catch {
-        return olsonId;
-      }
-    }
-    let _lastTransportReal = null;
-    let _lastTransportStopped = null;
-    function renderTransport() {
-      const isReal = timeController2.isRealTime;
-      const isStopped = timeController2.isStopped;
-      if (isReal === _lastTransportReal && isStopped === _lastTransportStopped) {
-        return;
-      }
-      _lastTransportReal = isReal;
-      _lastTransportStopped = isStopped;
-      tpTransport.innerHTML = "";
-      const topRow = document.createElement("div");
-      topRow.className = "tp-transport-row";
-      if (!timeController2.isRealTime) {
-        const nowBtn = document.createElement("button");
-        nowBtn.className = "tp-btn";
-        nowBtn.innerHTML = 'Now\u2009<span style="position:relative;top:1px">\u25B6</span>';
-        nowBtn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          nowClicked();
-        });
-        topRow.appendChild(nowBtn);
-      }
-      if (!isStopped) {
-        const pauseBtn = document.createElement("button");
-        pauseBtn.className = "tp-btn active";
-        pauseBtn.textContent = "\u2016";
-        pauseBtn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          timeController2.stop();
-          updater2?.reset();
-          onTransportChange();
-          updateTimeUI();
-          ensureSchedulerRunning();
-          writeTimeState2();
-        });
-        topRow.appendChild(pauseBtn);
-      }
-      if (topRow.childNodes.length > 0) {
-        tpTransport.appendChild(topRow);
-      }
-      if (isStopped) {
-        const bottomRow = document.createElement("div");
-        bottomRow.className = "tp-transport-row";
-        const revBtn = document.createElement("button");
-        revBtn.className = "tp-btn";
-        revBtn.textContent = "\u25C0";
-        revBtn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          timeController2.setDirection(-1);
-          timeController2.setRate(null);
-          updater2?.reset();
-          onTransportChange();
-          updateTimeUI();
-          ensureSchedulerRunning();
-          writeTimeState2();
-        });
-        const fwdBtn = document.createElement("button");
-        fwdBtn.className = "tp-btn";
-        fwdBtn.textContent = "\u25B6";
-        fwdBtn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          timeController2.setDirection(1);
-          timeController2.setRate(null);
-          updater2?.reset();
-          onTransportChange();
-          updateTimeUI();
-          ensureSchedulerRunning();
-          writeTimeState2();
-        });
-        bottomRow.appendChild(revBtn);
-        bottomRow.appendChild(fwdBtn);
-        tpTransport.appendChild(bottomRow);
-      }
-    }
-    function updateTimeUI() {
-      const isReal = timeController2.isRealTime;
-      timeBar.classList.toggle("overridden", !isReal);
-      const sim = timeController2.getDisplayTime();
-      timeBarDate.textContent = formatSimTime(sim);
-      const simMs = sim.getTime();
-      const atLimit = simMs <= MIN_DISPLAY_DATE_MS || simMs >= MAX_DISPLAY_DATE_MS;
-      timeBar.classList.toggle("at-limit", atLimit);
-      if (!isReal) {
-        timeBarRate.textContent = timeController2.statusLabel;
-        timeBarOffset.textContent = formatOffset(sim, /* @__PURE__ */ new Date());
-      }
-      tpRateLabel.textContent = timeController2.statusLabel;
-      renderTransport();
-      updateTimezoneDisplay();
-      const simDI = dateToDateInterval(sim);
-      const simCs = localComponentsFromTimeInterval(simDI, targetTzOffsetSec(sim));
-      const yearEl = document.getElementById("tp-year");
-      const monthEl = document.getElementById("tp-month");
-      const dayEl = document.getElementById("tp-day");
-      const hourEl = document.getElementById("tp-hour");
-      const minuteEl = document.getElementById("tp-minute");
-      const active = document.activeElement;
-      if (yearEl && active !== yearEl) yearEl.value = simCs.year.toString();
-      if (monthEl && active !== monthEl) monthEl.value = simCs.month.toString();
-      if (dayEl && active !== dayEl) dayEl.value = simCs.day.toString();
-      if (hourEl && active !== hourEl) hourEl.value = simCs.hour.toString();
-      if (minuteEl && active !== minuteEl) minuteEl.value = simCs.minute.toString();
-      const bceBtn = document.getElementById("tp-bce");
-      if (bceBtn) {
-        const isBCE = simCs.era === 0;
-        bceBtn.textContent = isBCE ? "BCE" : "CE";
-        bceBtn.classList.toggle("active", isBCE);
-      }
-    }
-    function updateTimezoneDisplay() {
-      const formatted = formatTimezoneDisplay(
-        getTimezone(),
-        timeController2.getDisplayTime()
-      );
-      if (locationTzLabel) locationTzLabel.innerHTML = formatted;
-      if (lpLocationTz) lpLocationTz.innerHTML = formatted;
-    }
-    function showPopover() {
-      popoverOpen = true;
-      timePopover.style.display = "";
-      timeBarLabel.textContent = "\u23F1 Hide time controller";
-      timeBarLabel.classList.add("active");
-      updateTimeUI();
-      setState({ tc: true });
-      onPopoverToggle?.(true);
-    }
-    function hidePopover() {
-      popoverOpen = false;
-      timePopover.style.display = "none";
-      timeBarLabel.textContent = "\u23F1 Show time controller";
-      timeBarLabel.classList.remove("active");
-      updateTimeUI();
-      setState({ tc: false });
-      onPopoverToggle?.(false);
-    }
-    function nowClicked() {
-      timeController2.reset();
-      updater2?.reset();
-      onNowClicked();
-      updateTimeUI();
-      ensureSchedulerRunning();
-      writeTimeState2();
-    }
-    const HOLD_DELAY_MS = 300;
-    let holdTimer = null;
-    let holdingBtn = null;
-    function startHold(btn, unit, dir) {
-      holdingBtn = btn;
-      btn.classList.add("holding");
-      timeController2.setDirection(dir);
-      const rateIdx = unitToRateIndex[unit];
-      if (rateIdx !== void 0) {
-        timeController2.setRate(RATE_OPTIONS[rateIdx]);
-      }
-      updater2?.reset();
-      onScrubStart();
-      updateTimeUI();
-      ensureSchedulerRunning();
-    }
-    function endHold() {
-      if (holdTimer !== null) {
-        clearTimeout(holdTimer);
-        holdTimer = null;
-      }
-      if (holdingBtn) {
-        holdingBtn.classList.remove("holding");
-        holdingBtn = null;
-        timeController2.stop();
-        updater2?.reset();
-        onScrubEnd();
-        updateTimeUI();
-        ensureSchedulerRunning();
-        writeTimeState2();
-      }
-    }
-    timePopover.querySelectorAll("[data-step]").forEach((btn) => {
-      const el = btn;
-      const stepKey = el.dataset.step;
-      const entry = stepMap[stepKey];
-      if (!entry) return;
-      const [unit, dir] = entry;
-      const unitName = el.dataset.unit || unit;
-      function doStep(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        timeController2.stop();
-        timeController2.step(unit, dir);
-        updater2?.reset();
-        onTimeStep();
-        updateTimeUI();
-        ensureSchedulerRunning();
-        holdTimer = setTimeout(() => {
-          holdTimer = null;
-          startHold(el, unitName, dir);
-        }, HOLD_DELAY_MS);
-      }
-      function doRelease(e) {
-        e.stopPropagation();
-        endHold();
-        writeTimeState2();
-      }
-      el.addEventListener("mousedown", doStep);
-      el.addEventListener("mouseup", doRelease);
-      el.addEventListener("mouseleave", () => endHold());
-      el.addEventListener("touchstart", doStep);
-      el.addEventListener("touchend", doRelease);
-      el.addEventListener("touchcancel", () => endHold());
-    });
-    const tpTabDate = document.getElementById("tp-tab-date");
-    const tpTabAstro = document.getElementById("tp-tab-astro");
-    const tpTabs = timePopover.querySelectorAll(".tp-tab");
-    function switchTab(tabName) {
-      if (tpTabDate && tpTabAstro) {
-        const hiding = tabName === "a" ? tpTabDate : tpTabAstro;
-        const showing = tabName === "a" ? tpTabAstro : tpTabDate;
-        hiding.style.transition = "none";
-        hiding.classList.add("tp-pane-hidden");
-        void hiding.offsetHeight;
-        hiding.style.transition = "";
-        showing.classList.remove("tp-pane-hidden");
-      }
-      tpTabs.forEach((btn) => {
-        const el = btn;
-        el.classList.toggle("active", el.dataset.tab === (tabName === "a" ? "astro" : "date"));
-      });
-      setState({ tp: tabName });
-      if (popoverOpen) {
-        setTimeout(() => {
-          onPopoverToggle?.(true);
-        }, 320);
-      }
-    }
-    const urlTp = new URLSearchParams(window.location.search).get("tp");
-    if (urlTp === "a") {
-      switchTab("a");
-    }
-    tpTabs.forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const el = btn;
-        switchTab(el.dataset.tab === "astro" ? "a" : "d");
-      });
-    });
-    function handleAstroStep(eventType, dir, btnEl) {
-      let bodyPlanetNumber;
-      if (eventType === "body-transit" || eventType === "body-rise" || eventType === "body-set") {
-        bodyPlanetNumber = getSelectedBody?.();
-        if (bodyPlanetNumber === void 0) {
-          const bodyLabel = document.getElementById("tp-body-transit-label");
-          bodyPlanetNumber = bodyLabel ? parseInt(bodyLabel.dataset.planet || "1", 10) : void 0;
-        }
-      }
-      const targetDate = computeAstroTarget(
-        eventType,
-        dir,
-        timeController2.getDisplayTime(),
-        getLat() * Math.PI / 180,
-        getLon() * Math.PI / 180,
-        bodyPlanetNumber
-      );
-      if (!targetDate || isNaN(targetDate.getTime())) {
-        btnEl.classList.add("flash-fail");
-        setTimeout(() => btnEl.classList.remove("flash-fail"), 300);
-        return;
-      }
-      timeController2.stop();
-      timeController2.setTime(targetDate);
-      updater2?.reset();
-      onTimeStep();
-      updateTimeUI();
-      ensureSchedulerRunning();
-      writeTimeState2();
-    }
-    timePopover.querySelectorAll("[data-astro]").forEach((btn) => {
-      const el = btn;
-      const eventType = el.dataset.astro;
-      const dir = parseInt(el.dataset.dir || "1", 10);
-      el.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        handleAstroStep(eventType, dir, el);
-      });
-      el.addEventListener("touchstart", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        handleAstroStep(eventType, dir, el);
-      });
-    });
-    function applyDateInputs() {
-      const yr = parseInt(document.getElementById("tp-year").value, 10);
-      const mo = parseInt(document.getElementById("tp-month").value, 10);
-      const dy = parseInt(document.getElementById("tp-day").value, 10);
-      const hr = parseInt(document.getElementById("tp-hour").value, 10);
-      const mn = parseInt(document.getElementById("tp-minute").value, 10);
-      if (isNaN(yr) || isNaN(mo) || isNaN(dy) || isNaN(hr) || isNaN(mn)) return;
-      const bceBtn = document.getElementById("tp-bce");
-      const isBCE = bceBtn?.classList.contains("active") ?? false;
-      const era = isBCE ? 0 : 1;
-      const refDate = timeController2.getDisplayTime();
-      const tzOff = targetTzOffsetSec(refDate);
-      const di = timeIntervalFromLocalComponents(tzOff, era, yr, mo, dy, hr, mn, 0);
-      const d = dateIntervalToDate(di);
-      const clampedMs = Math.max(
-        MIN_DISPLAY_DATE_MS,
-        Math.min(MAX_DISPLAY_DATE_MS, d.getTime())
-      );
-      timeController2.setTime(clampedMs !== d.getTime() ? new Date(clampedMs) : d);
-      updater2?.reset();
-      onTimeStep();
-      updateTimeUI();
-      ensureSchedulerRunning();
-      writeTimeState2();
-    }
-    ["tp-year", "tp-month", "tp-day", "tp-hour", "tp-minute"].forEach((id) => {
-      const el = document.getElementById(id);
-      if (el) {
-        el.addEventListener("change", () => applyDateInputs());
-      }
-    });
-    const tpBce = document.getElementById("tp-bce");
-    if (tpBce) {
-      tpBce.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const isActive = tpBce.classList.toggle("active");
-        tpBce.textContent = isActive ? "BCE" : "CE";
-        applyDateInputs();
-      });
-    }
-    timeBarLabel.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (popoverOpen) {
-        hidePopover();
-      } else {
-        showPopover();
-      }
-    });
-    timeBarRate.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (popoverOpen) {
-        hidePopover();
-      } else {
-        showPopover();
-      }
-    });
-    timeBarNow.addEventListener("click", (e) => {
-      e.stopPropagation();
-      nowClicked();
-    });
-    tpClose.addEventListener("click", (e) => {
-      e.stopPropagation();
-      hidePopover();
-    });
-    updateTimezoneDisplay();
-    updateTimeUI();
-    return {
-      updateTimeUI,
-      showPopover,
-      hidePopover,
-      isPopoverOpen: () => popoverOpen,
-      updateTimezoneDisplay
-    };
-  }
-
-  // src/shared/fps-indicator.ts
-  var FPS_WATCHDOG_MS = 1e3;
-  var TARGET_FRAME_MS = 1e3 / 60;
-  function median(xs) {
-    if (xs.length === 0) return 0;
-    const s = [...xs].sort((a, b) => a - b);
-    const mid = s.length >> 1;
-    return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
-  }
-  function createFpsIndicator(enabled) {
-    if (typeof document === "undefined") return null;
-    let lastFrameTime = 0;
-    let wasContinuous = false;
-    let continuousFrames = 0;
-    let frameCount = 0;
-    let windowStart = performance.now();
-    const workSamples = [];
-    const deltaSamples = [];
-    let fpsHeld = 0;
-    let cpuFrameHeld = 0;
-    let cpu60Held = 0;
-    const el = document.createElement("div");
-    el.id = "fps-indicator";
-    el.title = "fps: wallclock rate while animating (vsync-bound) \xB7 1st %: CPU share of that actual frame (~100% = CPU-paced) \xB7 2nd %: CPU share of a 60 fps (16.7ms) frame, can exceed 100% (\xD74 for 240 fps) \xB7 avg: frames/sec over the last second, incl. idle";
-    el.style.cssText = 'position:fixed;bottom:8px;left:8px;z-index:9999;pointer-events:none;font:11px "JetBrains Mono",monospace;color:rgba(255,255,255,0.5);background:rgba(0,0,0,0.35);padding:2px 6px;border-radius:4px;';
-    const animEl = document.createElement("span");
-    const thruEl = document.createElement("span");
-    const sep = document.createElement("span");
-    sep.textContent = " ";
-    animEl.textContent = "\u2013fps";
-    animEl.style.opacity = "0.4";
-    thruEl.textContent = "0avg";
-    el.append(animEl, sep, thruEl);
-    document.body.appendChild(el);
-    if (enabled) {
-      document.body.classList.add("has-fps");
-    } else {
-      el.style.display = "none";
-    }
-    window.addEventListener("keydown", (ev) => {
-      const target = ev.target;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
-        return;
-      }
-      if (ev.key.toLowerCase() === "f" && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
-        const params = new URLSearchParams(window.location.search);
-        const isVisible = el.style.display !== "none";
-        if (isVisible) {
-          el.style.display = "none";
-          document.body.classList.remove("has-fps");
-          params.delete("fps");
-        } else {
-          el.style.display = "";
-          document.body.classList.add("has-fps");
-          params.set("fps", "1");
-        }
-        const qs = params.toString();
-        const newUrl = window.location.pathname + (qs ? "?" + qs : "");
-        window.history.replaceState(null, "", newUrl);
-        updateNavigationLinks();
-      }
-    });
-    setInterval(() => {
-      const nowW = performance.now();
-      const elapsedSec = (nowW - windowStart) / 1e3;
-      const throughput = elapsedSec > 0 ? frameCount / elapsedSec : 0;
-      const mWork = median(workSamples);
-      const mDelta = median(deltaSamples);
-      if (mDelta > 0) fpsHeld = 1e3 / mDelta;
-      if (mWork > 0 && mDelta > 0) cpuFrameHeld = mWork / mDelta * 100;
-      if (mWork > 0) cpu60Held = mWork / TARGET_FRAME_MS * 100;
-      const isActive = continuousFrames > 0;
-      frameCount = 0;
-      windowStart = nowW;
-      continuousFrames = 0;
-      workSamples.length = 0;
-      deltaSamples.length = 0;
-      animEl.style.opacity = isActive ? "1" : "0.4";
-      animEl.textContent = `${fpsHeld.toFixed(0)}fps ${cpuFrameHeld.toFixed(0)}% ${cpu60Held.toFixed(0)}%`;
-      thruEl.textContent = `${throughput.toFixed(0)}avg`;
-    }, FPS_WATCHDOG_MS);
-    return {
-      recordFrame(continuous, workMs) {
-        const now = performance.now();
-        frameCount++;
-        if (workMs > 0) workSamples.push(workMs);
-        if (continuous && wasContinuous && lastFrameTime > 0) {
-          const delta = now - lastFrameTime;
-          if (delta > 0) deltaSamples.push(delta);
-        }
-        lastFrameTime = now;
-        if (continuous) continuousFrames++;
-        wasContinuous = continuous;
-      }
-    };
-  }
-
-  // src/shared/share-button.ts
-  function initShareButton(options) {
-    const shareBtn = document.getElementById("share-btn");
-    if (!shareBtn) return;
-    shareBtn.addEventListener("click", () => {
-      showShareDialog(buildShareUrl(options.getState(), { slots: getSlotOverrides() }));
-    });
-  }
-  function showShareDialog(url) {
-    ensureModalStyles();
-    const backdrop = document.createElement("div");
-    backdrop.className = "ec-modal-backdrop";
-    const modal = document.createElement("div");
-    modal.className = "ec-modal";
-    modal.setAttribute("role", "dialog");
-    modal.setAttribute("aria-modal", "true");
-    const title = document.createElement("h2");
-    title.className = "ec-modal-title";
-    title.textContent = "Share this view";
-    const text = document.createElement("p");
-    text.className = "ec-modal-text";
-    text.textContent = "Anyone who opens this link sees this time, location, and setup. They choose whether to keep it as their default.";
-    const input = document.createElement("input");
-    input.className = "ec-modal-input";
-    input.type = "text";
-    input.readOnly = true;
-    input.value = url;
-    const buttons = document.createElement("div");
-    buttons.className = "ec-modal-buttons";
-    const copyBtn = document.createElement("button");
-    copyBtn.className = "ec-modal-btn ec-primary";
-    copyBtn.textContent = "Copy link";
-    const closeBtn = document.createElement("button");
-    closeBtn.className = "ec-modal-btn";
-    closeBtn.textContent = "Close";
-    buttons.append(copyBtn, closeBtn);
-    modal.append(title, text, input, buttons);
-    backdrop.append(modal);
-    document.body.appendChild(backdrop);
-    let done = false;
-    const close = () => {
-      if (done) return;
-      done = true;
-      document.removeEventListener("keydown", onKey);
-      backdrop.remove();
-    };
-    const onKey = (e) => {
-      if (e.key === "Escape") close();
-    };
-    const selectAll = () => {
-      input.focus();
-      input.select();
-    };
-    copyBtn.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(url);
-        copyBtn.textContent = "Copied!";
-        setTimeout(() => {
-          copyBtn.textContent = "Copy link";
-        }, 1500);
-      } catch {
-        selectAll();
-        copyBtn.textContent = "Press \u2318C to copy";
-      }
-    });
-    closeBtn.addEventListener("click", close);
-    backdrop.addEventListener("click", (e) => {
-      if (e.target === backdrop) close();
-    });
-    document.addEventListener("keydown", onKey);
-    selectAll();
-  }
-
-  // src/shared/city-search.ts
-  var TZ = [];
-  var CC = [];
-  var AD = [];
-  var N = 0;
-  var cLat = new Int32Array(0);
-  var cLon = new Int32Array(0);
-  var cPop = new Uint32Array(0);
-  var cTz = new Uint16Array(0);
-  var cCc = new Uint16Array(0);
-  var cAd1 = new Uint16Array(0);
-  var names = "";
-  var nameOff = new Uint32Array(0);
-  var ascii = "";
-  var asciiOff = new Uint32Array(0);
-  var alts = "";
-  var altOff = new Uint32Array(0);
-  var ad2 = /* @__PURE__ */ new Map();
-  var aN = 0;
-  var aLat = new Int32Array(0);
-  var aLon = new Int32Array(0);
-  var aTz = new Uint16Array(0);
-  var aCc = new Uint16Array(0);
-  var aIata = "";
-  var aIataOff = new Uint32Array(0);
-  var aCity = "";
-  var aCityOff = new Uint32Array(0);
-  var loaded = false;
-  var IS_LE = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
-  function b64ToBytes(s) {
-    const bin = atob(s);
-    const len = bin.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
-    return bytes;
-  }
-  function swapInPlace(bytes, width) {
-    for (let i = 0; i < bytes.length; i += width) {
-      for (let j = 0; j < width >> 1; j++) {
-        const t = bytes[i + j];
-        bytes[i + j] = bytes[i + width - 1 - j];
-        bytes[i + width - 1 - j] = t;
-      }
-    }
-  }
-  function decodeI32(s) {
-    const b = b64ToBytes(s);
-    if (!IS_LE) swapInPlace(b, 4);
-    return new Int32Array(b.buffer);
-  }
-  function decodeU32(s) {
-    const b = b64ToBytes(s);
-    if (!IS_LE) swapInPlace(b, 4);
-    return new Uint32Array(b.buffer);
-  }
-  function decodeU16(s) {
-    const b = b64ToBytes(s);
-    if (!IS_LE) swapInPlace(b, 2);
-    return new Uint16Array(b.buffer);
-  }
-  function buildOffsets(str, rows) {
-    const off = new Uint32Array(rows + 1);
-    let r = 1;
-    let pos = str.indexOf("\n");
-    while (pos !== -1) {
-      off[r++] = pos + 1;
-      pos = str.indexOf("\n", pos + 1);
-    }
-    off[rows] = str.length + 1;
-    return off;
-  }
-  function rowStr(str, off, i) {
-    return str.slice(off[i], off[i + 1] - 1);
-  }
-  function rowLen(off, i) {
-    return off[i + 1] - 1 - off[i];
-  }
-  function startsWithAt(h, start, q) {
-    for (let k = 0; k < q.length; k++) {
-      if (h.charCodeAt(start + k) !== q.charCodeAt(k)) return false;
-    }
-    return true;
-  }
-  function rowOfOffset(off, pos) {
-    let lo = 0;
-    let hi = off.length - 2;
-    while (lo < hi) {
-      const mid = lo + hi + 1 >> 1;
-      if (off[mid] <= pos) lo = mid;
-      else hi = mid - 1;
-    }
-    return lo;
-  }
-  var isFileProtocol = typeof location !== "undefined" && location.protocol === "file:";
-  var compressedBlob = null;
-  var prefetchPromise = null;
-  var loadPromise = null;
-  function canUseFetchPath() {
-    return !isFileProtocol && typeof fetch !== "undefined" && typeof DecompressionStream !== "undefined";
-  }
-  function ingest(raw) {
-    TZ = raw.TZ;
-    CC = raw.CC;
-    AD = raw.AD;
-    N = raw.N;
-    aN = raw.aN;
-    cLat = decodeI32(raw.cLat);
-    cLon = decodeI32(raw.cLon);
-    cPop = decodeU32(raw.cPop);
-    cTz = decodeU16(raw.cTz);
-    cCc = decodeU16(raw.cCc);
-    cAd1 = decodeU16(raw.cAd1);
-    names = raw.names;
-    ascii = raw.ascii;
-    alts = raw.alts;
-    nameOff = buildOffsets(names, N);
-    asciiOff = buildOffsets(ascii, N);
-    altOff = buildOffsets(alts, N);
-    ad2 = /* @__PURE__ */ new Map();
-    for (const k in raw.ad2) ad2.set(+k, raw.ad2[k]);
-    aLat = decodeI32(raw.aLat);
-    aLon = decodeI32(raw.aLon);
-    aTz = decodeU16(raw.aTz);
-    aCc = decodeU16(raw.aCc);
-    aIata = raw.aIata;
-    aCity = raw.aCity;
-    aIataOff = buildOffsets(aIata, aN);
-    aCityOff = buildOffsets(aCity, aN);
-    loaded = true;
-    window.ChronometerCities = void 0;
-    console.log(`[CitySearch] Loaded ${N} cities, ${aN} airports`);
-  }
-  function toASCII(s) {
-    return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  }
-  var loadError = "";
-  async function fetchCompressed() {
-    const resp = await fetch("cities-data.json.gz");
-    if (!resp.ok) throw new Error(`fetch cities-data.json.gz: HTTP ${resp.status}`);
-    return new Uint8Array(await resp.arrayBuffer());
-  }
-  async function gunzipToText(bytes) {
-    const ds = new DecompressionStream("gzip");
-    const stream = new Blob([bytes]).stream().pipeThrough(ds);
-    return await new Response(stream).text();
-  }
-  async function ensureCompressed() {
-    if (compressedBlob) return compressedBlob;
-    if (prefetchPromise) await prefetchPromise;
-    if (compressedBlob) return compressedBlob;
-    compressedBlob = await fetchCompressed();
-    return compressedBlob;
-  }
-  function loadViaScript() {
-    return new Promise((resolve, reject) => {
-      window._chronCitiesCallback = (data) => {
-        if (data) ingest(data);
-      };
-      const script = document.createElement("script");
-      script.src = "cities-data.js";
-      const errorHandler = (evt) => {
-        if (evt.filename && evt.filename.includes("cities-data")) {
-          window.removeEventListener("error", errorHandler);
-          loadError = `JS error in cities-data.js: ${evt.message} (line ${evt.lineno})`;
-          console.error(`[CitySearch] ${loadError}`);
-          reject(new Error(loadError));
-        }
-      };
-      window.addEventListener("error", errorHandler);
-      script.onload = () => {
-        window.removeEventListener("error", errorHandler);
-        delete window._chronCitiesCallback;
-        script.remove();
-        if (loaded) resolve();
-        else {
-          loadError = "cities-data.js loaded but data callback was not invoked";
-          console.error(`[CitySearch] ${loadError}`);
-          reject(new Error(loadError));
-        }
-      };
-      script.onerror = (evt) => {
-        window.removeEventListener("error", errorHandler);
-        delete window._chronCitiesCallback;
-        loadError = `Failed to download cities-data.js`;
-        console.error(`[CitySearch] ${loadError}`, evt);
-        reject(new Error(loadError));
-      };
-      document.head.appendChild(script);
-    });
-  }
-  async function loadViaFetch() {
-    try {
-      const bytes = await ensureCompressed();
-      ingest(JSON.parse(await gunzipToText(bytes)));
-    } catch (err) {
-      console.warn("[CitySearch] fetch/gz load failed, falling back to <script>", err);
-      await loadViaScript();
-    }
-  }
-  function prefetchCityData() {
-    if (loaded || loadError || compressedBlob || !canUseFetchPath()) return Promise.resolve();
-    if (prefetchPromise) return prefetchPromise;
-    prefetchPromise = fetchCompressed().then((bytes) => {
-      compressedBlob = bytes;
-    }).catch((err) => {
-      console.warn("[CitySearch] prefetch failed (will retry on demand)", err);
-    });
-    return prefetchPromise;
-  }
-  function loadCityData() {
-    if (loaded) return Promise.resolve();
-    if (loadError) return Promise.reject(new Error(loadError));
-    if (loadPromise) return loadPromise;
-    const existing = window.ChronometerCities;
-    if (existing) {
-      ingest(existing);
-      return Promise.resolve();
-    }
-    loadPromise = (canUseFetchPath() ? loadViaFetch() : loadViaScript()).finally(() => {
-      loadPromise = null;
-    });
-    return loadPromise;
-  }
-  function releaseCityData() {
-    if (!loaded) return;
-    loaded = false;
-    N = 0;
-    aN = 0;
-    TZ = [];
-    CC = [];
-    AD = [];
-    cLat = new Int32Array(0);
-    cLon = new Int32Array(0);
-    cPop = new Uint32Array(0);
-    cTz = new Uint16Array(0);
-    cCc = new Uint16Array(0);
-    cAd1 = new Uint16Array(0);
-    names = "";
-    ascii = "";
-    alts = "";
-    nameOff = new Uint32Array(0);
-    asciiOff = new Uint32Array(0);
-    altOff = new Uint32Array(0);
-    ad2 = /* @__PURE__ */ new Map();
-    aLat = new Int32Array(0);
-    aLon = new Int32Array(0);
-    aTz = new Uint16Array(0);
-    aCc = new Uint16Array(0);
-    aIata = "";
-    aCity = "";
-    aIataOff = new Uint32Array(0);
-    aCityOff = new Uint32Array(0);
-    console.log("[CitySearch] Released parsed city data");
-  }
-  function isCityDataLoaded() {
-    return loaded;
-  }
-  function cityLabel(i, name) {
-    let label = name;
-    const a2 = ad2.get(i);
-    if (a2) label += ` (${a2})`;
-    const admin1 = AD[cAd1[i]] || "";
-    if (admin1) label += `, ${admin1}`;
-    const cc = CC[cCc[i]] || "";
-    if (cc) label += `, ${cc}`;
-    return label;
-  }
-  function searchCities(query, limit = 20) {
-    if (!loaded || !query || query.length < 2) return [];
-    const q = toASCII(query.trim());
-    if (!q) return [];
-    const qUpper = query.trim().toUpperCase();
-    const results = [];
-    for (let i = 0; i < aN; i++) {
-      if (!startsWithAt(aIata, aIataOff[i], qUpper)) continue;
-      const iata = rowStr(aIata, aIataOff, i);
-      const city = rowStr(aCity, aCityOff, i);
-      results.push({
-        result: {
-          label: `${iata}  ${city} airport`,
-          shortLabel: `${iata} ${city} airport`,
-          lat: aLat[i] / 1e3,
-          lon: aLon[i] / 1e3,
-          timezone: TZ[aTz[i]] || "",
-          isAirport: true
-        },
-        priority: rowLen(aIataOff, i) === qUpper.length ? 0 : 1,
-        // exact match first
-        pop: 0
-      });
-    }
-    const matchedRows = /* @__PURE__ */ new Set();
-    for (let i = 0; i < N; i++) {
-      if (!startsWithAt(ascii, asciiOff[i], q)) continue;
-      matchedRows.add(i);
-      const name = rowStr(names, nameOff, i);
-      results.push({
-        result: {
-          label: cityLabel(i, name),
-          shortLabel: name,
-          lat: cLat[i] / 1e3,
-          lon: cLon[i] / 1e3,
-          timezone: TZ[cTz[i]] || "",
-          isAirport: false
-        },
-        priority: rowLen(asciiOff, i) === q.length ? 0 : 1,
-        pop: cPop[i]
-      });
-    }
-    let pos = alts.indexOf(q);
-    while (pos >= 0) {
-      const prev = pos === 0 ? 10 : alts.charCodeAt(pos - 1);
-      if (prev === 10 || prev === 44) {
-        const i = rowOfOffset(altOff, pos);
-        if (!matchedRows.has(i)) {
-          matchedRows.add(i);
-          const name = rowStr(names, nameOff, i);
-          results.push({
-            result: {
-              label: cityLabel(i, name),
-              shortLabel: name,
-              lat: cLat[i] / 1e3,
-              lon: cLon[i] / 1e3,
-              timezone: TZ[cTz[i]] || "",
-              isAirport: false
-            },
-            priority: 3,
-            pop: cPop[i]
-          });
-        }
-      }
-      pos = alts.indexOf(q, pos + 1);
-    }
-    results.sort((a, b) => {
-      if (a.priority !== b.priority) return a.priority - b.priority;
-      return b.pop - a.pop;
-    });
-    return results.slice(0, limit).map((r) => r.result);
-  }
-  function findClosestCity(lat2, lon2) {
-    if (!loaded || N === 0) return null;
-    let bestDist = Infinity;
-    let bestIdx = -1;
-    const cosLat = Math.cos(lat2 * Math.PI / 180);
-    for (let i = 0; i < N; i++) {
-      const dLat = cLat[i] / 1e3 - lat2;
-      const dLon = (cLon[i] / 1e3 - lon2) * cosLat;
-      const dist = dLat * dLat + dLon * dLon;
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestIdx = i;
-      }
-    }
-    if (bestIdx < 0) return null;
-    const name = rowStr(names, nameOff, bestIdx);
-    return {
-      label: cityLabel(bestIdx, name),
-      shortLabel: name,
-      lat: cLat[bestIdx] / 1e3,
-      lon: cLon[bestIdx] / 1e3,
-      timezone: TZ[cTz[bestIdx]] || "",
-      isAirport: false,
-      distanceDeg: Math.sqrt(bestDist)
-    };
-  }
-
-  // src/shared/tz-resolve.ts
-  function resolveTimezone(lat2, lon2, cityTz) {
-    if (cityTz) return cityTz;
-    const closest = findClosestCity(lat2, lon2);
-    if (closest?.timezone) return closest.timezone;
-    try {
-      return Intl.DateTimeFormat().resolvedOptions().timeZone;
-    } catch {
-      return "Etc/UTC";
-    }
-  }
-
-  // src/blue-marble-data.ts
-  var BLUE_MARBLE = "data:image/jpeg;base64,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";
-
-  // src/shared/mini-map.ts
-  var textureImg = null;
-  var textureCanvas = null;
-  var textureCtx = null;
-  var textureLoaded = false;
-  function ensureTexture() {
-    if (textureLoaded) return Promise.resolve();
-    if (textureImg) return new Promise((r) => {
-      textureImg.onload = () => r();
-    });
-    return new Promise((resolve) => {
-      textureImg = new Image();
-      textureImg.onload = () => {
-        textureCanvas = document.createElement("canvas");
-        textureCanvas.width = textureImg.width;
-        textureCanvas.height = textureImg.height;
-        textureCtx = textureCanvas.getContext("2d", { willReadFrequently: true });
-        textureCtx.drawImage(textureImg, 0, 0);
-        textureLoaded = true;
-        resolve();
-      };
-      textureImg.src = BLUE_MARBLE;
-    });
-  }
-  async function renderGlobe(canvas, lat2, lon2) {
-    await ensureTexture();
-    const ctx = canvas.getContext("2d");
-    const w = canvas.width;
-    const h = canvas.height;
-    const cx = w / 2;
-    const cy = h / 2;
-    const r = Math.min(cx, cy) - 2;
-    ctx.clearRect(0, 0, w, h);
-    const tw = textureCanvas.width;
-    const th = textureCanvas.height;
-    const texData = textureCtx.getImageData(0, 0, tw, th).data;
-    const imgData = ctx.createImageData(w, h);
-    const pixels = imgData.data;
-    const \u03C60 = lat2 * Math.PI / 180;
-    const \u03BB0 = lon2 * Math.PI / 180;
-    const sin\u03C60 = Math.sin(\u03C60);
-    const cos\u03C60 = Math.cos(\u03C60);
-    for (let sy = 0; sy < h; sy++) {
-      for (let sx = 0; sx < w; sx++) {
-        const nx = (sx - cx) / r;
-        const ny = (cy - sy) / r;
-        const \u03C12 = nx * nx + ny * ny;
-        if (\u03C12 > 1) continue;
-        const \u03C1 = Math.sqrt(\u03C12);
-        const c = Math.asin(\u03C1);
-        const sinC = Math.sin(c);
-        const cosC = Math.cos(c);
-        let \u03C6, \u03BB;
-        if (\u03C1 === 0) {
-          \u03C6 = \u03C60;
-          \u03BB = \u03BB0;
-        } else {
-          \u03C6 = Math.asin(cosC * sin\u03C60 + ny * sinC * cos\u03C60 / \u03C1);
-          \u03BB = \u03BB0 + Math.atan2(nx * sinC, \u03C1 * cos\u03C60 * cosC - ny * sin\u03C60 * sinC);
-        }
-        const latDeg = \u03C6 * 180 / Math.PI;
-        const lonDeg = \u03BB * 180 / Math.PI;
-        let tx = (lonDeg + 180) % 360 / 360 * tw;
-        let ty = (90 - latDeg) / 180 * th;
-        tx = Math.max(0, Math.min(tw - 1, Math.floor(tx)));
-        ty = Math.max(0, Math.min(th - 1, Math.floor(ty)));
-        const ti = (ty * tw + tx) * 4;
-        const pi = (sy * w + sx) * 4;
-        const edgeFactor = 1 - \u03C12 * 0.3;
-        pixels[pi] = texData[ti] * edgeFactor;
-        pixels[pi + 1] = texData[ti + 1] * edgeFactor;
-        pixels[pi + 2] = texData[ti + 2] * edgeFactor;
-        pixels[pi + 3] = 255;
-      }
-    }
-    ctx.putImageData(imgData, 0, 0);
-    ctx.fillStyle = "#ff4444";
-    ctx.fillRect(cx - 1.5, cy - 1.5, 3, 3);
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.strokeStyle = "rgba(100, 160, 255, 0.2)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-  }
-  function latLonToTile(lat2, lon2, zoom) {
-    const n = 2 ** zoom;
-    const xf = (lon2 + 180) / 360 * n;
-    const latRad = lat2 * Math.PI / 180;
-    const yf = (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n;
-    const tileX = Math.floor(xf);
-    const tileY = Math.floor(yf);
-    const px = (xf - tileX) * 256;
-    const py = (yf - tileY) * 256;
-    return { tileX, tileY, px, py };
-  }
-  function loadOSMTile(container, _img, markerEl, lat2, lon2, zoom = 8) {
-    const { tileX, tileY, px, py } = latLonToTile(lat2, lon2, zoom);
-    const startX = px >= 128 ? tileX : tileX - 1;
-    const startY = py >= 128 ? tileY : tileY - 1;
-    const markerX = px + (tileX - startX) * 256;
-    const markerY = py + (tileY - startY) * 256;
-    const cw = container.clientWidth;
-    const ch = container.clientHeight;
-    container.querySelectorAll(".osm-tile-img").forEach((el) => el.remove());
-    const offsetX = Math.round(cw / 2 - markerX);
-    const offsetY = Math.round(ch / 2 - markerY);
-    markerEl.style.left = `${Math.round(cw / 2)}px`;
-    markerEl.style.top = `${Math.round(ch / 2)}px`;
-    const promises = [];
-    for (let dy = 0; dy < 2; dy++) {
-      for (let dx = 0; dx < 2; dx++) {
-        const tx = startX + dx;
-        const ty = startY + dy;
-        const url = `https://tile.openstreetmap.org/${zoom}/${tx}/${ty}.png`;
-        const img = document.createElement("img");
-        img.className = "osm-tile-img";
-        img.style.position = "absolute";
-        img.style.width = "256px";
-        img.style.height = "256px";
-        img.style.left = `${offsetX + dx * 256}px`;
-        img.style.top = `${offsetY + dy * 256}px`;
-        img.alt = "";
-        container.insertBefore(img, markerEl);
-        promises.push(new Promise((resolve) => {
-          img.onload = () => resolve(true);
-          img.onerror = () => {
-            img.remove();
-            resolve(false);
-          };
-          img.src = url;
-        }));
-      }
-    }
-    _img.style.display = "none";
-    return Promise.all(promises).then((results) => results.some((ok) => ok));
-  }
-
-  // src/shared/location-dialog.ts
-  function requestBrowserLocation(timeoutMs) {
-    if (!navigator.geolocation) return Promise.resolve({ status: "unavailable" });
-    return new Promise((resolve) => {
-      const options = {};
-      if (timeoutMs != null) options.timeout = timeoutMs;
-      navigator.geolocation.getCurrentPosition(
-        (pos) => resolve({ status: "success", lat: pos.coords.latitude, lon: pos.coords.longitude }),
-        (err) => {
-          if (err.code === err.PERMISSION_DENIED) resolve({ status: "denied" });
-          else if (err.code === err.TIMEOUT) resolve({ status: "timeout" });
-          else resolve({ status: "unavailable" });
-        },
-        options
-      );
-    });
-  }
-  function useImperial() {
-    const locale = navigator.language || "en-US";
-    const region = locale.split("-")[1]?.toUpperCase() || "";
-    return ["US", "GB", "MM", "LR"].includes(region);
-  }
-  function haversineKm(lat1, lon1, lat2, lon2) {
-    const R = 6371;
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  }
-  function compassBearing(lat1, lon1, lat2, lon2) {
-    const toRad = Math.PI / 180;
-    const dLon = (lon2 - lon1) * toRad;
-    const y = Math.sin(dLon) * Math.cos(lat2 * toRad);
-    const x = Math.cos(lat1 * toRad) * Math.sin(lat2 * toRad) - Math.sin(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.cos(dLon);
-    let bearing = Math.atan2(y, x) * 180 / Math.PI;
-    bearing = (bearing + 360) % 360;
-    const dirs = [
-      "N",
-      "NNE",
-      "NE",
-      "ENE",
-      "E",
-      "ESE",
-      "SE",
-      "SSE",
-      "S",
-      "SSW",
-      "SW",
-      "WSW",
-      "W",
-      "WNW",
-      "NW",
-      "NNW"
-    ];
-    return dirs[Math.round(bearing / 22.5) % 16];
-  }
-  function initLocationDialog(config) {
-    const maybeLp = document.getElementById("location-prompt");
-    if (!maybeLp) return null;
-    const locationPrompt = maybeLp;
-    const lpLatInput = document.getElementById("lp-lat");
-    const lpLonInput = document.getElementById("lp-lon");
-    const lpUseCoords = document.getElementById("lp-use-coords");
-    const lpUseBrowser = document.getElementById("lp-use-browser");
-    const lpCityInput = document.getElementById("lp-city-input");
-    const lpCityResults = document.getElementById("lp-city-results");
-    const lpGlobe = document.getElementById("lp-globe");
-    const lpOsmContainer = document.getElementById("lp-osm-container");
-    const lpOsmTile = document.getElementById("lp-osm-tile");
-    const lpMapMarker = document.getElementById("lp-map-marker");
-    const lpOsmOffline = document.getElementById("lp-osm-offline");
-    const lpStatusSection = document.getElementById("lp-status-section");
-    const lpNoLocation = document.getElementById("lp-no-location");
-    const lpNoLocationHint = document.getElementById("lp-no-location-hint");
-    const lpNoLocationDefault = document.getElementById("lp-no-location-default");
-    const lpLocationName = document.getElementById("lp-location-name");
-    const lpLocationTz = document.getElementById("lp-location-tz");
-    const lpOsmAttribution = document.getElementById("lp-osm-attribution");
-    const lpDoneBtn = document.getElementById("lp-done");
-    const lpDialogFooter = lpDoneBtn.parentElement;
-    const lpFullContent = document.getElementById("lp-full-content");
-    const lpLocating = document.getElementById("lp-locating");
-    const lpLocatingManual = document.getElementById("lp-locating-manual");
-    const isFileProtocol2 = window.location.protocol === "file:";
-    let currentLat = config.initialLat ?? 0;
-    let currentLon = config.initialLon ?? 0;
-    let locationSource = "";
-    let locationFullLabel = "";
-    let locationSourceType = "none";
-    let needsPrompt2 = config.needsPrompt ?? false;
-    let geoPermission = config.geoPermission ?? "unknown";
-    let locating = false;
-    const browserBtnLabel = lpUseBrowser.textContent || "Use device location via browser";
-    function buildLocationNameHTML() {
-      if (locationSourceType === "url-city" && locationFullLabel) {
-        return `${locationFullLabel} <span class="lp-loc-source">(from cities database)</span>`;
-      }
-      if (locationSourceType === "browser" || locationSourceType === "manual") {
-        const closest = findClosestCity(currentLat, currentLon);
-        const sourceLabel = locationSourceType === "browser" ? "(from browser)" : "(manually entered)";
-        if (closest) {
-          const distKm = haversineKm(currentLat, currentLon, closest.lat, closest.lon);
-          const THRESHOLD_KM = 16;
-          if (distKm > THRESHOLD_KM) {
-            const dir = compassBearing(closest.lat, closest.lon, currentLat, currentLon);
-            let distStr;
-            if (useImperial()) {
-              const mi = Math.round(distKm * 0.621371);
-              distStr = `${mi}\xA0mi`;
-            } else {
-              distStr = `${Math.round(distKm)}\xA0km`;
-            }
-            return `${distStr} ${dir} of ${closest.label} <span class="lp-loc-source">${sourceLabel}</span>`;
-          }
-          return `${closest.label} <span class="lp-loc-source">${sourceLabel}</span>`;
-        }
-        return `${currentLat.toFixed(3)}, ${currentLon.toFixed(3)} <span class="lp-loc-source">${sourceLabel}</span>`;
-      }
-      return `${currentLat.toFixed(3)}, ${currentLon.toFixed(3)}`;
-    }
-    function updateMapPreview(mapLat, mapLon) {
-      lpStatusSection.classList.add("visible");
-      lpNoLocation.classList.add("hidden");
-      renderGlobe(lpGlobe, mapLat, mapLon);
-      if (isFileProtocol2) {
-        lpOsmContainer.style.display = "none";
-        lpOsmAttribution.style.display = "none";
-        lpGlobe.width = 160;
-        lpGlobe.height = 160;
-        lpGlobe.style.width = "160px";
-        lpGlobe.style.height = "160px";
-      } else {
-        lpOsmContainer.style.display = "";
-        lpOsmAttribution.style.display = "";
-        lpOsmOffline.style.display = "none";
-        loadOSMTile(lpOsmContainer, lpOsmTile, lpMapMarker, mapLat, mapLon).then((ok) => {
-          lpOsmOffline.style.display = ok ? "none" : "";
-        });
-      }
-      lpLocationName.innerHTML = buildLocationNameHTML();
-    }
-    function applyLocation(newLat, newLon, source, fullLabel, sourceType, cityTz = null) {
-      currentLat = newLat;
-      currentLon = newLon;
-      locationSource = source;
-      locationFullLabel = fullLabel;
-      locationSourceType = sourceType;
-      const timezone = resolveTimezone(newLat, newLon, cityTz);
-      config.onLocationChange({
-        lat: newLat,
-        lon: newLon,
-        source,
-        fullLabel,
-        sourceType,
-        timezone,
-        cityTimezone: cityTz
-      });
-      updateMapPreview(newLat, newLon);
-      lpDialogFooter.classList.add("visible");
-      needsPrompt2 = false;
-    }
-    function showLocating() {
-      locating = true;
-      needsPrompt2 = true;
-      lpFullContent.style.display = "none";
-      lpLocating.style.display = "";
-      locationPrompt.style.display = "";
-      config.onShow?.();
-    }
-    function showDialog() {
-      locating = false;
-      lpLocating.style.display = "none";
-      lpFullContent.style.display = "";
-      locationPrompt.style.display = "";
-      config.onShow?.();
-      loadCityData().then(() => {
-        if (locationPrompt.style.display !== "none") {
-          lpLocationName.innerHTML = buildLocationNameHTML();
-        }
-      }).catch(() => {
-      });
-      lpLatInput.value = currentLat !== 0 || currentLon !== 0 ? currentLat.toFixed(3) : "";
-      lpLonInput.value = currentLat !== 0 || currentLon !== 0 ? currentLon.toFixed(3) : "";
-      if (lpCityInput) {
-        lpCityInput.value = "";
-      }
-      if (lpCityResults) {
-        lpCityResults.innerHTML = "";
-      }
-      setTimeout(() => lpCityInput?.focus(), 50);
-      const hasLocation = currentLat !== 0 || currentLon !== 0;
-      if (hasLocation) {
-        lpStatusSection.classList.add("visible");
-        lpNoLocation.classList.add("hidden");
-        updateMapPreview(currentLat, currentLon);
-      } else {
-        lpStatusSection.classList.remove("visible");
-        lpNoLocation.classList.remove("hidden");
-        if (needsPrompt2) {
-          lpNoLocationHint.style.display = "";
-          lpNoLocationDefault.style.display = "none";
-        } else {
-          lpNoLocationHint.style.display = "none";
-          lpNoLocationDefault.style.display = "";
-        }
-      }
-      lpDialogFooter.classList.toggle("visible", !needsPrompt2 || hasLocation);
-      const btn = lpUseBrowser;
-      const deniedTooltip = isFileProtocol2 ? "Not all browsers support location access from file:// URLs" : "Browser location was not granted \u2014 check your browser settings to allow it";
-      if (geoPermission === "denied") {
-        btn.disabled = true;
-        btn.dataset.tooltip = deniedTooltip;
-        btn.textContent = browserBtnLabel + " (unavailable)";
-      } else {
-        btn.disabled = false;
-        delete btn.dataset.tooltip;
-        btn.textContent = browserBtnLabel;
-      }
-      const coordsBtn = lpUseCoords;
-      function validateCoordInputs() {
-        const validLat = !isNaN(parseFloat(lpLatInput.value));
-        const validLon = !isNaN(parseFloat(lpLonInput.value));
-        coordsBtn.disabled = !(validLat && validLon);
-      }
-      validateCoordInputs();
-      lpLatInput.oninput = validateCoordInputs;
-      lpLonInput.oninput = validateCoordInputs;
-    }
-    function dismissDialog() {
-      locating = false;
-      locationPrompt.style.display = "none";
-      releaseCityData();
-      config.onDismiss?.();
-    }
-    function canDismiss() {
-      return !needsPrompt2 || (currentLat !== 0 || currentLon !== 0);
-    }
-    lpUseCoords.addEventListener("click", () => {
-      const newLat = parseFloat(lpLatInput.value);
-      const newLon = parseFloat(lpLonInput.value);
-      if (isNaN(newLat) || isNaN(newLon)) return;
-      applyLocation(newLat, newLon, "", "", "manual");
-    });
-    lpUseBrowser.addEventListener("click", async () => {
-      lpUseBrowser.textContent = "Requesting\u2026";
-      const result = await requestBrowserLocation();
-      if (result.status === "success") {
-        lpUseBrowser.textContent = browserBtnLabel;
-        geoPermission = "granted";
-        applyLocation(result.lat, result.lon, "", "", "browser");
-      } else if (result.status === "denied") {
-        geoPermission = "denied";
-        const btn = lpUseBrowser;
-        btn.disabled = true;
-        btn.textContent = browserBtnLabel + " (unavailable)";
-        btn.dataset.tooltip = isFileProtocol2 ? "Not all browsers support location access from file:// URLs" : "Browser location was not granted \u2014 check your browser settings to allow it";
-      } else {
-        lpUseBrowser.textContent = browserBtnLabel;
-      }
-    });
-    locationPrompt.querySelector(".lp-backdrop").addEventListener("click", () => {
-      if (canDismiss()) dismissDialog();
-    });
-    lpDoneBtn.addEventListener("click", () => {
-      if (canDismiss()) dismissDialog();
-    });
-    lpLocatingManual.addEventListener("click", () => {
-      showDialog();
-    });
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && locationPrompt.style.display !== "none") {
-        if (canDismiss()) {
-          dismissDialog();
-          e.stopPropagation();
-        }
-      }
-    });
-    let citySearchDebounce = null;
-    let cityDataLoading = false;
-    let cityDataFailed = false;
-    let selectedCityIndex = -1;
-    function renderCityResults(results) {
-      lpCityResults.innerHTML = "";
-      selectedCityIndex = -1;
-      for (let i = 0; i < results.length; i++) {
-        const r = results[i];
-        const div = document.createElement("div");
-        div.className = "lp-city-item";
-        if (r.isAirport) {
-          const parts = r.label.split("  ");
-          div.innerHTML = `<span class="iata-tag">${parts[0]}</span>${parts.slice(1).join("  ")}`;
-        } else {
-          div.textContent = r.label;
-        }
-        div.addEventListener("click", () => {
-          applyLocation(r.lat, r.lon, r.shortLabel, r.label, "url-city", r.timezone);
-          lpCityInput.value = "";
-          lpCityResults.innerHTML = "";
-          lpLatInput.value = r.lat.toFixed(3);
-          lpLonInput.value = r.lon.toFixed(3);
-        });
-        lpCityResults.appendChild(div);
-      }
-    }
-    async function onCityInput() {
-      try {
-        let query = lpCityInput.value.trim();
-        if (query.length < 2) {
-          lpCityResults.innerHTML = "";
-          return;
-        }
-        if (cityDataFailed) {
-          lpCityResults.innerHTML = `<div class="lp-city-loading">City search unavailable: ${loadError || "unknown error"}</div>`;
-          return;
-        }
-        if (!isCityDataLoaded()) {
-          if (!cityDataLoading) {
-            cityDataLoading = true;
-            lpCityResults.innerHTML = '<div class="lp-city-loading">Loading city database\u2026</div>';
-            try {
-              await loadCityData();
-            } catch (err) {
-              cityDataLoading = false;
-              cityDataFailed = true;
-              lpCityResults.innerHTML = `<div class="lp-city-loading">Failed to load city data: ${err.message}</div>`;
-              return;
-            }
-            cityDataLoading = false;
-            query = lpCityInput.value.trim();
-            if (query.length < 2) {
-              lpCityResults.innerHTML = "";
-              return;
-            }
-          } else {
-            return;
-          }
-        }
-        const results = searchCities(query, 20);
-        renderCityResults(results);
-      } catch (err) {
-        console.error("[CitySearch] Error:", err);
-        lpCityResults.innerHTML = `<div class="lp-city-loading">Error: ${err.message}</div>`;
-      }
-    }
-    function debounceCitySearch() {
-      if (citySearchDebounce) clearTimeout(citySearchDebounce);
-      citySearchDebounce = setTimeout(onCityInput, 150);
-    }
-    lpCityInput.addEventListener("input", debounceCitySearch);
-    lpCityInput.addEventListener("keyup", debounceCitySearch);
-    lpCityInput.addEventListener("compositionend", debounceCitySearch);
-    lpCityInput.addEventListener("focus", () => {
-      setTimeout(() => {
-        lpCityInput.scrollIntoView({ behavior: "smooth", block: "center" });
-      }, 300);
-    });
-    lpCityInput.addEventListener("keydown", (e) => {
-      const items = lpCityResults.querySelectorAll(".lp-city-item");
-      if (items.length === 0) return;
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        selectedCityIndex = Math.min(selectedCityIndex + 1, items.length - 1);
-        items.forEach((el, i) => el.classList.toggle("selected", i === selectedCityIndex));
-        items[selectedCityIndex].scrollIntoView({ block: "nearest" });
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        selectedCityIndex = Math.max(selectedCityIndex - 1, 0);
-        items.forEach((el, i) => el.classList.toggle("selected", i === selectedCityIndex));
-        items[selectedCityIndex].scrollIntoView({ block: "nearest" });
-      } else if (e.key === "Enter" && selectedCityIndex >= 0) {
-        e.preventDefault();
-        items[selectedCityIndex].click();
-      } else if (e.key === "Escape") {
-        lpCityResults.innerHTML = "";
-        lpCityInput.value = "";
-      }
-    });
-    return {
-      show: showDialog,
-      showLocating,
-      isLocating: () => locating,
-      dismiss: dismissDialog,
-      updateState(lat2, lon2, sourceType, source, fullLabel) {
-        currentLat = lat2;
-        currentLon = lon2;
-        locationSourceType = sourceType;
-        locationSource = source;
-        locationFullLabel = fullLabel;
-      },
-      setGeoPermission(state) {
-        geoPermission = state;
-      },
-      setNeedsPrompt(needs) {
-        needsPrompt2 = needs;
-      }
-    };
-  }
-
-  // src/inspector/expr-metadata.ts
-  var EXPR_METADATA = [
-    // ── Constants: Planets ──────────────────────────────────────────────
-    { name: "Sun", category: "Planet Constants", desc: "Sun (0)", kind: "const" },
-    { name: "Moon", category: "Planet Constants", desc: "Moon (1)", kind: "const" },
-    { name: "Mercury", category: "Planet Constants", desc: "Mercury (2)", kind: "const" },
-    { name: "Venus", category: "Planet Constants", desc: "Venus (3)", kind: "const" },
-    { name: "Mars", category: "Planet Constants", desc: "Mars (5)", kind: "const" },
-    { name: "Jupiter", category: "Planet Constants", desc: "Jupiter (6)", kind: "const" },
-    { name: "Saturn", category: "Planet Constants", desc: "Saturn (7)", kind: "const" },
-    { name: "Uranus", category: "Planet Constants", desc: "Uranus (8)", kind: "const" },
-    { name: "Neptune", category: "Planet Constants", desc: "Neptune (9)", kind: "const" },
-    { name: "Pluto", category: "Planet Constants", desc: "Pluto (10)", kind: "const" },
-    // ── Constants: Math ─────────────────────────────────────────────────
-    { name: "pi", category: "Math Constants", desc: "\u03C0 \u2248 3.14159", kind: "const" },
-    { name: "true", category: "Math Constants", desc: "1", kind: "const" },
-    { name: "false", category: "Math Constants", desc: "0", kind: "const" },
-    // ── Sun Times ───────────────────────────────────────────────────────
-    { name: "nextSunrise", category: "Sun Times", desc: "Next sunrise (date interval)", kind: "fn" },
-    { name: "nextSunset", category: "Sun Times", desc: "Next sunset (date interval)", kind: "fn" },
-    { name: "nextSunTransit", category: "Sun Times", desc: "Next solar noon (date interval)", kind: "fn" },
-    { name: "prevSunrise", category: "Sun Times", desc: "Previous sunrise (date interval)", kind: "fn" },
-    { name: "prevSunset", category: "Sun Times", desc: "Previous sunset (date interval)", kind: "fn" },
-    { name: "prevSunTransit", category: "Sun Times", desc: "Previous solar noon (date interval)", kind: "fn" },
-    { name: "sunriseForDayTime", category: "Sun Times", desc: "Today's sunrise (NaN if none)", kind: "fn" },
-    { name: "sunsetForDayTime", category: "Sun Times", desc: "Today's sunset (NaN if none)", kind: "fn" },
-    { name: "sunTransitForDayTime", category: "Sun Times", desc: "Today's solar noon (NaN if none)", kind: "fn" },
-    // ── Moon Times ──────────────────────────────────────────────────────
-    { name: "nextMoonrise", category: "Moon Times", desc: "Next moonrise (date interval)", kind: "fn" },
-    { name: "nextMoonset", category: "Moon Times", desc: "Next moonset (date interval)", kind: "fn" },
-    { name: "nextMoonTransit", category: "Moon Times", desc: "Next moon transit (date interval)", kind: "fn" },
-    { name: "prevMoonrise", category: "Moon Times", desc: "Previous moonrise (date interval)", kind: "fn" },
-    { name: "prevMoonset", category: "Moon Times", desc: "Previous moonset (date interval)", kind: "fn" },
-    { name: "prevMoonTransit", category: "Moon Times", desc: "Previous moon transit (date interval)", kind: "fn" },
-    { name: "moonriseForDayTime", category: "Moon Times", desc: "Today's moonrise (NaN if none)", kind: "fn" },
-    { name: "moonsetForDayTime", category: "Moon Times", desc: "Today's moonset (NaN if none)", kind: "fn" },
-    { name: "moonTransitForDayTime", category: "Moon Times", desc: "Today's moon transit (NaN if none)", kind: "fn" },
-    // ── Planet Times ────────────────────────────────────────────────────
-    { name: "nextRiseOfPlanet", category: "Planet Times", desc: "Next rise of planet", kind: "fn", sig: "(planet)" },
-    { name: "nextSetOfPlanet", category: "Planet Times", desc: "Next set of planet", kind: "fn", sig: "(planet)" },
-    { name: "nextTransitOfPlanet", category: "Planet Times", desc: "Next transit of planet", kind: "fn", sig: "(planet)" },
-    { name: "prevRiseOfPlanet", category: "Planet Times", desc: "Previous rise of planet", kind: "fn", sig: "(planet)" },
-    { name: "prevSetOfPlanet", category: "Planet Times", desc: "Previous set of planet", kind: "fn", sig: "(planet)" },
-    { name: "prevTransitOfPlanet", category: "Planet Times", desc: "Previous transit of planet", kind: "fn", sig: "(planet)" },
-    { name: "riseOfPlanetForDayTime", category: "Planet Times", desc: "Today's rise of planet", kind: "fn", sig: "(planet)" },
-    { name: "setOfPlanetForDayTime", category: "Planet Times", desc: "Today's set of planet", kind: "fn", sig: "(planet)" },
-    { name: "transitOfPlanetForDayTime", category: "Planet Times", desc: "Today's transit of planet", kind: "fn", sig: "(planet)" },
-    // ── Sun Position ────────────────────────────────────────────────────
-    { name: "sunAltitude", category: "Sun Position", desc: "Sun altitude (radians)", kind: "fn" },
-    { name: "sunAzimuth", category: "Sun Position", desc: "Sun azimuth (radians)", kind: "fn" },
-    { name: "sunRA", category: "Sun Position", desc: "Sun right ascension (radians)", kind: "fn" },
-    { name: "sunDecl", category: "Sun Position", desc: "Sun declination (radians)", kind: "fn" },
-    { name: "sunEclipticLongitude", category: "Sun Position", desc: "Sun ecliptic longitude (radians)", kind: "fn" },
-    { name: "subSolarLatitude", category: "Sun Position", desc: "Sub-solar point latitude (= sun declination, radians)", kind: "fn" },
-    { name: "subSolarLongitude", category: "Sun Position", desc: "Sub-solar point longitude (radians, [-\u03C0, \u03C0])", kind: "fn" },
-    // ── Moon Position ───────────────────────────────────────────────────
-    { name: "moonAltitude", category: "Moon Position", desc: "Moon altitude (radians)", kind: "fn" },
-    { name: "moonAzimuth", category: "Moon Position", desc: "Moon azimuth (radians)", kind: "fn" },
-    { name: "moonAgeAngle", category: "Moon Position", desc: "Moon phase angle (radians, 0=new)", kind: "fn" },
-    { name: "realMoonAgeAngle", category: "Moon Position", desc: "Moon age in days since new moon", kind: "fn" },
-    { name: "moonRelativeAngle", category: "Moon Position", desc: "Moon relative angle (radians)", kind: "fn" },
-    // ── Planet Position ─────────────────────────────────────────────────
-    { name: "RAOfPlanet", category: "Planet Position", desc: "Right ascension (radians)", kind: "fn", sig: "(planet)" },
-    { name: "declinationOfPlanet", category: "Planet Position", desc: "Geocentric apparent declination (radians)", kind: "fn", sig: "(planet)" },
-    { name: "altitudeOfPlanet", category: "Planet Position", desc: "Topocentric altitude (radians)", kind: "fn", sig: "(planet)" },
-    { name: "azimuthOfPlanet", category: "Planet Position", desc: "Topocentric azimuth (radians)", kind: "fn", sig: "(planet)" },
-    { name: "ELongitudeOfPlanet", category: "Planet Position", desc: "Geocentric ecliptic longitude (radians)", kind: "fn", sig: "(planet)" },
-    { name: "ELatitudeOfPlanet", category: "Planet Position", desc: "Geocentric ecliptic latitude (radians)", kind: "fn", sig: "(planet)" },
-    { name: "HLongitudeOfPlanet", category: "Planet Position", desc: "Heliocentric longitude (radians)", kind: "fn", sig: "(planet)" },
-    { name: "HLatitudeOfPlanet", category: "Planet Position", desc: "Heliocentric latitude (radians)", kind: "fn", sig: "(planet)" },
-    { name: "distanceFromEarthOfPlanet", category: "Planet Position", desc: "Geocentric distance (AU)", kind: "fn", sig: "(planet)" },
-    { name: "planetIsUp", category: "Planet Position", desc: "1 if planet is above the horizon, else 0", kind: "fn", sig: "(planet)" },
-    // ── Clock / Calendar ────────────────────────────────────────────────
-    { name: "hour24Value", category: "Clock", desc: "Current hour (0\u201323, fractional)", kind: "fn" },
-    { name: "hour24Number", category: "Clock", desc: "Current hour (integer 0\u201323)", kind: "fn" },
-    { name: "minuteValue", category: "Clock", desc: "Current minute (fractional)", kind: "fn" },
-    { name: "minuteNumber", category: "Clock", desc: "Current minute (integer 0\u201359)", kind: "fn" },
-    { name: "secondValue", category: "Clock", desc: "Current second (fractional)", kind: "fn" },
-    { name: "dayOfWeekNumber", category: "Clock", desc: "Day of week (0=Sun, 6=Sat)", kind: "fn" },
-    { name: "dayOfMonthNumber", category: "Clock", desc: "Day of month (1\u201331)", kind: "fn" },
-    { name: "monthOfYearNumber", category: "Clock", desc: "Month of year (1\u201312)", kind: "fn" },
-    { name: "yearNumber", category: "Clock", desc: "Current year", kind: "fn" },
-    { name: "dayOfYear", category: "Clock", desc: "Day of year (1\u2013366)", kind: "fn" },
-    { name: "leapYear", category: "Clock", desc: "1 if leap year, 0 otherwise", kind: "fn" },
-    { name: "tzOffset", category: "Clock", desc: "Timezone offset in hours", kind: "fn" },
-    // ── Sidereal / Astronomical ─────────────────────────────────────────
-    { name: "siderealTime", category: "Astronomical", desc: "Local sidereal time (radians)", kind: "fn" },
-    { name: "julianDayNumber", category: "Astronomical", desc: "Julian day number", kind: "fn" },
-    { name: "eot", category: "Astronomical", desc: "Equation of time (radians)", kind: "fn" },
-    { name: "precession", category: "Astronomical", desc: "General precession since J2000", kind: "fn" },
-    { name: "obliquity", category: "Astronomical", desc: "Obliquity of ecliptic (radians)", kind: "fn" },
-    // ── Math Functions ──────────────────────────────────────────────────
-    { name: "sin", category: "Math", desc: "Sine", kind: "fn", sig: "(x)" },
-    { name: "cos", category: "Math", desc: "Cosine", kind: "fn", sig: "(x)" },
-    { name: "tan", category: "Math", desc: "Tangent", kind: "fn", sig: "(x)" },
-    { name: "asin", category: "Math", desc: "Arc sine", kind: "fn", sig: "(x)" },
-    { name: "acos", category: "Math", desc: "Arc cosine", kind: "fn", sig: "(x)" },
-    { name: "atan", category: "Math", desc: "Arc tangent", kind: "fn", sig: "(x)" },
-    { name: "atan2", category: "Math", desc: "Two-argument arc tangent", kind: "fn", sig: "(y, x)" },
-    { name: "sqrt", category: "Math", desc: "Square root", kind: "fn", sig: "(x)" },
-    { name: "abs", category: "Math", desc: "Absolute value", kind: "fn", sig: "(x)" },
-    { name: "floor", category: "Math", desc: "Floor (round down)", kind: "fn", sig: "(x)" },
-    { name: "ceil", category: "Math", desc: "Ceiling (round up)", kind: "fn", sig: "(x)" },
-    { name: "round", category: "Math", desc: "Round to nearest", kind: "fn", sig: "(x)" },
-    { name: "log", category: "Math", desc: "Natural logarithm", kind: "fn", sig: "(x)" },
-    { name: "exp", category: "Math", desc: "Exponential (e^x)", kind: "fn", sig: "(x)" },
-    { name: "pow", category: "Math", desc: "Power", kind: "fn", sig: "(base, exp)" },
-    { name: "min", category: "Math", desc: "Minimum", kind: "fn", sig: "(a, b)" },
-    { name: "max", category: "Math", desc: "Maximum", kind: "fn", sig: "(a, b)" },
-    { name: "fmod", category: "Math", desc: "Floating-point modulus", kind: "fn", sig: "(a, b)" },
-    // ── Day/Night Ring ──────────────────────────────────────────────────
-    { name: "dayNightLeafAngle", category: "Day/Night Ring", desc: "Rise/set/leaf angle for planet ring", kind: "fn", sig: "(planet, leaf, numLeaves)" },
-    { name: "dayNightLeafAngleLST", category: "Day/Night Ring", desc: "Rise/set/leaf angle (LST time base)", kind: "fn", sig: "(planet, leaf, numLeaves)" },
-    { name: "dayNightLeafAngleIsRiseSet", category: "Day/Night Ring", desc: "1 if planet actually rises/sets, 0 if transit fallback", kind: "fn", sig: "(planet, leaf)" },
-    { name: "dayNightLeafAngleAboveHorizon", category: "Day/Night Ring", desc: "1 if planet always above horizon (polar), 0 otherwise", kind: "fn", sig: "(planet, leaf)" },
-    { name: "planettransit24HourIndicatorAngle", category: "Day/Night Ring", desc: "Planet transit angle on 24h dial", kind: "fn", sig: "(planet)" },
-    { name: "planetTransitAngle", category: "Day/Night Ring", desc: "Planet high transit angle on 24h dial", kind: "fn", sig: "(planet)" },
-    { name: "sunSpecialAngle", category: "Day/Night Ring", desc: "Sun altitude crossing angle (rise/set/twilight)", kind: "fn", sig: "(kind)" },
-    { name: "solarNoonAngle", category: "Day/Night Ring", desc: "Solar noon angle on wadokei dial (+\u03C0 offset)", kind: "fn" },
-    { name: "solarNoonAngle24h", category: "Day/Night Ring", desc: "Solar noon angle on 24h dial (raw, no offset)", kind: "fn" },
-    { name: "polarSummer", category: "Day/Night Ring", desc: "1 if sun always above horizon", kind: "fn" },
-    { name: "polarWinter", category: "Day/Night Ring", desc: "1 if sun always below horizon", kind: "fn" }
-  ];
-  var CATEGORY_ORDER = [
-    "Sun Times",
-    "Moon Times",
-    "Planet Times",
-    "Sun Position",
-    "Moon Position",
-    "Planet Position",
-    "Clock",
-    "Astronomical",
-    "Day/Night Ring",
-    "Planet Constants",
-    "Math Constants",
-    "Math"
-  ];
-
-  // src/inspector/catalog.ts
-  function tagIsAngular(tag) {
-    return tag === "A";
-  }
-  function tagIsDiscrete(tag) {
-    return tag === "Int" || tag === "BOOL" || tag === "WD" || tag === "MO" || tag === "DAY" || tag === "HM" || tag === "LT";
-  }
-  var FAST = 0.1;
-  var NORMAL = 1;
-  var SLOW = 60;
-  var TIME_GROUP = {
-    name: "Time",
-    rows: [
-      {
-        rowLabel: "Date",
-        layout: "fields",
-        cells: [
-          { label: "Year", expr: "yearNumber()", tag: "Int", updateInterval: NORMAL },
-          { label: "Month", expr: "monthNumber()", tag: "MO", updateInterval: NORMAL },
-          { label: "Day Index", expr: "dayNumber()", tag: "DAY", updateInterval: NORMAL }
-        ]
-      },
-      {
-        // Weekday on its own line, aligned under Year (empty label fills the
-        // label column so the field starts at the same x).
-        layout: "fields",
-        cells: [
-          { label: "Weekday", expr: "weekdayNumber()", tag: "WD", updateInterval: NORMAL }
-        ]
-      },
-      {
-        rowLabel: "Clock",
-        layout: "fields",
-        cells: [
-          { label: "Hour", expr: "hour24Number()", tag: "Int", updateInterval: NORMAL },
-          { label: "Minute", expr: "minuteNumber()", tag: "Int", updateInterval: NORMAL },
-          { label: "Second", expr: "secondValue()", tag: "Num", updateInterval: FAST }
-        ]
-      },
-      { rowLabel: "Sidereal time", cells: [{ label: "", expr: "lstValue()", tag: "HMS", updateInterval: FAST }] },
-      { rowLabel: "Solar time", cells: [{ label: "", expr: "solarTimeSec()", tag: "HMS", updateInterval: FAST }] },
-      { rowLabel: "TZ offset", cells: [{ label: "", expr: "tzOffset()", tag: "HM", updateInterval: SLOW }] },
-      {
-        rowLabel: "Equation of time",
-        cells: [
-          { label: "\u0394t", expr: "EOTSeconds()", tag: "MS", updateInterval: SLOW },
-          { label: "angle", expr: "EOTAngle()", tag: "A", updateInterval: SLOW }
-        ]
-      }
-    ]
-  };
-  var SUN_GROUP = {
-    name: "Sun",
-    rows: [
-      { rowLabel: "RA / Dec", cells: [
-        { label: "RA", expr: "sunRA()", tag: "A", updateInterval: NORMAL },
-        { label: "Dec", expr: "declinationOfPlanet(0)", tag: "Ldeg", updateInterval: NORMAL }
-      ] },
-      { rowLabel: "Alt / Az", cells: [
-        { label: "Alt", expr: "sunAltitude()", tag: "Ldeg", updateInterval: NORMAL },
-        { label: "Az", expr: "sunAzimuth()", tag: "A", updateInterval: NORMAL },
-        { label: "Up?", expr: "planetIsUp(0)", tag: "BOOL", updateInterval: NORMAL }
-      ] },
-      { rowLabel: "Ecliptic", cells: [
-        { label: "Lon", expr: "ELongitudeOfPlanet(0)", tag: "A", updateInterval: NORMAL }
-      ] },
-      { rowLabel: "Sub-solar pt", cells: [
-        { label: "Lat", expr: "subSolarLatitude()", tag: "Ldeg", updateInterval: NORMAL },
-        { label: "Lon", expr: "subSolarLongitude()", tag: "A", updateInterval: NORMAL }
-      ] },
-      { rowLabel: "Solar-noon angle", cells: [
-        { label: "", expr: "solarNoonAngle24h()", tag: "A", updateInterval: NORMAL }
-      ] },
-      { rowLabel: "Rise / Set / Transit", cells: [
-        { label: "Rise", expr: "sunriseForDayTime()", tag: "LT", updateInterval: SLOW },
-        { label: "Set", expr: "sunsetForDayTime()", tag: "LT", updateInterval: SLOW },
-        { label: "Transit", expr: "sunTransitForDayTime()", tag: "LT", updateInterval: SLOW }
-      ] }
-    ]
-  };
-  var MOON_GROUP = {
-    name: "Moon",
-    rows: [
-      { rowLabel: "RA / Dec", cells: [
-        { label: "RA", expr: "moonRA()", tag: "A", updateInterval: NORMAL },
-        { label: "Dec", expr: "declinationOfPlanet(1)", tag: "Ldeg", updateInterval: NORMAL }
-      ] },
-      { rowLabel: "Alt / Az", cells: [
-        { label: "Alt", expr: "moonAltitude()", tag: "Ldeg", updateInterval: NORMAL },
-        { label: "Az", expr: "moonAzimuth()", tag: "A", updateInterval: NORMAL },
-        { label: "Up?", expr: "planetIsUp(1)", tag: "BOOL", updateInterval: NORMAL }
-      ] },
-      { rowLabel: "Ecliptic", cells: [
-        { label: "Lon", expr: "ELongitudeOfPlanet(1)", tag: "A", updateInterval: NORMAL },
-        { label: "Lat", expr: "ELatitudeOfPlanet(1)", tag: "Ldeg", updateInterval: NORMAL }
-      ] },
-      { rowLabel: "Phase", cells: [
-        { label: "Age", expr: "moonAgeAngle()", tag: "A", updateInterval: NORMAL },
-        { label: "Elongation", expr: "moonElongation()", tag: "A", updateInterval: NORMAL }
-      ] },
-      { rowLabel: "Position", cells: [
-        { label: "Relative", expr: "moonRelativeAngle()", tag: "A", updateInterval: NORMAL },
-        { label: "Rel-position", expr: "moonRelativePositionAngle()", tag: "A", updateInterval: NORMAL }
-      ] },
-      { rowLabel: "Asc. node", cells: [
-        { label: "Lon", expr: "lunarAscendingNodeLongitude()", tag: "A", updateInterval: NORMAL },
-        { label: "RA", expr: "lunarAscendingNodeRA()", tag: "A", updateInterval: NORMAL }
-      ] },
-      { rowLabel: "Distance", cells: [
-        { label: "", expr: "distanceFromEarthOfPlanet(1)", tag: "DIST", updateInterval: SLOW }
-      ] },
-      { rowLabel: "Rise / Set / Transit", cells: [
-        { label: "Rise", expr: "moonriseForDayTime()", tag: "LT", updateInterval: SLOW },
-        { label: "Set", expr: "moonsetForDayTime()", tag: "LT", updateInterval: SLOW },
-        { label: "Transit", expr: "moonTransitForDayTime()", tag: "LT", updateInterval: SLOW }
-      ] }
-    ]
-  };
-  var PLANETS = [
-    { name: "Mercury", n: 2 },
-    { name: "Venus", n: 3 },
-    { name: "Mars", n: 5 },
-    { name: "Jupiter", n: 6 },
-    { name: "Saturn", n: 7 },
-    { name: "Uranus", n: 8 },
-    { name: "Neptune", n: 9 }
-  ];
-  function planetGroup(name, n) {
-    return {
-      name,
-      rows: [
-        { rowLabel: "RA / Dec", cells: [
-          { label: "RA", expr: `RAOfPlanet(${n})`, tag: "A", updateInterval: NORMAL },
-          { label: "Dec", expr: `declinationOfPlanet(${n})`, tag: "Ldeg", updateInterval: NORMAL }
-        ] },
-        { rowLabel: "Alt / Az", cells: [
-          { label: "Alt", expr: `altitudeOfPlanet(${n})`, tag: "Ldeg", updateInterval: NORMAL },
-          { label: "Az", expr: `azimuthOfPlanet(${n})`, tag: "A", updateInterval: NORMAL },
-          { label: "Up?", expr: `planetIsUp(${n})`, tag: "BOOL", updateInterval: NORMAL }
-        ] },
-        { rowLabel: "Ecliptic (geo)", cells: [
-          { label: "Lon", expr: `ELongitudeOfPlanet(${n})`, tag: "A", updateInterval: NORMAL },
-          { label: "Lat", expr: `ELatitudeOfPlanet(${n})`, tag: "Ldeg", updateInterval: NORMAL }
-        ] },
-        { rowLabel: "Ecliptic (helio)", cells: [
-          { label: "Lon", expr: `HLongitudeOfPlanet(${n})`, tag: "A", updateInterval: NORMAL },
-          { label: "Lat", expr: `HLatitudeOfPlanet(${n})`, tag: "Ldeg", updateInterval: NORMAL }
-        ] },
-        { rowLabel: "Distance", cells: [
-          { label: "", expr: `distanceFromEarthOfPlanet(${n})`, tag: "DIST", updateInterval: SLOW }
-        ] },
-        { rowLabel: "Rise / Set / Transit", cells: [
-          { label: "Rise", expr: `riseOfPlanetForDayTime(${n})`, tag: "LT", updateInterval: SLOW },
-          { label: "Set", expr: `setOfPlanetForDayTime(${n})`, tag: "LT", updateInterval: SLOW },
-          { label: "Transit", expr: `transitOfPlanetForDayTime(${n})`, tag: "LT", updateInterval: SLOW }
-        ] }
-      ]
-    };
-  }
-  var CATALOG = [
-    TIME_GROUP,
-    SUN_GROUP,
-    MOON_GROUP,
-    ...PLANETS.map((p) => planetGroup(p.name, p.n))
-  ];
-
-  // src/inspector/inspector-entry.ts
-  var timeDisplay = document.getElementById("time-display");
-  var dateDisplay = document.getElementById("date-display");
-  var locationName = document.getElementById("location-name");
-  var locationDetail = document.getElementById("location-detail");
-  var setLocationBtn = document.getElementById("set-location-btn");
-  var catalogEl = document.getElementById("catalog");
-  var exprInput = document.getElementById("expr-input");
-  var exprResults = document.getElementById("expr-results");
-  var exprNumber = document.getElementById("expr-number");
-  var exprAngle = document.getElementById("expr-angle");
-  var exprDate = document.getElementById("expr-date");
-  var exprError = document.getElementById("expr-error");
-  var tzDisplay = document.getElementById("tz-display");
-  var timeMainEl = document.createElement("span");
-  var timeSubsecEl = document.createElement("span");
-  timeSubsecEl.className = "time-subsec";
-  timeDisplay.textContent = "";
-  timeDisplay.append(timeMainEl, timeSubsecEl);
-  initAppState({ app: "inspector" });
-  var urlState = getState();
-  var hasUrlLocation = urlState.lat !== null && urlState.lon !== null;
-  var lat = urlState.lat ?? 0;
-  var lon = urlState.lon ?? 0;
-  var locationTimezone = urlState.tz || void 0;
-  var needsPrompt = !hasUrlLocation && !urlState.bloc;
-  if (!navigator.connection?.saveData) prefetchCityData();
-  var LOCATING_TINT = "#e6b800";
-  var blocRefreshNoticeShown = false;
-  function notifyBlocRefreshFailed() {
-    if (blocRefreshNoticeShown) return;
-    blocRefreshNoticeShown = true;
-    showStorageWarning("Could not retrieve location from browser \u2014 falling back to last known location.");
-  }
-  function dialogShown() {
-    const lp = document.getElementById("location-prompt");
-    return !!lp && lp.style.display !== "none";
-  }
-  function haversineKm2(lat1, lon1, lat2, lon2) {
-    const R = 6371;
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
-    return 2 * R * Math.asin(Math.sqrt(a));
-  }
-  if (!locationTimezone && hasUrlLocation) {
-    locationTimezone = resolveTimezone(lat, lon, null);
-  }
-  var tzDeltaMs = computeTzDeltaMs(locationTimezone);
-  function formatTimezoneInfo(olsonId, referenceDate) {
-    if (!olsonId) return "";
-    try {
-      const ref = referenceDate || /* @__PURE__ */ new Date();
-      const shortFmt = new Intl.DateTimeFormat("en-US", {
-        timeZone: olsonId,
-        timeZoneName: "short"
-      });
-      const shortParts = shortFmt.formatToParts(ref);
-      const abbr = shortParts.find((p) => p.type === "timeZoneName")?.value || "";
-      const longFmt = new Intl.DateTimeFormat("en-US", {
-        timeZone: olsonId,
-        timeZoneName: "longOffset"
-      });
-      const longParts = longFmt.formatToParts(ref);
-      const offsetStr = longParts.find((p) => p.type === "timeZoneName")?.value || "";
-      let utcStr = offsetStr.replace("GMT", "UTC");
-      utcStr = utcStr.replace(/([+-])0(\d)/, "$1$2");
-      return `(${abbr})\xA0${utcStr}`;
-    } catch {
-      return "";
-    }
-  }
-  function updateLocationDisplay() {
-    if (lat === 0 && lon === 0 && needsPrompt) {
-      locationName.textContent = "No location set";
-      locationDetail.textContent = "Use the Set button to choose a location";
-      return;
-    }
-    const cityName = getState().city || null;
-    if (cityName) {
-      locationName.textContent = cityName;
-    } else if (isCityDataLoaded()) {
-      const closest = findClosestCity(lat, lon);
-      if (closest) {
-        locationName.textContent = closest.shortLabel;
-        if (isPersistentMode() && !getState().city) setState({ city: closest.shortLabel });
-      } else {
-        locationName.textContent = `${lat.toFixed(3)}\xB0, ${lon.toFixed(3)}\xB0`;
-      }
-    } else {
-      locationName.textContent = `${lat.toFixed(3)}\xB0, ${lon.toFixed(3)}\xB0`;
-      loadCityData().then(() => {
-        if (!getState().city) {
-          const c = findClosestCity(lat, lon);
-          if (c) {
-            locationName.textContent = c.shortLabel;
-            if (isPersistentMode()) setState({ city: c.shortLabel });
-          }
-        }
-        if (!dialogShown()) releaseCityData();
-      }).catch(() => {
-      });
-    }
-    const tzInfo = formatTimezoneInfo(locationTimezone);
-    const tzDisplayStr = locationTimezone || "Browser TZ";
-    const detail = tzInfo ? `${lat.toFixed(3)}\xB0 ${lat >= 0 ? "N" : "S"}, ${Math.abs(lon).toFixed(3)}\xB0 ${lon >= 0 ? "E" : "W"}  \xB7  ${tzDisplayStr} ${tzInfo}` : `${lat.toFixed(3)}\xB0 ${lat >= 0 ? "N" : "S"}, ${Math.abs(lon).toFixed(3)}\xB0 ${lon >= 0 ? "E" : "W"}  \xB7  ${tzDisplayStr}`;
-    locationDetail.textContent = detail;
-  }
-  updateLocationDisplay();
-  var locationDialog = initLocationDialog({
-    initialLat: lat,
-    initialLon: lon,
-    needsPrompt,
-    onLocationChange: (info) => {
-      lat = info.lat;
-      lon = info.lon;
-      locationTimezone = info.timezone;
-      tzDeltaMs = computeTzDeltaMs(locationTimezone);
-      needsPrompt = false;
-      if (info.sourceType === "browser") {
-        const derived = isCityDataLoaded() ? findClosestCity(info.lat, info.lon)?.shortLabel ?? null : null;
-        setState({ bloc: true, lat: info.lat, lon: info.lon, city: derived, tz: info.timezone || null });
-      } else {
-        setState({ bloc: false, lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
-      }
-      env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
-      updateLocationDisplay();
-      updateTimeDisplay();
-      rebuildExprValues();
-      resetAllSchedules();
-      scheduleFrame();
-    }
-  });
-  if (locationDialog) {
-    setLocationBtn.addEventListener("click", () => {
-      const s = getState();
-      if (s.lat !== null && s.lon !== null) {
-        const sourceType = s.bloc ? "browser" : s.city ? "url-city" : "manual";
-        locationDialog.updateState(s.lat, s.lon, sourceType, s.city || "", s.city || "");
-      }
-      locationDialog.show();
-    });
-    if (needsPrompt) {
-      locationDialog.show();
-    }
-    if (urlState.bloc && !hasUrlLocation) {
-      requestBrowserLocation(1e4).then((result) => {
-        if (result.status === "success") {
-          const tz = resolveTimezone(result.lat, result.lon, null);
-          lat = result.lat;
-          lon = result.lon;
-          locationTimezone = tz;
-          tzDeltaMs = computeTzDeltaMs(locationTimezone);
-          needsPrompt = false;
-          if (isPersistentMode()) setState({ bloc: true, lat, lon, tz: locationTimezone || null });
-          locationDialog.updateState(lat, lon, "browser", "", "");
-          env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
-          updateLocationDisplay();
-          updateTimeDisplay();
-          rebuildExprValues();
-          resetAllSchedules();
-          scheduleFrame();
-        } else {
-          needsPrompt = true;
-          locationDialog.setNeedsPrompt(true);
-          if (result.status === "denied") {
-            locationDialog.setGeoPermission("denied");
-          }
-          locationDialog.show();
-        }
-      });
-    } else if (urlState.bloc && hasUrlLocation) {
-      if (locationName) locationName.style.color = LOCATING_TINT;
-      requestBrowserLocation(1e4).then((result) => {
-        if (result.status !== "success") {
-          notifyBlocRefreshFailed();
-          return;
-        }
-        if (haversineKm2(lat, lon, result.lat, result.lon) <= 16) return;
-        const tz = resolveTimezone(result.lat, result.lon, null);
-        lat = result.lat;
-        lon = result.lon;
-        locationTimezone = tz;
-        tzDeltaMs = computeTzDeltaMs(locationTimezone);
-        if (isPersistentMode()) setState({ bloc: true, lat, lon, city: null, tz });
-        locationDialog.updateState(lat, lon, "browser", "", "");
-        env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
-        updateLocationDisplay();
-        updateTimeDisplay();
-        rebuildExprValues();
-        resetAllSchedules();
-        scheduleFrame();
-      }).catch(() => notifyBlocRefreshFailed()).finally(() => {
-        if (locationName) locationName.style.color = "";
-      });
-    }
-  }
-  var timeController = new TimeController();
-  if (urlState.off !== null && !isNaN(urlState.off)) {
-    timeController.setOffset(urlState.off);
-  } else if (urlState.t !== null && !isNaN(urlState.t)) {
-    timeController.setTime(new Date(urlState.t));
-    if (urlState.dir === 1) {
-      timeController.setDirection(1);
-      timeController.setRate(null);
-    } else if (urlState.dir === -1) {
-      timeController.setDirection(-1);
-      timeController.setRate(null);
-    }
-  }
-  var { getNow, withDisplayTime } = makeOverridableGetNow(() => timeController.getDisplayTime());
-  var env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
-  var updater = new Updater();
-  function formatTime(date) {
-    const h = date.getHours().toString().padStart(2, "0");
-    const m = date.getMinutes().toString().padStart(2, "0");
-    const s = date.getSeconds().toString().padStart(2, "0");
-    return `${h}:${m}:${s}`;
-  }
-  function formatDate(date) {
-    const options = {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      timeZone: locationTimezone
-    };
-    return date.toLocaleDateString("en-US", options);
-  }
-  function updateTimeDisplay() {
-    const now = getNow();
-    const shifted = tzDeltaMs !== 0 ? new Date(now.getTime() + tzDeltaMs) : now;
-    timeMainEl.textContent = formatTime(shifted);
-    timeSubsecEl.textContent = `.${shifted.getMilliseconds().toString().padStart(3, "0")}`;
-    dateDisplay.textContent = formatDate(now);
-    tzDisplay.textContent = formatTimezoneInfo(locationTimezone, now);
-  }
-  var EPOCH_2001_MS = 9783072e5;
-  function formatDateIntervalTime(value) {
-    const dateMs = value * 1e3 + EPOCH_2001_MS;
-    if (!isFinite(dateMs) || dateMs <= -62e12 || dateMs >= 25e13) return "\u2014";
-    const d = new Date(dateMs);
-    if (locationTimezone) {
-      try {
-        return new Intl.DateTimeFormat("en-US", {
-          timeZone: locationTimezone,
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          hour12: false
-        }).format(d);
-      } catch {
-        return d.toISOString().slice(11, 19);
-      }
-    }
-    return d.toISOString().slice(11, 19);
-  }
-  var EXPR_UPDATE_INTERVAL_SEC = 0.1;
-  var lastExprText = "";
-  var exprAngleVal = null;
-  var exprLinearVal = null;
-  var exprValues = [];
-  function rebuildExprValues() {
-    const text = exprInput.value.trim();
-    if (!text) {
-      exprResults.classList.remove("visible");
-      exprError.classList.remove("visible");
-      lastExprText = "";
-      exprAngleVal = null;
-      exprLinearVal = null;
-      exprValues = [];
-      return;
-    }
-    lastExprText = text;
-    const now = performance.now();
-    try {
-      const base = {
-        name: "expr",
-        expr: text,
-        updateInterval: EXPR_UPDATE_INTERVAL_SEC,
-        evalAhead: true,
-        animSpeed: JUMP
-      };
-      exprAngleVal = createObsValue({ ...base, linear: false }, env, now, getNow);
-      exprLinearVal = createObsValue({ ...base, linear: true }, env, now, getNow);
-      exprValues = [exprAngleVal, exprLinearVal];
-      exprError.classList.remove("visible");
-      exprResults.classList.add("visible");
-      renderExprValues();
-      scheduleFrame();
-    } catch (e) {
-      exprAngleVal = null;
-      exprLinearVal = null;
-      exprValues = [];
-      exprResults.classList.remove("visible");
-      exprError.textContent = e.message || "Parse error";
-      exprError.classList.add("visible");
-    }
-  }
-  function renderExprValues() {
-    if (!exprAngleVal || !exprLinearVal) return;
-    const value = exprLinearVal.currentValue;
-    const angleRad = exprAngleVal.currentValue;
-    if (Number.isInteger(value) && Math.abs(value) < 1e15) {
-      exprNumber.textContent = value.toString();
-    } else {
-      exprNumber.textContent = value.toPrecision(10);
-    }
-    const degrees = angleRad * 180 / Math.PI;
-    exprAngle.textContent = `${degrees.toFixed(4)}\xB0`;
-    const dateMs = value * 1e3 + EPOCH_2001_MS;
-    if (isFinite(dateMs) && dateMs > -62e12 && dateMs < 25e13) {
-      const d = new Date(dateMs);
-      if (locationTimezone) {
-        try {
-          const fmt = new Intl.DateTimeFormat("en-US", {
-            timeZone: locationTimezone,
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-            hour12: false
-          });
-          const tzAbbr = new Intl.DateTimeFormat("en-US", {
-            timeZone: locationTimezone,
-            timeZoneName: "short"
-          }).formatToParts(d).find((p) => p.type === "timeZoneName")?.value || "";
-          exprDate.textContent = `${fmt.format(d)} ${tzAbbr}`;
-        } catch {
-          exprDate.textContent = d.toISOString().replace("T", " ").replace("Z", " UTC");
-        }
-      } else {
-        exprDate.textContent = d.toISOString().replace("T", " ").replace("Z", " UTC");
-      }
-    } else {
-      exprDate.textContent = "\u2014";
-    }
-  }
-  function tickExprValues(perfNow, ctx) {
-    if (exprValues.length === 0) return;
-    try {
-      updateObsValues(
-        exprValues,
-        env,
-        perfNow,
-        getNow,
-        ctx.tickIntervalMs,
-        ctx.displayDeltaSec,
-        ctx.direction,
-        withDisplayTime
-      );
-      animateObsValues(exprValues, perfNow);
-      exprError.classList.remove("visible");
-      exprResults.classList.add("visible");
-      renderExprValues();
-    } catch (e) {
-      exprResults.classList.remove("visible");
-      exprError.textContent = e.message || "Evaluation error";
-      exprError.classList.add("visible");
-    }
-  }
-  exprInput.addEventListener("input", () => {
-    rebuildExprValues();
-    updateAutocomplete();
-  });
-  var acDropdown = document.getElementById("expr-autocomplete");
-  var acItems = [];
-  var acSelectedIdx = -1;
-  function getWordAtCursor() {
-    const pos = exprInput.selectionStart ?? exprInput.value.length;
-    const text = exprInput.value;
-    let start = pos;
-    while (start > 0 && /[a-zA-Z0-9_]/.test(text[start - 1])) start--;
-    let end = pos;
-    while (end < text.length && /[a-zA-Z0-9_]/.test(text[end])) end++;
-    return { word: text.slice(start, pos), start, end };
-  }
-  function getAllCompletions() {
-    const seen = new Set(EXPR_METADATA.map((e) => e.name));
-    const extras = [];
-    if (env) {
-      for (const name of env.functions.keys()) {
-        if (!seen.has(name)) {
-          extras.push({ name, category: "Other", desc: "", kind: "fn" });
-          seen.add(name);
-        }
-      }
-      for (const name of env.variables.keys()) {
-        if (!seen.has(name)) {
-          extras.push({ name, category: "Other", desc: "", kind: "const" });
-          seen.add(name);
-        }
-      }
-    }
-    return [...EXPR_METADATA, ...extras];
-  }
-  function updateAutocomplete() {
-    const { word } = getWordAtCursor();
-    if (word.length < 2) {
-      acDropdown.classList.remove("visible");
-      acItems = [];
-      return;
-    }
-    const lc = word.toLowerCase();
-    const all = getAllCompletions();
-    const prefixMatches = all.filter((e) => e.name.toLowerCase().startsWith(lc));
-    const subMatches = all.filter((e) => !e.name.toLowerCase().startsWith(lc) && e.name.toLowerCase().includes(lc));
-    acItems = [...prefixMatches, ...subMatches].slice(0, 20);
-    if (acItems.length === 0 || acItems.length === 1 && acItems[0].name.toLowerCase() === lc) {
-      acDropdown.classList.remove("visible");
-      acItems = [];
-      return;
-    }
-    acSelectedIdx = -1;
-    renderAutocomplete();
-    acDropdown.classList.add("visible");
-  }
-  function renderAutocomplete() {
-    acDropdown.innerHTML = acItems.map((entry, i) => {
-      const kindClass = entry.kind === "fn" ? "fn" : "const";
-      const kindLabel = entry.kind === "fn" ? "fn" : "var";
-      const sig = entry.kind === "fn" ? entry.sig || "()" : "";
-      const selected = i === acSelectedIdx ? " selected" : "";
-      return `<div class="ac-item${selected}" data-idx="${i}">
-            <span class="ac-kind ${kindClass}">${kindLabel}</span>
-            <span class="ac-name">${entry.name}</span>
-            <span class="ac-sig">${sig}</span>
-            <span class="ac-desc">${entry.desc}</span>
-        </div>`;
-    }).join("");
-  }
-  function acceptAutocomplete(idx) {
-    const entry = acItems[idx];
-    if (!entry) return;
-    const { start, end } = getWordAtCursor();
-    const text = exprInput.value;
-    let insert = entry.name;
-    if (entry.kind === "fn") {
-      insert += entry.sig || "()";
-    }
-    exprInput.value = text.slice(0, start) + insert + text.slice(end);
-    const cursorPos = entry.kind === "fn" && entry.sig && entry.sig !== "()" ? start + entry.name.length + 1 : start + insert.length;
-    exprInput.setSelectionRange(cursorPos, cursorPos);
-    acDropdown.classList.remove("visible");
-    acItems = [];
-    rebuildExprValues();
-  }
-  exprInput.addEventListener("keydown", (e) => {
-    if (!acDropdown.classList.contains("visible")) return;
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      acSelectedIdx = Math.min(acSelectedIdx + 1, acItems.length - 1);
-      renderAutocomplete();
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      acSelectedIdx = Math.max(acSelectedIdx - 1, 0);
-      renderAutocomplete();
-    } else if (e.key === "Enter" || e.key === "Tab") {
-      if (acSelectedIdx >= 0) {
-        e.preventDefault();
-        acceptAutocomplete(acSelectedIdx);
-      }
-    } else if (e.key === "Escape") {
-      acDropdown.classList.remove("visible");
-      acItems = [];
-    }
-  });
-  acDropdown.addEventListener("mousedown", (e) => {
-    e.preventDefault();
-    const item = e.target.closest(".ac-item");
-    if (item) {
-      const idx = parseInt(item.dataset.idx, 10);
-      acceptAutocomplete(idx);
-    }
-  });
-  exprInput.addEventListener("blur", () => {
-    setTimeout(() => {
-      acDropdown.classList.remove("visible");
-      acItems = [];
-    }, 150);
-  });
-  var refToggle = document.getElementById("ref-toggle");
-  var refPanel = document.getElementById("ref-panel");
-  initShareButton({ getState });
-  function applyTimeFromState(s) {
-    if (s.off !== null) {
-      timeController.setOffset(s.off);
-      return true;
-    }
-    if (s.t !== null) {
-      timeController.setTime(new Date(s.t));
-      if (s.dir === 1) {
-        timeController.setDirection(1);
-        timeController.setRate(null);
-      } else if (s.dir === -1) {
-        timeController.setDirection(-1);
-        timeController.setRate(null);
-      }
-      return true;
-    }
-    if (!timeController.isRealTime) {
-      timeController.reset();
-      return true;
-    }
-    return false;
-  }
-  onSharedChange((s) => {
-    let changed = false;
-    if (s.lat !== null && s.lon !== null && (s.lat !== lat || s.lon !== lon || (s.tz || void 0) !== locationTimezone)) {
-      lat = s.lat;
-      lon = s.lon;
-      locationTimezone = s.tz || resolveTimezone(lat, lon, null);
-      tzDeltaMs = computeTzDeltaMs(locationTimezone);
-      needsPrompt = false;
-      urlState.city = s.city;
-      env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
-      updateLocationDisplay();
-      rebuildExprValues();
-      resetAllSchedules();
-      changed = true;
-    }
-    if (applyTimeFromState(s)) changed = true;
-    if (changed) {
-      updateTimeDisplay();
-      scheduleFrame();
-    }
-  });
-  function buildReferencePanel() {
-    const all = getAllCompletions();
-    const groups = /* @__PURE__ */ new Map();
-    for (const entry of all) {
-      const cat = entry.category;
-      if (!groups.has(cat)) groups.set(cat, []);
-      groups.get(cat).push(entry);
-    }
-    const catOrder = [...CATEGORY_ORDER];
-    for (const cat of groups.keys()) {
-      if (!catOrder.includes(cat)) catOrder.push(cat);
-    }
-    let html = "";
-    for (const cat of catOrder) {
-      const entries = groups.get(cat);
-      if (!entries || entries.length === 0) continue;
-      html += `<div class="ref-category">`;
-      html += `<div class="ref-cat-header"><span class="ref-cat-arrow">\u25B6</span> ${cat} <span style="color:#4b5563;font-weight:400">(${entries.length})</span></div>`;
-      html += `<div class="ref-cat-body">`;
-      for (const entry of entries) {
-        const sig = entry.kind === "fn" ? entry.sig || "()" : "";
-        html += `<div class="ref-item" data-name="${entry.name}" data-kind="${entry.kind}" data-sig="${entry.sig || ""}">`;
-        html += `<span class="ref-item-name">${entry.name}${sig}</span>`;
-        html += `<span class="ref-item-desc">${entry.desc}</span>`;
-        html += `</div>`;
-      }
-      html += `</div></div>`;
-    }
-    refPanel.innerHTML = html;
-    refPanel.querySelectorAll(".ref-cat-header").forEach((header) => {
-      header.addEventListener("click", () => {
-        header.parentElement.classList.toggle("open");
-      });
-    });
-    refPanel.querySelectorAll(".ref-item").forEach((item) => {
-      item.addEventListener("click", () => {
-        const el = item;
-        const name = el.dataset.name;
-        const kind = el.dataset.kind;
-        const sig = el.dataset.sig || "";
-        let insert = name;
-        if (kind === "fn") {
-          insert += sig || "()";
-        }
-        if (exprInput.value.trim() === "") {
-          exprInput.value = insert;
-        } else {
-          const pos = exprInput.selectionStart ?? exprInput.value.length;
-          const text = exprInput.value;
-          exprInput.value = text.slice(0, pos) + insert + text.slice(pos);
-        }
-        const cursorPos = kind === "fn" && sig && sig !== "()" ? exprInput.value.indexOf(insert) + name.length + 1 : exprInput.value.indexOf(insert) + insert.length;
-        exprInput.setSelectionRange(cursorPos, cursorPos);
-        exprInput.focus();
-        rebuildExprValues();
-      });
-    });
-  }
-  refToggle.addEventListener("click", () => {
-    const isOpen = refPanel.classList.toggle("visible");
-    refToggle.classList.toggle("active", isOpen);
-    if (isOpen && refPanel.innerHTML === "") {
-      buildReferencePanel();
-    }
-  });
-  var catalogHandles = [];
-  var WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-  var MONTH_NAMES = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December"
-  ];
-  var KM_PER_AU = 1495978707e-1;
-  var MINUS = "\u2212";
-  var APOS = "\u2019";
-  var browserTimeEl = null;
-  var browserTimeRowEl = null;
-  var lastBrowserTimeStr = "";
-  function buildCatalog() {
-    const now = performance.now();
-    for (const group of CATALOG) {
-      const groupEl = document.createElement("section");
-      groupEl.className = "cat-group";
-      const nameEl = document.createElement("h2");
-      nameEl.className = "cat-group-name";
-      nameEl.textContent = group.name;
-      groupEl.appendChild(nameEl);
-      for (const row of group.rows) {
-        const rowEl = document.createElement("div");
-        rowEl.className = row.layout === "fields" ? "cat-row cat-row-fields" : "cat-row";
-        const lbl = document.createElement("span");
-        lbl.className = "cat-row-label";
-        lbl.textContent = row.rowLabel ?? "";
-        rowEl.appendChild(lbl);
-        for (const cell of row.cells) {
-          const cellEl = document.createElement("div");
-          cellEl.className = cell.tag === "DIST" ? "cat-cell dist-cell" : "cat-cell";
-          if (cell.label) {
-            const cl = document.createElement("span");
-            cl.className = "cat-cell-label";
-            cl.textContent = cell.label;
-            cellEl.appendChild(cl);
-          }
-          const valueEl = document.createElement("span");
-          valueEl.className = "cat-cell-value";
-          valueEl.textContent = "\u2014";
-          cellEl.appendChild(valueEl);
-          rowEl.appendChild(cellEl);
-          const discrete = tagIsDiscrete(cell.tag);
-          const obs = createObsValue(
-            {
-              name: cell.expr,
-              expr: cell.expr,
-              updateInterval: cell.updateInterval,
-              evalAhead: !discrete,
-              discrete,
-              linear: !tagIsAngular(cell.tag),
-              // Digital readout: jump to the new value on stop/step rather
-              // than creep at a magnitude-mismatched settle speed.
-              animSpeed: JUMP
-            },
-            env,
-            now,
-            getNow
-          );
-          updater.add(obs);
-          catalogHandles.push({ cell, obs, valueEl, last: "" });
-        }
-        groupEl.appendChild(rowEl);
-      }
-      catalogEl.appendChild(groupEl);
-    }
-    const timeGroupEl = catalogEl.querySelector(".cat-group");
-    if (timeGroupEl) {
-      const btRow = document.createElement("div");
-      btRow.className = "cat-row";
-      const btLabel = document.createElement("span");
-      btLabel.className = "cat-row-label";
-      btLabel.textContent = "Browser time";
-      btRow.appendChild(btLabel);
-      const btCell = document.createElement("div");
-      btCell.className = "cat-cell";
-      const btValue = document.createElement("span");
-      btValue.className = "cat-cell-value";
-      btValue.textContent = "\u2014";
-      btCell.appendChild(btValue);
-      btRow.appendChild(btCell);
-      timeGroupEl.appendChild(btRow);
-      browserTimeEl = btValue;
-      browserTimeRowEl = btRow;
-    }
-  }
-  function resetAllSchedules() {
-    updater.reset();
-    resetObsValueSchedules(exprValues);
-  }
-  function pad2(n) {
-    return n.toString().padStart(2, "0");
-  }
-  function pad3(n) {
-    return n.toString().padStart(3, "0");
-  }
-  function groupThousands(digits) {
-    let out = "";
-    for (let i = 0; i < digits.length; i++) {
-      if (i > 0 && (digits.length - i) % 3 === 0) out += `<span class="kilo-sep">${APOS}</span>`;
-      out += digits[i];
-    }
-    return out;
-  }
-  function fmtAngle(v) {
-    if (!isFinite(v)) return "\u2014";
-    let deg = v * 180 / Math.PI;
-    deg = (deg % 360 + 360) % 360;
-    return `${deg.toFixed(2)}\xB0`;
-  }
-  function fmtDeg(v) {
-    if (!isFinite(v)) return "\u2014";
-    const deg = v * 180 / Math.PI;
-    return `${deg < 0 ? MINUS : ""}${Math.abs(deg).toFixed(2)}\xB0`;
-  }
-  function fmtInt(v) {
-    if (!isFinite(v)) return "\u2014";
-    return Math.round(v).toString();
-  }
-  function fmtNum(v) {
-    if (!isFinite(v)) return "\u2014";
-    return Number.isInteger(v) ? v.toString() : v.toFixed(3);
-  }
-  function fmtBool(v) {
-    if (!isFinite(v)) return "\u2014";
-    return Math.round(v) !== 0 ? "yes" : "no";
-  }
-  function fmtWeekday(v) {
-    if (!isFinite(v)) return "\u2014";
-    const idx = (Math.round(v) % 7 + 7) % 7;
-    return `${idx} (${WEEKDAY_NAMES[idx]})`;
-  }
-  function fmtMonth(v) {
-    if (!isFinite(v)) return "\u2014";
-    const idx = (Math.round(v) % 12 + 12) % 12;
-    return `${idx} (${MONTH_NAMES[idx]})`;
-  }
-  function ordinal(n) {
-    const v = n % 100;
-    const suffix = v >= 11 && v <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th";
-    return `${n}${suffix}`;
-  }
-  function fmtDay(v) {
-    if (!isFinite(v)) return "\u2014";
-    const n = Math.round(v);
-    return `${n} (${ordinal(n + 1)})`;
-  }
-  function fmtHMS(seconds) {
-    if (!isFinite(seconds)) return "\u2014";
-    const sign = seconds < 0 ? MINUS : "";
-    const totalMs = Math.round(Math.abs(seconds) * 1e3);
-    const ms = totalMs % 1e3;
-    let rem = Math.floor(totalMs / 1e3);
-    const ss = rem % 60;
-    rem = Math.floor(rem / 60);
-    const m = rem % 60;
-    const h = Math.floor(rem / 60);
-    return `${sign}${pad2(h)}:${pad2(m)}:${pad2(ss)}.${pad3(ms)}`;
-  }
-  function fmtHM(seconds) {
-    if (!isFinite(seconds)) return "\u2014";
-    const sign = seconds < 0 ? MINUS : "+";
-    const totalMin = Math.round(Math.abs(seconds) / 60);
-    const h = Math.floor(totalMin / 60);
-    const m = totalMin % 60;
-    return `${sign}${pad2(h)}:${pad2(m)}`;
-  }
-  function fmtMS(seconds) {
-    if (!isFinite(seconds)) return "\u2014";
-    const sign = seconds < 0 ? MINUS : "+";
-    const totalMs = Math.round(Math.abs(seconds) * 1e3);
-    const ms = totalMs % 1e3;
-    let rem = Math.floor(totalMs / 1e3);
-    const ss = rem % 60;
-    const m = Math.floor(rem / 60);
-    return `${sign}${pad2(m)}:${pad2(ss)}.${pad3(ms)}`;
-  }
-  function fmtDist(au) {
-    if (!isFinite(au)) return "\u2014";
-    const auStr = `${au.toFixed(au < 1 ? 5 : 4)} AU`;
-    const kmStr = `${groupThousands(Math.round(au * KM_PER_AU).toString())} km`;
-    return `${auStr}<span class="dist-km">${kmStr}</span>`;
-  }
-  function tagIsHtml(tag) {
-    return tag === "DIST";
-  }
-  function formatCell(tag, v) {
-    switch (tag) {
-      case "A":
-        return fmtAngle(v);
-      case "Ldeg":
-        return fmtDeg(v);
-      case "Num":
-        return fmtNum(v);
-      case "Int":
-        return fmtInt(v);
-      case "BOOL":
-        return fmtBool(v);
-      case "WD":
-        return fmtWeekday(v);
-      case "MO":
-        return fmtMonth(v);
-      case "DAY":
-        return fmtDay(v);
-      case "HMS":
-        return fmtHMS(v);
-      case "HM":
-        return fmtHM(v);
-      case "MS":
-        return fmtMS(v);
-      case "LT":
-        return formatDateIntervalTime(v);
-      case "DIST":
-        return fmtDist(v);
-    }
-  }
-  function renderCatalog() {
-    for (const h of catalogHandles) {
-      const str = formatCell(h.cell.tag, h.obs.currentValue);
-      if (str === h.last) continue;
-      h.last = str;
-      if (tagIsHtml(h.cell.tag)) h.valueEl.innerHTML = str;
-      else h.valueEl.textContent = str;
-    }
-  }
-  function renderBrowserTime() {
-    if (!browserTimeEl || !browserTimeRowEl) return;
-    const stopped = timeController.isStopped;
-    browserTimeRowEl.style.opacity = stopped ? "0.35" : "";
-    if (stopped) return;
-    const wallMs = performance.timeOrigin + performance.now();
-    const wallDate = new Date(wallMs);
-    const shifted = tzDeltaMs !== 0 ? new Date(wallDate.getTime() + tzDeltaMs) : wallDate;
-    const secSinceMidnight = shifted.getHours() * 3600 + shifted.getMinutes() * 60 + shifted.getSeconds() + shifted.getMilliseconds() / 1e3;
-    const str = fmtHMS(secSinceMidnight);
-    if (str !== lastBrowserTimeStr) {
-      lastBrowserTimeStr = str;
-      browserTimeEl.textContent = str;
-    }
-  }
-  var fpsIndicator = createFpsIndicator(urlState.fps);
-  var rafId = null;
-  var inTick = false;
-  var frameRequestedDuringTick = false;
-  function scheduleFrame() {
-    if (inTick) {
-      frameRequestedDuringTick = true;
-      return;
-    }
-    if (rafId === null) rafId = requestAnimationFrame(tick);
-  }
-  function tick() {
-    rafId = null;
-    inTick = true;
-    frameRequestedDuringTick = false;
-    const perfNow = performance.now();
-    timeController.checkTick(perfNow);
-    timeController.beginFrame();
-    const ctx = timingContextForFrame(timeController);
-    updater.tick(env, perfNow, getNow, withDisplayTime, ctx);
-    tickExprValues(perfNow, ctx);
-    updateTimeDisplay();
-    renderCatalog();
-    renderBrowserTime();
-    timeUI?.updateTimeUI();
-    timeController.clampDisplayTime();
-    timeController.endFrame();
-    const continuous = !timeController.isStopped || updater.anyAnimating();
-    fpsIndicator?.recordFrame(continuous, performance.now() - perfNow);
-    inTick = false;
-    if (continuous || frameRequestedDuringTick) {
-      rafId = requestAnimationFrame(tick);
-    }
-  }
-  function writeTimeState() {
-    writeTimeStateToUrl(timeController);
-  }
-  function resetExprBox() {
-    rebuildExprValues();
-    resetObsValueSchedules(exprValues);
-  }
-  var timeUI = initTimeControls({
-    timeController,
-    updater,
-    getTimezone: () => locationTimezone,
-    getTzDeltaMs: () => tzDeltaMs,
-    getLat: () => lat,
-    getLon: () => lon,
-    onTimeStep: resetExprBox,
-    onScrubStart: () => {
-      resetObsValueSchedules(exprValues);
-    },
-    onScrubEnd: resetExprBox,
-    onNowClicked: resetExprBox,
-    onTransportChange: resetExprBox,
-    ensureSchedulerRunning: () => {
-      scheduleFrame();
-    }
-  });
-  function wireAppLink(id, page) {
-    const a = document.getElementById(id);
-    if (!a) return;
-    const setHref = () => {
-      a.href = page + window.location.search;
-    };
-    const flushAndSet = () => {
-      writeTimeState();
-      setHref();
-    };
-    a.addEventListener("pointerdown", flushAndSet);
-    a.addEventListener("focus", flushAndSet);
-    setHref();
-  }
-  wireAppLink("open-observatory", "observatory.html");
-  wireAppLink("open-chronometer", "all.html");
-  buildCatalog();
-  updateTimeDisplay();
-  renderBrowserTime();
-  timeUI?.updateTimeUI();
-  scheduleFrame();
-  console.log(
-    "[Inspector] Initialized \u2014 lat:",
-    lat,
-    "lon:",
-    lon,
-    "tz:",
-    locationTimezone,
-    "\u2014 catalog values:",
-    updater.all.length
-  );
 })();

@@ -485,9 +485,178 @@ Offload the on-arrival evaluation to a worker.
 - B-1. Factor a **worker-safe env builder** (explicit state in, no `getState`/DOM)
   and bundle astronomy + `expr` + env-function bodies into a worker entry. Verify
   no DOM/`getState`/`navigator` reach-through (the three points above).
+  **✅ DONE (2026-06-27, env-builder half).** `createWatchEnvironment` is now pure:
+  the `body`/`noonOnTop`/`kyMode`/`kyHandMode` overrides became an explicit
+  `WatchEnvOverrides` param instead of an in-builder `getState()`/`window` read. The
+  main thread supplies them via `readPersistedOverrides()` (engine-entry), threaded
+  through all 7 call sites; the worker (B-2) will supply the same shape from its
+  mirror. Verified: the worker-bundle module set (`watch-env`, `astro-env`,
+  `animation`, `obs-value`, `updater`, `expr/*`, `astronomy/*`, `terminator`,
+  `analemma`) is grep-clean of `window`/`document`/`getState`/`localStorage`;
+  remaining browser-API touches are `navigator.language`/`getBattery` (guarded,
+  worker-available) and `OffscreenCanvas` (a worker API). tsc clean, full suite
+  green (8539), and the override path verified live (Venezia `?body=mars` →
+  "Mars Trans", planet 5). **Remaining for B-1:** create the actual worker entry +
+  esbuild bundle target (deferred into B-2 wiring).
 - B-2. Wire the **mirror message** (state + generation) and the **request/result**
   protocol; give the worker its own `AstroCachePool`. Start with **one shared
   worker**, all values, `N = 2`.
+  **✅ (i) done (2026-06-27): build/transport proof.** `src/watch/eval-worker.ts`
+  bundles to `dist/chronometer-worker.js` (separate esbuild target in build.sh,
+  90 kb). Verified in-browser: the worker **loads worker-safe** (force-imports the
+  pure `createWatchEnvironment`; a DOM-touching module-init would have thrown on
+  load — it didn't, `onerror` never fired) and **round-trips real astronomy** —
+  `{type:'ping', timeMs: 2026-06-27T12:00Z}` → `{di: 804254400, moonAge age 2.665 /
+  phase 0.944}`, echo preserved, no console errors. Confirms the bundling +
+  transport approach. Note: under `file://`, `new Worker(url)` is blocked, **but a
+  Blob-URL worker works** (`new Worker(URL.createObjectURL(new Blob([src])))`) — it
+  just needs the worker source inlined (can't `fetch()` on file://). So file://
+  support is possible via the blob path; otherwise fall back to the Phase-A
+  synchronous on-beat path (the worker is an optional accelerator).
+
+  **✅ (ii) done (2026-06-27): worker-core + determinism proven.**
+  `src/watch/worker-core.ts` is the pure, node-testable worker logic — builds a face
+  env from mirrored state and evaluates value exprs at future boundaries via the
+  same overridable seam + bps quantizer as the engine. A shared
+  `src/shared/time-quantize.ts` (`quantizeGetNow`) is now the single quantizer used
+  by both `engine-entry` and `worker-core` (no drift). `src/__tests__/worker-core.test.ts`
+  asserts the worker's targets are **bit-identical** to a main-thread eval-ahead
+  reference for **every face × every ObsValue × 11 time offsets** (sub-second →
+  300 days) — all 16 pass; full suite 8555 green. Three findings that shaped the
+  protocol:
+    1. **`DOMParser` is unavailable in a dedicated worker**, so the worker does not
+       parse XML — it receives the already-parsed `initExprs` + per-value
+       expression ASTs (plain objects → structured-cloneable). Added `WatchEnvSource`
+       (`{ initExprs }`) so the worker passes only the init ASTs, not the parts tree
+       or image data.
+    2. **Init blocks evaluate at construction-time `getNow`**, so the worker must
+       build its env at the **same display instant** the main thread mirrored
+       (`WorkerFaceInit.nowMs`); otherwise date/calendar/UT-base values captured at
+       init diverge. A later main-thread env rebuild bumps the generation and
+       re-inits the worker at the new `nowMs`.
+    3. **ObsValue *names* are not unique** — `refName` parts share a name (e.g.
+       Babylon's four `year` digit wheels are all `Babylon.year.angle`). The engine
+       is unaffected (renderer uses direct `part._obsAngle` refs), but the **worker
+       request/result protocol must key values by a unique id**, not the name.
+  **✅ (iii-a) done (2026-06-27): protocol + dispatcher + client.**
+  `src/watch/worker-protocol.ts` defines the `init`/`req`/`res` messages (generation
+  on every message; values keyed by unique id). `WorkerDispatcher` (in worker-core)
+  owns the per-face map and gates `req` by generation (stale/unknown → dropped).
+  `eval-worker.ts` is now just postMessage glue around it. `src/watch/worker-client.ts`
+  is the main-thread wrapper: spawns `chronometer-worker.js`, exposes
+  `available` (false ⇒ engine uses the Phase-A sync path), and has the Blob-URL
+  fallback for `file://`. Verified: node test drives the dispatcher through
+  `structuredClone` (proves the payload — incl. ASTs — is postMessage-safe) and the
+  results match the main thread; generation-gating drops stale/unknown reqs; and the
+  **real bundled worker** round-trips `init`+`req`→`res` in-browser (hand-built AST
+  cloned over real `postMessage` → `hour24Number` = 5 at 12:00 Z / PDT). Full suite
+  8557 green. (Worker bundle is now 1.2 MB — it bundles the full astronomy/env graph,
+  shared with the engine; fine for budget.)
+  **✅ (iii-b) done (2026-06-27): engine render-loop integration.**
+  `ObsValue` gained `ahead` (depth-`N=2` buffer) + `aheadPending` + a `requestAhead`
+  hook. `onArrivalOnBeat` now: if `requestAhead` is set, **request** upcoming
+  boundaries + **consume** the precomputed target (miss → fail-fast: sit a beat,
+  throttled warn, self-heals); else the synchronous Phase-A eval (unchanged).
+  Engine spawns one shared `WorkerEvalClient`; `maybeReinitWorker(face)` runs each
+  frame and re-`init`s (bumping generation) only when a **state fingerprint**
+  (location / DST tz / overrides / bps / Terra slots) changes — NOT on the per-tick
+  env rebuild (time is handled by `withDisplayTime`). Results route into `ahead` with
+  generation filtering. `reset()`/`finish()` clear the buffers. When
+  `!client.available` (file://, no workers) the values keep `requestAhead` unset →
+  exact Phase-A path.
+    - **Interval gate added (decision #3's deferred gate, now empirically required).**
+      First run flooded misses on `second.angle` (`update='.1'`, a 10 Hz *arithmetic*
+      value): offloading cheap/fast values just spams the worker and misses every
+      beat. `isWorkerEligible = onBeat && (interval < 0 || interval ≥ 2 s)` — astro
+      values (coarse intervals / event sentinels) offload; cheap sub-second hands
+      stay synchronous.
+    - **Also fixed a B-1 regression**: the map-drag location site
+      ([engine-entry.ts] `newLat,newLon`) had lost its `readPersistedOverrides()`
+      arg; restored.
+    - **Verified in-browser** (Mauna Kea, the heaviest face): worker bundle fetched
+      → active; astro values offloaded; **zero steady-state misses; no console
+      errors**; renders identically to Phase A (determinism guarantees value
+      equality). tsc clean; full suite **8557 green** (node has no worker → exercises
+      the sync path).
+    - **Testing gotcha**: `python3 -m http.server` sends no cache headers, so the
+      browser serves **stale bundles** after a rebuild — verify on a fresh port to
+      bust the cache.
+  **Refinements (2026-06-27):**
+    - **Interval gate removed.** The "0.1 s second hand can't round-trip" finding was
+      an artifact of a *stale cached bundle* (the throttle wasn't firing either —
+      impossible with fresh code). Fresh + ungated: a 0.1 s value misses ~2×/3 s
+      (rare, self-healing), confirming a postMessage round-trip easily fits 100 ms.
+      So `isWorkerEligible = v.onBeat` (offload all, per decision #3). A cheap-value
+      gate remains a possible *traffic* optimization, not a correctness need.
+    - **Observability:** startup logs `[eval-worker] ENABLED/DISABLED (reason)`;
+      `?noworker` force-disables for same-machine A/B.
+    - **file:// is worker-OFF** (`new Worker(url)` blocked; Blob-URL fallback would
+      need the 1.2 MB source inlined → bundle bloat for a dev-only path, deferred).
+      Test on http.
+
+  **(iv) measurement — IN PROGRESS / blocked on a representative device.**
+  A/B on the headless preview (Mauna Kea, scrub 1 day/tick): worker ON 16.1 fps /
+  CPU 1.5 ms / GPU 52 ms; worker OFF 16.2 fps / CPU 1.3 ms / GPU 51 ms — **no fps
+  difference**. Cause: the preview is **GPU/render-bound** (that 51 ms "GPU flush" is
+  almost certainly *software* rasterization in the headless browser), so CPU
+  astronomy isn't the bottleneck there and offloading it can't move fps. The
+  worker's win only appears when **CPU-bound** — the prerequisite's "16 fps, >½ CPU"
+  regime. **The headless preview is not representative; measure on the real slow
+  target** (http, scrub a heavy face, `?noworker` A/B, watch the CPU number — not
+  just fps). Also note `[scrub-perf]`'s "Pure Animation Frame Stats" cover only the
+  *interpolation* frames (no astronomy ever), so they understate the worker by
+  construction — a per-tick-frame CPU measure would show it directly.
+
+  **⚠️ DECISIVE FINDING (2026-06-27): astronomy is NOT the per-frame bottleneck —
+  rendering is.** Added a per-frame CPU split to `[scrub-perf]` (tick = updater
+  update+astro+animate vs render = `renderFrame` draw-command issuance). Mauna Kea,
+  1 day/tick scrub, headless preview:
+    - worker ON:  tick **0.23 ms**, render **1.63 ms**
+    - worker OFF: tick **0.23 ms**, render **1.65 ms**
+  The tick time (which *includes* astronomy) is **identical** with the worker on or
+  off and is **tiny** — because the `AstroCachePool` already collapses the work (all
+  ~48 day/night wedges share one cached rise/set compute per display instant). So
+  **the worker offloads an already-cheap cost** (~0.23 ms), which is why on/off shows
+  no difference. The JS CPU per frame is dominated by **render (≈1.6 ms)**, and the
+  ~58 ms wall frame by GPU rasterization (~50 ms — software in the headless preview,
+  not representative).
+
+  **Implication:** the premise that astronomy CPU is the scrub bottleneck does not
+  hold here — the astro cache already solved it. Before more worker work, **measure
+  the split on the real slow device** (the new `[scrub-perf]` "Frame CPU split"
+  line): if `tick` is small there too, the worker cannot help and the lever is
+  **rendering** (draw-call issuance + canvas/GPU). The worker pipeline is complete,
+  correct, and harmless (gated + sync-fallback), but its value is unproven and looks
+  unlikely on cache-warm faces.
+
+  **CONFIRMED on the real target — all.html (2026-06-27).** all.html (all faces in a
+  grid, the worst case for CPU+render+scrub-fps) is where the tick cost is large
+  (owner's machine: tick **102 ms**; preview ~17 faces: tick **22.7 ms**). A/B there:
+    - worker ON:  tick 22.66 ms / render 12.29 ms
+    - worker OFF: tick 23.52 ms / render 13.65 ms
+  The worker saves **~1 ms of ~23 ms (≈noise)**. So even on the heavy page, astronomy
+  is ≈1 ms; the remaining ~22 ms (102 ms on the slow machine) is **per-value
+  per-frame machinery** — interpolation + the on-beat sit/sweep state machine +
+  boundary walking (`computeNextBoundary`) — across the *thousands* of ObsValues on
+  17–25 faces, all ticked every frame. **The worker is the wrong lever for the
+  thing that's actually slow.**
+
+  **PIVOT (recommended): optimize the per-value tick pass, not astronomy.** Concrete
+  levers, in rough priority:
+    1. **Double interpolation** — `onBeatStep` interpolates AND the subsequent
+       `animateObsValues` interpolates the same value again (the integration left
+       both). Eliminate the second pass for on-beat values (keep it for the
+       fixed-duration/drag path).
+    2. **Skip sitting/idle values** — a value that is `!animating` (sitting between
+       beats, or frozen) needs no interpolation; today every value is touched every
+       frame. Maintain an "active" subset.
+    3. **Only tick visible/on-screen faces** (all.html renders a grid; off-screen or
+       tiny thumbnails could tick less often).
+    4. **Reduce boundary-walking** — `ensureRequested`/`computeNextBoundary` per
+       arrival (×3 in worker mode) adds main-thread work; the worker path made this
+       *worse*, not better.
+  **Decision needed:** keep the worker (harmless, gated, but ~0 benefit + added
+  complexity) or shelve/revert it, and pivot to the tick pass.
 - B-3. Replace Phase A's synchronous on-arrival eval with a **buffer read** from
   `v.ahead`; on a miss, **wait one beat and log** (fail-fast, decision #2). On
   `reset()`/`finish()`, bump generation + one sync eval (decision #4).

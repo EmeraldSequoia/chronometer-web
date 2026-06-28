@@ -18,6 +18,7 @@ import {
     Environment,
 } from '../expr/evaluator.js';
 import type { Watch } from './types.js';
+import type { ASTNode } from '../expr/parser.js';
 import {
     EC_UPDATE_NEXT_SUNRISE,
     EC_UPDATE_NEXT_SUNSET,
@@ -33,7 +34,6 @@ import {
 } from '../shared/animation.js';
 import { releaseCachePool } from '../astronomy/astro-cache.js';
 import { ECPlanetNumber } from '../astronomy/astro-constants.js';
-import { getState } from '../shared/app-state.js';
 
 // Import the shared astro environment function registration
 import {
@@ -139,6 +139,35 @@ export const GAIA_SUBDIAL_DEFAULTS: Record<number, TerraSlot> = {
 // ============================================================================
 
 /**
+ * Persisted UI overrides applied to the env *after* the XML init blocks, so they
+ * win over the XML defaults. These come from app-state (storage/URL) on the main
+ * thread, or from the mirrored state on a worker — **never read here**, so this
+ * builder stays pure and worker-safe (no `getState`/DOM access). Each field is the
+ * already-resolved value (e.g. `body` is a planet number, not the URL string);
+ * `undefined` means "leave the XML default in place".
+ */
+/**
+ * Minimal slice of a {@link Watch} that {@link createWatchEnvironment} actually
+ * needs — just the init-block expressions. A full `Watch` satisfies this, and the
+ * eval-ahead worker can pass only `{ initExprs }` (the parsed init ASTs) instead of
+ * cloning the entire parts tree / image data across the thread boundary.
+ */
+export interface WatchEnvSource {
+    initExprs: ASTNode[];
+}
+
+export interface WatchEnvOverrides {
+    /** Venezia selected body (resolved `ECPlanetNumber`). */
+    body?: number;
+    /** Vienna noon-on-top toggle (true ⇒ noonOnTop=1, dialFlip=π). */
+    noonOnTop?: boolean;
+    /** Kyoto constant/variable hand-rate mode (0 or 1). */
+    kyMode?: number;
+    /** Kyoto fixed-hand mode (0 or 1). */
+    kyHandMode?: number;
+}
+
+/**
  * Build the expression environment for a watch:
  *  1. Math builtins + color constants (via createDefaultEnvironment)
  *  2. All shared astronomy/calendar/time functions (via registerAstroFunctions)
@@ -154,13 +183,14 @@ export const GAIA_SUBDIAL_DEFAULTS: Record<number, TerraSlot> = {
  * @param globalLocationSlot - Terra ring top-slot override
  */
 export function createWatchEnvironment(
-    watch: Watch,
+    watch: WatchEnvSource,
     observerLatDeg: number = DEFAULT_LAT_DEG,
     observerLonDeg: number = DEFAULT_LON_DEG,
     getNow: () => Date = () => new Date(),
     olsonTimezone?: string,
     slotOverrides?: Record<number, TerraSlot>,
     globalLocationSlot?: number,
+    overrides?: WatchEnvOverrides,
 ): Environment {
     const OBSERVER_LAT = observerLatDeg * Math.PI / 180;
     const OBSERVER_LON = observerLonDeg * Math.PI / 180;
@@ -223,55 +253,43 @@ export function createWatchEnvironment(
     /** Kyoto hand mode: 0 = moving hand, 1 = fixed hand at top */
     env.kyHandMode = 0;
 
-    // Persisted overrides for body/vnoon/kmode/kyhand (storage in storage mode,
-    // URL otherwise — sourced via app-state.getState()). Must run AFTER init
-    // blocks so they override the XML's default assignments. Guarded on `window`
-    // so headless test environments skip it.
-    if (typeof window !== 'undefined') {
-        const persisted = getState();
-        const bodyParam = persisted.body;
-        if (bodyParam) {
-            const bodyMap: Record<string, number> = {
-                sun: ECPlanetNumber.Sun, moon: ECPlanetNumber.Moon,
-                mercury: ECPlanetNumber.Mercury, venus: ECPlanetNumber.Venus,
-                earth: ECPlanetNumber.Earth, mars: ECPlanetNumber.Mars,
-                jupiter: ECPlanetNumber.Jupiter, saturn: ECPlanetNumber.Saturn,
-                uranus: ECPlanetNumber.Uranus, neptune: ECPlanetNumber.Neptune,
-            };
-            const planet = bodyMap[bodyParam.toLowerCase()];
-            if (planet !== undefined) {
-                env.variables.set('body', planet);
-                // Recompute bodySlot from body (matching the XML init expression)
-                const body = planet;
-                const bodySlot =
-                    body === ECPlanetNumber.Moon ? 0 :
-                    body === ECPlanetNumber.Mercury ? 1 :
-                    body === ECPlanetNumber.Venus ? 2 :
-                    body === ECPlanetNumber.Mars ? 3 :
-                    body === ECPlanetNumber.Jupiter ? 4 :
-                    body === ECPlanetNumber.Saturn ? 5 :
-                    body === ECPlanetNumber.Uranus ? 6 :
-                    body === ECPlanetNumber.Neptune ? 7 :
-                    body === ECPlanetNumber.Sun ? 8 : 0.5;
-                env.variables.set('bodySlot', bodySlot);
-            }
+    // Persisted UI overrides (body / noonOnTop / kyMode / kyHandMode), applied
+    // AFTER the init blocks so they win over the XML defaults. Passed in explicitly
+    // (read from app-state on the main thread; mirrored on a worker) — this builder
+    // does NOT read getState/DOM, keeping it pure and worker-safe.
+    if (overrides) {
+        if (overrides.body !== undefined) {
+            const body = overrides.body;
+            env.variables.set('body', body);
+            // Recompute bodySlot from body (matching the XML init expression)
+            const bodySlot =
+                body === ECPlanetNumber.Moon ? 0 :
+                body === ECPlanetNumber.Mercury ? 1 :
+                body === ECPlanetNumber.Venus ? 2 :
+                body === ECPlanetNumber.Mars ? 3 :
+                body === ECPlanetNumber.Jupiter ? 4 :
+                body === ECPlanetNumber.Saturn ? 5 :
+                body === ECPlanetNumber.Uranus ? 6 :
+                body === ECPlanetNumber.Neptune ? 7 :
+                body === ECPlanetNumber.Sun ? 8 : 0.5;
+            env.variables.set('bodySlot', bodySlot);
         }
 
         // Vienna noon-on-top toggle. Only the non-default (noon) case is applied;
-        // false leaves the XML init's default (midnight) in place.
-        if (persisted.vnoon) {
+        // false/undefined leaves the XML init's default (midnight) in place.
+        if (overrides.noonOnTop) {
             env.variables.set('noonOnTop', 1);
             env.variables.set('dialFlip', Math.PI);
         }
 
-        // Kyoto constant/variable hand rate toggle ('kyMode').
-        if (persisted.kmode === '1' || persisted.kmode === '0') {
-            env.variables.set('kyMode', parseInt(persisted.kmode, 10));
+        // Kyoto constant/variable hand rate toggle.
+        if (overrides.kyMode !== undefined) {
+            env.variables.set('kyMode', overrides.kyMode);
         }
 
-        // Kyoto fixed-hand toggle ('kyHandMode').
-        if (persisted.kyhand === '1') {
-            env.kyHandMode = 1;
+        // Kyoto fixed-hand toggle.
+        if (overrides.kyHandMode !== undefined) {
+            env.kyHandMode = overrides.kyHandMode;
         }
     }
 

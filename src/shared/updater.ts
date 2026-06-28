@@ -34,6 +34,17 @@ const K_ANGLE_ANIM_SPEED = 2.0;
 // "on track" and skips the catch-up phase.
 const NATURAL_ERROR_THRESHOLD = 0.002;
 
+// ── Worker eval-ahead (Phase B) ─────────────────────────────────────────────
+// How many upcoming boundaries to keep precomputed in each value's `ahead` buffer.
+// N=2 gives a full interval of compute slack (see the planning doc).
+const AHEAD_DEPTH = 2;
+// On a buffer miss (target not ready), how long to sit before re-checking. The
+// owner's policy is "fail fast: wait a beat and log"; a short retry self-heals the
+// (expected) cold-start miss without a visible stall.
+const WORKER_MISS_RETRY_MS = 33;
+// Throttle for miss warnings so a cold start / transient doesn't flood the console.
+let lastWorkerMissWarnMs = -Infinity;
+
 // ============================================================================
 // Time source / eval-ahead helper
 // ============================================================================
@@ -460,6 +471,78 @@ function shortestPathDistance(current: number, target: number, period: number): 
 }
 
 /**
+ * Walk the value's next `count` update boundaries forward in display time (the same
+ * incremental walk `onArrivalOnBeat` uses for the immediate boundary). Used to tell
+ * the worker which boundaries to precompute. Stops early at a non-finite boundary
+ * (e.g. an `envChangeOnly` sentinel).
+ */
+function upcomingBoundaries(
+    v: ObsValue, getNow: () => Date, dir: 1 | -1, env: Environment, count: number,
+): number[] {
+    const out: number[] = [];
+    let cursorMs = getNow().getTime();
+    const cursorGetNow = (): Date => new Date(cursorMs);
+    for (let i = 0; i < count; i++) {
+        const b = computeNextBoundary(v.updateInterval * 1000, cursorGetNow, dir, env);
+        if (!isFinite(b)) break;
+        out.push(b);
+        cursorMs = b + dir;  // step just past the boundary in the direction of travel
+    }
+    return out;
+}
+
+/**
+ * Ensure the worker is computing the value's upcoming boundaries: request any in
+ * the next `AHEAD_DEPTH+1` that aren't already buffered or in flight.
+ */
+function ensureRequested(v: ObsValue, getNow: () => Date, dir: 1 | -1, env: Environment): void {
+    if (!v.requestAhead) return;
+    const wanted = upcomingBoundaries(v, getNow, dir, env, AHEAD_DEPTH + 1);
+    const need: number[] = [];
+    for (const b of wanted) {
+        if (v.ahead.some(e => e.boundaryDisplayMs === b)) continue;
+        if (v.aheadPending.includes(b)) continue;
+        v.aheadPending.push(b);
+        need.push(b);
+    }
+    if (need.length > 0) v.requestAhead(need);
+}
+
+/**
+ * Consume the worker-precomputed target for `boundaryMs`. Returns `undefined` on a
+ * miss (not yet ready). Direction-agnostic: matches by boundary value, not order.
+ */
+function consumeAhead(v: ObsValue, boundaryMs: number): number | undefined {
+    const i = v.ahead.findIndex(e => e.boundaryDisplayMs === boundaryMs);
+    if (i < 0) return undefined;
+    const target = v.ahead[i].target;
+    v.ahead.splice(i, 1);
+    return target;
+}
+
+function noteWorkerMiss(v: ObsValue, boundaryMs: number, perfNow: number): void {
+    if (perfNow - lastWorkerMissWarnMs > 1000) {
+        lastWorkerMissWarnMs = perfNow;
+        console.warn(`[eval-worker] target not ready for ${v.name} @${boundaryMs} — sitting a beat`);
+    }
+}
+
+/**
+ * File a worker result into a value's `ahead` buffer (called by the engine when a
+ * result message arrives, after generation filtering). Removes the boundary from
+ * the pending set and caps the buffer.
+ */
+export function fileObsAheadResult(v: ObsValue, boundaryDisplayMs: number, target: number): void {
+    const pi = v.aheadPending.indexOf(boundaryDisplayMs);
+    if (pi >= 0) v.aheadPending.splice(pi, 1);
+    if (!v.ahead.some(e => e.boundaryDisplayMs === boundaryDisplayMs)) {
+        v.ahead.push({ boundaryDisplayMs, target });
+        // Safety cap (the buffer is bounded by what we request, ~AHEAD_DEPTH+1).
+        while (v.ahead.length > AHEAD_DEPTH + 2) v.ahead.shift();
+    }
+}
+
+/**
  * On-beat **arrival**: the value has reached its current boundary and is now
  * deciding where (and when) to go next. Compute the next update boundary in
  * display time, evaluate the target *there* (eval-ahead), and schedule the snap to
@@ -480,7 +563,7 @@ function onArrivalOnBeat(
     tickIntervalMs: number | null,
     displayDeltaPerTickSec: number,
     withDisplayTime?: WithDisplayTime,
-): void {
+): boolean {
     const nextDisplayMs = computeNextBoundary(
         v.updateInterval * 1000, getNow, timeDirection, env);
 
@@ -502,10 +585,27 @@ function onArrivalOnBeat(
         boundaryRealMs = displayTimeToPerfNow(nextDisplayMs, getNow);
     }
 
-    // Evaluate the target AT the future boundary's display time (eval-ahead).
-    const target = withDisplayTime
-        ? withDisplayTime(nextDisplayMs, () => evalAttr(v.expr, env))
-        : evalAttr(v.expr, env);
+    // Obtain the target AT the future boundary's display time (eval-ahead).
+    let target: number;
+    if (v.requestAhead) {
+        // Worker mode: keep the buffer full, then consume this boundary's target.
+        ensureRequested(v, getNow, timeDirection, env);
+        const hit = consumeAhead(v, nextDisplayMs);
+        if (hit === undefined) {
+            // Miss — fail fast: sit a beat, re-check shortly, log (throttled). The
+            // boundary is already requested (ensureRequested) so it self-heals.
+            noteWorkerMiss(v, nextDisplayMs, perfNow);
+            v.nextUpdateDisplayTime = nextDisplayMs;
+            v.nextUpdateTime = perfNow + WORKER_MISS_RETRY_MS;
+            return false;  // not scheduled — caller sits until the retry
+        }
+        target = hit;
+    } else {
+        // Synchronous (Phase-A / no-worker) path.
+        target = withDisplayTime
+            ? withDisplayTime(nextDisplayMs, () => evalAttr(v.expr, env))
+            : evalAttr(v.expr, env);
+    }
 
     // Sweep duration d = distance / speed (0 when NaN/instant → snap on boundary).
     const dist = shortestPathDistance(v.anim.currentValue, target, v.period);
@@ -520,6 +620,7 @@ function onArrivalOnBeat(
     v.pendingTarget = { target, boundaryRealMs, startTime };
     v.nextUpdateDisplayTime = nextDisplayMs;
     v.nextUpdateTime = startTime;
+    return true;
 }
 
 /**
@@ -604,8 +705,9 @@ function onBeatStep(
     let started = false;
     for (let guard = 0; guard < 4 && !v.anim.animating; guard++) {
         if (v.pendingTarget === null) {
-            onArrivalOnBeat(v, env, perfNow, getNow, dir,
+            const scheduled = onArrivalOnBeat(v, env, perfNow, getNow, dir,
                 tickIntervalMs, displayDeltaPerTickSec, withDisplayTime);
+            if (!scheduled) break;  // worker miss — sit until the retry wakeup
         } else if (perfNow >= v.pendingTarget.startTime) {
             startOnBeatSweep(v, perfNow);
             started = true;
@@ -732,8 +834,11 @@ export function resetObsValueSchedules(values: ObsValue[]): void {
     for (const v of values) {
         v.nextUpdateDisplayTime = 0;
         v.nextUpdateTime = 0;
-        // Drop any on-beat plan so the next frame re-evaluates from the new state.
+        // Drop any on-beat plan + worker buffer so the next frame re-derives from
+        // the new state (stale worker results are dropped by generation filtering).
         v.pendingTarget = null;
+        v.ahead.length = 0;
+        v.aheadPending.length = 0;
     }
 }
 
@@ -847,6 +952,8 @@ export class Updater<K extends string = string> {
         for (const v of this.values) {
             v.pendingSweep = null;
             v.pendingTarget = null;
+            v.ahead.length = 0;
+            v.aheadPending.length = 0;
             let target = (v.onBeat && env) ? evalAttr(v.expr, env) : v.anim.targetValue;
             if (isFinite(v.period)) {
                 target = ((target % v.period) + v.period) % v.period;
