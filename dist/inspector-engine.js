@@ -13962,6 +13962,21 @@
   // src/shared/updater.ts
   var K_ANGLE_ANIM_SPEED = 2;
   var NATURAL_ERROR_THRESHOLD = 2e-3;
+  var tickProfile = {
+    updateMs: 0,
+    // updateObsValues — the whole update pass
+    animateMs: 0,
+    // animateObsValues — the second interpolation pass
+    evalMs: 0,
+    // evalAttr (expression evaluation) at on-beat arrivals
+    boundaryMs: 0,
+    // computeNextBoundary (scheduling) at on-beat arrivals
+    interpMs: 0,
+    // interpolateValue inside onBeatStep
+    evalCalls: 0
+    // # of evalAttr calls (→ per-eval µs)
+  };
+  var profileEnabled = false;
   function makeOverridableGetNow(base) {
     let overrideMs = null;
     const getNow2 = () => overrideMs != null ? new Date(overrideMs) : base();
@@ -14227,12 +14242,14 @@
     return Math.abs(delta);
   }
   function onArrivalOnBeat(v, env2, perfNow, getNow2, timeDirection, tickIntervalMs, displayDeltaPerTickSec, withDisplayTime2) {
+    const _b0 = profileEnabled ? performance.now() : 0;
     const nextDisplayMs = computeNextBoundary(
       v.updateInterval * 1e3,
       getNow2,
       timeDirection,
       env2
     );
+    if (profileEnabled) tickProfile.boundaryMs += performance.now() - _b0;
     let boundaryRealMs;
     if (tickIntervalMs !== null && tickIntervalMs > 0) {
       const displayNowMs = getNow2().getTime();
@@ -14243,7 +14260,12 @@
     } else {
       boundaryRealMs = displayTimeToPerfNow(nextDisplayMs, getNow2);
     }
+    const _e0 = profileEnabled ? performance.now() : 0;
     const target = withDisplayTime2 ? withDisplayTime2(nextDisplayMs, () => evalAttr(v.expr, env2)) : evalAttr(v.expr, env2);
+    if (profileEnabled) {
+      tickProfile.evalMs += performance.now() - _e0;
+      tickProfile.evalCalls++;
+    }
     const dist = shortestPathDistance(v.anim.currentValue, target, v.period);
     const d = v.animSpeed > 0 && isFinite(dist) ? dist / v.animSpeed * 1e3 : 0;
     let startTime = isFinite(boundaryRealMs) ? boundaryRealMs - d : Infinity;
@@ -14282,7 +14304,9 @@
       return;
     }
     const dir = timeDirection === -1 ? -1 : 1;
+    const _i0 = profileEnabled ? performance.now() : 0;
     v.currentValue = interpolateValue(v.anim, perfNow);
+    if (profileEnabled) tickProfile.interpMs += performance.now() - _i0;
     let started = false;
     for (let guard = 0; guard < 4 && !v.anim.animating; guard++) {
       if (v.pendingTarget === null) {
@@ -14437,6 +14461,21 @@
     }
     /** Per-frame: re-evaluate expired values + animate the whole collection. */
     tick(env2, perfNow, getNow2, withDisplayTime2, ctx) {
+      if (!profileEnabled) {
+        updateObsValues(
+          this.values,
+          env2,
+          perfNow,
+          getNow2,
+          ctx.tickIntervalMs,
+          ctx.displayDeltaSec,
+          ctx.direction,
+          withDisplayTime2
+        );
+        animateObsValues(this.values, perfNow);
+        return;
+      }
+      const _u0 = performance.now();
       updateObsValues(
         this.values,
         env2,
@@ -14447,7 +14486,10 @@
         ctx.direction,
         withDisplayTime2
       );
+      const _u1 = performance.now();
       animateObsValues(this.values, perfNow);
+      tickProfile.updateMs += _u1 - _u0;
+      tickProfile.animateMs += performance.now() - _u1;
     }
     /** True while any value is mid-animation (for idle-scheduler decisions). */
     anyAnimating() {

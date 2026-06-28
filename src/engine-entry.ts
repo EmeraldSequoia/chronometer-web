@@ -32,7 +32,7 @@ import { validSlotsForTz, formatSlotOffset, getStandardOffsetMinutes, olsonIdToC
 import { buildStaticBlockCaches, renderFrame, buildHandShadowCaches, BEZEL_THICKNESS_XML } from './watch/renderer.js';
 import type { LoadedImage } from './watch/image-loader.js';
 import { SCHEDULER_LOOKAHEAD_MS } from './shared/animation.js';
-import { Updater, makeOverridableGetNow, timingContextForFrame, type WithDisplayTime } from './shared/updater.js';
+import { Updater, makeOverridableGetNow, timingContextForFrame, tickProfile, resetTickProfile, setTickProfiling, type WithDisplayTime } from './shared/updater.js';
 import { buildHandValues } from './watch/hand-values.js';
 import type { Watch } from './watch/types.js';
 import type { Environment } from './expr/evaluator.js';
@@ -63,6 +63,12 @@ import { getBezelBackgroundColor, updateDynamicCompositeIcon } from './shared/co
 // Select the state backend before any getState()/setState() call. Phase 1-2
 // keeps the URL backend active (behavior-preserving); Phase 3 enables storage.
 initAppState({ app: 'chronometer' });
+
+// Opt-in per-value tick attribution (taxes the hot path; off by default). Enable
+// with ?tickprofile to break the scrub tick into eval/boundary/interp on scrub end.
+const _tickProfile = typeof location !== 'undefined'
+    && new URLSearchParams(location.search).has('tickprofile');
+setTickProfiling(_tickProfile);
 
 /** Convert a face name like "Mauna Kea" or "Haleakalā" to a filename like "mauna-kea" */
 function faceNameToSlug(name: string): string {
@@ -923,6 +929,13 @@ async function main() {
     let _pureAnimDeltaMax = -Infinity;
     let _lastAnimFrameTime: number | null = null;
 
+    // Per-frame CPU breakdown across ALL scrub frames (tick = updater update+animate,
+    // incl. astronomy; render = renderFrame draw-command issuance). Answers "where
+    // does the frame CPU go — astronomy/expression eval or rendering?".
+    let _scrubTickMsTotal = 0;
+    let _scrubRenderMsTotal = 0;
+    let _scrubBodyFrameCount = 0;
+
     function frame() {
         rafId = null;
         const now = performance.now();
@@ -956,6 +969,10 @@ async function main() {
                 _pureAnimDeltaMin = Infinity;
                 _pureAnimDeltaMax = -Infinity;
                 _lastAnimFrameTime = null;
+                _scrubTickMsTotal = 0;
+                _scrubRenderMsTotal = 0;
+                _scrubBodyFrameCount = 0;
+                resetTickProfile();
                 console.log('[scrub-perf] Scrubbing session started.');
             }
 
@@ -1044,7 +1061,27 @@ async function main() {
                 `  - Pure Animation Frame Stats (N = ${_pureAnimCount}):\n` +
                 `    - CPU execution: avg ${avgCpu}ms (min: ${minCpu}ms, max: ${maxCpu}ms)\n` +
                 `    - GPU flush/render: avg ${avgGpu}ms (min: ${minGpu}ms, max: ${maxGpu}ms)\n` +
-                `    - Inter-frame interval: avg ${avgDelta}ms (min: ${minDelta}ms, max: ${maxDelta}ms) -> equivalent to ${avgAnimFps} FPS`
+                `    - Inter-frame interval: avg ${avgDelta}ms (min: ${minDelta}ms, max: ${maxDelta}ms) -> equivalent to ${avgAnimFps} FPS\n` +
+                `  - Frame CPU split (all ${_scrubBodyFrameCount} scrub frames): ` +
+                `tick(update+astro+animate) avg ${(_scrubBodyFrameCount ? _scrubTickMsTotal / _scrubBodyFrameCount : 0).toFixed(2)}ms, ` +
+                `render(draw issuance) avg ${(_scrubBodyFrameCount ? _scrubRenderMsTotal / _scrubBodyFrameCount : 0).toFixed(2)}ms\n` +
+                (() => {
+                    const built = faces.filter(f => f.enabled && f.cachesBuilt);
+                    const obs = built.reduce((n, f) => n + f.updater.all.length, 0);
+                    return `  - Ticked: ${obs} obsValues across ${built.length} faces ` +
+                        `(${built.length ? (obs / built.length).toFixed(0) : 0}/face) · canvas ${built[0]?.sizePx ?? 0}px`;
+                })() +
+                (_tickProfile ? '\n' + (() => {
+                    const n = _scrubBodyFrameCount || 1;
+                    const p = tickProfile;
+                    const rest = p.updateMs - p.evalMs - p.boundaryMs - p.interpMs;
+                    const perEvalUs = p.evalCalls ? (p.evalMs * 1000 / p.evalCalls) : 0;
+                    return `  - Tick attribution (avg/frame): update ${(p.updateMs/n).toFixed(2)}ms ` +
+                        `[eval ${(p.evalMs/n).toFixed(2)} · boundary ${(p.boundaryMs/n).toFixed(2)} · ` +
+                        `interp ${(p.interpMs/n).toFixed(2)} · rest ${(rest/n).toFixed(2)}], ` +
+                        `animate(2nd interp) ${(p.animateMs/n).toFixed(2)}ms · ` +
+                        `${perEvalUs.toFixed(1)}µs/eval (${p.evalCalls} evals)`;
+                })() : '')
             );
         }
 
@@ -1070,6 +1107,7 @@ async function main() {
         const deltaSec = rate !== null ? displaySecondsPerTick(rate.unit) : 0;
 
         let renderMs = 0;
+        let tickCpuMs = 0;
         let animatingFaceCount = 0;
 
         const isPureAnimFrame = isScrubbing && !willTick;
@@ -1083,7 +1121,9 @@ async function main() {
             if (!face.enabled || !face.cachesBuilt) continue;
             // Drive all ObsValues for this face — hands, wheels, dials, wedges,
             // masterOffset, and the terminator leaves (all on the per-face Updater).
+            const tickStart = performance.now();
             face.updater.tick(face.env, now, face.getNow, face.withDisplayTime, timingCtx);
+            tickCpuMs += performance.now() - tickStart;
 
             const renderStart = performance.now();
             renderFrame(face.ctx, face.watch, face.env, face.scale, face.images, face.terminatorLeaves, face.analemmaState);
@@ -1095,6 +1135,13 @@ async function main() {
                 stillAnimating = true;
                 animatingFaceCount++;
             }
+        }
+
+        // Accumulate the tick/render CPU split across all scrub frames.
+        if (isScrubbing) {
+            _scrubTickMsTotal += tickCpuMs;
+            _scrubRenderMsTotal += renderMs;
+            _scrubBodyFrameCount++;
         }
 
         if (isPureAnimFrame) {

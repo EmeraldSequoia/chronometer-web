@@ -18996,6 +18996,32 @@
   // src/shared/updater.ts
   var K_ANGLE_ANIM_SPEED = 2;
   var NATURAL_ERROR_THRESHOLD = 2e-3;
+  var tickProfile = {
+    updateMs: 0,
+    // updateObsValues — the whole update pass
+    animateMs: 0,
+    // animateObsValues — the second interpolation pass
+    evalMs: 0,
+    // evalAttr (expression evaluation) at on-beat arrivals
+    boundaryMs: 0,
+    // computeNextBoundary (scheduling) at on-beat arrivals
+    interpMs: 0,
+    // interpolateValue inside onBeatStep
+    evalCalls: 0
+    // # of evalAttr calls (→ per-eval µs)
+  };
+  function resetTickProfile() {
+    tickProfile.updateMs = 0;
+    tickProfile.animateMs = 0;
+    tickProfile.evalMs = 0;
+    tickProfile.boundaryMs = 0;
+    tickProfile.interpMs = 0;
+    tickProfile.evalCalls = 0;
+  }
+  var profileEnabled = false;
+  function setTickProfiling(on) {
+    profileEnabled = on;
+  }
   function makeOverridableGetNow(base) {
     let overrideMs = null;
     const getNow = () => overrideMs != null ? new Date(overrideMs) : base();
@@ -19261,12 +19287,14 @@
     return Math.abs(delta);
   }
   function onArrivalOnBeat(v, env, perfNow, getNow, timeDirection, tickIntervalMs, displayDeltaPerTickSec, withDisplayTime) {
+    const _b0 = profileEnabled ? performance.now() : 0;
     const nextDisplayMs = computeNextBoundary(
       v.updateInterval * 1e3,
       getNow,
       timeDirection,
       env
     );
+    if (profileEnabled) tickProfile.boundaryMs += performance.now() - _b0;
     let boundaryRealMs;
     if (tickIntervalMs !== null && tickIntervalMs > 0) {
       const displayNowMs = getNow().getTime();
@@ -19277,7 +19305,12 @@
     } else {
       boundaryRealMs = displayTimeToPerfNow(nextDisplayMs, getNow);
     }
+    const _e0 = profileEnabled ? performance.now() : 0;
     const target = withDisplayTime ? withDisplayTime(nextDisplayMs, () => evalAttr(v.expr, env)) : evalAttr(v.expr, env);
+    if (profileEnabled) {
+      tickProfile.evalMs += performance.now() - _e0;
+      tickProfile.evalCalls++;
+    }
     const dist = shortestPathDistance(v.anim.currentValue, target, v.period);
     const d = v.animSpeed > 0 && isFinite(dist) ? dist / v.animSpeed * 1e3 : 0;
     let startTime = isFinite(boundaryRealMs) ? boundaryRealMs - d : Infinity;
@@ -19316,7 +19349,9 @@
       return;
     }
     const dir = timeDirection === -1 ? -1 : 1;
+    const _i0 = profileEnabled ? performance.now() : 0;
     v.currentValue = interpolateValue(v.anim, perfNow);
+    if (profileEnabled) tickProfile.interpMs += performance.now() - _i0;
     let started = false;
     for (let guard = 0; guard < 4 && !v.anim.animating; guard++) {
       if (v.pendingTarget === null) {
@@ -19471,6 +19506,21 @@
     }
     /** Per-frame: re-evaluate expired values + animate the whole collection. */
     tick(env, perfNow, getNow, withDisplayTime, ctx) {
+      if (!profileEnabled) {
+        updateObsValues(
+          this.values,
+          env,
+          perfNow,
+          getNow,
+          ctx.tickIntervalMs,
+          ctx.displayDeltaSec,
+          ctx.direction,
+          withDisplayTime
+        );
+        animateObsValues(this.values, perfNow);
+        return;
+      }
+      const _u0 = performance.now();
       updateObsValues(
         this.values,
         env,
@@ -19481,7 +19531,10 @@
         ctx.direction,
         withDisplayTime
       );
+      const _u1 = performance.now();
       animateObsValues(this.values, perfNow);
+      tickProfile.updateMs += _u1 - _u0;
+      tickProfile.animateMs += performance.now() - _u1;
     }
     /** True while any value is mid-animation (for idle-scheduler decisions). */
     anyAnimating() {
@@ -21576,6 +21629,8 @@
 
   // src/engine-entry.ts
   initAppState({ app: "chronometer" });
+  var _tickProfile = typeof location !== "undefined" && new URLSearchParams(location.search).has("tickprofile");
+  setTickProfiling(_tickProfile);
   function faceNameToSlug(name) {
     return name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, "-");
   }
@@ -22172,6 +22227,9 @@
     let _pureAnimDeltaMin = Infinity;
     let _pureAnimDeltaMax = -Infinity;
     let _lastAnimFrameTime = null;
+    let _scrubTickMsTotal = 0;
+    let _scrubRenderMsTotal = 0;
+    let _scrubBodyFrameCount = 0;
     function frame() {
       rafId = null;
       const now = performance.now();
@@ -22202,6 +22260,10 @@
           _pureAnimDeltaMin = Infinity;
           _pureAnimDeltaMax = -Infinity;
           _lastAnimFrameTime = null;
+          _scrubTickMsTotal = 0;
+          _scrubRenderMsTotal = 0;
+          _scrubBodyFrameCount = 0;
+          resetTickProfile();
           console.log("[scrub-perf] Scrubbing session started.");
         }
         const elapsed = now - timeController.lastTickRealMs;
@@ -22266,7 +22328,19 @@
   - Pure Animation Frame Stats (N = ${_pureAnimCount}):
     - CPU execution: avg ${avgCpu}ms (min: ${minCpu}ms, max: ${maxCpu}ms)
     - GPU flush/render: avg ${avgGpu}ms (min: ${minGpu}ms, max: ${maxGpu}ms)
-    - Inter-frame interval: avg ${avgDelta}ms (min: ${minDelta}ms, max: ${maxDelta}ms) -> equivalent to ${avgAnimFps} FPS`
+    - Inter-frame interval: avg ${avgDelta}ms (min: ${minDelta}ms, max: ${maxDelta}ms) -> equivalent to ${avgAnimFps} FPS
+  - Frame CPU split (all ${_scrubBodyFrameCount} scrub frames): tick(update+astro+animate) avg ${(_scrubBodyFrameCount ? _scrubTickMsTotal / _scrubBodyFrameCount : 0).toFixed(2)}ms, render(draw issuance) avg ${(_scrubBodyFrameCount ? _scrubRenderMsTotal / _scrubBodyFrameCount : 0).toFixed(2)}ms
+` + (() => {
+            const built = faces.filter((f) => f.enabled && f.cachesBuilt);
+            const obs = built.reduce((n, f) => n + f.updater.all.length, 0);
+            return `  - Ticked: ${obs} obsValues across ${built.length} faces (${built.length ? (obs / built.length).toFixed(0) : 0}/face) \xB7 canvas ${built[0]?.sizePx ?? 0}px`;
+          })() + (_tickProfile ? "\n" + (() => {
+            const n = _scrubBodyFrameCount || 1;
+            const p = tickProfile;
+            const rest = p.updateMs - p.evalMs - p.boundaryMs - p.interpMs;
+            const perEvalUs = p.evalCalls ? p.evalMs * 1e3 / p.evalCalls : 0;
+            return `  - Tick attribution (avg/frame): update ${(p.updateMs / n).toFixed(2)}ms [eval ${(p.evalMs / n).toFixed(2)} \xB7 boundary ${(p.boundaryMs / n).toFixed(2)} \xB7 interp ${(p.interpMs / n).toFixed(2)} \xB7 rest ${(rest / n).toFixed(2)}], animate(2nd interp) ${(p.animateMs / n).toFixed(2)}ms \xB7 ${perEvalUs.toFixed(1)}\xB5s/eval (${p.evalCalls} evals)`;
+          })() : "")
         );
       }
       timeController.checkTick(now);
@@ -22281,13 +22355,16 @@
       const tickMs = rate !== null ? TICK_INTERVAL_MS : null;
       const deltaSec = rate !== null ? displaySecondsPerTick(rate.unit) : 0;
       let renderMs = 0;
+      let tickCpuMs = 0;
       let animatingFaceCount = 0;
       const isPureAnimFrame = isScrubbing && !willTick;
       const animStart = isPureAnimFrame ? performance.now() : 0;
       const timingCtx = timingContextForFrame(timeController);
       for (const face of faces) {
         if (!face.enabled || !face.cachesBuilt) continue;
+        const tickStart = performance.now();
         face.updater.tick(face.env, now, face.getNow, face.withDisplayTime, timingCtx);
+        tickCpuMs += performance.now() - tickStart;
         const renderStart = performance.now();
         renderFrame(face.ctx, face.watch, face.env, face.scale, face.images, face.terminatorLeaves, face.analemmaState);
         renderMs += performance.now() - renderStart;
@@ -22296,6 +22373,11 @@
           stillAnimating = true;
           animatingFaceCount++;
         }
+      }
+      if (isScrubbing) {
+        _scrubTickMsTotal += tickCpuMs;
+        _scrubRenderMsTotal += renderMs;
+        _scrubBodyFrameCount++;
       }
       if (isPureAnimFrame) {
         const animJsEnd = performance.now();

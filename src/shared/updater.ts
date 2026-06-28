@@ -34,6 +34,29 @@ const K_ANGLE_ANIM_SPEED = 2.0;
 // "on track" and skips the catch-up phase.
 const NATURAL_ERROR_THRESHOLD = 0.002;
 
+// ── Tick CPU attribution (diagnostic) ───────────────────────────────────────
+// Module-level accumulators summed over a scrub session; the engine resets at
+// scrub start and logs at scrub end. There's a small per-value `performance.now()`
+// overhead, so treat the numbers as *proportions* (where the tick time goes), not
+// exact totals.
+export const tickProfile = {
+    updateMs: 0,    // updateObsValues — the whole update pass
+    animateMs: 0,   // animateObsValues — the second interpolation pass
+    evalMs: 0,      // evalAttr (expression evaluation) at on-beat arrivals
+    boundaryMs: 0,  // computeNextBoundary (scheduling) at on-beat arrivals
+    interpMs: 0,    // interpolateValue inside onBeatStep
+    evalCalls: 0,   // # of evalAttr calls (→ per-eval µs)
+};
+export function resetTickProfile(): void {
+    tickProfile.updateMs = 0; tickProfile.animateMs = 0; tickProfile.evalMs = 0;
+    tickProfile.boundaryMs = 0; tickProfile.interpMs = 0; tickProfile.evalCalls = 0;
+}
+// Off by default — the per-value `performance.now()` calls tax the hot path we're
+// measuring, so they're enabled on demand (engine: `?tickprofile`). When off, the
+// guards are a single boolean test (~free).
+let profileEnabled = false;
+export function setTickProfiling(on: boolean): void { profileEnabled = on; }
+
 // ============================================================================
 // Time source / eval-ahead helper
 // ============================================================================
@@ -481,8 +504,10 @@ function onArrivalOnBeat(
     displayDeltaPerTickSec: number,
     withDisplayTime?: WithDisplayTime,
 ): void {
+    const _b0 = profileEnabled ? performance.now() : 0;
     const nextDisplayMs = computeNextBoundary(
         v.updateInterval * 1000, getNow, timeDirection, env);
+    if (profileEnabled) tickProfile.boundaryMs += performance.now() - _b0;
 
     // Real time at which that boundary lands.
     let boundaryRealMs: number;
@@ -503,9 +528,11 @@ function onArrivalOnBeat(
     }
 
     // Evaluate the target AT the future boundary's display time (eval-ahead).
+    const _e0 = profileEnabled ? performance.now() : 0;
     const target = withDisplayTime
         ? withDisplayTime(nextDisplayMs, () => evalAttr(v.expr, env))
         : evalAttr(v.expr, env);
+    if (profileEnabled) { tickProfile.evalMs += performance.now() - _e0; tickProfile.evalCalls++; }
 
     // Sweep duration d = distance / speed (0 when NaN/instant → snap on boundary).
     const dist = shortestPathDistance(v.anim.currentValue, target, v.period);
@@ -597,7 +624,9 @@ function onBeatStep(
     const dir: 1 | -1 = timeDirection === -1 ? -1 : 1;
 
     // Advance any in-flight snap (may flip animating→false, i.e. arrive).
+    const _i0 = profileEnabled ? performance.now() : 0;
     v.currentValue = interpolateValue(v.anim, perfNow);
+    if (profileEnabled) tickProfile.interpMs += performance.now() - _i0;
 
     // Resolve the scheduling state (ARRIVED → SITTING → SWEEPING can chain in one
     // frame when the start time has already passed, e.g. continuous-sweep values).
@@ -806,9 +835,19 @@ export class Updater<K extends string = string> {
         withDisplayTime: WithDisplayTime,
         ctx: TimingContext,
     ): void {
+        if (!profileEnabled) {
+            updateObsValues(this.values, env, perfNow, getNow,
+                ctx.tickIntervalMs, ctx.displayDeltaSec, ctx.direction, withDisplayTime);
+            animateObsValues(this.values, perfNow);
+            return;
+        }
+        const _u0 = performance.now();
         updateObsValues(this.values, env, perfNow, getNow,
             ctx.tickIntervalMs, ctx.displayDeltaSec, ctx.direction, withDisplayTime);
+        const _u1 = performance.now();
         animateObsValues(this.values, perfNow);
+        tickProfile.updateMs += _u1 - _u0;
+        tickProfile.animateMs += performance.now() - _u1;
     }
 
     /** True while any value is mid-animation (for idle-scheduler decisions). */
