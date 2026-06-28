@@ -1,10 +1,91 @@
 # Replacing the Custom Expression Parser with `eval()`
 
 **Date:** 2026-06-15  
-**Status:** Analysis / Investigation. **Performance motivation upgraded by direct
-profiling (2026-06-28): the AST evaluator is the dominant scrub-time cost (~92–95%
-of the tick), not the "wash or slight win" Assertion 4 originally estimated — see
-*“Profiling evidence”* below.**
+**Status:** Investigation complete; **Step 0 benchmark gate FAILED (2026-06-28) — the
+performance motivation is disproven.** This migration is now a **simplification-only**
+proposal, not a perf play, and is **not currently scheduled** (a separate effort — the
+day/night wedge memoization in
+[2026-06-28-daynight-wedge-memo.md](2026-06-28-daynight-wedge-memo.md) — is the real
+scrub-tick lever).
+
+> **What changed.** The plan originally opened with a performance hypothesis: profiling
+> showed the AST evaluator is ~92–95% of the scrub tick, and a `new Function`-compiled
+> closure was *expected* to erase that as interpreter/tree-walk overhead. Step 0
+> measured it directly on both V8 and JSC (see **“Step 0 RESULTS”** under Assertion 6).
+> **Result: the win does not exist.** The interpreter/tree-walk overhead is a fixed
+> ~0.06–0.13 µs/eval regardless of expression — so the *maximum* the migration can
+> reclaim is ≈0.1 µs × 1563 evals ≈ **0.16 ms of a ~20 ms tick (<1%)**, and that ceiling
+> holds however effective the astronomy cache is, because the cost is the env-function
+> *body* (real astronomy), which compilation does not touch. The profiling section's
+> premise that the 26 µs/eval was "interpreter machinery, not the work inside the env
+> functions" is **disproven**: direct measurement shows the body *is* the cost (a Moon
+> day/night wedge is ~158 µs of root-finding). Read the "Profiling evidence" and
+> "Assertion 4" sections below with this correction in mind — they are retained for the
+> record but their perf conclusions are superseded by Step 0 RESULTS.
+
+**Remaining rationale (if pursued at all): pure simplification.** Deleting ~940 lines
+of bespoke tokenizer/parser/evaluator so the only parser in the codebase is the JS
+engine's, plus modest memory savings and no security/`file://` regression (all still
+valid). Whether that is worth the multi-file threading + correctness risk is a
+standalone call — there is **no** performance argument for it.
+
+---
+
+## Implementation summary (start here)
+
+> Single entry point for a fresh session. **Read the Status block above first: the perf
+> justification is dead; this is simplification-only and unscheduled.** The authoritative
+> design (if it proceeds) is **Assertion 6** plus the revised **init** and **Part 3**
+> sections; Assertions 1–5 are supporting analysis. This whole migration is
+> `file://`-safe and CSP-safe (verified; see the CSP risk section).
+
+**Goal.** Delete the entire custom expression front-end (`tokenizer.ts` + `parser.ts`
++ `evaluator.ts` + the `ASTNode` type, ~940 lines) and let the JS engine parse and
+run expressions. The only non-JS "parsing" that remains is one ~5-line identifier
+regex (`referencedNames`).
+
+**Ordered checklist:**
+
+0. **Step 0 — benchmark gate. DONE 2026-06-28 → FAILED.** Compared a `new Function`
+   closure vs. the current tree-walk on real hot expressions, V8 + JSC. Compiled was
+   **not** materially faster on the dominant expressions (~1.0× on the day/night
+   wedges). The perf rationale is gone; steps 1–5 below are simplification-only and
+   should only be undertaken if that simplification is judged worth it on its own.
+   (Assertion 6 → Step 0 RESULTS.)
+1. **Add `src/expr/compile.ts`** with three exports, plus a home for the still-needed
+   `Environment` / `ExprFunction` / `createDefaultEnvironment` (move them here or to
+   `expr/env.ts`):
+   - `referencedNames(src)` — identifiers minus JS reserved words, numeric-literal-
+     safe (strip-numbers-first; **no** lookbehind — old-Safari). The two traps
+     (`true`/`false`; hex/sci literals) are confirmed live in the XML.
+   - `compileExpr(src, env): CompiledExpr` — bind only referenced names, captured
+     once (function refs live, variable values snapshotted).
+   - `runInit(src, vars, fns)` — parser-free init: assign-and-merge into the variable
+     store. No write-back protocol, no retained evaluator.
+2. **Land the regression corpus test BEFORE deleting anything** — assert `compileExpr`
+   is bit-identical to the old evaluator across real XML expressions (include a
+   hex-heavy and a scientific-notation case), and that `runInit` reproduces the old
+   `initExprs` bindings. This is the safety net for the steps below.
+3. **Wire the two compiled populations** (Assertion 6 → Part 1):
+   - **ObsValue hot path:** add `ObsValue.evalFn: CompiledExpr` (compile in
+     `createObsValue`); replace the ~8 `evalAttr(v.expr, env)` sites in `updater.ts`
+     with `v.evalFn()`.
+   - **Render pass:** make `evalAttr`/`evalColor` compile-and-memo, keyed
+     **per-`env`** (`WeakMap<Environment, Map<string, CompiledExpr>>`) — not a global
+     string map (16 envs coexist on `all.html`). Call sites unchanged.
+4. **Thread `ASTNode → string`** (Assertion 6 → Part 2): `types.ts` (~80 fields +
+   `initExprs: string[]`), `xml-parser.ts` (`attrExpr` returns raw string), `terminator.ts`
+   (`phaseExpr`/`rotationExpr` → string), `obs-value.ts` (drop `createObsValueFromAST`),
+   and **hand-values.ts synthetic ASTs → parenthesized string composition**. Point
+   `watch-env.ts`’s init loop at `runInit`.
+5. **Delete** `tokenizer.ts`, `parser.ts`, `evaluator.ts`, `ASTNode`; rewrite the
+   expr tests; update `architecture-overview.md`, `development-rules.md` §7,
+   `expressions.md`.
+
+**Highest-risk spots to watch** (each is a confirmed gotcha, detailed inline): the
+`referencedNames` traps (step 1); the per-env render cache (step 3); precedence when
+composing `terminatorLeafAngle(...)` strings — wrap embedded sub-exprs in parens
+(step 4).
 
 ## Background
 
@@ -58,13 +139,30 @@ Corroborating facts:
   engines; differences in *total* scrub cost across browsers track JS-interpreter
   behavior, consistent with "this is the AST walker," not arithmetic or GPU.
 
-**Implication for this plan:** compiling each expression once to a closure
-(`new Function`) and calling it directly should collapse the ~26µs/eval to low
-single-digit µs, i.e. cut the dominant ~20–27ms tick by most of itself. *Caveat to
-verify during implementation:* a residual of the 26µs is the env-function bodies
-invoked by each eval (e.g. the day/night wedge functions), which compilation does
-**not** remove — measure the post-compile per-eval to see whether function-body
-work (or the sheer ~1563-evals/tick count, e.g. the wedges) becomes the next target.
+**Implication for this plan (a hypothesis, not a proven result):** compiling each
+expression once to a closure (`new Function`) and calling it directly *should*
+collapse the ~26µs/eval to low single-digit µs, i.e. cut the dominant ~20–27ms tick
+by most of itself. This is the motivating bet, but two caveats keep it from being a
+sure thing — both must be measured, not assumed:
+
+1. **Residual function-body work.** A portion of the 26µs is the env-function
+   bodies invoked by each eval (e.g. the day/night wedge functions), which
+   compilation does **not** remove. If that residual is large, the win shrinks and
+   the next target becomes the function bodies or the sheer ~1563-evals/tick count
+   (e.g. the wedges).
+2. **Per-call binding overhead.** A naïve `new Function(...allKeys, body)` that
+   spreads the full ~100-entry environment on every call can *replace* tree-walk
+   cost with argument-marshalling cost. The design in Assertion 6 avoids this by
+   binding only the few names an expression references, captured once per value —
+   but this is exactly why the design matters and why Step 0 measures a realistic
+   binding, not a toy `new Function('return 1+1')`.
+
+**Two eval populations, not one.** Profiling pinned the *update* (tick) pass, which
+is ObsValue eval. But there is a second, separate population: the **render pass**
+re-evaluates ~200 *static* part attributes per frame via `evalAttr`/`evalColor`
+in [renderer.ts](../src/watch/renderer.ts) (radius, colors, lengths, widths). Those
+are tree-walks too and are part of the ~13ms render cost. Any “delete the
+evaluator” plan must give *both* populations a compiled path; see Assertion 6.
 
 **Reproduce / measure (instrumentation landed on `main`):**
 - `[scrub-perf]` console summary (always on) reports the **tick vs render split** and
@@ -218,9 +316,15 @@ directionally correct and contribute to the overall simplification.
 
 ## Assertion 4: Performance Savings
 
-**Verdict: ✅ True — and far larger than estimated here.** The "wash or slight win"
-analysis below was wrong: profiling shows the AST evaluator is ~92–95% of the scrub
-tick (see *“Profiling evidence”* above). Treat this section as superseded.
+**Verdict: ⚠️ Plausibly a large win, but unproven — do not treat as a sure thing.**
+The original "wash or slight win" estimate understated the *opportunity*: profiling
+shows the AST evaluator is ~92–95% of the scrub tick (see *“Profiling evidence”*
+above), so the evaluator is unambiguously where the time goes. What profiling does
+**not** establish is that a `new Function` closure will be faster *at the same
+work* — that depends on how much of the per-eval cost is interpreter/tree-walk
+overhead (which a JIT erases) versus env-function-body work and per-call binding
+(which it does not). The honest position: strong prior that compilation helps,
+no measurement yet. Step 0 (Assertion 6) settles it before the full migration.
 
 ### Parse-time savings
 Startup is faster because parsing XML attributes no longer requires a recursive-
@@ -279,117 +383,335 @@ battle-tested engine is strictly better.
 
 ## Assertion 6: Implementation Plan
 
-**Verdict: ✅ Correct decomposition, with some additional details.**
+**Verdict: ⚠️ The original three-part decomposition is directionally right but
+under-specified for the post-ObsValue codebase.** Rewritten below to be
+implementation-ready: it names the real call sites, specifies the compiled-closure
+design (the crux — getting this wrong forfeits the win), and adds the two pieces
+the original omitted (render-pass attribute evals; synthetic-AST construction in
+hand-values/terminator).
 
-### Part 1: Change expression representation from `ASTNode` to `string`
+### Step 0 (do this first): a benchmark spike to de-risk the win
 
-**Files affected:**
-- [types.ts](../src/watch/types.ts) — All `ASTNode` optional fields → `string` (Watch.initExprs: `string[]`)
-- [xml-parser.ts](../src/watch/xml-parser.ts) — `attrExpr()` returns `string | undefined` instead of calling `parse()`; `processElement` for `<init>` stores raw expression string
-- [obs-value.ts](../src/shared/obs-value.ts) — `expr: ASTNode` → `expr: string`
+Before touching the codebase, confirm the hypothesis from Assertion 4 on a
+*representative* expression and a *realistic binding*. Pick a real hot expression
+(e.g. a day/night wedge `dayNightLeafAngle(planet, i, n)` and a hand angle like
+`hour24ValueAngle()`), and compare, over ~1e6 iterations:
 
-### Part 2: Change evaluation to use `eval()` / `new Function()`
+1. current tree-walk `evaluate(ast, env)`;
+2. a `new Function`-compiled closure bound the way Part 2 proposes (only referenced
+   names captured once), calling the *same* env functions.
 
-**Files affected:**
-- [evaluator.ts](../src/expr/evaluator.ts) — Replace `evaluate()` with a function that:
-  1. Destructures `env.variables` and `env.functions` into a scope object
-  2. Calls `new Function(...varNames, ...fnNames, 'return (' + expr + ')')(...varValues, ...fnValues)`
-  3. For init blocks (with assignments), uses a different wrapper that declares
-     `let` variables and writes back to `env.variables`
-- [astro-env.ts](../src/shared/astro-env.ts) — `evalAttr()` signature changes (`string | undefined` instead of `ASTNode | undefined`)
-- [watch-env.ts](../src/watch/watch-env.ts) — `evaluate()` calls for init block evaluation change
-- [terminator.ts](../src/watch/terminator.ts) — Minor: `ASTNode` → `string` for `terminatorAngle()` params
-- [updater.ts](../src/shared/updater.ts) — `evalAttr()` calls unchanged (the function signature changes, but call sites don't)
-- [animation.ts](../src/shared/animation.ts) — No ASTNode references; no changes needed
-- [renderer.ts](../src/watch/renderer.ts) — `evalAttr()` and `evalColor()` calls unchanged
+Measure per-eval µs on both V8 and JSC. **Decision gate:** proceed only if (2) is
+materially faster than (1) on the expressions that dominate the tick. If the win is
+small, the residual is function-body work (Profiling caveat #1) and the right next
+move is optimizing the wedge/astronomy functions or cutting the ~1563-evals/tick
+count — *not* this migration. Keep the spike script in `planning/`.
 
-**Implementation approach for `new Function()`:**
+#### Step 0 RESULTS (2026-06-28) — the performance gate FAILS; caveat #1 was the reality
 
-The key design choice is how to bridge the `Environment` (Maps of variables and
-functions) with the JS eval scope. Two options:
+Ran the spike (`planning/step0-bench.ts`, bundle with esbuild, run on `node` = V8 and
+the JSC `Helpers/jsc`). Per-eval µs, tree-walk → compiled, against a real
+`createAstroEnvironment`:
 
-**Option A — `new Function()` with explicit parameter binding:**
+| Scenario | V8 tree→comp (speedup, **abs. save**) | JSC tree→comp (speedup, **abs. save**) |
+|---|---|---|
+| `r*cos(th*pi/180)` (arith control, no env fn) | 0.133→0.025 (5.4×, **0.108µs**) | 0.110→0.032 (3.5×, **0.078µs**) |
+| `hour24ValueAngle()` (cheap hand angle) | 0.147→0.112 (1.31×, **0.035µs**) | 0.109→0.100 (1.09×, **0.009µs**) |
+| `dayNightLeafAngle(0,5,24)` single (cold) | 10.26→10.29 (1.00×) | 6.12→5.99 (1.02×, **0.13µs**) |
+| **ring scrub, Sun N=24 (cache active)** | 9.50→9.43 (1.01×, **0.07µs**) | 5.55→5.49 (1.01×, **0.06µs**) |
+| **ring scrub, Moon N=24 (cache active)** | 158.1→157.5 (1.00×, **0.6µs**) | 67.9→67.8 (1.00×, **0.06µs**) |
+| ring scrub, Sun/Moon N=96 (cache active) | 9.7→9.6 / 154.9→155.6 (≈1.0×) | 5.4→5.4 / 67.1→67.2 (≈1.0×) |
+
+**The "realistic ring scrub" rows model the real app**: advance the clock once per
+tick, then evaluate a whole ring of wedges (varying leaf index, same planet/day) so
+the `AstroCachePool` is warm across the ring — exactly the scenario where "all wedges
+make the same astronomy calls." It does **not** rescue the win: a Sun wedge stays
+~9.4µs (V8) / ~5.5µs (JSC), a Moon wedge ~155µs / ~67µs, and compiling saves ~0%.
+
+**Why the gate fails, cache-independently.** The interpreter/tree-walk overhead is a
+*fixed* ~0.06–0.13µs/eval added on top of the function body, no matter how big the
+body is (the "abs. save" column is ~0.1µs everywhere). The arith control's "5.4×" is
+5× of a tiny number — the same ~0.1µs absolute. So the **maximum** the migration can
+reclaim is ≈0.1µs × 1563 evals ≈ **0.16ms out of the ~20ms tick (<1%)** — and that
+ceiling holds however effective the cache is, because the body cost is what
+compilation does *not* touch. The profiling section's premise that the 26µs/eval was
+"interpreter machinery, not the work inside the env functions" is **disproven**:
+direct measurement shows the body *is* the cost (Sun wedge ~9µs, Moon ~155µs of real
+astronomy). The right perf lever is the wedge/astronomy bodies or the eval count,
+**not** this migration. **Conclusion: do not pursue this migration as a performance
+play.** (It may still be worth doing purely as a ~940-line simplification — a
+separate decision.)
+
+### The core design: compile once per value, bind only referenced names
+
+The naïve `new Function(...allKeys, body)` (old Options A/C) is wrong for the hot
+path: spreading the full ~100-entry environment on every call trades tree-walk cost
+for argument-marshalling cost. Instead:
+
 ```typescript
-function evalExpr(expr: string, env: Environment): number {
-    const names = [...env.variables.keys(), ...env.functions.keys()];
-    const values = [...env.variables.values(), ...env.functions.values()];
-    const fn = new Function(...names, `return (${expr})`);
-    return fn(...values);
+// expr/compile.ts (new) — replaces evaluator.ts for the hot path.
+export type CompiledExpr = () => number;
+
+export function compileExpr(src: string, env: Environment): CompiledExpr {
+    // 1. Identifiers the expression references (see referencedNames below).
+    const names = referencedNames(src).filter(n => env.variables.has(n) || env.functions.has(n));
+    // 2. Capture the bindings ONCE: function refs are live (they read getNow
+    //    internally); variable values are snapshotted (see invariant below).
+    const values = names.map(n => env.functions.get(n) ?? env.variables.get(n));
+    // 3. Compile once; the closure spreads only the few referenced values.
+    const fn = new Function(...names, `return (${src});`) as (...a: unknown[]) => number;
+    return () => fn(...values);
 }
 ```
-Pro: Clean sandbox. Con: Creating a new Function object per evaluation is
-expensive — must cache compiled functions per expression string.
 
-**Option B — `with` statement + proxy object (not recommended):**
-The `with` statement is deprecated and forbidden in strict mode.
+**`referencedNames` — the one helper, fully specified (two non-obvious traps).**
+Both `compileExpr` and `runInit` depend on it; it is the *only* non-JS "parsing"
+left. Naïve `/[A-Za-z_$][\w$]*/g` has two bugs that **will** crash or corrupt the
+build, so spell it out:
 
-**Option C — `new Function()` with a single scope object (recommended):**
 ```typescript
-function evalExpr(expr: string, env: Environment): number {
-    // Build scope object with all vars + fns
-    const scope: Record<string, any> = {};
-    for (const [k, v] of env.variables) scope[k] = v;
-    for (const [k, v] of env.functions) scope[k] = v;
-    // Destructure scope keys into function parameters
-    const keys = Object.keys(scope);
-    const fn = new Function(...keys, `return (${expr})`);
-    return fn(...keys.map(k => scope[k]));
+// Identifiers, minus (a) JS reserved words and (b) false matches inside numeric
+// literals. Both traps are confirmed live in the real XML (see notes).
+const JS_RESERVED = new Set([
+    'true', 'false', 'null', 'undefined', 'NaN', 'Infinity', 'in', 'of', 'new',
+    'typeof', 'void', 'delete', 'instanceof', 'this', 'function', 'return', 'if',
+    'else', 'var', 'let', 'const', 'do', 'while', 'for', 'class', 'with',
+    // (extend to the full reserved list to be safe against future XML)
+]);
+export function referencedNames(src: string): string[] {
+    // CORRECTED 2026-06-28 (Step 0): the "strip numbers first" approach below is
+    // BUGGY — `/\d*\.?\d+/g` matches the `24` inside identifiers like
+    // `hour24ValueAngle` / `hour24Number`, splitting them into bogus pieces, so the
+    // real name never gets bound and the closure throws ReferenceError. Instead do a
+    // SINGLE left-to-right scan with the identifier alternative listed FIRST: the
+    // scanner consumes `hour24ValueAngle` whole (the `[\w$]*` tail swallows digits),
+    // and the number alternatives only win where a literal starts at a position an
+    // identifier cannot (`0xff00c0ac`, `1e10`). Lookbehind-free (old-Safari safe)
+    // AND digit-in-identifier safe. (Verified in the Step 0 spike.)
+    const toks = src.match(
+        /[A-Za-z_$][\w$]*|0[xX][0-9a-fA-F]+|\d*\.?\d+(?:[eE][+-]?\d+)?/g,
+    ) ?? [];
+    const ids = toks.filter(t => /^[A-Za-z_$]/.test(t));
+    return [...new Set(ids)].filter(n => !JS_RESERVED.has(n));
 }
 ```
 
-**Caching strategy:** Since expressions are evaluated repeatedly (every animation
-frame), the compiled `Function` should be cached by expression string. The
-scope parameter names rarely change (only when the environment is rebuilt), so
-the cache key is `(exprString, sortedScopeKeyList)`.
+- **Trap (a) — `true`/`false` are illegal `new Function` parameter names.** At least
+  one XML expression references `true`, and `createDefaultEnvironment` even binds
+  `true→1`, `false→0`. Passing `'true'` to `new Function` throws `SyntaxError`. The
+  fix is to **drop them from `names` and rely on JS's native `true`/`false`**, which
+  coerce to `1`/`0` in every arithmetic/comparison context — bit-identical to the old
+  evaluator (`2 == true` → `2 == 1` → `0` in both). Those two env bindings become
+  dead and can be removed from `createDefaultEnvironment`.
+- **Trap (b) — hex/scientific literals.** `0xff00c0ac` and `1e10` appear throughout
+  (133 hex literals in init blocks alone). The lookbehind above is mandatory; the
+  regression corpus test must include a hex-heavy and a scientific-notation
+  expression.
 
-**Init block handling:** Init blocks use the comma operator with assignments
-(`cr=136, cr2=114, mainR=cr+18`). In JS, these are valid comma expressions
-where each assignment mutates a variable. The wrapper must:
-1. Declare all variables with `let`
-2. Evaluate the expression
-3. Write modified variables back to `env.variables`
+**Why capturing values once is correct (the load-bearing invariant).** Per-frame
+change in this system flows in through **env functions** (they call the overridable
+`getNow()` internally), whose references are stable — so capturing the *function
+ref* once and letting it read live time is exactly right, and it is also why
+**eval-ahead still works unchanged**: `withDisplayTime(ms, fn)` mutates the `getNow`
+closure the captured functions read; compiled-vs-tree-walk is irrelevant to it.
+**Variables**, by contrast, are written only by init blocks at face-load time and
+are static thereafter; nothing mutates `env.variables` per frame. The one rule the
+implementation must honor: **recompile whenever the environment is rebuilt** (body
+switch, location change). That already happens — `buildHandValues` re-runs and
+reconstructs every `ObsValue` — so compilation belongs in `createObsValue` /
+`createObsValueFromAST`, naturally inheriting the existing rebuild lifecycle.
 
-The chained assignment pattern `hrColor=minColor=black` is valid JS and works
-correctly.
+### Part 1: Two compiled populations
 
-### Part 3: Remove the custom parser code
+**1a. ObsValue expressions (the profiled tick hot path).** Store the compiled
+closure on the value and call it instead of `evalAttr(v.expr, env)`:
+- [obs-value.ts](../src/shared/obs-value.ts) — `ObsValue.expr: ASTNode` → keep the
+  source `string` (for debugging) **plus** add `evalFn: CompiledExpr` (do *not* name
+  the field `eval` — it shadows the global and trips linters/strict mode).
+  `createObsValue` compiles from its string; `createObsValueFromAST` is replaced (see
+  Part 2) — Parts now hand over strings, so there is no longer a pre-parsed AST to
+  accept. The construction-time initial-value eval (`evalAttr(expr, env)` at
+  `obs-value.ts:184`) becomes `v.evalFn()`.
+- [updater.ts](../src/shared/updater.ts) — replace every `evalAttr(v.expr, env)`
+  (≈8 sites: `onArrivalOnBeat`, `updateObsValueScrub`, `updateObsValueEvalAhead`,
+  `updateObsValueDiscrete`, `settleAtNow`, `snapToTargetAtBoundary`,
+  `updateNaturalSpeedValue`, `updateObsValueFixedDuration`, `onBeatStep`,
+  `Updater.finish`) with `v.evalFn()`. This is the change that should move the tick.
 
-**Files to delete:**
-- [tokenizer.ts](../src/expr/tokenizer.ts) (262 lines)
-- [parser.ts](../src/expr/parser.ts) (410 lines)
-- [expr.test.ts](../src/expr/__tests__/expr.test.ts) — tokenizer and parser tests removed; evaluator tests simplified
+**1b. Render-pass static attributes (the second population — originally omitted).**
+[renderer.ts](../src/watch/renderer.ts) calls `evalAttr`/`evalColor` ~200× per
+frame on Part attributes (`part.radius`, `part.fillColor`, …). Give these a compiled
+path too, but the cache **must be per-`env`, not a single module-level
+`Map<string, …>`** — that is the one subtle correctness trap here:
+- **Why per-env.** `createDefaultEnvironment()` runs fresh per watch
+  (`watch-env.ts:168`), so `all.html` holds **16 distinct envs at once**, and the same
+  source string means different things in each (`r*cos(th*pi/180)` — `r`/`th` are
+  set by *each face's* init block). A string-keyed global cache would hand face B a
+  closure bound to face A's variable snapshot. Key by env identity:
+  `const cache = new WeakMap<Environment, Map<string, CompiledExpr>>();` (or hang the
+  inner `Map` off the `Environment` object). `WeakMap` also lets a face's cache be
+  GC'd when its env is discarded on body/location change.
+- `evalAttr(expr, env)` / `evalColor(expr, env)` in
+  [astro-env.ts](../src/shared/astro-env.ts) keep their call signatures but, with
+  `expr` now a `string`, look up `cache.get(env)?.get(src)` (compiling + storing on
+  miss) and call it. The ~200 call sites in renderer.ts and ~13 in terminator.ts are
+  then **unchanged at the call site** — only the helper's implementation changes.
+
+### Part 2: Representation change `ASTNode → string` (the threading work)
+
+This is *not* a single-point change (see the corrected note under the old
+prerequisite). Touch-points:
+- [types.ts](../src/watch/types.ts) — ~80 `ASTNode` optional fields → `string`;
+  `Watch.initExprs: ASTNode[]` → `string[]`.
+- [xml-parser.ts](../src/watch/xml-parser.ts) — `attrExpr()` returns the raw
+  `string | undefined` (drops the `parse()` call); `<init>` handling stores the raw
+  expression string instead of `parse(exprStr)`.
+- [hand-values.ts](../src/watch/hand-values.ts) — **synthetic-AST construction must
+  become string composition.** The `lit()` helper and the hand-built `FunctionCall`
+  node for `terminatorLeafAngle(...)` (in `buildTerminatorValues`) become template
+  strings, e.g.
+  `` `terminatorLeafAngle((${leaf.phaseExpr ?? '0'}), ${quad}, ${idx}, ${lpq}, ${incr})` ``.
+  **Wrap embedded sub-expressions in parens** (`(${phaseExpr})`) to preserve
+  precedence. `createObsValueFromAST` call sites switch to `createObsValue` (string).
+- [terminator.ts](../src/watch/terminator.ts) — `phaseExpr`/`rotationExpr` fields
+  `ASTNode → string`; its ~13 `evaluate(node, env)` calls become
+  `evalAttr(str, env)` (or `compileExpr(str, env)()` for one-shots).
+- [obs-value.ts](../src/shared/obs-value.ts) — drop the `ObsValueDefAST` variant and
+  `createObsValueFromAST`; everything constructs from strings now.
+
+**Init blocks are parser-free too — `runInit` (this is what lets us delete the whole
+parser).** Init blocks (`cr=136, cr2=114, mainR=cr+18`, chained
+`hrColor=minColor=black`) assign variables, so they cannot use the read-only
+`compileExpr` above. They do **not**, however, need a retained evaluator. The
+enabling facts:
+
+- **All assignments in the entire XML corpus live inside `<init>` blocks** (verified
+  2026-06-28: 208 init blocks; zero assignments — single, chained, or compound — in
+  any runtime attribute expression). So the *runtime* path is purely read-only and
+  the assignment problem is confined to init.
+- **Init's only job is to populate the variable namespace.** There is one writer
+  (init) and one store (`env.variables`) that runtime reads from — so there is no
+  "write back to a throwaway scope" step to engineer; init writes the store directly.
+- **Init expressions are semantically trivial** — `name = <arithmetic>` over
+  `+ - * /`, unary minus, `cos`/`sin`, hex/decimal literals, parens, comma. No
+  ternary, comparison, logical, bitwise, or compound assignment appears. `new
+  Function` evaluates all of it natively.
+
+The implementation reuses the *same* `referencedNames(src)` helper the runtime path
+already needs — the only non-JS "parsing" left anywhere (a ~3-line identifier
+regex, not a grammar):
+
+```typescript
+// expr/compile.ts — alongside compileExpr; ExprFunction is the existing env fn type.
+function runInit(src: string, vars: Map<string, number>, fns: Map<string, ExprFunction>): void {
+    const names = referencedNames(src);                       // same helper; keywords excluded
+    const args  = names.map(n => fns.get(n) ?? vars.get(n));  // funcs + existing vars in
+    const body  = `${src};\nreturn {${names.join(',')}};`;    // hand every name back out
+    const out   = new Function(...names, body)(...args) as Record<string, number>;
+    for (const n of names) if (!fns.has(n)) vars.set(n, out[n]);  // merge results into store
+}
+```
+
+Every assignment target appears as an identifier, so it is in `names`, so it is a
+mutable parameter, so its final value returns in `out` and lands in `vars`.
+`cos`/`pi`/`black` flow in as args and are skipped on write-out (`!fns.has` and
+unchanged value). Chained assignment and comma sequences are just JS. No LHS-only
+scan, no `let` redeclaration, no `with`. [watch-env.ts](../src/watch/watch-env.ts)’s
+init loop calls `runInit(expr, env.variables, env.functions)` per block, in document
+order, exactly as today.
+
+*(A `with(scopeProxy)` variant — `new Function('S', \`with(S){ ${src} }\`)` over a
+`has:()=>true` Proxy — also works and reads like "evaluate init in this scope," but
+it is not recommended: `with` would deopt a hot function (fine here, since init is
+once-per-load, but a footgun if copied to the runtime path) and the regex version
+above needs no deprecated construct. Mentioned only so the option is on record.)*
+
+**Sloppy-mode / octal note.** `new Function` bodies are **non-strict** unless they
+begin with `'use strict'`. We will *not* add that directive, so the theoretical
+`0377` octal literal (Assertion 1 — zero occurrences in any XML) would still
+evaluate, and `with`-free codegen keeps us clear of the strict-mode traps. No action
+needed; just don’t opt into strict mode in the wrapper.
+
+**Inspector error parity.** [inspector-entry.ts](../src/inspector/inspector-entry.ts)
+wraps `createObsValue(...)` in `try/catch` and shows `e.message`. With `new Function`,
+a malformed expression throws `SyntaxError` at *compile* time (inside
+`createObsValue`) and an unknown identifier throws `ReferenceError` at the *first*
+eval — which also happens inside `createObsValue` (it evaluates the initial value).
+So the existing try/catch still catches both; only the message text changes (e.g.
+“Unexpected token” instead of the custom parser’s wording). Acceptable; note it in
+the Inspector’s help text if the current copy quotes the old messages.
+
+### Part 3: Remove the custom parser code — *all of it*
+
+Because init is parser-free (`runInit` above), **the entire custom expression
+front-end is deleted with no vestige retained.** A "tiny evaluator for init" was
+considered and rejected: init RHS is full arithmetic, so retaining it would drag in
+essentially all of `tokenizer.ts` (~262 lines) plus the `parseExpression →
+parseAssignment → parseAdditive → … → parsePrimary` spine of `parser.ts` (~300 of
+410 lines) and most of `evaluator.ts` — ~550–600 of the ~940 lines, *and* a
+developer would still have to understand a bespoke grammar. That defeats the point;
+the whole value of this migration is that the only parser in the codebase becomes
+the JS engine's.
+
+**Files to delete (unconditional):**
+- [tokenizer.ts](../src/expr/tokenizer.ts) (262 lines) — replaced by the
+  `referencedNames` identifier regex.
+- [parser.ts](../src/expr/parser.ts) (410 lines) — the `ASTNode` type and all
+  recursive-descent parsing go; `new Function` parses instead.
+- [evaluator.ts](../src/expr/evaluator.ts) (266 lines) — the tree-walker goes;
+  `compileExpr`/`runInit` (the new `expr/compile.ts`) replace it. Keep
+  `createDefaultEnvironment` and the `Environment`/`ExprFunction` types by moving
+  them into `compile.ts` (or a small `expr/env.ts`) — they are still needed.
+- [expr.test.ts](../src/expr/__tests__/expr.test.ts) — tokenizer/parser tests
+  removed; **add** a focused test that `compileExpr` returns bit-identical results to
+  the old evaluator on a corpus of real XML expressions, and that `runInit`
+  reproduces the old `initExprs` variable bindings (the regression guard for this
+  migration — land it *before* deleting anything, so the old and new paths can be
+  diffed against each other).
+
+Confirmed no other consumer pins the parser in place: the remaining `parse()` /
+`evaluate()` callers are exactly the sites this migration rewrites (obs-value
+construction, `evalAttr`/`evalColor`, terminator's 13 evals, watch-env init, the
+synthetic ASTs in hand-values). The lone `parse(` in
+[ring-view.ts](../src/observatory/ring-view.ts) is a same-named *local* color-string
+helper, not the expression parser.
 
 **Files to update:**
-- Build scripts — remove any expr-related generation steps
-- [architecture-overview.md](../docs/architecture-overview.md) and other docs referencing `src/expr/`
-- [development-rules.md](../docs/development-rules.md) §7 — bundle includes `src/expr/`
-- [expressions.md](../docs/expressions.md) — rewrite to reflect new approach
+- Build scripts — remove any expr-related steps (none today; `build.sh` bundles
+  `src/` wholesale, so deletions just shrink the bundle).
+- [architecture-overview.md](../docs/architecture-overview.md), 
+  [development-rules.md](../docs/development-rules.md) §7,
+  [expressions.md](../docs/expressions.md) — update to the compiled-closure model.
 
 ---
 
-## Pre-Requisite: ObsValue Migration
+## ~~Pre-Requisite: ObsValue Migration~~ — DONE (2026-06-28)
 
-> Does this depend on switching Chronometer to the ObsValue system first?
+> Earlier draft asked: does this depend on switching Chronometer to the ObsValue
+> system first?
 
-**No, not strictly — but it would reduce churn.** The reasons:
+**The ObsValue migration is complete, so this is no longer a prerequisite of any
+kind.** Chronometer's dynamic parts now build per-face `Updater`s of `ObsValue`s
+([hand-values.ts](../src/watch/hand-values.ts)), and the hot scrub-tick eval is
+`evalAttr(v.expr, env)` driven from [updater.ts](../src/shared/updater.ts).
 
-1. Currently, `ASTNode` is used in two parallel systems:
-   - **Chronometer's watch parts** (types.ts → xml-parser.ts → renderer.ts/animation.ts)
-   - **ObsValue** (obs-value.ts → updater.ts, used by Observatory and Inspector)
+**But note an important correction to the old reasoning:** the migration did **not**
+collapse `ASTNode → string` to a single point. Reality, as built:
 
-2. If Chronometer switches to ObsValue first, then the Part types no longer
-   store `ASTNode` — they store `ObsValue` references (or expression strings
-   that ObsValue holds). The `ASTNode → string` change would be made in one
-   place (ObsValue) rather than in both the Part types and ObsValue.
+- `ObsValue.expr` is still an `ASTNode` (`obs-value.ts` L41); `createObsValue`
+  *parses* a string, `createObsValueFromAST` takes a pre-parsed node.
+- Watch **Part types still store `ASTNode`** (`types.ts` — ~80 fields), and
+  `hand-values.ts` feeds those nodes straight into `createObsValueFromAST`.
+- `hand-values.ts` and [terminator.ts](../src/watch/terminator.ts) also **synthesize
+  AST nodes programmatically** (the `lit()` helper, hand-built `FunctionCall` nodes
+  for `terminatorLeafAngle(...)`), and `watch.initExprs` is `ASTNode[]`.
 
-3. If we do the eval migration **before** the ObsValue switch, we touch types.ts
-   and xml-parser.ts to change `ASTNode → string`, then touch them again during
-   the ObsValue migration. Double churn, but manageable.
-
-**Recommendation:** Do the ObsValue migration first. It's a larger architectural
-improvement that the eval change naturally falls out of — once all expressions
-are managed through ObsValue, changing the evaluation strategy is a single-point
-change in `evalAttr()` and `createObsValue()`.
+So the `ASTNode → string` change still threads through Part types, the XML parser,
+hand-values, terminator, and ObsValue — it is *not* a one-line swap. That changes
+nothing about feasibility, but it does mean the implementation plan (Assertion 6,
+rewritten below) must enumerate those touch-points explicitly. The migration having
+landed is a *help* (the eval call sites are now concentrated in `updater.ts` +
+`renderer.ts`), not the single choke point the old prerequisite imagined.
 
 ---
 
@@ -402,11 +724,31 @@ body switch, etc.), the scope key list may change, invalidating cached Functions
 is stable within a session — only the values change, not the names.
 
 ### Risk: CSP (Content Security Policy) restrictions
-`eval()` and `new Function()` are blocked by strict CSP headers
-(`script-src` without `'unsafe-eval'`). Since this is a static app served from
-any web server, the deployer controls CSP. The app currently has no CSP
-restrictions. **Mitigation:** Document that `'unsafe-eval'` is required if CSP
-is applied, or use a CSP nonce.
+`eval()` and `new Function()` are blocked by strict CSP (`script-src` without
+`'unsafe-eval'`). Status in this app, verified 2026-06-28:
+
+- **No CSP anywhere today.** There is no `Content-Security-Policy` `<meta>` tag in
+  any source HTML (`grep -ri content-security-policy src/**/*.html` → no matches),
+  and the app ships no server, so no response headers either. `new Function` is
+  unrestricted.
+- **`file://` is fine — this is the important confirmation.** `file://` URLs carry
+  *no HTTP response headers*, so a header-based CSP cannot exist there. The only way
+  to get a CSP on `file://` is a `<meta http-equiv>` tag, which we do not ship. And
+  `new Function`/`eval` are pure language features (no network), so they execute
+  identically under `file://` — there is no `file://`-specific restriction on them.
+  (Contrast `fetch()` of local files, which *is* CORS-blocked on `file://`; the
+  build already sidesteps that by inlining XML via esbuild and using IIFE bundles,
+  not ES modules — see below. This migration adds no new network or module
+  dependency, so it does not regress `file://` support.)
+- **Future-proofing.** If a deployer ever adds a CSP, `'unsafe-eval'` (or a nonce)
+  would be required. **Mitigation:** note this in [build-system.md](../docs/build-system.md)
+  alongside the existing `file://` deployment notes.
+
+**`file://` sign-off for the rest of the plan.** Nothing else proposed here touches
+the loader, network, or module system. Bundles remain `--format=iife` classic
+scripts (`<script src>`), expression strings are already inlined from the XML at
+build time, and compilation happens in-process. So the whole plan — not just the
+CSP point — is `file://`-safe.
 
 ### Risk: Numeric precision differences
 The custom evaluator returns `1`/`0` for boolean comparisons; JS returns
@@ -423,14 +765,36 @@ this is very unlikely to arise.
 
 ## Conclusion
 
-All six assertions check out. Replacing the custom parser/evaluator with
-`eval()` / `new Function()` is sound, reduces complexity (~1,600 lines of
-parser code eliminated), saves memory, and has no security downside for this
-fully-static client-side application.
+**The performance case is dead (Step 0, 2026-06-28).** The migration is still **sound,
+safe, and `file://`-compatible** — syntax compatibility, security, memory, and
+complexity all check out, and the ObsValue migration (the former prerequisite) has
+landed, so the eval call sites are concentrated in `updater.ts` and `renderer.ts`. But
+the headline justification — reclaiming the scrub tick — **was measured and does not
+hold.** A `new Function` closure is ~1.0× the tree-walk on the dominant day/night
+wedges (the interpreter overhead is a fixed ~0.1 µs/eval, <1% of the tick, and the
+cache cannot change that because the cost is the astronomy *body*). The real scrub
+lever is elsewhere: per-wedge rise/set memoization, tracked in
+[2026-06-28-daynight-wedge-memo.md](2026-06-28-daynight-wedge-memo.md).
 
-The recommended sequencing is:
-1. **First:** Migrate Chronometer to the ObsValue system (separate effort per [animation.md](../docs/animation.md))
-2. **Then:** Replace expression representation and evaluation (this change)
+**So this migration is now optional and simplification-only.** It is worth doing only
+if deleting ~940 lines of bespoke parser/evaluator (leaving the JS engine as the only
+parser) is judged worth the multi-file `ASTNode → string` threading and its correctness
+risk — there is **no** performance reason to do it. It is **not currently scheduled.**
 
-This ordering minimizes double-churn on the Part types and concentrates the
-expression change to a single code path.
+If it is later undertaken as a cleanup, the sequencing (the ObsValue migration is done;
+ignore the old ordering; **skip Step 0 — already done and failed**):
+1. **Build the compiled path** (`expr/compile.ts`: `compileExpr` + `runInit`, sharing
+   one **corrected** `referencedNames` regex — see the fix in Assertion 6, step 1)
+   behind a regression test that asserts bit-identical results to the old evaluator
+   across a corpus of real XML expressions — covering the per-value `CompiledExpr`
+   (ObsValue path), the memoized `evalAttr`/`evalColor` (render pass), **and** `runInit`
+   reproducing the old `initExprs` variable bindings.
+2. **Thread `ASTNode → string`** through Part types, xml-parser, hand-values
+   (synthetic-AST → string composition), terminator, obs-value, and watch-env's init
+   loop. Init needs no parser — it uses `runInit`.
+3. **Delete the entire custom front-end** — `tokenizer.ts`, `parser.ts`,
+   `evaluator.ts`, `ASTNode` (no vestige retained) — and update docs.
+
+Net effect if shipped: the **whole ~940-line custom tokenizer/parser/evaluator is gone**
+(the only parser left is the JS engine's), modest memory savings, no security or
+`file://` regression — and **no measurable scrub-tick change** (Step 0).
