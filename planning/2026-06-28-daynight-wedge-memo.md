@@ -1,8 +1,11 @@
 # Day/Night Ring Wedges: Memoize the Rise/Set Search (and unify on the slot cache)
 
 **Date:** 2026-06-28
-**Status:** Diagnosis complete; cache mechanism verified and slop decided with Steve
-(2026-06-28, keep existing 0.5 s default); implementation not started.
+**Status:** ✅ **Implemented 2026-06-28.** Bit-identical (full suite 8539 tests green,
+incl. arctic polar rings — no golden re-baselining needed). Measured wedge cost at a
+fixed time: Sun 9.17 → **0.170 µs**, Moon 157.8 → **0.189 µs** (the wedge path now matches
+the indicator memo). 96-wedge Moon ring ≈ one ~158 µs search + 95×0.19 µs ≈ **~0.18 ms**
+(was ~15 ms). Slop kept at the existing 0.5 s default. See "Implementation notes" at end.
 **Supersedes** (as the real scrub-perf lever) the perf motivation in
 [2026-06-15-eval-vs-custom-parser.md](2026-06-15-eval-vs-custom-parser.md), whose
 Step 0 gate failed — see that doc's "Step 0 RESULTS" section.
@@ -219,3 +222,32 @@ A 96-wedge Moon ring: ~15 ms → ~0.3 ms per tick. Sun rings benefit less in abs
 terms (~9 µs → shared) but still collapse to one search per ring. This is the dominant
 scrub-tick cost the Step 0 profiling chased; unlike the eval→`new Function` migration
 (≤1% ceiling), this targets the function-body work that actually dominates.
+
+## Implementation notes (2026-06-28, as built)
+
+- **What stores what:** the memo holds the **four raw search outputs** — `riseTime`,
+  `setTime`, `riseTransitTime`, `setTransitTime` (raw event/transit times, or the ±1e18
+  always-above/below sentinels) — in the renamed `dayNightMaster{Rise,Set,RiseTransit,
+  SetTransit}Time` slots. All angle derivation (`rTransitAngle`, `riseTimeAngle`, …) and
+  the polar `isAlwaysAbove` sentinel logic happen per-call in the consumers from these
+  four raw values, so storing times (not angles) is sufficient and bit-identical
+  (JS numbers are Float64, so slot round-trips are exact).
+- **Helper:** `getMasterRiseSet(planet, calcDate, lat, lon, pool)` in `astro-env.ts`
+  pushes `finalCache` with `pushECAstroCacheInPool` (default 0.5 s slop), reads/writes the
+  four slots, pops back. `computeMasterRiseSet` is the un-cached search half.
+- **One mechanism:** `PlanetRiseSetCache` / `planetRiseSetCaches` Map / `riseSetCacheKey` /
+  `computeAndCachePlanetRiseSet` / `getPlanetRiseSetCache` are **deleted**. All three
+  sibling expression functions (`dayNightLeafAngle` 0/1, `dayNightLeafAngleIsRiseSet`,
+  `dayNightLeafAngleAboveHorizon`) now route through `computeDayNightLeafAngle`, which
+  shares the slot memo — preserving the "no ordering dependency" property the Map gave.
+- **Both paths unified:** indicator (`numLeaves === 0`, leafNumber 0/1) and wedge
+  (`numLeaves > 0`) both call `getMasterRiseSet`. The leafNumber-4 transit indicator still
+  uses `planettransitTimeRefined` directly (returns before the search). The 0/1 indicator
+  returns from the raw angles **before** the polar NaN-resolution tail, matching the old
+  compute-once cache exactly.
+- **Pluto (planet 10):** the `dayNightMaster*` slot categories cover planets 0..9, so
+  `getMasterRiseSet` computes Pluto without memoizing. (The day/night ring is not used
+  for Pluto; MidnightSun=11 is substituted to Sun=0 before the helper.)
+- **Left as-is:** the four unused `dayNightMaster*AngleLST` slot categories (dead) and the
+  separate LST ring path (`computeDayNightLeafAngleLST`) — out of scope; not on the
+  scrub-perf hot path.

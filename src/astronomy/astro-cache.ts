@@ -238,26 +238,30 @@ export const enum CacheSlot {
     prevPlanettransitLow1, prevPlanettransitLow2, prevPlanettransitLow3, prevPlanettransitLow4,
     prevPlanettransitLow5, prevPlanettransitLow6, prevPlanettransitLow7, prevPlanettransitLow8, prevPlanettransitLow9,
 
-    // Day/night master angles (10 per category × 8 categories)
-    dayNightMasterRiseAngle,
-    dayNightMasterRiseAngle1, dayNightMasterRiseAngle2, dayNightMasterRiseAngle3,
-    dayNightMasterRiseAngle4, dayNightMasterRiseAngle5, dayNightMasterRiseAngle6,
-    dayNightMasterRiseAngle7, dayNightMasterRiseAngle8, dayNightMasterRiseAngle9,
+    // Day/night master rise/set search outputs — raw event/transit *times*
+    // (seconds since the 2001 epoch, or the ±1e18 always-above/below sentinels),
+    // NOT angles. Memoized once per (planet, date, lat, lon) and shared by every
+    // wedge/indicator in a tick. See getMasterRiseSet() in astro-env.ts.
+    // 10 slots per category (planet 0..9).
+    dayNightMasterRiseTime,
+    dayNightMasterRiseTime1, dayNightMasterRiseTime2, dayNightMasterRiseTime3,
+    dayNightMasterRiseTime4, dayNightMasterRiseTime5, dayNightMasterRiseTime6,
+    dayNightMasterRiseTime7, dayNightMasterRiseTime8, dayNightMasterRiseTime9,
 
-    dayNightMasterSetAngle,
-    dayNightMasterSetAngle1, dayNightMasterSetAngle2, dayNightMasterSetAngle3,
-    dayNightMasterSetAngle4, dayNightMasterSetAngle5, dayNightMasterSetAngle6,
-    dayNightMasterSetAngle7, dayNightMasterSetAngle8, dayNightMasterSetAngle9,
+    dayNightMasterSetTime,
+    dayNightMasterSetTime1, dayNightMasterSetTime2, dayNightMasterSetTime3,
+    dayNightMasterSetTime4, dayNightMasterSetTime5, dayNightMasterSetTime6,
+    dayNightMasterSetTime7, dayNightMasterSetTime8, dayNightMasterSetTime9,
 
-    dayNightMasterRTransitAngle,
-    dayNightMasterRTransitAngle1, dayNightMasterRTransitAngle2, dayNightMasterRTransitAngle3,
-    dayNightMasterRTransitAngle4, dayNightMasterRTransitAngle5, dayNightMasterRTransitAngle6,
-    dayNightMasterRTransitAngle7, dayNightMasterRTransitAngle8, dayNightMasterRTransitAngle9,
+    dayNightMasterRiseTransitTime,
+    dayNightMasterRiseTransitTime1, dayNightMasterRiseTransitTime2, dayNightMasterRiseTransitTime3,
+    dayNightMasterRiseTransitTime4, dayNightMasterRiseTransitTime5, dayNightMasterRiseTransitTime6,
+    dayNightMasterRiseTransitTime7, dayNightMasterRiseTransitTime8, dayNightMasterRiseTransitTime9,
 
-    dayNightMasterSTransitAngle,
-    dayNightMasterSTransitAngle1, dayNightMasterSTransitAngle2, dayNightMasterSTransitAngle3,
-    dayNightMasterSTransitAngle4, dayNightMasterSTransitAngle5, dayNightMasterSTransitAngle6,
-    dayNightMasterSTransitAngle7, dayNightMasterSTransitAngle8, dayNightMasterSTransitAngle9,
+    dayNightMasterSetTransitTime,
+    dayNightMasterSetTransitTime1, dayNightMasterSetTransitTime2, dayNightMasterSetTransitTime3,
+    dayNightMasterSetTransitTime4, dayNightMasterSetTransitTime5, dayNightMasterSetTransitTime6,
+    dayNightMasterSetTransitTime7, dayNightMasterSetTransitTime8, dayNightMasterSetTransitTime9,
 
     dayNightMasterRiseAngleLST,
     dayNightMasterRiseAngleLST1, dayNightMasterRiseAngleLST2, dayNightMasterRiseAngleLST3,
