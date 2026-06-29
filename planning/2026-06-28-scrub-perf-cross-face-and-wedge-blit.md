@@ -96,10 +96,25 @@ but it is **not worth implementing now**. Skip to Part C and the new Part D (LOD
 
 ### Why it would have been correct (verified)
 
-- **Same location for every ring.** `dayNightLeafAngleForSlot` (the only per-slot,
-  multi-location astro path) is **unused by any asset XML** (`grep` = 0). Gaia's four
-  day/night rings use `planetNumber='planetSun'` at the **observer** location, not
-  per-slot. So every day/night ring on a page shares one `(lat, lon)`.
+- **Same location for every ring.** ⚠️ **CORRECTION (2026-06-28, later):** this was WRONG.
+  `dayNightLeafAngleForSlot` is absent from XML *text* but is **generated at runtime** by
+  `buildDayNightRing` whenever a `QDayNightRing` carries `envSlot` — and **Gaia's four rings
+  carry `envSlot='1'…'4'`**, so they DO compute per-city day/night at four different
+  locations. So *not* every ring shares one `(lat, lon)`. (This doesn't change Part B's
+  rejection — the master search is cheap regardless.) But it surfaces a real bug:
+  `getMasterRiseSet` keys its `dayNightMaster*` slot by **`planetNumber` only**, not lat/lon,
+  so Gaia's four `planetSun` rings at different locations **collide** in that memo — slot-2/3/4
+  read slot-1's city's rise/set. **CONFIRMED** by direct test (2026-06-28): same pool, Sun,
+  same time, equator vs arctic → both return `2.3328` (arctic's true value is `4.3341`). So
+  Gaia currently renders all four day/night rings as the *first* slot's city. It's a
+  regression from the day/night memo; the green "bit-identical" suite is on baked-in wrong
+  values (Gaia's snapshot was captured with the memo present). **NOT in production** — the
+  deployed GitHub release (`4b0fdff`, ~2026-06-24) predates the memo and shows Gaia's four
+  dials with clearly-different rise/set. So **no urgent standalone fix**: fold it into the
+  `(location, di)` cache key in
+  [2026-06-28-per-tick-astronomy-memoization.md](2026-06-28-per-tick-astronomy-memoization.md)
+  §4b, which makes the collision impossible (different slot location ⇒ different cache).
+  (The snapshot re-baseline happens then.)
 - **tz-independent.** The `dayNightMaster*` slots store **raw UTC event times**
   ([astro-cache.ts](../src/astronomy/astro-cache.ts) L241 doc-comment). Timezone enters
   only via `angle24HourForDate(di, tzOffsetSeconds)` applied *after* the cache. So faces
@@ -248,45 +263,44 @@ itself fix `all.html` scrub — there the cost is the aggregate of 16 static-cac
 the ~11 ms tick eval, so **Part D (LOD)** and/or reducing per-face static re-blit remain
 the levers for the grid.
 
-## Part D — Wedge-count LOD (attacks both halves)
+## Part D — Wedge-count LOD — ❌ DROPPED (Steve, 2026-06-28)
 
-`~1310 wedges/tick` is the scaling factor behind *both* the 10.6ms tick eval and the
-13.4ms render. On all.html each face is ~128px, where a 48–96-wedge ring resolves to a
-near-solid arc — the wedge count buys no visible fidelity. Reduce `numWedges` as a
-function of on-screen ring size (the day/night ring's `outerR × face.scale` in device
-px), e.g. cap to ~1 wedge per few px of arc length. Full count on single-face pages,
-reduced on the grid.
+Steve: prefer the small all.html faces to reproduce the large look **faithfully** over a
+faster scrub frame rate ("most people won't scrub; if they do, rarely"). So no LOD — keep
+full wedge counts at every size. Left here only as a record of the rejected option.
 
-- **Where:** `numWedges` is an ObsValue/expr (`sunNumWedges`, `moonNumWedges`,
-  `planNumWedges` in the XML; e.g. Miami `=24`). Either clamp at ring expansion time
-  ([hand-values.ts](../src/watch/hand-values.ts) `buildDayNightRing`) or expose a
-  render-scale-aware `numWedges` cap. Must re-clamp on resize.
-- **Why it's the best per-effort lever:** halving wedge count ~halves the wedge share of
-  *both* the tick eval and the render — no parity risk to the astronomy (the leaves just
-  get wider), only a visual-fidelity tradeoff that's invisible at grid size.
-- **Risk:** wedges span `2π/n + 0.2` overlap; at very low `n` the fixed 0.2 overlap is a
-  larger fraction — check the night/day boundary still looks clean. Keep a sane floor
-  (e.g. n ≥ 12).
-- **Interaction with C:** independent and complementary. C makes each wedge cheaper to
-  draw; D draws fewer of them. Do C first (bigger, no fidelity change), then D if the
-  tick half still matters.
+## Part E — Memoize position astronomy (the real tick lever)
 
-## Optional finer instrumentation (before touching the tick half)
+**Found by the Node tick profiler** ([step0-tick-profile.ts](step0-tick-profile.ts), real
+timers — the browser ?tickprofile per-eval µs was a `performance.now()` artifact). The
+eval-dominated tick is **not the evaluator (~0.01µs)** — it's **un-memoized full-series
+moon/planet POSITION astronomy**. Every astro fn in [astro-env.ts](../src/shared/astro-env.ts)
+passes `null` cache, so `moonRAAndDecl`/`planetEclipticLongitude`/`moonAge` recompute the
+**full WB series (~13–19µs) on every call**, shared by nobody within a tick.
 
-The 13.7µs/eval lumps evaluator dispatch + the per-wedge *remainder* of
-`computeDayNightLeafAngle` (transit-angle conversions, polar NaN resolution — all
-ring-shared) + the final leaf distribution. If, after C+D, the tick is still the
-constraint, split that: time `computeDayNightLeafAngle`'s post-`getMasterRiseSet` tail
-vs pure evaluator overhead. If the tail dominates, memoize the ring-shared remainder in
-the slot cache too (same single-cache philosophy). If evaluator dispatch dominates,
-batch a ring's wedge angles in one pass instead of N `evalAttr` dispatches. **Don't
-guess — measure this only if C+D leave the tick as the bottleneck.**
+Measured warm tick (1 day/tick): **Miami 0.44ms** (its 7 day/night rings ARE memoized via
+`getMasterRiseSet` → cheap), **Selene 3.25ms** (58× `moonDeltaEclipticLongitudeAtDeltaDay`
+@13µs + position subdials @19µs, all un-memoized). Cold/warm 1.1×, GC 0 → real astronomy,
+not JIT/GC. So all.html's heavy tick is the moon/planet-position faces (Selene, Venezia,
+Firenze orrery, …), not the day/night rings or the evaluator.
+
+**Fix (same mechanism as the rise/set memo, single cache):**
+- Route the position functions through the slot cache: push `pool.finalCache` with the
+  frozen tick `calcDate` and pass it (instead of `null`) to `moonRAAndDecl` /
+  `planetEclipticLongitude` / `moonAge` / `sun*`. Within a tick (time frozen) all same-time
+  callers collapse to **one** compute. Slots already exist (`moonRA`, `moonDecl`,
+  `moonEclipticLongitude`, `planetEclipticLongitude`, `sunRA`, …).
+- `moonDeltaEclipticLongitudeAtDeltaDay(0..7)` computes at 8 *offset* times → memoize per
+  delta-day per tick: 58 calls → 8 computes.
+- Zero visual change (identical values, computed once). Expect Selene ~3.25ms → ~0.5ms and
+  a meaningful all.html tick drop. Guard with the full regression suite (bit-identical).
 
 ## Suggested order
 
-1. ✅ **A** — instrumentation (done) and ✅ **measured** (baseline above).
-2. ❌ **B** — rejected by measurement (search is 0.26ms/frame). No action.
-3. **C** — wedge blit, gated behind a visual-parity check. Targets the 13.4ms render half.
-4. **D** — wedge-count LOD on the grid. Targets wedge *count* in both halves.
-5. Re-measure; only then consider the finer tick instrumentation above.
-6. ✅ Updated the `scrub-perf-lever-wedge-memo` memory note with the post-fix profile.
+1. ✅ **A** — instrumentation + measured.
+2. ❌ **B** — rejected (cross-face search sharing saves <0.26ms/frame).
+3. ✅ **C** — wedge blit (QDayNightRing + QWedge, appearance-keyed shared cache). Done,
+   parity-verified, tests green. Big win on heavy single faces; neutral on the grid.
+4. ❌ **D** — LOD dropped (faithful small-face rendering preferred).
+5. **E** — memoize position astronomy via the slot cache. **The real tick lever.** Next.
+6. ✅ memory note updated.

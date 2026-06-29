@@ -828,14 +828,33 @@ export function anyObsAnimating(values: ObsValue[]): boolean {
  * union. Observatory instantiates `Updater<ObsValueName>` for typo-checked lookup;
  * the Inspector uses the default `Updater` (`K = string`) and never calls `get()`.
  */
+/**
+ * Stable comparator that groups ObsValues by their scrub eval *time class*:
+ * `now` (rank 0: discrete/scrub-compress), `next-tick` (rank 1: eval-ahead), and
+ * `boundary` (rank 2: on-beat, sub-grouped by `updateInterval` since each interval
+ * resolves to a distinct boundary). Within a leaf group every value evaluates at
+ * the same display time, so they share one astro cache. (`envSlot`/`updateOffset`
+ * refinements can join the key later; today they're 0/observer for ~all parts.)
+ */
+function byEvalTimeClass(a: ObsValue, b: ObsValue): number {
+    const rank = (v: ObsValue): number => (v.onBeat ? 2 : v.evalAhead ? 1 : 0);
+    const ra = rank(a), rb = rank(b);
+    if (ra !== rb) return ra - rb;
+    if (ra === 2 && a.updateInterval !== b.updateInterval) return a.updateInterval - b.updateInterval;
+    return 0;
+}
+
 export class Updater<K extends string = string> {
     private values: ObsValue[] = [];
     private byName = new Map<string, ObsValue>();
+    /** Whether {@link values} has been grouped for astro-cache sharing (see tick). */
+    private _grouped = false;
 
     /** Register a value; returns it for convenient handle capture. */
     add<T extends ObsValue>(v: T): T {
         this.values.push(v);
         this.byName.set(v.name, v);
+        this._grouped = false;  // re-group on next tick now that the set changed
         return v;
     }
     addAll(vs: ObsValue[]): void { for (const v of vs) this.add(v); }
@@ -865,6 +884,17 @@ export class Updater<K extends string = string> {
         withDisplayTime: WithDisplayTime,
         ctx: TimingContext,
     ): void {
+        // Group values by their scrub eval *time class* so that consecutive
+        // evaluations share one (location, display-time) astro cache instead of
+        // thrashing it. During scrub a value evaluates at: `now` (discrete/scrub),
+        // `next-tick` (eval-ahead), or its own boundary `computeNextBoundary(interval)`
+        // (on-beat). That class is `(onBeat/evalAhead, interval)` — all static — so a
+        // one-time stable sort suffices. Pure reorder: every evalFn is a function of
+        // env + display time + cache only, so the result is order-independent.
+        if (!this._grouped) {
+            this.values.sort(byEvalTimeClass);
+            this._grouped = true;
+        }
         if (!profileEnabled) {
             updateObsValues(this.values, env, perfNow, getNow,
                 ctx.tickIntervalMs, ctx.displayDeltaSec, ctx.direction, withDisplayTime);

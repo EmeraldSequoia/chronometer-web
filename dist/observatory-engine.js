@@ -11101,6 +11101,7 @@
   // src/shared/astro-env.ts
   var DEFAULT_LAT_DEG = 37.205;
   var DEFAULT_LON_DEG = -121.954;
+  var ASTRO_SLOP_SEC = 0.5;
   var cachedBatteryLevel = 1;
   var batteryInitialized = false;
   function initBatteryState() {
@@ -11312,6 +11313,17 @@
     functions.set("seconds", () => 1);
     const pool = new AstroCachePool();
     initializeCachePool(pool, dateInterval, OBSERVER_LAT, OBSERVER_LON, false, tzOffsetSeconds);
+    const _tickMemo = /* @__PURE__ */ new Map();
+    function tickMemo(key, compute) {
+      const di = dateToDateInterval(getNow2());
+      const k = `${key}|${Math.round(di / ASTRO_SLOP_SEC)}`;
+      const hit = _tickMemo.get(k);
+      if (hit !== void 0) return hit;
+      if (_tickMemo.size > 256) _tickMemo.clear();
+      const v = compute();
+      _tickMemo.set(k, v);
+      return v;
+    }
     functions.set("sunAltitude", () => {
       const di = dateToDateInterval(getNow2());
       return sunAltitude(di, OBSERVER_LAT, OBSERVER_LON, null);
@@ -11325,6 +11337,12 @@
       return sunSkyOrientationAngle(di, OBSERVER_LAT, OBSERVER_LON, null);
     });
     function riseSetForDay(riseNotSet, planetNumber) {
+      return tickMemo(
+        `rs:${riseNotSet ? 1 : 0}:${planetNumber}`,
+        () => riseSetForDayCompute(riseNotSet, planetNumber)
+      );
+    }
+    function riseSetForDayCompute(riseNotSet, planetNumber) {
       const now2 = getNow2();
       const calcDate = dateToDateInterval(now2);
       const ld = liveDate();
@@ -11429,16 +11447,20 @@
       return moonElongation(di, OBSERVER_LAT, OBSERVER_LON, null);
     });
     functions.set("closestNewMoonDayNumber", () => {
-      return closestPhaseDayNumber(0, dateToDateInterval(getNow2())) - 1;
+      const di = dateToDateInterval(getNow2());
+      return tickMemo("cp:0", () => closestPhaseDayNumber(0, di)) - 1;
     });
     functions.set("closestFirstQuarterDayNumber", () => {
-      return closestPhaseDayNumber(Math.PI / 2, dateToDateInterval(getNow2())) - 1;
+      const di = dateToDateInterval(getNow2());
+      return tickMemo("cp:1", () => closestPhaseDayNumber(Math.PI / 2, di)) - 1;
     });
     functions.set("closestFullMoonDayNumber", () => {
-      return closestPhaseDayNumber(Math.PI, dateToDateInterval(getNow2())) - 1;
+      const di = dateToDateInterval(getNow2());
+      return tickMemo("cp:2", () => closestPhaseDayNumber(Math.PI, di)) - 1;
     });
     functions.set("closestThirdQuarterDayNumber", () => {
-      return closestPhaseDayNumber(3 * Math.PI / 2, dateToDateInterval(getNow2())) - 1;
+      const di = dateToDateInterval(getNow2());
+      return tickMemo("cp:3", () => closestPhaseDayNumber(3 * Math.PI / 2, di)) - 1;
     });
     functions.set("ELongitudeOfPlanet", (n) => {
       const di = dateToDateInterval(getNow2());
@@ -11499,6 +11521,9 @@
       return WB_planetHeliocentricLatitude(n, julianCenturiesSince2000Epoch / 100);
     });
     function transitForDay(planetNumber) {
+      return tickMemo(`tr:${planetNumber}`, () => transitForDayCompute(planetNumber));
+    }
+    function transitForDayCompute(planetNumber) {
       const now2 = getNow2();
       const di = dateToDateInterval(now2);
       const utcNowSec = di + 978307200;
@@ -11813,10 +11838,12 @@
       return lunarAscendingNodeLongitude(di, null);
     });
     functions.set("moonDeltaEclipticLongitudeAtDeltaDay", (n) => {
-      const nowDate = liveDate();
-      const targetMidnight = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() + n);
-      const requestedDI = dateToDateInterval(new Date(targetMidnight.getTime() - tzDeltaMs2));
-      return moonAge(requestedDI, null).age;
+      return tickMemo(`mdeld:${n}`, () => {
+        const nowDate = liveDate();
+        const targetMidnight = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() + n);
+        const requestedDI = dateToDateInterval(new Date(targetMidnight.getTime() - tzDeltaMs2));
+        return moonAge(requestedDI, null).age;
+      });
     });
     const MS_PER_DAY = 864e5;
     const tzOffsetMs = tzOffsetSeconds * 1e3;
@@ -12509,8 +12536,15 @@
   var astroProfile = {
     masterCalls: 0,
     masterComputes: 0,
-    masterMs: 0
+    masterMs: 0,
+    // Total wall time in computeDayNightLeafAngle (the whole per-wedge day/night
+    // computation — memoized search hit + the un-memoized per-wedge leaf/angle
+    // math) and the call count. Compare leafMs against the tick's evalMs to see
+    // how much of the eval-dominated tick is this astronomy vs evaluator overhead.
+    leafCalls: 0,
+    leafMs: 0
   };
+  var astroProfilingEnabled = false;
   function computeMasterRiseSet(planetNumber, calcDate, observerLat, observerLon, pool) {
     astroProfile.masterComputes++;
     const _t0 = performance.now();
@@ -12575,6 +12609,34 @@
     return result;
   }
   function computeDayNightLeafAngle(planetNumber, leafNumber, numLeaves, getNow2, observerLat, observerLon, pool, tzOffsetSeconds) {
+    astroProfile.leafCalls++;
+    if (!astroProfilingEnabled) {
+      return computeDayNightLeafAngleImpl(
+        planetNumber,
+        leafNumber,
+        numLeaves,
+        getNow2,
+        observerLat,
+        observerLon,
+        pool,
+        tzOffsetSeconds
+      );
+    }
+    const _t0 = performance.now();
+    const r = computeDayNightLeafAngleImpl(
+      planetNumber,
+      leafNumber,
+      numLeaves,
+      getNow2,
+      observerLat,
+      observerLon,
+      pool,
+      tzOffsetSeconds
+    );
+    astroProfile.leafMs += performance.now() - _t0;
+    return r;
+  }
+  function computeDayNightLeafAngleImpl(planetNumber, leafNumber, numLeaves, getNow2, observerLat, observerLon, pool, tzOffsetSeconds) {
     const calcDate = dateToDateInterval(getNow2());
     const nightTime = planetNumber === 11 /* MidnightSun */;
     if (nightTime) {

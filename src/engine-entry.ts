@@ -33,7 +33,7 @@ import { buildStaticBlockCaches, renderFrame, buildHandShadowCaches, BEZEL_THICK
 import type { LoadedImage } from './watch/image-loader.js';
 import { SCHEDULER_LOOKAHEAD_MS } from './shared/animation.js';
 import { Updater, makeOverridableGetNow, timingContextForFrame, tickProfile, resetTickProfile, setTickProfiling, type WithDisplayTime } from './shared/updater.js';
-import { astroProfile, resetAstroProfile } from './shared/astro-env.js';
+import { astroProfile, resetAstroProfile, setAstroProfiling } from './shared/astro-env.js';
 import { buildHandValues } from './watch/hand-values.js';
 import type { Watch } from './watch/types.js';
 import type { Environment } from './expr/env.js';
@@ -70,6 +70,7 @@ initAppState({ app: 'chronometer' });
 const _tickProfile = typeof location !== 'undefined'
     && new URLSearchParams(location.search).has('tickprofile');
 setTickProfiling(_tickProfile);
+setAstroProfiling(_tickProfile);
 
 /** Convert a face name like "Mauna Kea" or "Haleakalā" to a filename like "mauna-kea" */
 function faceNameToSlug(name: string): string {
@@ -1078,9 +1079,13 @@ async function main() {
                     const a = astroProfile;
                     const perSearch = a.masterComputes ? (a.masterMs / a.masterComputes) : 0;
                     const hitRate = a.masterCalls ? (1 - a.masterComputes / a.masterCalls) * 100 : 0;
+                    const perLeaf = a.leafCalls ? (a.leafMs / a.leafCalls * 1000) : 0;
                     return `\n  - Master rise/set search: ${a.masterComputes} computes / ${a.masterCalls} calls ` +
                         `(${(a.masterComputes / n).toFixed(1)} computes/frame, ${hitRate.toFixed(0)}% cache hit), ` +
-                        `${perSearch.toFixed(3)}ms/search, ${(a.masterMs / n).toFixed(2)}ms/frame, ${a.masterMs.toFixed(0)}ms total`;
+                        `${perSearch.toFixed(3)}ms/search, ${(a.masterMs / n).toFixed(2)}ms/frame, ${a.masterMs.toFixed(0)}ms total` +
+                        `\n  - Day/night leaf calc: ${a.leafCalls} calls (${(a.leafCalls / n).toFixed(0)}/frame), ` +
+                        `${perLeaf.toFixed(1)}µs/call, ${(a.leafMs / n).toFixed(2)}ms/frame ` +
+                        `(= the share of tick eval spent in day/night wedge astronomy)`;
                 })() +
                 (_tickProfile ? '\n' + (() => {
                     const n = _scrubBodyFrameCount || 1;

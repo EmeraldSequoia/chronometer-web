@@ -64,6 +64,10 @@ import { WB_nutationObliquity } from '../astronomy/wb-sun.js';
 const DEFAULT_LAT_DEG = 37.205;    // degrees N
 const DEFAULT_LON_DEG = -121.954;  // degrees (west is negative)
 
+// Slop (seconds) for bucketing display times in the per-tick result memo; matches
+// the slot cache's ASTRO_SLOP so within-tick (frozen) calls bucket together.
+const ASTRO_SLOP_SEC = 0.5;
+
 let cachedBatteryLevel = 1.0;
 let batteryInitialized = false;
 
@@ -471,6 +475,44 @@ export function registerAstroFunctions(
     const pool = new AstroCachePool();
     initializeCachePool(pool, dateInterval, OBSERVER_LAT, OBSERVER_LON, false, tzOffsetSeconds);
 
+    /**
+     * Per-tick result memo in a finalCache slot — the same slot-cache mechanism
+     * as getMasterRiseSet, applied to the other expensive "once per day" searches
+     * (rise/set/transit "for day", closest-phase day numbers). Each of these runs
+     * a root-finder; without memoization every dependent subdial value re-runs it
+     * on every tick (e.g. Selene's 8 moonrise/moonset subdial values each re-search
+     * at ~68µs). Pushing finalCache with the live display `calcDate` self-invalidates
+     * when the time moves past slop, so within a tick all callers of the same slot
+     * share the first computation and across ticks it recomputes exactly once.
+     * `slot < 0` opts out (no dedicated slot → compute uncached).
+     */
+    /**
+     * Per-tick result memo for the expensive "once per day" searches (rise/set/
+     * transit "for day", closest-phase, moon-delta-at-day). Each runs a root-finder
+     * or full lunar series; without memoization every dependent subdial/wedge value
+     * re-runs it (e.g. Selene's 58 DEL wedges each recompute moonAge).
+     *
+     * NOT the slot cache: the slot cache holds one display time (its single
+     * `dateInterval`), but the eval-ahead animation scheme evaluates **two** times
+     * per tick — discrete values at "now", continuous values at the next tick — so
+     * a one-time slot cache thrashes as the two interleave. This memo keys on the
+     * (function, di-bucket) so both display times coexist within a tick and every
+     * caller of the same (key, time) shares one computation. Keyed by a slop-bucketed
+     * di so the frozen within-tick calls collide; capped so stale buckets are
+     * eventually dropped (a cap clear costs at most a one-tick recompute).
+     */
+    const _tickMemo = new Map<string, number>();
+    function tickMemo(key: string, compute: () => number): number {
+        const di = dateToDateInterval(getNow());
+        const k = `${key}|${Math.round(di / ASTRO_SLOP_SEC)}`;
+        const hit = _tickMemo.get(k);
+        if (hit !== undefined) return hit;
+        if (_tickMemo.size > 256) _tickMemo.clear();
+        const v = compute();
+        _tickMemo.set(k, v);
+        return v;
+    }
+
     // --- Sun position (LIVE — recompute each call) ---
     // Sun altitude and azimuth change continuously throughout the day.
     functions.set('sunAltitude', () => {
@@ -490,6 +532,16 @@ export function registerAstroFunctions(
     // iOS planetRiseSetForDay: search forward then backward, only accept
     // results on the current calendar day.  Return NaN if no event today.
     function riseSetForDay(
+        riseNotSet: boolean,
+        planetNumber: ECPlanetNumber,
+    ): number {
+        // Memoize the per-day rise/set search so the many subdial values that
+        // share (planet, rise/set, day) re-use one ~68µs search per display time.
+        return tickMemo(`rs:${riseNotSet ? 1 : 0}:${planetNumber}`,
+            () => riseSetForDayCompute(riseNotSet, planetNumber));
+    }
+
+    function riseSetForDayCompute(
         riseNotSet: boolean,
         planetNumber: ECPlanetNumber,
     ): number {
@@ -612,17 +664,23 @@ export function registerAstroFunctions(
     });
 
     // --- Closest phase quarter day numbers (LIVE — recompute from getNow()) ---
+    // Closest-phase day numbers run a phase search (~75µs); memoize per tick so
+    // repeated references share one search per display time.
     functions.set('closestNewMoonDayNumber', () => {
-        return closestPhaseDayNumber(0, dateToDateInterval(getNow())) - 1;
+        const di = dateToDateInterval(getNow());
+        return tickMemo('cp:0', () => closestPhaseDayNumber(0, di)) - 1;
     });
     functions.set('closestFirstQuarterDayNumber', () => {
-        return closestPhaseDayNumber(Math.PI / 2, dateToDateInterval(getNow())) - 1;
+        const di = dateToDateInterval(getNow());
+        return tickMemo('cp:1', () => closestPhaseDayNumber(Math.PI / 2, di)) - 1;
     });
     functions.set('closestFullMoonDayNumber', () => {
-        return closestPhaseDayNumber(Math.PI, dateToDateInterval(getNow())) - 1;
+        const di = dateToDateInterval(getNow());
+        return tickMemo('cp:2', () => closestPhaseDayNumber(Math.PI, di)) - 1;
     });
     functions.set('closestThirdQuarterDayNumber', () => {
-        return closestPhaseDayNumber(3 * Math.PI / 2, dateToDateInterval(getNow())) - 1;
+        const di = dateToDateInterval(getNow());
+        return tickMemo('cp:3', () => closestPhaseDayNumber(3 * Math.PI / 2, di)) - 1;
     });
 
     // --- Planetary ecliptic coordinates ---
@@ -700,8 +758,13 @@ export function registerAstroFunctions(
     });
 
     // --- Planet rise/transit/set for day (Venezia) ---
-    // Helper: find transit of any planet for the current day
+    // Helper: find transit of any planet for the current day (memoized per tick
+    // in the transit forDay slot — shared by all transit subdial values).
     function transitForDay(planetNumber: ECPlanetNumber): number {
+        return tickMemo(`tr:${planetNumber}`, () => transitForDayCompute(planetNumber));
+    }
+
+    function transitForDayCompute(planetNumber: ECPlanetNumber): number {
         const now = getNow();
         const di = dateToDateInterval(now);
         // Compute local noon in the target timezone using UTC arithmetic
@@ -1058,11 +1121,17 @@ export function registerAstroFunctions(
     // Computes moonAge (= moonEclipticLong - sunEclipticLong) at local midnight ± n days.
     // Uses JS Date for DST-correct midnight (better than iOS, which is imprecise across DST).
     functions.set('moonDeltaEclipticLongitudeAtDeltaDay', (n: number) => {
-        const nowDate = liveDate();
-        // Midnight of the target day in local timezone (DST-aware)
-        const targetMidnight = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() + n);
-        const requestedDI = dateToDateInterval(new Date(targetMidnight.getTime() - tzDeltaMs));
-        return moonAge(requestedDI, null).age;
+        // Memoize per delta-day per tick: a DEL ring's many wedges reference only
+        // a handful of distinct delta-days, but each call recomputes moonAge (full
+        // lunar series, ~13µs) at that day's midnight. Collapse the duplicate calls
+        // within a tick to one compute per distinct day.
+        return tickMemo(`mdeld:${n}`, () => {
+            const nowDate = liveDate();
+            // Midnight of the target day in local timezone (DST-aware)
+            const targetMidnight = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() + n);
+            const requestedDI = dateToDateInterval(new Date(targetMidnight.getTime() - tzDeltaMs));
+            return moonAge(requestedDI, null).age;
+        });
     });
 
     // --- DEL wedge color functions (iOS-style stable alternation) ---
@@ -2046,13 +2115,28 @@ export const astroProfile = {
     masterCalls: 0,
     masterComputes: 0,
     masterMs: 0,
+    // Total wall time in computeDayNightLeafAngle (the whole per-wedge day/night
+    // computation — memoized search hit + the un-memoized per-wedge leaf/angle
+    // math) and the call count. Compare leafMs against the tick's evalMs to see
+    // how much of the eval-dominated tick is this astronomy vs evaluator overhead.
+    leafCalls: 0,
+    leafMs: 0,
 };
 
 export function resetAstroProfile(): void {
     astroProfile.masterCalls = 0;
     astroProfile.masterComputes = 0;
     astroProfile.masterMs = 0;
+    astroProfile.leafCalls = 0;
+    astroProfile.leafMs = 0;
 }
+
+// Cheap integer counters (masterCalls/Computes, leafCalls) stay always-on; the
+// `performance.now()` *timing* (masterMs, leafMs) is gated behind this flag so it
+// doesn't tax the hot path — it's only meaningful alongside ?tickprofile anyway,
+// and timing 600+ sub-µs leaf calls/frame with now() would itself inflate the tick.
+let astroProfilingEnabled = false;
+export function setAstroProfiling(on: boolean): void { astroProfilingEnabled = on; }
 
 /**
  * The expensive half of the day/night computation: the two
@@ -2122,7 +2206,16 @@ function getMasterRiseSet(
     pool: AstroCachePool,
 ): MasterRiseSet {
     astroProfile.masterCalls++;
-    if (planetNumber < 0 || planetNumber > 9) {
+    // The dayNightMaster* slots are keyed by planetNumber alone, so a memoized
+    // value is valid ONLY for the pool's own observer location. A per-slot ring at
+    // a different location (e.g. Gaia's four `envSlot` city rings) must NOT read the
+    // observer's cached search — otherwise every slot collides onto the first one.
+    // Such calls bypass the memo and compute directly (they're few — a handful of
+    // rings on one face). The general fix is a (location, di)-keyed cache; see
+    // planning/2026-06-28-per-tick-astronomy-memoization.md §4b.
+    const sharedLocation = observerLat === pool.observerLatitude
+        && observerLon === pool.observerLongitude;
+    if (planetNumber < 0 || planetNumber > 9 || !sharedLocation) {
         return computeMasterRiseSet(planetNumber, calcDate, observerLat, observerLon, pool);
     }
 
@@ -2169,6 +2262,32 @@ function getMasterRiseSet(
  * (isRiseSet, aboveHorizon). For numLeaves > 0, isRiseSet is always true.
  */
 export function computeDayNightLeafAngle(
+    planetNumber: number,
+    leafNumber: number,
+    numLeaves: number,
+    getNow: () => Date,
+    observerLat: number,
+    observerLon: number,
+    pool: AstroCachePool,
+    tzOffsetSeconds: number,
+): DayNightLeafAngleResult {
+    // Thin timing wrapper: attribute the per-wedge day/night cost so the scrub
+    // log can show how much of the (eval-dominated) tick is this vs the evaluator.
+    astroProfile.leafCalls++;
+    if (!astroProfilingEnabled) {
+        return computeDayNightLeafAngleImpl(
+            planetNumber, leafNumber, numLeaves, getNow, observerLat, observerLon, pool, tzOffsetSeconds,
+        );
+    }
+    const _t0 = performance.now();
+    const r = computeDayNightLeafAngleImpl(
+        planetNumber, leafNumber, numLeaves, getNow, observerLat, observerLon, pool, tzOffsetSeconds,
+    );
+    astroProfile.leafMs += performance.now() - _t0;
+    return r;
+}
+
+function computeDayNightLeafAngleImpl(
     planetNumber: number,
     leafNumber: number,
     numLeaves: number,
