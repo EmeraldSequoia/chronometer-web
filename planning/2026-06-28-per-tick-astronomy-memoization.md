@@ -32,8 +32,10 @@ per-function attribution), `planning/step0-eval-cost.ts` (per-call microbench).
   the underlying moon/planet *position* across functions, and unifies on the slot cache. The
   only change is reordering the iteration + a cheap pre-pass; per-value animation untouched.
 - The DEL ring's **29 distinct delta-days** (moonAge at midnight±14) are irreducible under
-  any per-display-time cache (they're offset times, not the eval time). Future: opt the
-  ring out of the cache, and/or a cheaper moonAge algorithm. Not urgent.
+  any per-display-time cache (they're offset times, not the eval time) — but the *duplicate*
+  calls and isolation are best handled by **29 dedicated cache slots** (§5, Steve 2026-06-29),
+  which retires `tickMemo` for the ring and needs no `cache="private"`. Reducing the 29 computes
+  (cheaper moonAge algorithm) stays deferred. Not urgent.
 
 ---
 
@@ -303,10 +305,68 @@ a few hundred values with cheap keys).
 `moonDeltaEclipticLongitudeAtDeltaDay(n)` computes `moonAge` at **local midnight ± n days**
 (n ∈ −14…+14). These are 29 **offset** times unrelated to the eval display time, so *no*
 per-display-time cache can collapse them below 29 computes/tick (~0.4ms at 1 day/tick). Two
-distinct concerns: **isolation** (don't let those 29 offset-time computes invalidate the
-tick's shared cache) and **the 29 computes themselves**.
+distinct concerns: **memoization/isolation** (collapse the duplicate calls *and* don't let
+those offset-time computes invalidate the tick's shared cache) and **the 29 computes
+themselves**.
 
-### Isolation: a *private* cache, selected by XML attribute (Steve)
+### Memoization via 29 dedicated slots (RECOMMENDED, Steve 2026-06-29)
+
+The cleanest answer to the first concern — and the one that satisfies the "exactly one caching
+mechanism" directive — is to **give the offset-day `moonAge` its own cache slots** rather than a
+`Map` (`tickMemo`) or a scratch cache. Add 29 slots indexed `n + 14 ∈ [0,28]`, in the existing
+`<type><index>` pattern (e.g. `moonAgeAtDayOffset` … `moonAgeAtDayOffset28`). The DEL function
+computes `moonAge(localMidnight(displayDate) + n)` internally with a `null` cache and stores the
+*result* in slot `n+14` of the **shared per-display-time cache**.
+
+Why this is the right shape:
+
+- **It fits the slot model exactly.** A slot holds a deterministic function of the cache's
+  `(location, dateInterval)` key. `moonAge` at `localMidnight(displayDate) + n` is precisely
+  that — a pure function of (display time, tz, n), just like `closestFullMoon` / `nextMoonPhase`,
+  which are already display-time-derived slots. These *are* legitimate astronomy slots; framing
+  them as "moonAge at integer day offset, ±14" keeps the engine free of any "DEL ring" knowledge.
+- **Isolation comes for free — no `cache="private"` needed for Selene.** The internal compute
+  passes `null`, so it never touches the shared cache; only the result lands in a dedicated slot
+  keyed to the *display* time. There is **no push of the shared cache to an offset `dateInterval`**,
+  so there is nothing to poison. Confirmed against [Selene-I.xml:98](../src/watch/assets/selene/Selene-I.xml):
+  the DEL wedges call **only** `moonDeltaEclipticLongitudeAtDeltaDay` for astronomy (the
+  `delOnDayStrokeColor`/`TintColor` calls are pure index→color), so 29 slots fully cover the ring.
+- **It retires `tickMemo` for this case** — replacing a `Map` + per-call string-key build with an
+  array index (strictly cheaper per call), and it coexists cleanly with §4b: all DEL wedges share
+  one `update=3600` → one group → one display time → slots fill once, wedges share, no other
+  group's re-key interferes (the group runs contiguously).
+
+Three caveats to settle when implementing:
+
+1. **The slots are timezone-dependent → place them in the *location-dependent* region (after
+   `firstLocationDependent`).** `moonAge` at a fixed instant is location-independent, but the
+   *instant* is local midnight, which depends on tz. If placed before `firstLocationDependent`,
+   [`initializeCachePool`](../src/astronomy/astro-cache.ts) preserves them across an observer/tz
+   change (it bumps location-independent flags forward) → stale values computed at the old tz's
+   midnight. Past the boundary they invalidate on location change like everything else. This is a
+   correctness requirement, not cosmetic.
+2. **The ±14 range is baked into the layout** (29 = one synodic month centered on today — a
+   principled magnitude, not arbitrary). Needs a bounds guard so an out-of-range `n` falls back to
+   an uncached compute rather than indexing past the slab. Record the range rationale in a comment.
+3. **It does not reduce the 29 computes** (~0.4ms) — same floor as `tickMemo`. That's the separate,
+   deferred "cheaper moonAge" work below. No regression, no perf win from this change itself; the
+   win is mechanism unification + a cheaper per-call path.
+
+> **On passing a cache to `moonAge` (investigated 2026-06-29):** the internal `null` is correct —
+> supplying a cache buys essentially nothing. Within one `moonAge` call the expensive full lunar
+> series runs **exactly once** (un-dedupable). The only redundant intermediates are a second
+> `julianCenturiesSince2000EpochForDateInterval` (cheap arithmetic; a cache would slot-hit it) and a
+> double nutation/obliquity — but the moon path uses *un-slotted local* `nutations()`/`meanObliquity`
+> ([wb-moon.ts:191](../src/astronomy/wb-moon.ts)) while only the sun path is slot-backed, and they use
+> different argument scaling, so a cache can't share them anyway. So `null` internally + 29 result
+> slots keeps the work at its irreducible floor with zero poisoning risk; a scratch cache would add
+> risk for a sub-µs saving.
+
+### Isolation fallback: a *private* cache, selected by XML attribute (Steve)
+
+*Superseded for Selene by the 29-slot approach above (which needs no private cache). Retained as
+the **general** mechanism for any future part that does offset-time astronomy through a function
+that is **not** slot-backed.* The motivation:
 
 The DEL ring must NOT use the tick's shared cache — but it *should* use **a** cache, so each
 part's own sub-calculations are cached. Mechanism (honoring the dev rule — *no semantic
@@ -355,6 +415,69 @@ mostly other things).
   the foundation for 2b. (`envSlot`/`updateOffset` will join the key when 2b needs them; today
   ~all parts are `envSlot=0`/`offset=0`.)
 
+- **Stage 2c (DEL ring) — 29 dedicated slots (DONE 2026-06-29).** Added
+  `CacheSlot.moonAgeAtDayOffset`…`+28` (29 slots, index `n+14`) in the *location-dependent*
+  region of [astro-cache.ts](../src/astronomy/astro-cache.ts) (tz-dependent "local midnight").
+  `moonDeltaEclipticLongitudeAtDeltaDay(n)` now memoizes its full-series moonAge in slot `n+14`
+  of `pool.finalCache`, keyed by the display time — the same push/pop pattern as
+  `getMasterRiseSet`. A bounds guard (`|n| > 14` or non-integer) falls back to an uncached
+  compute. The internal `moonAge` keeps its `null` cache (documented: the series runs once, and
+  a real cache there would clobber finalCache's display-time-keyed moon/sun slots). **Retires
+  `tickMemo` for the ring** (it still serves rise/set/closest-phase); no `cache="private"`
+  needed. Safe before the full 2b routing because the **Stage-2a sort keeps the DEL wedges
+  (`onBeat`, `update=3600`) contiguous**, so they don't interleave with `getMasterRiseSet` on
+  `finalCache`; verified **bit-identical (8505 tests)**, Selene included.
+  **Measured (step0-tick-profile selene, 2000-tick warm):** Selene warm tick **2.46 → ~2.06
+  ms** (−0.40 ms, ~16%; reproduces 2.04–2.10 across runs); `eval` µs/call 21.8 → 18.4. Cold
+  (60-tick sample) flat within noise. The DEL function floor is unchanged (~0.69 ms/tick: 58
+  calls → 29 distinct full-series `moonAge` computes) — the win is the cheaper per-call memo
+  (array slot vs `Map` string-key), not fewer computes. Reducing the 29 stays deferred (§5).
+
+- **Stage 2b — route live astronomy through the shared display-time cache (DONE 2026-06-29).**
+  Added a `liveAstro((cache, di) => …)` helper in [astro-env.ts](../src/shared/astro-env.ts): it
+  computes `di = dateToDateInterval(getNow())`, pushes `pool.finalCache` at `di` (re-keying it),
+  runs the call with that cache, and pops — the same push/pop as `getMasterRiseSet`. Converted the
+  observer-location, display-time functions that previously passed `null`: sun/moon **alt/az**,
+  **moonAge/elongation/relative angles**, **planet ecliptic lon/lat/distance/alt/az/RA/decl**,
+  **sun/moon RA**, **LST**, **EOT** (+ `solarTimeSec`/`subSolar*`), **vernal-equinox / J2000 /
+  ascending-node** angles, **season**, the two **planet-terminator** functions, and the six
+  **eclipse** functions. Within a sorted leaf group (one display time) these now share the
+  underlying position slots (e.g. Basel's 6 eclipse fns → one `calculateEclipse`; Venezia's planet
+  fns → one series).
+  - **Left `null` deliberately:** offset/search-time calls (the DEL ring's `requestedDI`, the
+    `season` reference longitude at `thisDay2001`, the rise/set/transit *for-day* searches, and
+    module-level helpers taking a `calcDate`/`tryDate` parameter). The for-day searches use
+    `pool.refinementCache`, not `finalCache`, so they don't poison the shared position slots; and
+    `getMasterRiseSet` keys `finalCache` at the **same** display `di`, so all `finalCache` users in a
+    group coexist (disjoint slots, one di) with no mutual invalidation.
+  - **Verified bit-identical (8505 tests)** — Basel/Venezia/Gaia included. **Measured warm tick
+    (step0-tick-profile, 2000-tick):** Venezia **0.733 → 0.655 ms (−11%)**, Basel **4.785 → 4.352 ms
+    (−9%)**, Selene 2.05 → 2.01 (DEL-dominated), Miami flat (already memoized). No warm regression;
+    cold flat-to-better. `liveAstro` push/pop overhead negligible.
+
+- **Stage 2d — for-day / closest-phase onto slots; tickMemo retired; es-riseset local-day fix
+  (DONE 2026-06-29).** The last `tickMemo` users (rise/set & transit "for-day", closest-phase day
+  numbers) moved onto their existing dedicated slots, keyed by display time via `liveAstro`. They
+  *are* display-time-derived (anchored to today's local calendar day), so they fit the slot model;
+  the per-day re-eval is governed by each part's `updateInterval` (event boundary / `days()`), so
+  the slot's slop granularity is irrelevant. **`tickMemo` and `ASTRO_SLOP_SEC` are removed — the
+  slot cache is now the single astronomy-memoization mechanism.**
+  - **es-riseset fix:** the slot-backed `sunriseForDay`/`sunsetForDay`/`suntransitForDay` were a bad
+    iOS port (single search from **UT noon** → wrong day at non-UTC offsets) and were **production-
+    unused** (only two test files called them; the env had its own local-day logic). Replaced with
+    correct cores `riseSetForLocalDay`/`transitForLocalDay` (forward/backward local-noon search +
+    caller-injected `isSameLocalDay` predicate + slot caching, planets 0..9 with a Pluto/MidnightSun
+    guard like `getMasterRiseSet`). The env supplies the two civil-calendar inputs the astronomy
+    layer can't know — the local-noon **seed** (kept byte-for-byte: browser-`Date` for rise/set,
+    `tzOffsetSeconds` arithmetic for transit, so the iterative solver's seed is unchanged → no
+    last-ULP drift) and the same-day predicate. The kept sun wrappers now derive the local day from
+    `pool.tzOffsetSeconds`.
+  - **Verified bit-identical (8506 tests)** — Selene/Venezia/Geneva/Haleakala/Gaia included — plus a
+    new regression-lock test (evening-local western longitude: rise/set/transit resolve to today's
+    **local** day, which the old UT-noon search got wrong). **Perf neutral** (Selene/Venezia/Geneva
+    flat within noise; Venezia min 0.655 vs baseline 0.675) — this was correctness + unification, not
+    a perf change.
+
 ### Stage 2b/2c routing subtleties to handle carefully (found while scoping)
 
 The cache routing is mechanical but has real coordination hazards — do it deliberately, not
@@ -368,10 +491,13 @@ rushed:
 2. **`finalCache` is shared** by `getMasterRiseSet` (dayNightMaster slots) and would be shared
    by the position functions. Within a sorted group (same di+location) they coexist (different
    slots); the sort keeps different-di groups from interleaving. Verify no cross-invalidation.
-3. **`moonDelta`'s memo doesn't fit a slot cache.** It's keyed by `(deltaDay n, di)` over 29
-   offset times — a Map shape, not a fixed slot. So `tickMemo` can't be *fully* retired by the
-   slot cache for the DEL ring; either keep a tiny `(n, di)` memo for it, add ~29 slots, or use
-   the private scratch cache + accept 29 computes. Decide during 2c.
+3. **`moonDelta`'s memo → 29 dedicated slots (DECIDED, see §5).** Earlier framing held this
+   `(deltaDay n, di)` memo was Map-shaped and couldn't be a slot. It can: `n` is bounded
+   (−14…+14), so 29 fixed slots (indexed `n+14`) hold the per-day result, keyed by the shared
+   cache's display time. This **retires `tickMemo` for the DEL ring** and removes the need for
+   `cache="private"` here (the internal compute passes `null`, so nothing offset-time touches the
+   shared cache). Caveats: slots must live in the *location-dependent* region (tz-dependent), and
+   a bounds guard handles out-of-range `n`. The 29 computes themselves are unchanged.
 
 ### Eval-time has THREE classes, not "now vs next" — affects the sort key
 
@@ -392,16 +518,22 @@ which subsumes all path cases without enumerating them. (b) is more robust; (a) 
 1. **Keep Part E (`tickMemo`) shipped** — a real, safe, bit-identical win that stands until
    §4b lands (and `tickMemo` can be retired then).
 2. **Build §4b** — the recommended path. It sidesteps the pool-sizing question entirely and
-   can't thrash. Steps:
+   can't thrash. **Status: Stages 2a (sort) + 2b (live-function routing) + 2c (DEL slots) + 2d
+   (for-day/closest-phase slots + es-riseset local-day fix) all DONE 2026-06-29 — see the
+   implementation log. `tickMemo` is fully retired; the slot cache is the single astronomy memo.**
+   Original steps:
    a. One-time **static sort** of `updater.values` by `(updateInterval, updateOffset)` at
       build (§4b "even cheaper"), with a comment recording the "no per-value boundary input"
       assumption (sentinels).
    b. Route the astronomy functions through the pool's **current** cache — a single
-      `AstroCache` re-keyed when the active display time changes. Parts marked `cache="private"`
-      (§5) route onto a scratch cache so they don't poison the shared one.
-   c. Gate on the full regression suite (bit-identical) — verifies eval-order independence.
+      `AstroCache` re-keyed when the active display time changes.
+   c. **Add the 29 DEL-ring slots (§5)** in the location-dependent region, route
+      `moonDeltaEclipticLongitudeAtDeltaDay(n)` onto slot `n+14` (with a bounds guard), and
+      **retire `tickMemo` for the ring**. This needs no `cache="private"` for Selene; keep the
+      `cache="private"` mechanism only if/when a non-slot-backed offset-time part appears.
+   d. Gate on the full regression suite (bit-identical) — verifies eval-order independence.
 3. Re-measure Selene + all.html tick (Node `step0-tick-profile.ts` and the browser scrub log).
-4. **Defer** the cheaper-moonAge work until the 29 delta-day calls actually dominate.
+4. **Defer** the cheaper-moonAge work (reducing the 29 computes) until those calls actually dominate.
 5. Reassess the frame with the wedge-blit render savings.
 
 **Run it always, not just during scrub (Steve).** Less code (no mode branch) and the cost is
@@ -415,7 +547,10 @@ assumption breaks.
 
 - **Attribute = `cache="private"`** — "create a temporary cache just for evaluating this
   part's values." Absent ⇒ today's behavior (share the tick cache). The engine reads it
-  generically; no part-specific code.
+  generically; no part-specific code. **Update (2026-06-29):** the DEL ring — its original
+  motivation — is now handled by 29 dedicated slots (§5) and does **not** need this. The
+  attribute stays designed-but-unused, to be implemented only when a part does offset-time
+  astronomy through a function that isn't slot-backed.
 - **Reuse the scratch cache, don't allocate per eval.** Cheaper and avoids GC. An `AstroCache`
   is two typed arrays of `NUM_SLOTS` (~400+ slots ≈ a few KB); allocating one per private-part
   eval per frame is real churn. Reuse is ~free: invalidation is a single `currentFlag` bump

@@ -599,12 +599,120 @@ export function planettransitTimeRefined(
 }
 
 // ============================================================================
-// "For day" wrappers (find rise/set closest to the given day)
+// "For day" searches (find the body's rise/set/transit on the LOCAL calendar day)
 // ============================================================================
 
 /**
- * Find sunrise for the day containing the given date.
- * Uses the prior UT noon as the starting point for the search.
+ * Rise (`riseNotSet=true`) or set (`false`) of a body for the LOCAL calendar day,
+ * seeded at that day's local noon (`noonDI`). Searches forward from local noon; if
+ * that event doesn't fall on the local day, searches backward from the previous local
+ * noon; returns the event on the local day, or NaN if none (e.g. polar day/night).
+ *
+ * `isSameLocalDay(eventDI)` decides "on the local day" — supplied by the caller, which
+ * owns the timezone/calendar (this layer stays tz-agnostic). The result is memoized in
+ * the planet rise/set for-day slot of the pool's **current cache** (keyed by that
+ * cache's display time), so the several subdial values referencing one event share a
+ * single ~68µs search. Planets 0..9 only; Pluto/MidnightSun compute uncached, matching
+ * getMasterRiseSet.
+ *
+ * Replaces an earlier UT-noon single-search version (a bad iOS port that returned the
+ * wrong day for western longitudes). See
+ * planning/2026-06-28-per-tick-astronomy-memoization.md.
+ */
+export function riseSetForLocalDay(
+    noonDI: number,
+    observerLatitude: number,
+    observerLongitude: number,
+    riseNotSet: boolean,
+    planetNumber: number,
+    cachePool: AstroCachePool,
+    isSameLocalDay: (eventDI: number) => boolean,
+): number {
+    const cache = cachePool.currentCache;
+    const slot = (planetNumber >= 0 && planetNumber <= 9)
+        ? (riseNotSet ? CacheSlot.planetriseForDay : CacheSlot.planetsetForDay) + planetNumber
+        : -1;
+    if (slot >= 0 && cache && cache.isValid(slot)) {
+        return cache.get(slot);
+    }
+
+    let result = NaN;
+    const fwd = planetaryRiseSetTimeRefined(
+        noonDI, observerLatitude, observerLongitude,
+        riseNotSet, planetNumber, NaN, cachePool,
+    ).riseSetTime;
+    if (!isNoRiseSet(fwd) && isSameLocalDay(fwd)) {
+        result = fwd;
+    } else {
+        const bwd = planetaryRiseSetTimeRefined(
+            noonDI - 24 * 3600, observerLatitude, observerLongitude,
+            riseNotSet, planetNumber, NaN, cachePool,
+        ).riseSetTime;
+        if (!isNoRiseSet(bwd) && isSameLocalDay(bwd)) {
+            result = bwd;
+        }
+    }
+
+    if (slot >= 0 && cache) cache.set(slot, result);
+    return result;
+}
+
+/**
+ * High transit (meridian crossing) of a body for the LOCAL calendar day, seeded at the
+ * day's local noon. Transit always exists, but the one nearest local noon can land on
+ * the adjacent local day; the forward/backward + `isSameLocalDay` selection mirrors
+ * {@link riseSetForLocalDay}. Memoized in the `planettransitForDay` slot (planets 0..9).
+ */
+export function transitForLocalDay(
+    noonDI: number,
+    observerLatitude: number,
+    observerLongitude: number,
+    planetNumber: number,
+    cachePool: AstroCachePool,
+    isSameLocalDay: (eventDI: number) => boolean,
+): number {
+    const cache = cachePool.currentCache;
+    const slot = (planetNumber >= 0 && planetNumber <= 9)
+        ? CacheSlot.planettransitForDay + planetNumber : -1;
+    if (slot >= 0 && cache && cache.isValid(slot)) {
+        return cache.get(slot);
+    }
+
+    let result = planettransitTimeRefined(
+        noonDI, observerLatitude, observerLongitude, true, planetNumber, cachePool,
+    );
+    if (!isSameLocalDay(result)) {
+        const result2 = planettransitTimeRefined(
+            noonDI - 24 * 3600, observerLatitude, observerLongitude, true, planetNumber, cachePool,
+        );
+        result = isSameLocalDay(result2) ? result2 : NaN;
+    }
+
+    if (slot >= 0 && cache) cache.set(slot, result);
+    return result;
+}
+
+/**
+ * Local noon + day window `[start, end)` (as date intervals) for the local calendar day
+ * containing `dateInterval`, given the timezone's UTC offset. Pure arithmetic — used by
+ * the self-contained wrappers below and available for callers that don't have their own
+ * civil-calendar logic.
+ */
+export function localDayNoonAndWindow(
+    dateInterval: number,
+    tzOffsetSeconds: number,
+): { noonDI: number; dayStartDI: number; dayEndDI: number } {
+    const localSec = dateInterval + 978307200 + tzOffsetSeconds;
+    const localDayStartSec = localSec - (((localSec % 86400) + 86400) % 86400);
+    const dayStartDI = localDayStartSec - tzOffsetSeconds - 978307200;
+    return { noonDI: dayStartDI + 12 * 3600, dayStartDI, dayEndDI: dayStartDI + 86400 };
+}
+
+/**
+ * Self-contained "today's sunrise" for a given date, deriving the local day from the
+ * pool's `tzOffsetSeconds`. Convenience wrapper over {@link riseSetForLocalDay} for
+ * standalone callers/tests (production routes through astro-env, which supplies its own
+ * local-noon seed and same-day predicate).
  */
 export function sunriseForDay(
     dateInterval: number,
@@ -612,77 +720,39 @@ export function sunriseForDay(
     observerLongitude: number,
     cachePool: AstroCachePool,
 ): number {
-    if (cachePool.currentCache && cachePool.currentCache.isValid(CacheSlot.sunriseForDay)) {
-        return cachePool.currentCache.get(CacheSlot.sunriseForDay);
-    }
-
-    // Start search from UT noon of the day
-    const midnight = priorUTMidnightForDateInterval(dateInterval, cachePool.currentCache);
-    const noon = midnight + 12 * 3600;
-
-    const { riseSetTime } = planetaryRiseSetTimeRefined(
-        noon, observerLatitude, observerLongitude,
-        true, ECPlanetNumber.Sun, NaN, cachePool,
+    const { noonDI, dayStartDI, dayEndDI } = localDayNoonAndWindow(dateInterval, cachePool.tzOffsetSeconds);
+    return riseSetForLocalDay(
+        noonDI, observerLatitude, observerLongitude, true, ECPlanetNumber.Sun, cachePool,
+        (e) => e >= dayStartDI && e < dayEndDI,
     );
-
-    if (cachePool.currentCache) {
-        cachePool.currentCache.set(CacheSlot.sunriseForDay, riseSetTime);
-    }
-
-    return riseSetTime;
 }
 
-/**
- * Find sunset for the day containing the given date.
- */
+/** Self-contained "today's sunset" (see {@link sunriseForDay}). */
 export function sunsetForDay(
     dateInterval: number,
     observerLatitude: number,
     observerLongitude: number,
     cachePool: AstroCachePool,
 ): number {
-    if (cachePool.currentCache && cachePool.currentCache.isValid(CacheSlot.sunsetForDay)) {
-        return cachePool.currentCache.get(CacheSlot.sunsetForDay);
-    }
-
-    const midnight = priorUTMidnightForDateInterval(dateInterval, cachePool.currentCache);
-    const noon = midnight + 12 * 3600;
-
-    const { riseSetTime } = planetaryRiseSetTimeRefined(
-        noon, observerLatitude, observerLongitude,
-        false, ECPlanetNumber.Sun, NaN, cachePool,
+    const { noonDI, dayStartDI, dayEndDI } = localDayNoonAndWindow(dateInterval, cachePool.tzOffsetSeconds);
+    return riseSetForLocalDay(
+        noonDI, observerLatitude, observerLongitude, false, ECPlanetNumber.Sun, cachePool,
+        (e) => e >= dayStartDI && e < dayEndDI,
     );
-
-    if (cachePool.currentCache) {
-        cachePool.currentCache.set(CacheSlot.sunsetForDay, riseSetTime);
-    }
-
-    return riseSetTime;
 }
 
-/**
- * Find sun transit (solar noon) for the day containing the given date.
- */
+/** Self-contained "today's solar transit" (see {@link sunriseForDay}). */
 export function suntransitForDay(
     dateInterval: number,
     observerLatitude: number,
     observerLongitude: number,
     cachePool: AstroCachePool,
 ): number {
-    if (cachePool.currentCache && cachePool.currentCache.isValid(CacheSlot.suntransitForDay)) {
-        return cachePool.currentCache.get(CacheSlot.suntransitForDay);
-    }
-
-    const result = planettransitTimeRefined(
-        dateInterval, observerLatitude, observerLongitude,
-        true, ECPlanetNumber.Sun, cachePool,
+    const { noonDI, dayStartDI, dayEndDI } = localDayNoonAndWindow(dateInterval, cachePool.tzOffsetSeconds);
+    return transitForLocalDay(
+        noonDI, observerLatitude, observerLongitude, ECPlanetNumber.Sun, cachePool,
+        (e) => e >= dayStartDI && e < dayEndDI,
     );
-
-    if (cachePool.currentCache) {
-        cachePool.currentCache.set(CacheSlot.suntransitForDay, result);
-    }
-
-    return result;
 }
 
 // ============================================================================

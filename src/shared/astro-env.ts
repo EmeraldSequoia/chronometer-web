@@ -34,7 +34,7 @@ import {
     EC_UPDATE_NEXT_MOONRISE_OR_MOONSET,
 } from './animation.js';
 import {
-    AstroCachePool, CacheSlot, initializeCachePool, releaseCachePool,
+    AstroCache, AstroCachePool, CacheSlot, initializeCachePool, releaseCachePool,
     pushECAstroCacheInPool, popECAstroCacheToInPool,
 } from '../astronomy/astro-cache.js';
 import {
@@ -50,7 +50,10 @@ import {
     positionAngle, northAngleForObject,
     sunSkyOrientationAngle,
 } from '../astronomy/es-astro.js';
-import { planetaryRiseSetTimeRefined, planettransitTimeRefined, type RiseSetResult } from '../astronomy/es-riseset.js';
+import {
+    planetaryRiseSetTimeRefined, planettransitTimeRefined,
+    riseSetForLocalDay, transitForLocalDay, type RiseSetResult,
+} from '../astronomy/es-riseset.js';
 import { ECPlanetNumber, ECWBPrecision, isNoRiseSet, isAlwaysAbove, fmod } from '../astronomy/astro-constants.js';
 import { terminatorAngle } from '../watch/terminator.js';
 import { GSTDifferenceForDate, convertUTToGSTP03, convertGSTtoLST } from '../astronomy/es-sidereal.js';
@@ -64,9 +67,10 @@ import { WB_nutationObliquity } from '../astronomy/wb-sun.js';
 const DEFAULT_LAT_DEG = 37.205;    // degrees N
 const DEFAULT_LON_DEG = -121.954;  // degrees (west is negative)
 
-// Slop (seconds) for bucketing display times in the per-tick result memo; matches
-// the slot cache's ASTRO_SLOP so within-tick (frozen) calls bucket together.
-const ASTRO_SLOP_SEC = 0.5;
+// DEL ring: delta-days run n ∈ [−DEL_DAY_OFFSET_MAX, +DEL_DAY_OFFSET_MAX] (one synodic
+// month centered on today → 29 values). Sized to the dedicated CacheSlot.moonAgeAtDayOffset
+// slab; values outside compute uncached. See astro-cache.ts and planning/...§5.
+const DEL_DAY_OFFSET_MAX = 14;
 
 let cachedBatteryLevel = 1.0;
 let batteryInitialized = false;
@@ -433,8 +437,7 @@ export function registerAstroFunctions(
         // Ported from ECVirtualMachineOps.m line 2367
         // 0=spring, 1=summer, 2=fall, 3=winter
         const north = OBSERVER_LAT >= 0;  // equator counts as north
-        const di = dateToDateInterval(getNow());
-        const sunLong = planetEclipticLongitude(ECPlanetNumber.Sun, di, null);
+        const sunLong = liveAstro((cache, di) => planetEclipticLongitude(ECPlanetNumber.Sun, di, cache));
         if (sunLong > Math.PI * 3 / 2) return north ? 3 : 1;      // winter/summer
         else if (sunLong > Math.PI) return north ? 2 : 0;          // fall/spring
         else if (sunLong > Math.PI / 2) return north ? 1 : 3;      // summer/winter
@@ -444,7 +447,10 @@ export function registerAstroFunctions(
         // Ported from ECVirtualMachineOps.m line 1858
         // calendarErrorVsTropicalYear = sunLong(sameDay2001) - sunLong(today)
         const di = dateToDateInterval(getNow());
-        const todaysLongitude = planetEclipticLongitude(ECPlanetNumber.Sun, di, null);
+        // Today's sun longitude shares the display-time cache; the year-2001 reference
+        // is at an OFFSET time (thisDay2001) so it stays null — routing it would clobber
+        // the display-time sunEclipticLongitude slot.
+        const todaysLongitude = liveAstro((cache) => planetEclipticLongitude(ECPlanetNumber.Sun, di, cache));
 
         // Get the same month/day but in year 2001 (Gregorian reference)
         const cs = utcComponentsFromTimeInterval(di);
@@ -476,108 +482,60 @@ export function registerAstroFunctions(
     initializeCachePool(pool, dateInterval, OBSERVER_LAT, OBSERVER_LON, false, tzOffsetSeconds);
 
     /**
-     * Per-tick result memo in a finalCache slot — the same slot-cache mechanism
-     * as getMasterRiseSet, applied to the other expensive "once per day" searches
-     * (rise/set/transit "for day", closest-phase day numbers). Each of these runs
-     * a root-finder; without memoization every dependent subdial value re-runs it
-     * on every tick (e.g. Selene's 8 moonrise/moonset subdial values each re-search
-     * at ~68µs). Pushing finalCache with the live display `calcDate` self-invalidates
-     * when the time moves past slop, so within a tick all callers of the same slot
-     * share the first computation and across ticks it recomputes exactly once.
-     * `slot < 0` opts out (no dedicated slot → compute uncached).
+     * Stage 2b: route a LIVE display-time astronomy call through `pool.finalCache`,
+     * keyed at the current display time, instead of passing `null`. Within a sorted
+     * leaf group (one display time — see Updater's `byEvalTimeClass`) every caller then
+     * shares the underlying position slots: e.g. moonAltitude + moonAzimuth + moonAge
+     * compute the lunar series (`moonRAAndDecl`, ~13µs) ONCE and reuse it. The push
+     * re-keys (invalidates) `finalCache` only when the display time changes between
+     * groups; the Stage-2a sort keeps same-time values contiguous, so it doesn't thrash.
+     * Mirrors `getMasterRiseSet`'s push/pop, and coexists with its `dayNightMaster*`
+     * slots (disjoint slots, same di within a group). Observer location only — per-slot
+     * (`envSlot`) rings go through `getMasterRiseSet`'s location guard, not these.
+     * See planning/2026-06-28-per-tick-astronomy-memoization.md §4b.
      */
-    /**
-     * Per-tick result memo for the expensive "once per day" searches (rise/set/
-     * transit "for day", closest-phase, moon-delta-at-day). Each runs a root-finder
-     * or full lunar series; without memoization every dependent subdial/wedge value
-     * re-runs it (e.g. Selene's 58 DEL wedges each recompute moonAge).
-     *
-     * NOT the slot cache: the slot cache holds one display time (its single
-     * `dateInterval`), but the eval-ahead animation scheme evaluates **two** times
-     * per tick — discrete values at "now", continuous values at the next tick — so
-     * a one-time slot cache thrashes as the two interleave. This memo keys on the
-     * (function, di-bucket) so both display times coexist within a tick and every
-     * caller of the same (key, time) shares one computation. Keyed by a slop-bucketed
-     * di so the frozen within-tick calls collide; capped so stale buckets are
-     * eventually dropped (a cap clear costs at most a one-tick recompute).
-     */
-    const _tickMemo = new Map<string, number>();
-    function tickMemo(key: string, compute: () => number): number {
+    function liveAstro<T>(compute: (cache: AstroCache, di: number) => T): T {
         const di = dateToDateInterval(getNow());
-        const k = `${key}|${Math.round(di / ASTRO_SLOP_SEC)}`;
-        const hit = _tickMemo.get(k);
-        if (hit !== undefined) return hit;
-        if (_tickMemo.size > 256) _tickMemo.clear();
-        const v = compute();
-        _tickMemo.set(k, v);
-        return v;
+        const cache = pool.finalCache;
+        const prior = pushECAstroCacheInPool(pool, cache, di);
+        const r = compute(cache, di);
+        popECAstroCacheToInPool(pool, prior);
+        return r;
     }
 
     // --- Sun position (LIVE — recompute each call) ---
     // Sun altitude and azimuth change continuously throughout the day.
-    functions.set('sunAltitude', () => {
-        const di = dateToDateInterval(getNow());
-        return sunAltitude(di, OBSERVER_LAT, OBSERVER_LON, null);
-    });
-    functions.set('sunAzimuth', () => {
-        const di = dateToDateInterval(getNow());
-        return sunAzimuth(di, OBSERVER_LAT, OBSERVER_LON, null);
-    });
-    functions.set('sunSkyOrientationAngle', () => {
-        const di = dateToDateInterval(getNow());
-        return sunSkyOrientationAngle(di, OBSERVER_LAT, OBSERVER_LON, null);
-    });
+    functions.set('sunAltitude', () =>
+        liveAstro((cache, di) => sunAltitude(di, OBSERVER_LAT, OBSERVER_LON, cache)));
+    functions.set('sunAzimuth', () =>
+        liveAstro((cache, di) => sunAzimuth(di, OBSERVER_LAT, OBSERVER_LON, cache)));
+    functions.set('sunSkyOrientationAngle', () =>
+        liveAstro((cache, di) => sunSkyOrientationAngle(di, OBSERVER_LAT, OBSERVER_LON, cache)));
 
     // --- Rise/set "for day" helpers ---
     // iOS planetRiseSetForDay: search forward then backward, only accept
     // results on the current calendar day.  Return NaN if no event today.
+    // Find the rise/set of a body for the user's local calendar day. The search +
+    // forward/backward + same-day selection + result memoization live in es-riseset's
+    // riseSetForLocalDay (slot-cached per display time, replacing the old tickMemo). The
+    // env supplies the two civil-calendar inputs the astronomy layer can't know: the
+    // LOCAL-noon search seed (browser-Date, DST-aware) and the same-local-day predicate.
     function riseSetForDay(
         riseNotSet: boolean,
         planetNumber: ECPlanetNumber,
     ): number {
-        // Memoize the per-day rise/set search so the many subdial values that
-        // share (planet, rise/set, day) re-use one ~68µs search per display time.
-        return tickMemo(`rs:${riseNotSet ? 1 : 0}:${planetNumber}`,
-            () => riseSetForDayCompute(riseNotSet, planetNumber));
-    }
-
-    function riseSetForDayCompute(
-        riseNotSet: boolean,
-        planetNumber: ECPlanetNumber,
-    ): number {
-        const now = getNow();
-        const calcDate = dateToDateInterval(now);
-
-        // Compute LOCAL noon of the user's calendar day.
-        // We must use local time (not UT) because isSameLocalDay
-        // compares results in the user's timezone.
-        const ld = liveDate();  // timezone-shifted date
-        const localNoon = new Date(
-            ld.getFullYear(), ld.getMonth(), ld.getDate(), 12, 0, 0,
-        );
-        // Shift back to real UTC for the astronomy calculation
-        const noonDI = dateToDateInterval(new Date(localNoon.getTime() - tzDeltaMs));
-
-        // Search from local noon — both sunrise (~6h before) and sunset
-        // (~6h after) are within the solver's convergence radius.
-        const fwdResult = planetaryRiseSetTimeRefined(
-            noonDI, OBSERVER_LAT, OBSERVER_LON,
-            riseNotSet, planetNumber, NaN, pool,
-        ).riseSetTime;
-        if (!isNoRiseSet(fwdResult) && isSameLocalDay(fwdResult, calcDate)) {
-            return fwdResult;
-        }
-
-        // Backward: search from previous local noon (24h earlier)
-        const bwdResult = planetaryRiseSetTimeRefined(
-            noonDI - 24 * 3600, OBSERVER_LAT, OBSERVER_LON,
-            riseNotSet, planetNumber, NaN, pool,
-        ).riseSetTime;
-        if (!isNoRiseSet(bwdResult) && isSameLocalDay(bwdResult, calcDate)) {
-            return bwdResult;
-        }
-
-        return NaN;  // no event on current day
+        return liveAstro((_cache, calcDate) => {
+            // LOCAL noon of the user's calendar day (local time, not UT, so it agrees
+            // with isSameLocalDay). Both sunrise (~6h before) and sunset (~6h after) are
+            // within the solver's convergence radius from local noon.
+            const ld = liveDate();  // timezone-shifted date
+            const localNoon = new Date(ld.getFullYear(), ld.getMonth(), ld.getDate(), 12, 0, 0);
+            const noonDI = dateToDateInterval(new Date(localNoon.getTime() - tzDeltaMs));
+            return riseSetForLocalDay(
+                noonDI, OBSERVER_LAT, OBSERVER_LON, riseNotSet, planetNumber, pool,
+                (eventDI) => isSameLocalDay(eventDI, calcDate),
+            );
+        });
     }
 
     /** Check if two date intervals fall on the same local calendar day (in the target timezone) */
@@ -627,160 +585,127 @@ export function registerAstroFunctions(
     });
 
     // --- Moon (LIVE — recompute each call) ---
-    functions.set('moonAltitude', () => {
-        const di = dateToDateInterval(getNow());
-        return moonAltitude(di, OBSERVER_LAT, OBSERVER_LON, null);
-    });
-    functions.set('moonAzimuth', () => {
-        const di = dateToDateInterval(getNow());
-        return moonAzimuth(di, OBSERVER_LAT, OBSERVER_LON, null);
-    });
-    functions.set('moonAgeAngle', () => {
-        const di = dateToDateInterval(getNow());
-        return moonAge(di, null).age;
-    });
-    functions.set('moonRelativePositionAngle', () => {
-        const di = dateToDateInterval(getNow());
-        return moonRelativePositionAngle(di, OBSERVER_LAT, OBSERVER_LON, null);
-    });
-    functions.set('moonRelativeAngle', () => {
-        const di = dateToDateInterval(getNow());
-        return computeMoonRelativeAngle(di, OBSERVER_LAT, OBSERVER_LON, null);
-    });
+    functions.set('moonAltitude', () =>
+        liveAstro((cache, di) => moonAltitude(di, OBSERVER_LAT, OBSERVER_LON, cache)));
+    functions.set('moonAzimuth', () =>
+        liveAstro((cache, di) => moonAzimuth(di, OBSERVER_LAT, OBSERVER_LON, cache)));
+    functions.set('moonAgeAngle', () =>
+        liveAstro((cache, di) => moonAge(di, cache).age));
+    functions.set('moonRelativePositionAngle', () =>
+        liveAstro((cache, di) => moonRelativePositionAngle(di, OBSERVER_LAT, OBSERVER_LON, cache)));
+    functions.set('moonRelativeAngle', () =>
+        liveAstro((cache, di) => computeMoonRelativeAngle(di, OBSERVER_LAT, OBSERVER_LON, cache)));
     // realMoonAgeAngle: actual elapsed days since last new moon (not radians).
     // iOS: finds nearest new moon and returns (now - newMoon) / 86400.
     // Simplified: use moonAge (radians) * lunarCycle / 2π.
-    functions.set('realMoonAgeAngle', () => {
-        const di = dateToDateInterval(getNow());
-        const ageRadians = moonAge(di, null).age;
-        const kECLunarCycleInDays = 29.530588;
-        return ageRadians / (2 * Math.PI) * kECLunarCycleInDays;
-    });
+    functions.set('realMoonAgeAngle', () =>
+        liveAstro((cache, di) => {
+            const ageRadians = moonAge(di, cache).age;
+            const kECLunarCycleInDays = 29.530588;
+            return ageRadians / (2 * Math.PI) * kECLunarCycleInDays;
+        }));
 
     // --- Moon elongation (angular separation Sun–Moon) ---
-    functions.set('moonElongation', () => {
-        const di = dateToDateInterval(getNow());
-        return computeMoonElongation(di, OBSERVER_LAT, OBSERVER_LON, null);
-    });
+    functions.set('moonElongation', () =>
+        liveAstro((cache, di) => computeMoonElongation(di, OBSERVER_LAT, OBSERVER_LON, cache)));
 
     // --- Closest phase quarter day numbers (LIVE — recompute from getNow()) ---
-    // Closest-phase day numbers run a phase search (~75µs); memoize per tick so
-    // repeated references share one search per display time.
-    functions.set('closestNewMoonDayNumber', () => {
-        const di = dateToDateInterval(getNow());
-        return tickMemo('cp:0', () => closestPhaseDayNumber(0, di)) - 1;
-    });
-    functions.set('closestFirstQuarterDayNumber', () => {
-        const di = dateToDateInterval(getNow());
-        return tickMemo('cp:1', () => closestPhaseDayNumber(Math.PI / 2, di)) - 1;
-    });
-    functions.set('closestFullMoonDayNumber', () => {
-        const di = dateToDateInterval(getNow());
-        return tickMemo('cp:2', () => closestPhaseDayNumber(Math.PI, di)) - 1;
-    });
-    functions.set('closestThirdQuarterDayNumber', () => {
-        const di = dateToDateInterval(getNow());
-        return tickMemo('cp:3', () => closestPhaseDayNumber(3 * Math.PI / 2, di)) - 1;
-    });
+    // Closest-phase day numbers run a phase search (~75µs); memoize the result in its
+    // dedicated slot per display time so repeated references share one search.
+    const closestPhaseSlotted = (slot: CacheSlot, targetPhase: number): number =>
+        liveAstro((cache, di) => {
+            if (cache.isValid(slot)) return cache.get(slot);
+            const v = closestPhaseDayNumber(targetPhase, di);
+            cache.set(slot, v);
+            return v;
+        });
+    functions.set('closestNewMoonDayNumber', () =>
+        closestPhaseSlotted(CacheSlot.closestNewMoon, 0) - 1);
+    functions.set('closestFirstQuarterDayNumber', () =>
+        closestPhaseSlotted(CacheSlot.closestFirstQuarter, Math.PI / 2) - 1);
+    functions.set('closestFullMoonDayNumber', () =>
+        closestPhaseSlotted(CacheSlot.closestFullMoon, Math.PI) - 1);
+    functions.set('closestThirdQuarterDayNumber', () =>
+        closestPhaseSlotted(CacheSlot.closestThirdQuarter, 3 * Math.PI / 2) - 1);
 
     // --- Planetary ecliptic coordinates ---
     // ELongitudeOfPlanet(n): geocentric apparent ecliptic longitude (radians)
-    functions.set('ELongitudeOfPlanet', (n: number) => {
-        const di = dateToDateInterval(getNow());
-        return planetEclipticLongitude(n as ECPlanetNumber, di, null);
-    });
+    functions.set('ELongitudeOfPlanet', (n: number) =>
+        liveAstro((cache, di) => planetEclipticLongitude(n as ECPlanetNumber, di, cache)));
     // HLongitudeOfPlanet(n): heliocentric longitude (radians)
     // Used by Firenze's orrery to position planets on their orbits.
-    functions.set('HLongitudeOfPlanet', (n: number) => {
-        const di = dateToDateInterval(getNow());
-        const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, null);
-        return WB_planetHeliocentricLongitude(n as ECPlanetNumber, julianCenturiesSince2000Epoch / 100);
-    });
+    // (WB_planetHeliocentricLongitude takes no cache; routing shares only julianCenturies.)
+    functions.set('HLongitudeOfPlanet', (n: number) =>
+        liveAstro((cache, di) => {
+            const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, cache);
+            return WB_planetHeliocentricLongitude(n as ECPlanetNumber, julianCenturiesSince2000Epoch / 100);
+        }));
     // ELatitudeOfPlanet(n): geocentric apparent ecliptic latitude (radians)
-    functions.set('ELatitudeOfPlanet', (n: number) => {
-        const di = dateToDateInterval(getNow());
-        return planetEclipticLatitude(n as ECPlanetNumber, di, null);
-    });
+    functions.set('ELatitudeOfPlanet', (n: number) =>
+        liveAstro((cache, di) => planetEclipticLatitude(n as ECPlanetNumber, di, cache)));
     // distanceFromEarthOfPlanet(n): geocentric distance in AU
-    functions.set('distanceFromEarthOfPlanet', (n: number) => {
-        const di = dateToDateInterval(getNow());
-        return planetGeocentricDistance(n as ECPlanetNumber, di, null);
-    });
+    functions.set('distanceFromEarthOfPlanet', (n: number) =>
+        liveAstro((cache, di) => planetGeocentricDistance(n as ECPlanetNumber, di, cache)));
 
     // --- Planet azimuth / altitude / RA (Venezia) ---
     // azimuthOfPlanet(body): topocentric azimuth (radians)
-    functions.set('azimuthOfPlanet', (planetNumber: number) => {
-        const di = dateToDateInterval(getNow());
-        if (planetNumber === ECPlanetNumber.Sun) return sunAzimuth(di, OBSERVER_LAT, OBSERVER_LON, null);
-        if (planetNumber === ECPlanetNumber.Moon) return moonAzimuth(di, OBSERVER_LAT, OBSERVER_LON, null);
-        return planetAltAz(planetNumber, di, OBSERVER_LAT, OBSERVER_LON, true, false, null);
-    });
+    functions.set('azimuthOfPlanet', (planetNumber: number) =>
+        liveAstro((cache, di) => {
+            if (planetNumber === ECPlanetNumber.Sun) return sunAzimuth(di, OBSERVER_LAT, OBSERVER_LON, cache);
+            if (planetNumber === ECPlanetNumber.Moon) return moonAzimuth(di, OBSERVER_LAT, OBSERVER_LON, cache);
+            return planetAltAz(planetNumber, di, OBSERVER_LAT, OBSERVER_LON, true, false, cache);
+        }));
     // altitudeOfPlanet(body): topocentric altitude (radians)
-    functions.set('altitudeOfPlanet', (planetNumber: number) => {
-        const di = dateToDateInterval(getNow());
-        if (planetNumber === ECPlanetNumber.Sun) return sunAltitude(di, OBSERVER_LAT, OBSERVER_LON, null);
-        if (planetNumber === ECPlanetNumber.Moon) return moonAltitude(di, OBSERVER_LAT, OBSERVER_LON, null);
-        return planetAltAz(planetNumber, di, OBSERVER_LAT, OBSERVER_LON, true, true, null);
-    });
+    functions.set('altitudeOfPlanet', (planetNumber: number) =>
+        liveAstro((cache, di) => {
+            if (planetNumber === ECPlanetNumber.Sun) return sunAltitude(di, OBSERVER_LAT, OBSERVER_LON, cache);
+            if (planetNumber === ECPlanetNumber.Moon) return moonAltitude(di, OBSERVER_LAT, OBSERVER_LON, cache);
+            return planetAltAz(planetNumber, di, OBSERVER_LAT, OBSERVER_LON, true, true, cache);
+        }));
     // RAOfPlanet(body): right ascension (radians)
-    functions.set('RAOfPlanet', (planetNumber: number) => {
-        const di = dateToDateInterval(getNow());
-        const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, null);
-        if (planetNumber === ECPlanetNumber.Sun) {
-            return sunRAandDecl(di, null).rightAscension;
-        }
-        if (planetNumber === ECPlanetNumber.Moon) {
-            return moonRAAndDecl(di, null).rightAscension;
-        }
-        const pos = WB_planetApparentPosition(planetNumber as ECPlanetNumber, julianCenturiesSince2000Epoch / 100);
-        return pos.apparentRightAscension;
-    });
+    functions.set('RAOfPlanet', (planetNumber: number) =>
+        liveAstro((cache, di) => {
+            if (planetNumber === ECPlanetNumber.Sun) return sunRAandDecl(di, cache).rightAscension;
+            if (planetNumber === ECPlanetNumber.Moon) return moonRAAndDecl(di, cache).rightAscension;
+            const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, cache);
+            const pos = WB_planetApparentPosition(planetNumber as ECPlanetNumber, julianCenturiesSince2000Epoch / 100);
+            return pos.apparentRightAscension;
+        }));
     // declinationOfPlanet(body): geocentric apparent declination (radians).
     // Mirrors RAOfPlanet's Sun/Moon special-casing.
-    functions.set('declinationOfPlanet', (planetNumber: number) => {
-        const di = dateToDateInterval(getNow());
-        const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, null);
-        if (planetNumber === ECPlanetNumber.Sun) {
-            return sunRAandDecl(di, null).declination;
-        }
-        if (planetNumber === ECPlanetNumber.Moon) {
-            return moonRAAndDecl(di, null).declination;
-        }
-        const pos = WB_planetApparentPosition(planetNumber as ECPlanetNumber, julianCenturiesSince2000Epoch / 100);
-        return pos.apparentDeclination;
-    });
+    functions.set('declinationOfPlanet', (planetNumber: number) =>
+        liveAstro((cache, di) => {
+            if (planetNumber === ECPlanetNumber.Sun) return sunRAandDecl(di, cache).declination;
+            if (planetNumber === ECPlanetNumber.Moon) return moonRAAndDecl(di, cache).declination;
+            const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, cache);
+            const pos = WB_planetApparentPosition(planetNumber as ECPlanetNumber, julianCenturiesSince2000Epoch / 100);
+            return pos.apparentDeclination;
+        }));
     // HLatitudeOfPlanet(n): heliocentric latitude (radians). Companion to
     // HLongitudeOfPlanet.
-    functions.set('HLatitudeOfPlanet', (n: number) => {
-        const di = dateToDateInterval(getNow());
-        const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, null);
-        return WB_planetHeliocentricLatitude(n as ECPlanetNumber, julianCenturiesSince2000Epoch / 100);
-    });
+    functions.set('HLatitudeOfPlanet', (n: number) =>
+        liveAstro((cache, di) => {
+            const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, cache);
+            return WB_planetHeliocentricLatitude(n as ECPlanetNumber, julianCenturiesSince2000Epoch / 100);
+        }));
 
     // --- Planet rise/transit/set for day (Venezia) ---
     // Helper: find transit of any planet for the current day (memoized per tick
     // in the transit forDay slot — shared by all transit subdial values).
+    // Transit for the local calendar day — see riseSetForDay. The search + selection +
+    // slot memoization live in es-riseset's transitForLocalDay; the env supplies the
+    // local-noon seed (UTC arithmetic via tzOffsetSeconds) and the same-day predicate.
     function transitForDay(planetNumber: ECPlanetNumber): number {
-        return tickMemo(`tr:${planetNumber}`, () => transitForDayCompute(planetNumber));
-    }
-
-    function transitForDayCompute(planetNumber: ECPlanetNumber): number {
-        const now = getNow();
-        const di = dateToDateInterval(now);
-        // Compute local noon in the target timezone using UTC arithmetic
-        const utcNowSec = di + 978307200;
-        const localNowSec = utcNowSec + tzOffsetSeconds;
-        const localDayStartSec = localNowSec - ((localNowSec % 86400) + 86400) % 86400;
-        const noonDI = localDayStartSec + 12 * 3600 - tzOffsetSeconds - 978307200;
-
-        const result = planettransitTimeRefined(noonDI, OBSERVER_LAT, OBSERVER_LON, true, planetNumber, pool);
-        if (isSameLocalDay(result, di)) return result;
-
-        // Try from noon the day before
-        const result2 = planettransitTimeRefined(noonDI - 24 * 3600, OBSERVER_LAT, OBSERVER_LON, true, planetNumber, pool);
-        if (isSameLocalDay(result2, di)) return result2;
-
-        return NaN;
+        return liveAstro((_cache, di) => {
+            const utcNowSec = di + 978307200;
+            const localNowSec = utcNowSec + tzOffsetSeconds;
+            const localDayStartSec = localNowSec - ((localNowSec % 86400) + 86400) % 86400;
+            const noonDI = localDayStartSec + 12 * 3600 - tzOffsetSeconds - 978307200;
+            return transitForLocalDay(
+                noonDI, OBSERVER_LAT, OBSERVER_LON, planetNumber, pool,
+                (eventDI) => isSameLocalDay(eventDI, di),
+            );
+        });
     }
 
     // riseOfPlanetForDayValid(body)
@@ -1016,17 +941,17 @@ export function registerAstroFunctions(
     // --- Planet phase/terminator functions (Venezia) ---
     // planetMoonAgeAngle(body): returns an age-like angle for the terminator display
     // Follows ECAstronomy.m planetAge + planetMoonAgeAngle
-    functions.set('planetMoonAgeAngle', (planetNumber: number) => {
-        const di = dateToDateInterval(getNow());
+    functions.set('planetMoonAgeAngle', (planetNumber: number) =>
+        liveAstro((cache, di) => {
         if (planetNumber === ECPlanetNumber.Sun) return Math.PI; // always bright
-        if (planetNumber === ECPlanetNumber.Moon) return moonAge(di, null).age;
+        if (planetNumber === ECPlanetNumber.Moon) return moonAge(di, cache).age;
 
-        const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, null);
+        const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, cache);
         const U = julianCenturiesSince2000Epoch / 100;
 
         // Solve the Sun-planet-Earth triangle for phase angle
         const planet_r = WB_planetHeliocentricRadius(planetNumber as ECPlanetNumber, U);
-        const planet_delta = planetGeocentricDistance(planetNumber as ECPlanetNumber, di, null);
+        const planet_delta = planetGeocentricDistance(planetNumber as ECPlanetNumber, di, cache);
         const planet_R = WB_planetHeliocentricRadius(ECPlanetNumber.Earth, U); // Earth-Sun distance
 
         const cos_i = ((planet_r * planet_r) + (planet_delta * planet_delta) - (planet_R * planet_R))
@@ -1045,22 +970,22 @@ export function registerAstroFunctions(
             moonAgeVal = 2 * Math.PI - moonAgeVal;
         }
         return moonAgeVal;
-    });
+        }));
 
     // planetRelativePositionAngle(body): rotation of the terminator as it appears in the sky
     // Follows ECAstronomy.m planetRelativePositionAngle
-    functions.set('planetRelativePositionAngle', (planetNumber: number) => {
-        const di = dateToDateInterval(getNow());
+    functions.set('planetRelativePositionAngle', (planetNumber: number) =>
+        liveAstro((cache, di) => {
         if (planetNumber === ECPlanetNumber.Moon) {
-            return moonRelativePositionAngle(di, OBSERVER_LAT, OBSERVER_LON, null);
+            return moonRelativePositionAngle(di, OBSERVER_LAT, OBSERVER_LON, cache);
         }
         if (planetNumber === ECPlanetNumber.Sun) return 0;
 
-        const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, null);
+        const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, cache);
         const U = julianCenturiesSince2000Epoch / 100;
 
         // Sun RA/Decl
-        const sunRD = sunRAandDecl(di, null);
+        const sunRD = sunRAandDecl(di, cache);
         // Planet RA/Decl (without parallax)
         const planetPos = WB_planetApparentPosition(planetNumber as ECPlanetNumber, U);
         const planetRA = planetPos.apparentRightAscension;
@@ -1070,7 +995,7 @@ export function registerAstroFunctions(
 
         // Check if bright limb is on the left (moonAge > pi)
         const planet_r = WB_planetHeliocentricRadius(planetNumber as ECPlanetNumber, U);
-        const planet_delta = planetGeocentricDistance(planetNumber as ECPlanetNumber, di, null);
+        const planet_delta = planetGeocentricDistance(planetNumber as ECPlanetNumber, di, cache);
         const planet_R = WB_planetHeliocentricRadius(ECPlanetNumber.Earth, U);
         const cos_i = ((planet_r * planet_r) + (planet_delta * planet_delta) - (planet_R * planet_R))
             / (2 * planet_r * planet_delta);
@@ -1087,7 +1012,7 @@ export function registerAstroFunctions(
         }
 
         // Compute planet's azimuth/altitude for northAngle
-        const gst = convertUTToGSTP03(di, null);
+        const gst = convertUTToGSTP03(di, cache);
         const lst = convertGSTtoLST(gst, OBSERVER_LON);
         const planetHourAngle = lst - planetRA;
         const sinAlt = Math.sin(planetDecl) * Math.sin(OBSERVER_LAT)
@@ -1103,7 +1028,7 @@ export function registerAstroFunctions(
         if (angle < 0) angle += 2 * Math.PI;
         else if (angle > 2 * Math.PI) angle -= 2 * Math.PI;
         return angle;
-    });
+        }));
 
     // --- Venezia state variables ---
     // VeneziaTapsEnabled: always returns 0 (buttons deferred)
@@ -1120,18 +1045,48 @@ export function registerAstroFunctions(
     // --- Moon delta ecliptic longitude at delta day ---
     // Computes moonAge (= moonEclipticLong - sunEclipticLong) at local midnight ± n days.
     // Uses JS Date for DST-correct midnight (better than iOS, which is imprecise across DST).
+    //
+    // The full lunar-series moonAge (~13µs) at midnight±n is memoized in a dedicated
+    // cache slot per delta-day (CacheSlot.moonAgeAtDayOffset + n+14), keyed by the
+    // current display time via finalCache — the same slot-cache mechanism as
+    // getMasterRiseSet, so a DEL ring's many wedges (which reference only ~29 distinct
+    // delta-days) share one compute per distinct day per display time, and across ticks
+    // it recomputes only when the time moves past slop. This unifies on the slot cache
+    // (no separate tickMemo Map for the ring). See planning/...§5.
+    const moonDeltaCompute = (n: number): number => {
+        const nowDate = liveDate();
+        // Midnight of the target day in local timezone (DST-aware)
+        const targetMidnight = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() + n);
+        const requestedDI = dateToDateInterval(new Date(targetMidnight.getTime() - tzDeltaMs));
+        // Pass null (not finalCache): the internal moonAge runs its full lunar series
+        // exactly once per call, so a cache would save nothing here — the only repeated
+        // intermediate (julianCenturies) is sub-µs, and the moon path's nutation/obliquity
+        // isn't slot-backed anyway. More importantly, a real cache here would be keyed at
+        // the *offset* time (requestedDI), which would clobber finalCache's moon/sun slots
+        // that are keyed to the *display* time. So null is both safe and simplifying; the
+        // memoization happens one level up, in the per-delta-day result slot.
+        return moonAge(requestedDI, null).age;
+    };
     functions.set('moonDeltaEclipticLongitudeAtDeltaDay', (n: number) => {
-        // Memoize per delta-day per tick: a DEL ring's many wedges reference only
-        // a handful of distinct delta-days, but each call recomputes moonAge (full
-        // lunar series, ~13µs) at that day's midnight. Collapse the duplicate calls
-        // within a tick to one compute per distinct day.
-        return tickMemo(`mdeld:${n}`, () => {
-            const nowDate = liveDate();
-            // Midnight of the target day in local timezone (DST-aware)
-            const targetMidnight = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() + n);
-            const requestedDI = dateToDateInterval(new Date(targetMidnight.getTime() - tzDeltaMs));
-            return moonAge(requestedDI, null).age;
-        });
+        // Dedicated slots cover n ∈ [−14, +14] (the DEL ring's synodic-month range);
+        // anything outside (or non-integer) computes uncached rather than indexing past
+        // the slot range.
+        if (!Number.isInteger(n) || n < -DEL_DAY_OFFSET_MAX || n > DEL_DAY_OFFSET_MAX) {
+            return moonDeltaCompute(n);
+        }
+        const calcDate = dateToDateInterval(getNow());
+        const cache = pool.finalCache;
+        const prior = pushECAstroCacheInPool(pool, cache, calcDate);
+        const slot = CacheSlot.moonAgeAtDayOffset + (n + DEL_DAY_OFFSET_MAX);
+        let v: number;
+        if (cache.isValid(slot)) {
+            v = cache.get(slot);
+        } else {
+            v = moonDeltaCompute(n);
+            cache.set(slot, v);
+        }
+        popECAstroCacheToInPool(pool, prior);
+        return v;
     });
 
     // --- DEL wedge color functions (iOS-style stable alternation) ---
@@ -1341,27 +1296,22 @@ export function registerAstroFunctions(
     // --- Equation of Time angle (radians) ---
     // iOS: EOTAngle() returns [astro EOT] which is in radians
     // EOTSeconds converts HA to seconds, we need to convert back to angle
-    functions.set('EOTAngle', () => {
-        const di = dateToDateInterval(getNow());
-        const eotSec = EOTSeconds(di, null);
-        return eotSec * Math.PI / (12 * 3600);
-    });
-    functions.set('EOTSeconds', () => EOTSeconds(dateToDateInterval(getNow()), null));
+    functions.set('EOTAngle', () =>
+        liveAstro((cache, di) => EOTSeconds(di, cache) * Math.PI / (12 * 3600)));
+    functions.set('EOTSeconds', () => liveAstro((cache, di) => EOTSeconds(di, cache)));
 
     // --- Vernal equinox angle (sidereal-UT offset) ---
     // iOS: STDifferenceForDate — the difference between GST and UT
-    functions.set('vernalEquinoxAngle', () => {
-        const di = dateToDateInterval(getNow());
-        return GSTDifferenceForDate(di, null);
-    });
+    functions.set('vernalEquinoxAngle', () =>
+        liveAstro((cache, di) => GSTDifferenceForDate(di, cache)));
 
     // --- J2000 RA of vernal equinox of date (precession correction) ---
     // iOS: -[astro precession] = -generalPrecessionSinceJ2000(centuriesTDT)
-    functions.set('J2000RAofVernalEquinoxOfDateAngle', () => {
-        const di = dateToDateInterval(getNow());
-        const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, null);
-        return -generalPrecessionSinceJ2000(julianCenturiesSince2000Epoch);
-    });
+    functions.set('J2000RAofVernalEquinoxOfDateAngle', () =>
+        liveAstro((cache, di) => {
+            const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, cache);
+            return -generalPrecessionSinceJ2000(julianCenturiesSince2000Epoch);
+        }));
 
     // --- Sunrise/sunset 24-hour indicator angles ---
     // iOS: dayNightLeafAngleForPlanetNumber:leafNumber:numLeaves:0
@@ -1686,14 +1636,10 @@ export function registerAstroFunctions(
 
     // --- Sun/Moon RA (radians) ---
     // iOS: [mainAstro sunRA] → sunRAandDecl().rightAscension
-    functions.set('sunRA', () => {
-        const di = dateToDateInterval(getNow());
-        return sunRAandDecl(di, null).rightAscension;
-    });
-    functions.set('moonRA', () => {
-        const di = dateToDateInterval(getNow());
-        return moonRAAndDecl(di, null).rightAscension;
-    });
+    functions.set('sunRA', () =>
+        liveAstro((cache, di) => sunRAandDecl(di, cache).rightAscension));
+    functions.set('moonRA', () =>
+        liveAstro((cache, di) => moonRAAndDecl(di, cache).rightAscension));
 
     // --- minuteValue: fractional minutes (12:35:45 => 35.75) ---
     // iOS: ECWatchTime minuteValueUsingEnv: secondsSinceMidnightValue / 60 mod 60
@@ -1711,64 +1657,56 @@ export function registerAstroFunctions(
     // --- Local Sidereal Time in seconds ---
     // iOS: [mainAstro localSiderealTime] returns seconds
     // Our localSiderealTime() returns radians; convert: sec = radians * 12*3600/π
-    functions.set('lstValue', () => {
-        const di = dateToDateInterval(getNow());
-        const lstRadians = localSiderealTime(di, OBSERVER_LON, null);
-        return lstRadians * (12 * 3600) / Math.PI;
-    });
+    functions.set('lstValue', () =>
+        liveAstro((cache, di) => {
+            const lstRadians = localSiderealTime(di, OBSERVER_LON, cache);
+            return lstRadians * (12 * 3600) / Math.PI;
+        }));
 
     // --- Lunar ascending node RA ---
     // iOS: [mainAstro moonAscendingNodeRA] — converts node ecliptic longitude to RA
-    functions.set('lunarAscendingNodeRA', () => {
-        const di = dateToDateInterval(getNow());
-        const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, null);
+    functions.set('lunarAscendingNodeRA', () =>
+        liveAstro((cache, di) => {
+        const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, cache);
         const longitude = WB_MoonAscendingNodeLongitude(julianCenturiesSince2000Epoch);
         const { nutation, obliquity } = WB_nutationObliquity(julianCenturiesSince2000Epoch / 100);
         const { rightAscension } = raAndDeclO(0, longitude, obliquity);
         let ra = rightAscension;
         if (ra < 0) ra += 2 * Math.PI;
         return ra;
-    });
+        }));
 
     // --- Eclipse separation and kind ---
     // iOS: [mainAstro eclipseSeparation] → calculateEclipse().abstractSeparation
-    functions.set('eclipseSeparation', () => {
-        const di = dateToDateInterval(getNow());
-        return calculateEclipse(di, OBSERVER_LAT, OBSERVER_LON, null).abstractSeparation;
-    });
+    functions.set('eclipseSeparation', () =>
+        liveAstro((cache, di) => calculateEclipse(di, OBSERVER_LAT, OBSERVER_LON, cache).abstractSeparation));
     // iOS: eclipseKind → maps enum to wheel value (0-based with "none" collapsed)
-    functions.set('eclipseKind', () => {
-        const di = dateToDateInterval(getNow());
-        let value = calculateEclipse(di, OBSERVER_LAT, OBSERVER_LON, null).eclipseKind;
-        if (value > 0) value--;  // Wheel assumes one "none" value; collapse NoneSolar(0)/NoneLunar(5→4) gap
-        return value;
-    });
+    functions.set('eclipseKind', () =>
+        liveAstro((cache, di) => {
+            let value = calculateEclipse(di, OBSERVER_LAT, OBSERVER_LON, cache).eclipseKind;
+            if (value > 0) value--;  // Wheel assumes one "none" value; collapse NoneSolar(0)/NoneLunar(5→4) gap
+            return value;
+        }));
     // legacyEclipseKind: same as eclipseKind on iOS (Android-origin shim)
-    functions.set('legacyEclipseKind', () => {
-        const di = dateToDateInterval(getNow());
-        let value = calculateEclipse(di, OBSERVER_LAT, OBSERVER_LON, null).eclipseKind;
-        if (value > 0) value--;
-        return value;
-    });
+    functions.set('legacyEclipseKind', () =>
+        liveAstro((cache, di) => {
+            let value = calculateEclipse(di, OBSERVER_LAT, OBSERVER_LON, cache).eclipseKind;
+            if (value > 0) value--;
+            return value;
+        }));
 
     // --- Eclipse simulator disc geometry (Observatory Phase 7B) ---
     // These return the *physical* eclipse quantities the disc needs (not the
     // abstract/collapsed values the Basel wheel uses). iOS EOEclipseView.mm.
     // eclipseAngularSeparation(): physical Sun↔Moon (or shadow↔Moon) separation (rad)
-    functions.set('eclipseAngularSeparation', () => {
-        const di = dateToDateInterval(getNow());
-        return calculateEclipse(di, OBSERVER_LAT, OBSERVER_LON, null).angularSeparation;
-    });
+    functions.set('eclipseAngularSeparation', () =>
+        liveAstro((cache, di) => calculateEclipse(di, OBSERVER_LAT, OBSERVER_LON, cache).angularSeparation));
     // eclipseShadowAngularSize(): angular diameter of Earth's umbral shadow (rad, lunar)
-    functions.set('eclipseShadowAngularSize', () => {
-        const di = dateToDateInterval(getNow());
-        return calculateEclipse(di, OBSERVER_LAT, OBSERVER_LON, null).shadowAngularSize;
-    });
+    functions.set('eclipseShadowAngularSize', () =>
+        liveAstro((cache, di) => calculateEclipse(di, OBSERVER_LAT, OBSERVER_LON, cache).shadowAngularSize));
     // eclipseKindRaw(): raw ECEclipseKind enum value 0..8 (read via Math.round)
-    functions.set('eclipseKindRaw', () => {
-        const di = dateToDateInterval(getNow());
-        return calculateEclipse(di, OBSERVER_LAT, OBSERVER_LON, null).eclipseKind;
-    });
+    functions.set('eclipseKindRaw', () =>
+        liveAstro((cache, di) => calculateEclipse(di, OBSERVER_LAT, OBSERVER_LON, cache).eclipseKind));
 
     // --- year366IndicatorAngle ---
     // iOS: year366IndicatorFractionUsingEnv * 2π
@@ -1874,9 +1812,9 @@ export function registerAstroFunctions(
 
     // --- Local apparent solar time in seconds since midnight ---
     // iOS: solarTime = now + longitude * 86400/(2π) - tzOffset + EOT * 86400/(2π)
-    functions.set('solarTimeSec', () => {
-        const di = dateToDateInterval(getNow());
-        const eotSec = EOTSeconds(di, null);
+    functions.set('solarTimeSec', () =>
+        liveAstro((cache, di) => {
+        const eotSec = EOTSeconds(di, cache);
         const utcMs = getNow().getTime();
         const localSeconds = ((utcMs / 1000) + tzOffsetSeconds) % 86400;
         const secSinceMidnight = ((localSeconds % 86400) + 86400) % 86400;
@@ -1885,7 +1823,7 @@ export function registerAstroFunctions(
             - tzOffsetSeconds
             + eotSec;
         return ((solarSec % 86400) + 86400) % 86400;
-    });
+        }));
 
     // --- Planet transit angle on the 24h dial ---
     // Computes the high transit time and converts to a 24h angle.
@@ -1915,17 +1853,15 @@ export function registerAstroFunctions(
 
     // --- Sub-solar point (Observatory earth view) ---
     // subSolarLatitude: sun declination in radians (= sub-solar latitude)
-    functions.set('subSolarLatitude', () => {
-        const di = dateToDateInterval(getNow());
-        return sunRAandDecl(di, null).declination;
-    });
+    functions.set('subSolarLatitude', () =>
+        liveAstro((cache, di) => sunRAandDecl(di, cache).declination));
     // subSolarLongitude: longitude of the point where the sun is directly
     // overhead, in radians [-π, π]. Port of iOS sslng calculation:
     //   sslng = π - solarTimeAtGreenwich × π / (12 × 3600)
     // solarTimeAtGreenwich = secondsSinceMidnight - tzOffset + EOT
-    functions.set('subSolarLongitude', () => {
-        const di = dateToDateInterval(getNow());
-        const eotSec = EOTSeconds(di, null);
+    functions.set('subSolarLongitude', () =>
+        liveAstro((cache, di) => {
+        const eotSec = EOTSeconds(di, cache);
         // Compute seconds since local midnight in the target timezone
         const utcMs = getNow().getTime();
         const localSeconds = ((utcMs / 1000) + tzOffsetSeconds) % 86400;
@@ -1937,7 +1873,7 @@ export function registerAstroFunctions(
         while (sslng < -Math.PI) sslng += 2 * Math.PI;
         while (sslng > Math.PI) sslng -= 2 * Math.PI;
         return sslng;
-    });
+        }));
 
     // --- noonOnTop variable (0 or 1, set by Observatory toggle) ---
     if (!env.variables.has('noonOnTop')) {

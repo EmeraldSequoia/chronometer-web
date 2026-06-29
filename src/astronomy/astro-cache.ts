@@ -337,6 +337,22 @@ export const enum CacheSlot {
     planetMeridianTime1, planetMeridianTime2, planetMeridianTime3, planetMeridianTime4,
     planetMeridianTime5, planetMeridianTime6, planetMeridianTime7, planetMeridianTime8, planetMeridianTime9,
 
+    // moonAge (= moon − sun ecliptic longitude) at local midnight + (offset − 14) days,
+    // i.e. slot index `offset = n + 14` for delta-day n ∈ [−14, +14] — one synodic month
+    // centered on today, the DEL ring's range (see Selene-I.xml). Memoizes the ring's 29
+    // distinct offset-time moonAge computes per display time, shared by all its wedges.
+    // LOCATION-DEPENDENT on purpose: the value is location-independent at a fixed instant,
+    // but the instant ("local midnight") depends on the observer timezone, so these must
+    // invalidate on a location/tz change — hence their placement after firstLocationDependent.
+    // See planning/2026-06-28-per-tick-astronomy-memoization.md §5.
+    moonAgeAtDayOffset,    // offset 0 (n = −14)
+    moonAgeAtDayOffset1, moonAgeAtDayOffset2, moonAgeAtDayOffset3, moonAgeAtDayOffset4,
+    moonAgeAtDayOffset5, moonAgeAtDayOffset6, moonAgeAtDayOffset7, moonAgeAtDayOffset8, moonAgeAtDayOffset9,
+    moonAgeAtDayOffset10, moonAgeAtDayOffset11, moonAgeAtDayOffset12, moonAgeAtDayOffset13, moonAgeAtDayOffset14,
+    moonAgeAtDayOffset15, moonAgeAtDayOffset16, moonAgeAtDayOffset17, moonAgeAtDayOffset18, moonAgeAtDayOffset19,
+    moonAgeAtDayOffset20, moonAgeAtDayOffset21, moonAgeAtDayOffset22, moonAgeAtDayOffset23, moonAgeAtDayOffset24,
+    moonAgeAtDayOffset25, moonAgeAtDayOffset26, moonAgeAtDayOffset27, moonAgeAtDayOffset28,  // offset 28 (n = +14)
+
     /** Total number of cache slots. */
     NUM_SLOTS,
 }

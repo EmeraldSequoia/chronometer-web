@@ -498,9 +498,9 @@ describe('computeAstroTarget', () => {
 // ============================================================================
 
 describe('sunrise < transit < sunset ordering', () => {
-    // Note: sunriseForDay searches from UT noon. For western longitudes,
-    // UT noon is early local morning — be sure the search date is one where
-    // UT noon falls within the same local calendar day as sunrise/transit/sunset.
+    // makePool leaves tzOffsetSeconds = 0, so the "local day" these for-day searches use
+    // is the UTC day; pick dates/locations where sunrise/transit/sunset all fall on the
+    // same UTC day. (The local-day behavior with a real offset is covered below.)
     const cases = [
         { name: 'London summer',    date: '2024-06-15T12:00:00Z', ...LONDON },
         { name: 'Equator equinox',  date: '2024-03-20T12:00:00Z', ...EQUATOR },
@@ -521,6 +521,40 @@ describe('sunrise < transit < sunset ordering', () => {
             expect(transit).toBeLessThan(set);
         });
     }
+});
+
+// ============================================================================
+// 9b. Rise/set use the LOCAL calendar day, not the UTC day
+// ============================================================================
+
+describe('for-day searches resolve the local calendar day', () => {
+    // Regression lock for the local-day fix (replacing the old UT-noon search). When the
+    // local clock reads evening at a western longitude, the UTC instant is already the
+    // *next* UTC day. The old UT-noon code returned that next day's event; the corrected
+    // riseSetForLocalDay must return the event on the user's CURRENT local day.
+    const tzOffset = -7 * 3600; // PDT (America/Los_Angeles in June)
+    const localCivilDay = (di: number): number =>
+        new Date((di + 978307200 + tzOffset) * 1000).getUTCDate();
+
+    test('evening-local west: sunrise/sunset fall on today\'s local day, not the UTC day', () => {
+        // 2024-06-15 22:00 PDT == 2024-06-16 05:00 UTC → local day 15, UTC day 16.
+        const di = appleEpoch(new Date('2024-06-16T05:00:00Z'));
+        const pool = new AstroCachePool();
+        initializeCachePool(pool, di, CUPERTINO.lat, CUPERTINO.lon, false, tzOffset);
+        const sunrise = sunriseForDay(di, CUPERTINO.lat, CUPERTINO.lon, pool);
+        const sunset = sunsetForDay(di, CUPERTINO.lat, CUPERTINO.lon, pool);
+        const transit = suntransitForDay(di, CUPERTINO.lat, CUPERTINO.lon, pool);
+        releaseCachePool(pool);
+
+        expect(isNoRiseSet(sunrise)).toBe(false);
+        expect(isNoRiseSet(sunset)).toBe(false);
+        // All three events are on the 15th (local) — the old UT-noon search returned the 16th.
+        expect(localCivilDay(sunrise)).toBe(15);
+        expect(localCivilDay(transit)).toBe(15);
+        expect(localCivilDay(sunset)).toBe(15);
+        expect(sunrise).toBeLessThan(transit);
+        expect(transit).toBeLessThan(sunset);
+    });
 });
 
 // ============================================================================
