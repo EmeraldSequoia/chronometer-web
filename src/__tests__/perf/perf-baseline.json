@@ -1,0 +1,26 @@
+{
+  "capturedAt": "2026-06-29",
+  "machine": "(Steve's dev machine — fill in CPU/host; baseline medians hand-entered from the session scoreboard)",
+  "node": "v24.14.0",
+  "note": "post Lever A (LST↔LT unification) + Lever D (Intl formatter cache), BEFORE the per-instant tz-conversion change. All-faces warm tick ~8.4 ms.",
+  "methodology": "median of 4 runs, 1000 warm + 2000 measure ticks, 1 day/tick scrub, Cupertino observer + default Gaia city slots",
+  "calibrationMs": 5.464,
+  "faces": {
+    "babylon": 0.012,
+    "basel": 0.372,
+    "chandra": 0.054,
+    "firenze": 0.031,
+    "gaia": 1.053,
+    "geneva": 0.850,
+    "haleakala": 0.052,
+    "hana": 0.814,
+    "kyoto": 1.450,
+    "mauna-kea": 0.164,
+    "miami": 0.458,
+    "milano": 0.003,
+    "selene": 1.796,
+    "terra": 0.386,
+    "venezia": 0.640,
+    "vienna": 0.293
+  }
+}

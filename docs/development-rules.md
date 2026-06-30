@@ -214,3 +214,13 @@ The `AstroCache` slot mechanism (`src/astronomy/astro-cache.ts`) is the project'
 
 **The one legitimate limit:** each cache holds a single `(location, dateInterval)` at a time. Genuinely multi-location work in one tick (e.g. per-city world-clock rings, where one ring's slot for `planetNumber=Sun` would collide with another city's) needs either per-location slot indexing or a per-location temp cache from the pool — but that is still the pool's slot mechanism, not a new one. Likewise, two operations in one tick that want *different* dateIntervals simultaneously (e.g. a boundary search keyed at "now" interleaved with an eval keyed at a future boundary) cannot share one cache instance without thrashing — separate them into phases, or give each its own pool cache. Confirm you actually have one of these cases (measure / trace the control flow) before reaching past a single shared cache.
 
+## 18. Run the perf-regression check for performance-sensitive changes
+
+The Vitest suite is bit-identical/correctness only — it catches crashes but **not** "still correct, just slower." For any change that could plausibly affect the scrub/tick cost — astronomy, the cache pool, the updater/animation tick, expression evaluation, or per-eval work like timezone conversion — run the perf-regression check **alongside** `npx vitest run`, and surface the result to the user:
+
+```bash
+npx tsx src/__tests__/perf/perf-regression.ts
+```
+
+It measures every face's warm tick, diffs against `src/__tests__/perf/perf-baseline.json`, and prints a per-face + total summary with an instruction to surface notable deltas. It is **reported, not gated** (wall-clock time is machine-dependent, so it never fails the build). Re-baseline (`--capture`) only after an *intended* perf change, on a known-good tree — same discipline as regenerating golden files (§12). See [Perf Regression Check](perf-regression.md) for how to read the output and judge machine-variance vs a real regression.
+
