@@ -1724,16 +1724,16 @@ export function registerAstroFunctions(
     // --- planetrise/set 24-hour indicator angle LST ---
     // iOS: dayNightLeafAngleForPlanetNumber:leafNumber:0/1:numLeaves:0:timeBaseKind:LST
     functions.set('planetrise24HourIndicatorAngleLST', (planetNumber: number) => {
-        return computeDayNightLeafAngleLST(
+        return computeDayNightLeafAngle(
             planetNumber, 0, 0,
-            getNow, OBSERVER_LAT, OBSERVER_LON, pool, tzOffsetSeconds
-        );
+            getNow, OBSERVER_LAT, OBSERVER_LON, pool, tzOffsetSeconds, 'LST'
+        ).angle;
     });
     functions.set('planetset24HourIndicatorAngleLST', (planetNumber: number) => {
-        return computeDayNightLeafAngleLST(
+        return computeDayNightLeafAngle(
             planetNumber, 1, 0,
-            getNow, OBSERVER_LAT, OBSERVER_LON, pool, tzOffsetSeconds
-        );
+            getNow, OBSERVER_LAT, OBSERVER_LON, pool, tzOffsetSeconds, 'LST'
+        ).angle;
     });
 
     // --- Day/night ring leaf angle function (used by QdayNightRing) ---
@@ -1746,10 +1746,10 @@ export function registerAstroFunctions(
 
     // --- Day/night ring leaf angle function with LST time base (used by QdayNightRing with timeBase='LST') ---
     functions.set('dayNightLeafAngleLST', (planetNumber: number, leafNumber: number, numLeaves: number) => {
-        return computeDayNightLeafAngleLST(
+        return computeDayNightLeafAngle(
             planetNumber, leafNumber, numLeaves,
-            getNow, OBSERVER_LAT, OBSERVER_LON, pool, tzOffsetSeconds
-        );
+            getNow, OBSERVER_LAT, OBSERVER_LON, pool, tzOffsetSeconds, 'LST'
+        ).angle;
     });
 
     // --- Planet transit 24-hour indicator angle ---
@@ -2185,14 +2185,25 @@ function getMasterRiseSet(
 }
 
 /**
+ * Time base for day/night ring angles. iOS: ECTimeBaseKind.
+ * - `'LT'`  — local (clock) time, via `angle24HourForDate(t, tzOffsetSeconds)`.
+ * - `'LST'` — local sidereal time, via `angle24HourLSTForDate(t, observerLon)`.
+ */
+export type TimeBaseKind = 'LT' | 'LST';
+
+/**
  * Full day/night leaf angle computation.
- * iOS: dayNightLeafAngleForPlanetNumber:leafNumber:numLeaves:timeBaseKind:ECTimeBaseKindLT
+ * iOS: dayNightLeafAngleForPlanetNumber:leafNumber:numLeaves:timeBaseKind:
  *
  * Uses nextPrevRiseSetInternal (matching iOS nextPrevRiseSetInternalWithFudgeInterval)
  * with two-step search and transit-time validation.
  *
  * numLeaves == 0: special indicator angles (rise/set/polar)
  * numLeaves > 0: individual leaf positions for day/night ring
+ *
+ * `timeBaseKind` selects the time→angle conversion only; everything else (the
+ * shared rise/set master search and the leaf distribution) is identical for both
+ * bases, exactly as in iOS's single `dayNightLeafAngleForPlanetNumber:…:timeBaseKind:`.
  *
  * Returns a DayNightLeafAngleResult with the angle and the iOS output parameters
  * (isRiseSet, aboveHorizon). For numLeaves > 0, isRiseSet is always true.
@@ -2206,18 +2217,19 @@ export function computeDayNightLeafAngle(
     observerLon: number,
     pool: AstroCachePool,
     tzOffsetSeconds: number,
+    timeBaseKind: TimeBaseKind = 'LT',
 ): DayNightLeafAngleResult {
     // Thin timing wrapper: attribute the per-wedge day/night cost so the scrub
     // log can show how much of the (eval-dominated) tick is this vs the evaluator.
     astroProfile.leafCalls++;
     if (!astroProfilingEnabled) {
         return computeDayNightLeafAngleImpl(
-            planetNumber, leafNumber, numLeaves, getNow, observerLat, observerLon, pool, tzOffsetSeconds,
+            planetNumber, leafNumber, numLeaves, getNow, observerLat, observerLon, pool, tzOffsetSeconds, timeBaseKind,
         );
     }
     const _t0 = performance.now();
     const r = computeDayNightLeafAngleImpl(
-        planetNumber, leafNumber, numLeaves, getNow, observerLat, observerLon, pool, tzOffsetSeconds,
+        planetNumber, leafNumber, numLeaves, getNow, observerLat, observerLon, pool, tzOffsetSeconds, timeBaseKind,
     );
     astroProfile.leafMs += performance.now() - _t0;
     return r;
@@ -2232,8 +2244,14 @@ function computeDayNightLeafAngleImpl(
     observerLon: number,
     pool: AstroCachePool,
     tzOffsetSeconds: number,
+    timeBaseKind: TimeBaseKind,
 ): DayNightLeafAngleResult {
     const calcDate = dateToDateInterval(getNow());
+
+    // Time→angle conversion, selected by time base. iOS: angle24HourForDateInterval:timeBaseKind:.
+    const toAngle = timeBaseKind === 'LST'
+        ? (t: number) => angle24HourLSTForDate(t, observerLon)
+        : (t: number) => angle24HourForDate(t, tzOffsetSeconds);
 
     // iOS ECAstronomy.m line 4567-4570: planetMidnightSun is a special flag
     // that inverts the day/night ring (shows night leaves instead of day).
@@ -2250,7 +2268,7 @@ function computeDayNightLeafAngleImpl(
             calcDate, observerLat, observerLon,
             true /* wantHighTransit */, planetNumber, pool,
         );
-        return { angle: angle24HourForDate(transitDI, tzOffsetSeconds), isRiseSet: true, aboveHorizon: false };
+        return { angle: toAngle(transitDI), isRiseSet: true, aboveHorizon: false };
     }
 
     // isSpecial marks the numLeaves === 0 polar-detection indicators (leafNumber
@@ -2270,19 +2288,26 @@ function computeDayNightLeafAngleImpl(
     const riseTime = master.riseTime;
     const setTime = master.setTime;
 
-    // iOS lines 4616-4631: transit angles
-    let rTransitAngle = angle24HourForDate(master.riseTransitTime, tzOffsetSeconds);
-    let sTransitAngle = angle24HourForDate(master.setTransitTime, tzOffsetSeconds);
+    // iOS lines 4616-4631: transit angles. When always-above, the rise/set search
+    // returns the LOW transit but the indicator must show the HIGH transit, so add π.
+    // iOS guards this with `isnan(riseTimeAngle) && EC_nansEqual(…, kECAlwaysAboveHorizon)`
+    // because its sentinel is a NaN. The TS sentinel is the FINITE ±1e18, so the old
+    // `isNaN(riseTime)` guard was always false (dead code) and the +π never fired —
+    // a port regression that left polar-summer transit fallbacks at the low transit
+    // (≈ midnight). `isAlwaysAbove(riseTime)` is the correct check (matches the LST
+    // path and iOS intent). See planning/2026-06-29-scrub-perf-next-levers.md (Lever A).
+    let rTransitAngle = toAngle(master.riseTransitTime);
+    let sTransitAngle = toAngle(master.setTransitTime);
 
-    if (isNaN(riseTime) && isAlwaysAbove(riseTime)) {
+    if (isAlwaysAbove(riseTime)) {
         rTransitAngle = fmod(rTransitAngle + Math.PI, 2 * Math.PI);
     }
-    if (isNaN(setTime) && isAlwaysAbove(setTime)) {
+    if (isAlwaysAbove(setTime)) {
         sTransitAngle = fmod(sTransitAngle + Math.PI, 2 * Math.PI);
     }
 
-    let riseTimeAngle = isNoRiseSet(riseTime) ? NaN : angle24HourForDate(riseTime, tzOffsetSeconds);
-    let setTimeAngle = isNoRiseSet(setTime) ? NaN : angle24HourForDate(setTime, tzOffsetSeconds);
+    let riseTimeAngle = isNoRiseSet(riseTime) ? NaN : toAngle(riseTime);
+    let setTimeAngle = isNoRiseSet(setTime) ? NaN : toAngle(setTime);
 
     // Rise/set indicators (numLeaves === 0, leafNumber 0/1). iOS L5100-5125.
     // Derived from the raw angles BEFORE the polar NaN-resolution below, matching
@@ -2687,7 +2712,14 @@ function computeClosestSunEclipticLongQuarter366Angle(
 }
 
 // ============================================================================
-// LST variant of day/night leaf angle
+// LST 24-hour angle helper
+//
+// The LST day/night ring no longer has its own leaf-angle function: it shares
+// `computeDayNightLeafAngle` via `timeBaseKind='LST'`, which routes the
+// conversion through this helper. (Previously `computeDayNightLeafAngleLST`
+// duplicated the whole distribution — a simplified subset that omitted the
+// MidnightSun / polar-indicator / transit branches; the unified function covers
+// them all.)
 // ============================================================================
 
 /**
@@ -2698,124 +2730,3 @@ function angle24HourLSTForDate(dateInterval: number, observerLon: number): numbe
     return fmod(lstRadians, 2 * Math.PI);
 }
 
-/**
- * Compute day/night leaf angle using LST.
- * Same logic as computeDayNightLeafAngle, but returns an LST angle.
- */
-function computeDayNightLeafAngleLST(
-    planetNumber: number,
-    leafNumber: number,
-    numLeaves: number,
-    getNow: () => Date,
-    observerLat: number,
-    observerLon: number,
-    pool: AstroCachePool,
-    tzOffsetSeconds: number,
-): number {
-    const calcDate = dateToDateInterval(getNow());
-    const fudgeFactorSeconds = 5;
-    const lookahead = 3600 * 13.2;
-
-    // iOS: [self planetIsUp:planetNumber] — compares against altitudeAtRiseSet, not zero
-    const planetIsUp = planetIsUpForRiseSet(planetNumber, calcDate, observerLat, observerLon);
-
-    // iOS: search for rise and set using nextPrevRiseSetInternal
-    const riseResult = nextPrevRiseSetInternal(
-        calcDate, observerLat, observerLon,
-        true, planetNumber, !planetIsUp, -fudgeFactorSeconds, lookahead, pool,
-    );
-    const setResult = nextPrevRiseSetInternal(
-        calcDate, observerLat, observerLon,
-        false, planetNumber, planetIsUp, -fudgeFactorSeconds, lookahead, pool,
-    );
-
-    const riseTime = riseResult.eventTime;
-    const setTime = setResult.eventTime;
-
-    // Transit angles from search results (LST variant)
-    let rTransitAngle = angle24HourLSTForDate(riseResult.transitTime, observerLon);
-    let sTransitAngle = angle24HourLSTForDate(setResult.transitTime, observerLon);
-
-    // iOS: if always-above, transit was for low transit → add PI
-    if (isAlwaysAbove(riseTime)) {
-        rTransitAngle = fmod(rTransitAngle + Math.PI, 2 * Math.PI);
-    }
-    if (isAlwaysAbove(setTime)) {
-        sTransitAngle = fmod(sTransitAngle + Math.PI, 2 * Math.PI);
-    }
-
-    let riseTimeAngle = isNoRiseSet(riseTime) ? NaN : angle24HourLSTForDate(riseTime, observerLon);
-    let setTimeAngle = isNoRiseSet(setTime) ? NaN : angle24HourLSTForDate(setTime, observerLon);
-
-    // Special case: numLeaves == 0
-    if (numLeaves === 0) {
-        if (leafNumber === 0) { // Rise
-            if (isNaN(riseTimeAngle)) {
-                return rTransitAngle; // Fallback
-            } else {
-                return riseTimeAngle;
-            }
-        } else if (leafNumber === 1) { // Set
-            if (isNaN(setTimeAngle)) {
-                return sTransitAngle; // Fallback
-            } else {
-                return setTimeAngle;
-            }
-        }
-        return 0; // polar checks not done here
-    }
-
-    const leafWidth = 2 * Math.PI / numLeaves;
-
-    // Handle NaN cases — match iOS logic exactly
-    if (isNaN(riseTimeAngle)) {
-        if (isNaN(setTimeAngle)) {
-            let sTA = sTransitAngle;
-            if (sTA > rTransitAngle + Math.PI) sTA -= 2 * Math.PI;
-            else if (sTA < rTransitAngle - Math.PI) sTA += 2 * Math.PI;
-            const avgTransit = (rTransitAngle + sTA) / 2;
-            if (isAlwaysAbove(riseTime)) {
-                riseTimeAngle = avgTransit - Math.PI;
-                setTimeAngle = avgTransit + Math.PI;
-            } else {
-                riseTimeAngle = avgTransit - leafWidth / 2 - 0.00001;
-                setTimeAngle = avgTransit + leafWidth / 2 + 0.00001;
-            }
-        } else {
-            if (isAlwaysAbove(riseTime)) {
-                riseTimeAngle = setTimeAngle - 2 * Math.PI;
-            } else {
-                riseTimeAngle = setTimeAngle - leafWidth;
-            }
-        }
-    } else if (isNaN(setTimeAngle)) {
-        if (isAlwaysAbove(setTime)) {
-            setTimeAngle = riseTimeAngle + 2 * Math.PI;
-        } else {
-            setTimeAngle = riseTimeAngle + leafWidth;
-        }
-    }
-
-    // Normalize
-    riseTimeAngle = fmod(riseTimeAngle, 2 * Math.PI);
-    setTimeAngle = fmod(setTimeAngle, 2 * Math.PI);
-    if (setTimeAngle <= riseTimeAngle + 0.0001) {
-        setTimeAngle += 2 * Math.PI;
-    }
-
-    // Normal daytime leaf: shrink by half leaf width
-    setTimeAngle -= leafWidth / 2;
-    riseTimeAngle += leafWidth / 2;
-
-    if (setTimeAngle < riseTimeAngle) {
-        riseTimeAngle = setTimeAngle = (riseTimeAngle + setTimeAngle) / 2;
-    }
-
-    let leafCenterAngle = riseTimeAngle + (setTimeAngle - riseTimeAngle) / (numLeaves - 1) * leafNumber;
-
-    if (leafCenterAngle > 2 * Math.PI) {
-        leafCenterAngle -= 2 * Math.PI;
-    }
-
-    return leafCenterAngle;
-}

@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { PerformanceObserver } from 'node:perf_hooks';
 import { JSDOM } from 'jsdom';
 import { parseWatchXML } from '../src/watch/xml-parser.js';
-import { createWatchEnvironment } from '../src/watch/watch-env.js';
+import { createWatchEnvironment, GAIA_SUBDIAL_DEFAULTS, type TerraSlot } from '../src/watch/watch-env.js';
 import { buildHandValues } from '../src/watch/hand-values.js';
 import {
     Updater, makeOverridableGetNow, tickProfile, resetTickProfile, setTickProfiling,
@@ -33,7 +33,26 @@ let displayMs = Date.UTC(2026, 5, 28, 12, 0, 0);
 const base = () => new Date(displayMs);
 const { getNow, withDisplayTime } = makeOverridableGetNow(base);
 
-const env = createWatchEnvironment(watch, 37.3349, -122.0090, getNow);
+// Observer at Cupertino / Bay Area → America/Los_Angeles. Passing the real tz +
+// world-clock city slots makes the world-clock faces (Terra/Gaia) take the same
+// code paths as the browser. Terra's 24-city ring defaults auto-apply inside
+// createWatchEnvironment; Gaia's subdials must be seeded explicitly: slot 1 =
+// observer (so its day/night ring hits the observer rise/set memo, like the
+// browser), slots 2–4 = the default cities (New York / London / Sydney, which are
+// off-observer and exercise the per-city uncached path).
+const OBSERVER_LAT_DEG = 37.3349, OBSERVER_LON_DEG = -122.0090;
+const OBSERVER_TZ = 'America/Los_Angeles';
+const isGaia = /gaia/i.test(FACE);
+const slotOverrides: Record<number, TerraSlot> | undefined = isGaia
+    ? {
+        1: { cityName: 'Observer', olsonId: OBSERVER_TZ, lat: OBSERVER_LAT_DEG, lon: OBSERVER_LON_DEG },
+        ...Object.fromEntries(Object.entries(GAIA_SUBDIAL_DEFAULTS).map(([k, v]) => [k, { ...v }])),
+    }
+    : undefined;
+
+const env = createWatchEnvironment(
+    watch, OBSERVER_LAT_DEG, OBSERVER_LON_DEG, getNow, OBSERVER_TZ, slotOverrides,
+);
 
 // Per-function instrumentation: wrap every env function to count calls + time.
 const fnStats = new Map<string, { calls: number; ms: number }>();

@@ -198,3 +198,19 @@ Read [Observatory Documentation](observatory.md) for information on how to build
 
 The scope of this project does not include modifying the iOS reference codebases. Never modify them; check with the user if you think it's necessary.
 
+## 17. Reach for the slot-based astronomy cache before inventing a new memoization mechanism
+
+The `AstroCache` slot mechanism (`src/astronomy/astro-cache.ts`) is the project's primary memoization tool. It is a flat array of numeric slots with a `currentFlag` validity scheme, keyed by `(location, dateInterval)`, and it has been used in iOS for years for exactly this purpose. It is designed to memoize **both** high-level results (e.g. a rise/set angle for a planet) **and** the lower-level intermediates those results share (positions, nutation, obliquity) — all in one pass, with no ordering dependency between callers.
+
+**When you think you need to memoize something, do this first:**
+
+1. **Check whether the code you're touching already has slots for it.** Slots are sometimes defined but never wired up (a port artifact). Example found 2026-06-29: `dayNightMasterRiseAngleLST…` slots existed in the enum but `computeDayNightLeafAngleLST` ignored them and re-ran the rise/set search on every leaf — 41× the cost of the properly-cached local-time ring. The fix was to *use the existing slots*, not to add a new cache.
+2. **Check how iOS cached it.** The reference (`.chronometer-ref/Classes/ECAstronomy.m`, `ECAstronomyCache.h`) almost always memoized inline against the slot cache, keyed by an index like `baseSlotIndex + planetNumber (+ timeBaseOffset)`. Mirror that. iOS rarely needed bespoke memo wrappers; if the port grew one (e.g. `getMasterRiseSet`), that is a sign the low-level function should have cached into slots itself.
+3. **If a function recomputes the same astronomy across calls in a tick, the function — or the slot-backed helper it calls — should write its result into a slot,** so siblings hit the cache. Factor shared sub-computations into their own slot if needed.
+
+**Do not** introduce a parallel `Map`-based memo, a per-tick scratch object, or a hand-rolled wrapper when a slot (existing or new) would do. New mechanisms cost complexity and tend to drift out of the `(location, di)` invalidation model, producing stale-value bugs. The retired `tickMemo` (a `Map`) is the cautionary example — it was replaced wholesale by dedicated slots.
+
+**Use *the* pool's caches, even for a brief, few-slot need.** The rule is not "any slot-based cache is fine" — it is "use the existing `AstroCachePool`." The pool already provides reusable caches (`finalCache`, `refinementCache`, `tempCache`) whose invalidation is a single `currentFlag` bump — **O(1), independent of slot count** — so reusing one for a short window (e.g. one part's sub-calculations, or one phase of the tick) is essentially free and is the intended pattern. Reach for a pool cache (re-keyed/invalidated as needed) before ever defining a new cache object of your own. A short-lived `tempCache` from the pool is correct; a freshly-allocated cache or a `Map` is not.
+
+**The one legitimate limit:** each cache holds a single `(location, dateInterval)` at a time. Genuinely multi-location work in one tick (e.g. per-city world-clock rings, where one ring's slot for `planetNumber=Sun` would collide with another city's) needs either per-location slot indexing or a per-location temp cache from the pool — but that is still the pool's slot mechanism, not a new one. Likewise, two operations in one tick that want *different* dateIntervals simultaneously (e.g. a boundary search keyed at "now" interleaved with an eval keyed at a future boundary) cannot share one cache instance without thrashing — separate them into phases, or give each its own pool cache. Confirm you actually have one of these cases (measure / trace the control flow) before reaching past a single shared cache.
+

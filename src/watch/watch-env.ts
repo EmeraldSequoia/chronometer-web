@@ -547,6 +547,42 @@ function computeCalendarCoverOffsetForEnv(env: Environment, coverTypeCode: numbe
 // Terra I — World-time ring functions (Chronometer-specific)
 // ============================================================================
 
+// Intl.DateTimeFormat *construction* is expensive (~tens of µs: ICU setup +
+// allocation), while formatting with an existing instance is cheap. Terra/Gaia
+// call the tz helpers below dozens of times per scrub tick (one per ring slot, in
+// moreDay/lessDay/tzOffsetAngleN), so building a fresh formatter each call cost
+// ~4ms/tick on Terra (planning/2026-06-29-scrub-perf-next-levers.md, Lever D).
+// Cache the formatters by Olson id; the input Date varies per call, the formatter
+// does not. These are pure functions of (olsonId, fixed en-US options) so a
+// module-level cache is safe and shared across faces/envs.
+// NOTE: we intentionally do NOT cache the *offset value* — DST offsets change at
+// transition instants, not on a clean per-day key, so a value memo would be wrong
+// across a transition without next-DST-change gating (out of scope; see Lever D).
+const _tzOffsetFormatters = new Map<string, Intl.DateTimeFormat>();
+function tzOffsetFormatter(olsonId: string): Intl.DateTimeFormat {
+    let fmt = _tzOffsetFormatters.get(olsonId);
+    if (!fmt) {
+        fmt = new Intl.DateTimeFormat('en-US', { timeZone: olsonId, timeZoneName: 'longOffset' });
+        _tzOffsetFormatters.set(olsonId, fmt);
+    }
+    return fmt;
+}
+
+const _localTimeFormatters = new Map<string, Intl.DateTimeFormat>();
+function localTimeFormatter(olsonId: string): Intl.DateTimeFormat {
+    let fmt = _localTimeFormatters.get(olsonId);
+    if (!fmt) {
+        fmt = new Intl.DateTimeFormat('en-US', {
+            timeZone: olsonId,
+            hour: 'numeric', minute: 'numeric', second: 'numeric',
+            day: 'numeric', month: 'numeric', weekday: 'short',
+            hour12: false,
+        });
+        _localTimeFormatters.set(olsonId, fmt);
+    }
+    return fmt;
+}
+
 function registerTerraFunctions(
     env: Environment,
     OBSERVER_LAT: number,
@@ -607,10 +643,7 @@ function registerTerraFunctions(
      */
     function getTzOffsetSeconds(olsonId: string, date: Date): number {
         try {
-            const fmt = new Intl.DateTimeFormat('en-US', {
-                timeZone: olsonId,
-                timeZoneName: 'longOffset',
-            });
+            const fmt = tzOffsetFormatter(olsonId);
             const parts = fmt.formatToParts(date);
             const tzPart = parts.find(p => p.type === 'timeZoneName');
             if (!tzPart) return 0;
@@ -634,12 +667,7 @@ function registerTerraFunctions(
         h24: number; min: number; sec: number; day: number; month: number; weekday: number;
     } {
         try {
-            const fmt = new Intl.DateTimeFormat('en-US', {
-                timeZone: olsonId,
-                hour: 'numeric', minute: 'numeric', second: 'numeric',
-                day: 'numeric', month: 'numeric', weekday: 'short',
-                hour12: false,
-            });
+            const fmt = localTimeFormatter(olsonId);
             const parts = fmt.formatToParts(date);
             let h24 = 0, min = 0, sec = 0, day = 1, month = 0, weekday = 0;
             for (const p of parts) {
