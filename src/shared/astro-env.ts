@@ -35,7 +35,7 @@ import {
 } from './animation.js';
 import {
     AstroCache, AstroCachePool, CacheSlot, initializeCachePool, releaseCachePool,
-    pushECAstroCacheInPool, popECAstroCacheToInPool,
+    invalidateCachePool, pushECAstroCacheInPool, popECAstroCacheToInPool,
 } from '../astronomy/astro-cache.js';
 import {
     sunAltitude, sunAzimuth, moonAltitude, moonAzimuth, moonAge,
@@ -203,6 +203,49 @@ export function computeTzDeltaMs(olsonTimezone: string | undefined, referenceDat
         targetOffsetSec = browserOffsetSec;
     }
     return (targetOffsetSec - browserOffsetSec) * 1000;
+}
+
+/**
+ * The timezone offset (seconds, east-positive) that {@link registerAstroFunctions}
+ * captures on the env as `tzOffsetSec` for a given instant. This is the ONE piece
+ * of time-dependent state baked into the env at build time (everything else is a
+ * live closure over getNow()), so it is the sole thing that can go stale between
+ * scrub ticks — a change here means a DST boundary was crossed and the env must be
+ * rebuilt. Callers use it to decide whether a per-tick rebuild is actually needed.
+ *
+ * Note the browser offset cancels for a set timezone (tzDeltaMs already nets it
+ * out), so the result equals the target zone's per-instant offset and is therefore
+ * independent of the machine's own timezone.
+ */
+export function envTzOffsetSec(olsonTimezone: string | undefined, now: Date): number {
+    const browserOffsetSec = -now.getTimezoneOffset() * 60;
+    return browserOffsetSec + computeTzDeltaMs(olsonTimezone, now) / 1000;
+}
+
+/**
+ * Is an env's captured timezone state stale for its current display time?
+ *
+ * An env bakes in exactly two time-dependent scalars at build time (see
+ * {@link registerAstroFunctions}): `tzOffsetSec` (the target zone's offset,
+ * which changes at TARGET-zone DST boundaries) and `tzDeltaMs` (the
+ * browser→target delta, which ALSO changes at the BROWSER zone's DST
+ * boundaries — even when the target zone observes no DST at all). A rebuild
+ * is needed iff either differs from what a fresh build would capture now.
+ *
+ * The check reads the env's own (quantized) getNow — the exact source the
+ * captured values came from — because tzOffsetSecondsAt is sensitive to
+ * sub-second inputs (a …:59.999 display time can resolve 1s off).
+ *
+ * This is the per-tick rebuild guard's predicate: when it returns false, the
+ * env is byte-equivalent to a fresh build (given an invalidated astro cache
+ * pool), so the expensive rebuild can be skipped.
+ */
+export function envTzStateStale(env: Environment, olsonTimezone: string | undefined): boolean {
+    const now = (env.getNow ?? (() => new Date()))();
+    const deltaMs = computeTzDeltaMs(olsonTimezone, now);
+    const browserOffsetSec = -now.getTimezoneOffset() * 60;
+    return env.tzOffsetSec !== browserOffsetSec + deltaMs / 1000
+        || env.tzDeltaMs !== deltaMs;
 }
 
 /**
@@ -376,10 +419,13 @@ export function registerAstroFunctions(
     // makes getHours()/getMinutes()/getSeconds() return target-timezone values.
     const tzDeltaMs = computeTzDeltaMs(olsonTimezone, now);
 
-    // Timezone offset in seconds (east-positive) for calendar/astronomy.
-    const browserOffsetSec = -now.getTimezoneOffset() * 60;
-    const tzOffsetSeconds = browserOffsetSec + tzDeltaMs / 1000;
+    // Timezone offset in seconds (east-positive) for calendar/astronomy. Computed
+    // via the shared helper so the per-tick rebuild guard (envTzStateStale, which
+    // compares against env.tzOffsetSec/env.tzDeltaMs to detect DST crossings) can
+    // never diverge from these formulas.
+    const tzOffsetSeconds = envTzOffsetSec(olsonTimezone, now);
     env.tzOffsetSec = tzOffsetSeconds;
+    env.tzDeltaMs = tzDeltaMs;
 
     // --- Clock hands (LIVE — recompute from Date.now() on each call) ---
     // These are called every animation frame so the hands move in real time.
@@ -590,6 +636,12 @@ export function registerAstroFunctions(
     // --- Astronomy setup (snapshot for rise/set, which are daily values) ---
     const pool = new AstroCachePool();
     initializeCachePool(pool, dateInterval, OBSERVER_LAT, OBSERVER_LON, false, tzOffsetSeconds);
+
+    // Expose O(1) pool invalidation so the per-tick rebuild guard can skip the
+    // full env rebuild (offset unchanged) while still guaranteeing this tick's
+    // astronomy is computed fresh — identical semantics to the fresh pool a
+    // rebuild would have created.
+    env.invalidateAstroCaches = () => invalidateCachePool(pool);
 
     /**
      * Stage 2b: route a LIVE display-time astronomy call through `pool.finalCache`,

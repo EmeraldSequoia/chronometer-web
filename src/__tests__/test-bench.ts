@@ -28,6 +28,7 @@ import {
 
 import { parseWatchXML } from '../watch/xml-parser.js';
 import { createWatchEnvironment } from '../watch/watch-env.js';
+import { envTzStateStale } from '../shared/astro-env.js';
 import type { Watch, WatchPart, QDialPart } from '../watch/types.js';
 import type { Environment } from '../expr/env.js';
 import {
@@ -149,6 +150,25 @@ export class TestBench {
     }
 
     /**
+     * Mirror of the engine's rebuildEnvironments guard (engine-entry.ts): rebuild
+     * only when the env's captured timezone state (target offset + browser→target
+     * delta) is stale for the current display time — a DST crossing in either the
+     * target or the browser zone. Otherwise skip the rebuild and invalidate the
+     * env's astro cache pool, so this tick's astronomy starts from the same
+     * all-invalid state a fresh pool would have.
+     *
+     * The golden baselines were captured with an unconditional rebuild, so if this
+     * guard ever changes observable behavior, the regression suite catches it.
+     */
+    private guardedRebuildEnv(): void {
+        if (envTzStateStale(this.env, this.location.olsonTimezone) || this.env.captureStale?.()) {
+            this.rebuildEnv();
+        } else {
+            this.env.invalidateAstroCaches?.();
+        }
+    }
+
+    /**
      * Advance the mocked performance.now() by deltaMs and run one animation frame.
      * When playing, also advances display time by deltaMs in the play direction.
      */
@@ -189,7 +209,8 @@ export class TestBench {
         this.updater.finish();
 
         this.timeController.step(unit, direction);
-        this.rebuildEnv();
+        // Engine parity: step() fires onTick → the guarded rebuildEnvironments.
+        this.guardedRebuildEnv();
 
         // One-shot re-evaluation: reset schedules, then evaluate at the new time.
         // The clock is stopped (step() above), so the engine ticks with direction 0;
@@ -208,7 +229,8 @@ export class TestBench {
         if (rateIdx >= 0) {
             this.timeController.setRate(RATE_OPTIONS[rateIdx]);
         }
-        this.rebuildEnv();
+        // Engine parity: setDirection/setRate fire onTick → the guarded rebuild.
+        this.guardedRebuildEnv();
         this.updater.reset();
     }
 
@@ -218,7 +240,7 @@ export class TestBench {
 
         this.timeController.beginFrame();
         this.timeController.checkTick(this.perfNow);
-        this.rebuildEnv();
+        this.guardedRebuildEnv();
 
         const rate = this.timeController.currentRate;
         const displayDelta = rate ? displaySecondsPerTick(rate.unit) : 0;

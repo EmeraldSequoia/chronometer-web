@@ -692,7 +692,26 @@ function registerTerraFunctions(
     }
 
     // --- Determine which ring slot goes at the top (12 o'clock) ---
+    // Closest-offset match at a given instant. TIME-DEPENDENT: any ring city's
+    // DST transition can change which slot is closest, so a result captured at
+    // build time goes stale as the display time moves (see captureStale below).
+    function detectTopSlotByOffset(targetTz: string, nowDate: Date): number {
+        let best = 12;
+        const targetOffset = getTzOffsetSeconds(targetTz, nowDate);
+        let bestDiff = Infinity;
+        for (const [slotStr, data] of Object.entries(terraRingDefaults)) {
+            const slotOffset = getTzOffsetSeconds(data.olsonId, nowDate);
+            const diff = Math.abs(slotOffset - targetOffset);
+            if (diff < bestDiff) {
+                bestDiff = diff;
+                best = parseInt(slotStr, 10);
+            }
+        }
+        return best;
+    }
+
     let detectedTopSlot = 12; // default: London (slot 12 = UTC)
+    let offsetMatchedTz: string | null = null;  // set iff the time-dependent path chose the slot
     if (globalLocationSlot !== undefined) {
         detectedTopSlot = globalLocationSlot;
     } else {
@@ -705,21 +724,23 @@ function registerTerraFunctions(
                 }
             }
             if (detectedTopSlot === 12 && targetTz !== 'Europe/London' && targetTz !== 'UTC') {
-                const nowDate = getNow();
-                const targetOffset = getTzOffsetSeconds(targetTz, nowDate);
-                let bestDiff = Infinity;
-                for (const [slotStr, data] of Object.entries(terraRingDefaults)) {
-                    const slotOffset = getTzOffsetSeconds(data.olsonId, nowDate);
-                    const diff = Math.abs(slotOffset - targetOffset);
-                    if (diff < bestDiff) {
-                        bestDiff = diff;
-                        detectedTopSlot = parseInt(slotStr, 10);
-                    }
-                }
+                detectedTopSlot = detectTopSlotByOffset(targetTz, getNow());
+                offsetMatchedTz = targetTz;
             }
         } catch {
             // keep default
         }
+    }
+
+    // Offset-matched top slot is the one Terra-specific build-time capture that can
+    // go stale as the display time moves (a ring city entering/leaving DST changes
+    // which slot is closest). Report staleness so the per-tick rebuild guard forces
+    // a rebuild exactly when a fresh build would detect a different slot — the
+    // exact-olsonId and globalLocationSlot paths are time-independent, so they
+    // don't register the hook and pay nothing.
+    if (offsetMatchedTz !== null) {
+        const matchedTz = offsetMatchedTz;
+        env.captureStale = () => detectTopSlotByOffset(matchedTz, getNow()) !== detectedTopSlot;
     }
 
     functions.set('terraIDeviceSlot', () => detectedTopSlot);

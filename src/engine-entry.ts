@@ -33,7 +33,7 @@ import { buildStaticBlockCaches, renderFrame, buildHandShadowCaches, BEZEL_THICK
 import type { LoadedImage } from './watch/image-loader.js';
 import { SCHEDULER_LOOKAHEAD_MS } from './shared/animation.js';
 import { Updater, makeOverridableGetNow, timingContextForFrame, tickProfile, resetTickProfile, setTickProfiling, type WithDisplayTime } from './shared/updater.js';
-import { astroProfile, resetAstroProfile, setAstroProfiling } from './shared/astro-env.js';
+import { astroProfile, resetAstroProfile, setAstroProfiling, envTzStateStale } from './shared/astro-env.js';
 import { buildHandValues } from './watch/hand-values.js';
 import type { Watch } from './watch/types.js';
 import type { Environment } from './expr/env.js';
@@ -865,8 +865,27 @@ async function main() {
         tzDeltaMs = computeTzDeltaMs(locationTimezone, rawGetNow());
         let tzOffsetChanged = false;
 
+        // The only time-dependent state baked into an env is its captured tz offset
+        // (env.tzOffsetSec); everything else is either static config or a live closure
+        // over getNow(). So a rebuild is only *necessary* when that offset changes —
+        // i.e. a DST boundary was crossed. On the scrub hot path (this runs every
+        // 100ms tick) the offset is unchanged for the vast majority of ticks, so this
+        // guard skips a full createWatchEnvironment + buildStaticBlockCaches per face
+        // that would produce a byte-identical result. See planning/ perf notes.
+
         for (const face of faces) {
             if (!face.enabled) continue;
+            if (!envTzStateStale(face.env, locationTimezone) && !face.env.captureStale?.()) {
+                // Captured state unchanged → the live getNow() closures already
+                // reflect the new display time; nothing baked into the env is stale.
+                // Skip the rebuild — but invalidate the env's astro cache pool (O(1))
+                // so this tick's astronomy starts from the same all-invalid state a
+                // fresh pool would have, never serving values computed at a previous
+                // tick's time.
+                face.env.invalidateAstroCaches?.();
+                continue;
+            }
+
             // Preserve the Terra city-name knockout cache across env rebuilds
             // (it's stored on the env but doesn't depend on time — only on slot assignments).
             const oldKnockout = (face.env as any)._terraCityKnockout;

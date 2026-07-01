@@ -581,6 +581,23 @@ export function releaseCachePool(pool: AstroCachePool): void {
     pool.currentCache = null;
 }
 
+/**
+ * Invalidate every cache in the pool — O(1) per cache (bumps each
+ * `currentFlag`; no arrays are cleared).
+ *
+ * Used by the per-tick env-rebuild guard: when a scrub tick skips the full
+ * environment rebuild (timezone offset unchanged), this restores the exact
+ * semantics a rebuild would have had — a pool whose slots are all invalid at
+ * tick start — so no value computed at a previous tick's time (or a previous
+ * tick's eval-ahead boundary) can be served for the current tick.
+ */
+export function invalidateCachePool(pool: AstroCachePool): void {
+    pool.finalCache.invalidate();
+    pool.tempCache.invalidate();
+    pool.refinementCache.invalidate();
+    pool.midnightCache.invalidate();
+}
+
 // ============================================================================
 // Legacy WBCacheSlot mapping
 // ============================================================================

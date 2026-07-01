@@ -287,6 +287,12 @@
   function releaseCachePool(pool) {
     pool.currentCache = null;
   }
+  function invalidateCachePool(pool) {
+    pool.finalCache.invalidate();
+    pool.tempCache.invalidate();
+    pool.refinementCache.invalidate();
+    pool.midnightCache.invalidate();
+  }
 
   // src/astronomy/es-time.ts
   var ES_MIN_ASTRO_DATE = -189344476800;
@@ -11237,6 +11243,10 @@
     }
     return (targetOffsetSec - browserOffsetSec) * 1e3;
   }
+  function envTzOffsetSec(olsonTimezone, now) {
+    const browserOffsetSec = -now.getTimezoneOffset() * 60;
+    return browserOffsetSec + computeTzDeltaMs(olsonTimezone, now) / 1e3;
+  }
   function createAstroEnvironment(observerLatDeg = DEFAULT_LAT_DEG, observerLonDeg = DEFAULT_LON_DEG, getNow2 = () => /* @__PURE__ */ new Date(), olsonTimezone) {
     const OBSERVER_LAT = observerLatDeg * Math.PI / 180;
     const OBSERVER_LON = observerLonDeg * Math.PI / 180;
@@ -11282,9 +11292,9 @@
     const now = getNow2();
     const dateInterval = dateToDateInterval(now);
     const tzDeltaMs2 = computeTzDeltaMs(olsonTimezone, now);
-    const browserOffsetSec = -now.getTimezoneOffset() * 60;
-    const tzOffsetSeconds = browserOffsetSec + tzDeltaMs2 / 1e3;
+    const tzOffsetSeconds = envTzOffsetSec(olsonTimezone, now);
     env2.tzOffsetSec = tzOffsetSeconds;
+    env2.tzDeltaMs = tzDeltaMs2;
     const liveDate = () => {
       const raw = getNow2();
       return tzDeltaMs2 !== 0 ? new Date(raw.getTime() + tzDeltaMs2) : raw;
@@ -11412,6 +11422,7 @@
     functions.set("seconds", () => 1);
     const pool = new AstroCachePool();
     initializeCachePool(pool, dateInterval, OBSERVER_LAT, OBSERVER_LON, false, tzOffsetSeconds);
+    env2.invalidateAstroCaches = () => invalidateCachePool(pool);
     function liveAstro(compute) {
       const di = dateToDateInterval(getNow2());
       const cache = pool.finalCache;

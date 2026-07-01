@@ -810,6 +810,12 @@ return {${names2.join(",")}};`;
   function releaseCachePool(pool) {
     pool.currentCache = null;
   }
+  function invalidateCachePool(pool) {
+    pool.finalCache.invalidate();
+    pool.tempCache.invalidate();
+    pool.refinementCache.invalidate();
+    pool.midnightCache.invalidate();
+  }
 
   // src/astronomy/es-time.ts
   var ES_MIN_ASTRO_DATE = -189344476800;
@@ -12847,6 +12853,16 @@ return {${names2.join(",")}};`;
     }
     return (targetOffsetSec - browserOffsetSec) * 1e3;
   }
+  function envTzOffsetSec(olsonTimezone, now) {
+    const browserOffsetSec = -now.getTimezoneOffset() * 60;
+    return browserOffsetSec + computeTzDeltaMs(olsonTimezone, now) / 1e3;
+  }
+  function envTzStateStale(env, olsonTimezone) {
+    const now = (env.getNow ?? (() => /* @__PURE__ */ new Date()))();
+    const deltaMs = computeTzDeltaMs(olsonTimezone, now);
+    const browserOffsetSec = -now.getTimezoneOffset() * 60;
+    return env.tzOffsetSec !== browserOffsetSec + deltaMs / 1e3 || env.tzDeltaMs !== deltaMs;
+  }
   var exprCache = /* @__PURE__ */ new Map();
   function compiledFor(src) {
     let fn = exprCache.get(src);
@@ -12877,9 +12893,9 @@ return {${names2.join(",")}};`;
     const now = getNow();
     const dateInterval = dateToDateInterval(now);
     const tzDeltaMs = computeTzDeltaMs(olsonTimezone, now);
-    const browserOffsetSec = -now.getTimezoneOffset() * 60;
-    const tzOffsetSeconds = browserOffsetSec + tzDeltaMs / 1e3;
+    const tzOffsetSeconds = envTzOffsetSec(olsonTimezone, now);
     env.tzOffsetSec = tzOffsetSeconds;
+    env.tzDeltaMs = tzDeltaMs;
     const liveDate = () => {
       const raw = getNow();
       return tzDeltaMs !== 0 ? new Date(raw.getTime() + tzDeltaMs) : raw;
@@ -13007,6 +13023,7 @@ return {${names2.join(",")}};`;
     functions.set("seconds", () => 1);
     const pool = new AstroCachePool();
     initializeCachePool(pool, dateInterval, OBSERVER_LAT, OBSERVER_LON, false, tzOffsetSeconds);
+    env.invalidateAstroCaches = () => invalidateCachePool(pool);
     function liveAstro(compute) {
       const di = dateToDateInterval(getNow());
       const cache = pool.finalCache;
@@ -15324,7 +15341,22 @@ return {${names2.join(",")}};`;
         };
       }
     }
+    function detectTopSlotByOffset(targetTz, nowDate) {
+      let best = 12;
+      const targetOffset = getTzOffsetSeconds(targetTz, nowDate);
+      let bestDiff = Infinity;
+      for (const [slotStr, data] of Object.entries(terraRingDefaults)) {
+        const slotOffset = getTzOffsetSeconds(data.olsonId, nowDate);
+        const diff = Math.abs(slotOffset - targetOffset);
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          best = parseInt(slotStr, 10);
+        }
+      }
+      return best;
+    }
     let detectedTopSlot = 12;
+    let offsetMatchedTz = null;
     if (globalLocationSlot !== void 0) {
       detectedTopSlot = globalLocationSlot;
     } else {
@@ -15337,20 +15369,15 @@ return {${names2.join(",")}};`;
           }
         }
         if (detectedTopSlot === 12 && targetTz !== "Europe/London" && targetTz !== "UTC") {
-          const nowDate = getNow();
-          const targetOffset = getTzOffsetSeconds(targetTz, nowDate);
-          let bestDiff = Infinity;
-          for (const [slotStr, data] of Object.entries(terraRingDefaults)) {
-            const slotOffset = getTzOffsetSeconds(data.olsonId, nowDate);
-            const diff = Math.abs(slotOffset - targetOffset);
-            if (diff < bestDiff) {
-              bestDiff = diff;
-              detectedTopSlot = parseInt(slotStr, 10);
-            }
-          }
+          detectedTopSlot = detectTopSlotByOffset(targetTz, getNow());
+          offsetMatchedTz = targetTz;
         }
       } catch {
       }
+    }
+    if (offsetMatchedTz !== null) {
+      const matchedTz = offsetMatchedTz;
+      env.captureStale = () => detectTopSlotByOffset(matchedTz, getNow()) !== detectedTopSlot;
     }
     functions.set("terraIDeviceSlot", () => detectedTopSlot);
     functions.set("overrideTerraITopSlot", (_n) => 0);
@@ -21709,6 +21736,10 @@ return {${names2.join(",")}};`;
       let tzOffsetChanged = false;
       for (const face of faces) {
         if (!face.enabled) continue;
+        if (!envTzStateStale(face.env, locationTimezone) && !face.env.captureStale?.()) {
+          face.env.invalidateAstroCaches?.();
+          continue;
+        }
         const oldKnockout = face.env._terraCityKnockout;
         const oldTzOffset = face.env.tzOffsetSec;
         face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);

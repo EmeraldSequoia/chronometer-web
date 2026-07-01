@@ -24,8 +24,22 @@ export interface Environment {
     observerLonRad?: number;
     /** Timezone offset in seconds east-positive (set by watch-env, used by sentinel scheduling). */
     tzOffsetSec?: number;
+    /** Captured browser→target timezone delta in ms (set by registerAstroFunctions).
+     *  Together with tzOffsetSec this is the complete time-dependent state baked into
+     *  an env at build time; the per-tick rebuild guard compares both. */
+    tzDeltaMs?: number;
     /** Display-time source (set by watch-env, used by renderer ring cache). */
     getNow?: () => Date;
+    /** O(1) invalidation of this env's astro cache pool (set by registerAstroFunctions).
+     *  Called by the per-tick rebuild guard when it skips a full env rebuild, so
+     *  cached astronomy from a previous tick's time can never leak into this tick. */
+    invalidateAstroCaches?: () => void;
+    /** Does any face-specific build-time capture differ from what a fresh build
+     *  would compute at the current display time? Registered only by envs that
+     *  actually capture time-dependent state beyond the tz pair (e.g. Terra's
+     *  offset-matched top slot). The per-tick rebuild guard consults this in
+     *  addition to envTzStateStale; unset means "nothing else captured". */
+    captureStale?: () => boolean;
 }
 
 /**
