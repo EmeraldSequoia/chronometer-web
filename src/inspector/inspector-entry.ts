@@ -21,7 +21,7 @@ import { initTimeControls, writeTimeStateToUrl, type TimeControlsAPI } from '../
 import { createFpsIndicator } from '../shared/fps-indicator.js';
 import { getState, setState, initAppState, onSharedChange, isPersistentMode } from '../shared/app-state.js';
 import { initShareButton } from '../shared/share-button.js';
-import { resolveTimezone } from '../shared/tz-resolve.js';
+import { resolveTimezone, resolveTimezoneFromDb } from '../shared/tz-resolve.js';
 import { findClosestCity, prefetchCityData, loadCityData, releaseCityData, isCityDataLoaded } from '../shared/city-search.js';
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
 import { showStorageWarning } from '../shared/incoming-settings-dialog.js';
@@ -98,9 +98,19 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
     return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-// If no timezone in URL, resolve it from lat/lon (only if we have a location)
+// If no timezone in URL/state, resolve it from lat/lon (only if we have a
+// location). Use the nearest-city zone when the city DB is already resident;
+// otherwise fall back to the browser zone as a TRANSIENT backstop and re-resolve
+// once the DB loads (see "Backstop timezone re-resolution" below) — a direct link
+// at lat/lon should end up on the *location's* zone, not the browser's.
+let tzNeedsResolution = false;
 if (!locationTimezone && hasUrlLocation) {
-    locationTimezone = resolveTimezone(lat, lon, null);
+    if (isCityDataLoaded()) {
+        locationTimezone = resolveTimezone(lat, lon, null);
+    } else {
+        locationTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        tzNeedsResolution = true;
+    }
 }
 
 let tzDeltaMs = computeTzDeltaMs(locationTimezone);
@@ -1161,6 +1171,29 @@ updateTimeDisplay();
 renderBrowserTime();
 timeUI?.updateTimeUI();
 scheduleFrame();
+
+// Backstop timezone re-resolution: if startup fell back to the browser zone
+// because the city DB wasn't loaded (a direct link with lat/lon but no tz),
+// correct it once the DB is available. resolveTimezoneFromDb awaits the load and
+// tolerates a racing releaseCityData() (there is no refcount). On a change we
+// rebuild the env and refresh the catalog, mirroring onLocationChange.
+if (tzNeedsResolution) {
+    resolveTimezoneFromDb(lat, lon).then(resolved => {
+        tzNeedsResolution = false;
+        if (resolved && resolved !== locationTimezone) {
+            locationTimezone = resolved;
+            tzDeltaMs = computeTzDeltaMs(locationTimezone);
+            env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
+            if (isPersistentMode()) setState({ tz: locationTimezone });
+            updateLocationDisplay();
+            updateTimeDisplay();
+            rebuildExprValues();   // snap expression to the new environment
+            resetAllSchedules();   // re-evaluate the catalog against the new env
+            scheduleFrame();
+        }
+        if (!dialogShown()) releaseCityData();  // drop the parsed DB unless the dialog needs it
+    });
+}
 
 console.log('[Inspector] Initialized — lat:', lat, 'lon:', lon, 'tz:', locationTimezone,
     '— catalog values:', updater.all.length);

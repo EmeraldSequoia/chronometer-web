@@ -90,6 +90,98 @@ function initBatteryState(): void {
     }
 }
 
+// Cache of Intl.DateTimeFormat instances keyed by IANA timezone. Constructing
+// a formatter is the expensive part of an Intl call; formatToParts() on an
+// existing one is cheap. One global cache serves every coexisting env.
+const _tzFmtCache = new Map<string, Intl.DateTimeFormat>();
+
+function tzFormatter(tz: string): Intl.DateTimeFormat {
+    let fmt = _tzFmtCache.get(tz);
+    if (!fmt) {
+        fmt = new Intl.DateTimeFormat('en-US', {
+            timeZone: tz, hourCycle: 'h23',
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
+        });
+        _tzFmtCache.set(tz, fmt);
+    }
+    return fmt;
+}
+
+/** Uncached single offset lookup (one formatToParts). */
+function rawTzOffsetSecondsAt(tz: string, utcMs: number): number {
+    const parts = tzFormatter(tz).formatToParts(new Date(utcMs));
+    const p: Record<string, number> = {};
+    for (const part of parts) if (part.type !== 'literal') p[part.type] = +part.value;
+    // h23 yields 00..23, but guard the midnight-as-24 quirk seen on some engines.
+    const asUTC = Date.UTC(p.year, p.month - 1, p.day, p.hour % 24, p.minute, p.second);
+    return Math.round((asUTC - utcMs) / 1000);
+}
+
+/**
+ * Per-timezone memo of the constant-offset window around the last queried
+ * instant. A tz's UTC offset is piecewise-constant in time — it changes only at
+ * DST transitions — so once we know the offset holds across `[fromMs, untilMs)`,
+ * any instant in that window is answered with no `formatToParts`. This recovers
+ * the per-eval cost the per-instant conversion would otherwise add on every tick
+ * (rise/set subdials, day/night ring) while staying *exact* across transitions —
+ * unlike a per-day bucket, which is wrong on the two transition days.
+ */
+interface TzOffsetWindow { offsetSec: number; fromMs: number; untilMs: number; }
+const _tzOffsetWindow = new Map<string, TzOffsetWindow>();
+
+// Probe radii (ms), largest first. The largest must be smaller than the shortest
+// real DST period, so that an unchanged offset at the probe proves the interval
+// is transition-free: a round-trip offset→other→offset would need two
+// transitions within 2·radius. ~10 days is safely under the shortest modern
+// period (e.g. Morocco's ~month-long Ramadan DST suspension). Outside the modern
+// tz-data range, Intl extrapolates a single constant rule (no transitions), so
+// the widest probe always succeeds.
+const _PROBE_RADII_MS = [10 * 86_400_000, 2 * 86_400_000, 6 * 3_600_000, 3_600_000];
+
+// Farthest instant in direction `dir` (±1) provably still at `offsetSec`, probed
+// at descending radii. Always returns at least utcMs ± 1ms so the window contains
+// utcMs even when a transition is within the hour.
+function extendTzWindow(tz: string, utcMs: number, offsetSec: number, dir: number): number {
+    for (const r of _PROBE_RADII_MS) {
+        if (rawTzOffsetSecondsAt(tz, utcMs + dir * r) === offsetSec) return utcMs + dir * r;
+    }
+    return utcMs + dir;
+}
+
+/**
+ * Seconds east of UTC for the given IANA timezone AT the given instant.
+ *
+ * This is the web analog of iOS `ESCalendar_tzOffsetForTimeInterval(estz, dt)`
+ * (.estime-ref/src/ESCalendar_Cocoa.mm): the offset is looked up *at the
+ * instant being converted*, so it is correct on both sides of a DST transition.
+ * It uses numeric `formatToParts` → `Date.UTC` (no fragile offset-string
+ * parsing); handles fractional-hour zones (e.g. India +5:30) naturally. Results
+ * are memoized by constant-offset window (see {@link _tzOffsetWindow}); the
+ * returned value is identical to an uncached lookup.
+ *
+ * @param tz     IANA timezone (e.g. "America/New_York").
+ * @param utcMs  Instant as epoch milliseconds.
+ * @returns      Offset in seconds (positive east of UTC).
+ */
+export function tzOffsetSecondsAt(tz: string, utcMs: number): number {
+    // Eval-ahead toward a non-finite ("never") boundary feeds Infinity/NaN here
+    // (animation.ts returns Infinity for envChangeOnly / NaN rise-set sentinels;
+    // withDisplayTime(Infinity) makes getNow() an Invalid Date → getTime() NaN).
+    // formatToParts(new Date(NaN)) throws RangeError, so short-circuit. The value
+    // is never displayed at "never", so any finite answer is fine; 0 is simplest.
+    if (!Number.isFinite(utcMs)) return 0;
+    const w = _tzOffsetWindow.get(tz);
+    if (w !== undefined && utcMs >= w.fromMs && utcMs < w.untilMs) return w.offsetSec;
+    const offsetSec = rawTzOffsetSecondsAt(tz, utcMs);
+    _tzOffsetWindow.set(tz, {
+        offsetSec,
+        fromMs: extendTzWindow(tz, utcMs, offsetSec, -1),
+        untilMs: extendTzWindow(tz, utcMs, offsetSec, +1),
+    });
+    return offsetSec;
+}
+
 /**
  * Compute the millisecond delta between a target IANA timezone and the
  * browser's local timezone.  Adding this delta to a Date's getTime()
@@ -106,23 +198,7 @@ export function computeTzDeltaMs(olsonTimezone: string | undefined, referenceDat
     const browserOffsetSec = -ref.getTimezoneOffset() * 60;
     let targetOffsetSec: number;
     try {
-        const fmt = new Intl.DateTimeFormat('en-US', {
-            timeZone: olsonTimezone,
-            timeZoneName: 'longOffset',
-        });
-        const parts = fmt.formatToParts(ref);
-        const tzStr = parts.find(p => p.type === 'timeZoneName')?.value || '';
-        if (tzStr === 'GMT' || tzStr === 'UTC' || !tzStr) {
-            targetOffsetSec = 0;
-        } else {
-            const m = tzStr.match(/GMT([+-])(\d{1,2}):?(\d{2})?/);
-            if (m) {
-                const sign = m[1] === '+' ? 1 : -1;
-                targetOffsetSec = sign * (parseInt(m[2], 10) * 3600 + (m[3] ? parseInt(m[3], 10) * 60 : 0));
-            } else {
-                targetOffsetSec = browserOffsetSec;
-            }
-        }
+        targetOffsetSec = tzOffsetSecondsAt(olsonTimezone, ref.getTime());
     } catch {
         targetOffsetSec = browserOffsetSec;
     }
@@ -310,18 +386,48 @@ export function registerAstroFunctions(
 
     // Helper: return a Date shifted to the target timezone for display.
     // getHours/getMinutes/getSeconds on the result give target-tz values.
+    // NOTE: this conflates the BROWSER's DST schedule into the reading (getHours
+    // applies the browser offset at the *shifted* instant). It is retained only
+    // for "current date" callers (year/month/day at now), where the conflation
+    // is harmless. Wall-clock readouts that must be browser-DST-immune use
+    // targetLocalDate() (per-instant) or the captured tzOffsetSeconds (liveTime).
     const liveDate = (): Date => {
         const raw = getNow();
         return tzDeltaMs !== 0 ? new Date(raw.getTime() + tzDeltaMs) : raw;
     };
 
-    // Helper to extract fractional components from the current time:
+    // Per-instant target-timezone wall clock: the returned Date's getUTC*
+    // components equal the local wall-clock at `utcMs` in olsonTimezone (or the
+    // browser timezone if unset). Web analog of iOS
+    // ESCalendar_localComponentsFromTimeInterval — the offset is resolved AT the
+    // instant, so it is correct across DST transitions and independent of the
+    // browser's own DST schedule. Read components with getUTCHours()/etc.
+    const targetLocalDate = (utcMs: number): Date => {
+        const offMs = olsonTimezone
+            ? tzOffsetSecondsAt(olsonTimezone, utcMs) * 1000
+            : -new Date(utcMs).getTimezoneOffset() * 60000;
+        return new Date(utcMs + offMs);
+    };
+
+    // Helper to extract fractional components from the current time, in the
+    // target timezone.
     const liveTime = () => {
-        const t = liveDate();
-        const s = t.getSeconds() + t.getMilliseconds() / 1000;
-        const m = t.getMinutes() + s / 60;
-        const h = (t.getHours() % 12) + m / 60;
-        return { h, m, s, h24: t.getHours() };
+        if (tzDeltaMs === 0) {
+            // Target tz == browser tz (the home-watch case): the browser-local
+            // getters already give target-local time, and getHours() is itself
+            // per-instant. Fast path — skips the shifted-Date construction.
+            const t = getNow();
+            const s = t.getSeconds() + t.getMilliseconds() / 1000;
+            const m = t.getMinutes() + s / 60;
+            return { h: (t.getHours() % 12) + m / 60, m, s, h24: t.getHours() };
+        }
+        // Different tz: shift by the captured target offset (kept current by the
+        // per-transition env rebuild) and read UTC components, so a browser DST
+        // transition can no longer shift a target-timezone hand (Bug 2).
+        const t = new Date(getNow().getTime() + tzOffsetSeconds * 1000);
+        const s = t.getUTCSeconds() + t.getUTCMilliseconds() / 1000;
+        const m = t.getUTCMinutes() + s / 60;
+        return { h: (t.getUTCHours() % 12) + m / 60, m, s, h24: t.getUTCHours() };
     };
 
     functions.set('hour12ValueAngle', () => liveTime().h * 2 * Math.PI / 12);
@@ -385,18 +491,22 @@ export function registerAstroFunctions(
         return di > kECJulianGregorianSwitchoverTimeInterval ? 1 : 0;
     });
     functions.set('DSTNumber', () => {
+        const now = getNow();
         if (olsonTimezone) {
-            // For a custom timezone, compare the target offset at two reference
-            // points (Jan 1 and Jul 1) to determine if DST is active now.
-            const now = getNow();
-            const yr = liveDate().getFullYear();
-            const janDelta = computeTzDeltaMs(olsonTimezone, new Date(yr, 0, 1));
-            const julDelta = computeTzDeltaMs(olsonTimezone, new Date(yr, 6, 1));
-            const stdDelta = Math.min(janDelta, julDelta);  // standard time has smaller UTC offset
-            return tzDeltaMs > stdDelta ? 1 : 0;
+            // iOS ESCalendar_isDSTAtTimeInterval(estz, t): DST is active when the
+            // target's OWN UTC offset at the instant exceeds its standard offset.
+            // (Comparing the browser->target delta was wrong: when the browser
+            // shares the target's DST schedule the delta is constant year-round,
+            // so the indicator never lit. Fixed by isolating the target offset.)
+            // Standard offset = the smaller of the Jan/Jul offsets (works in both
+            // hemispheres).
+            const t = now.getTime();
+            const yr = targetLocalDate(t).getUTCFullYear();
+            const janOff = tzOffsetSecondsAt(olsonTimezone, Date.UTC(yr, 0, 1, 12));
+            const julOff = tzOffsetSecondsAt(olsonTimezone, Date.UTC(yr, 6, 1, 12));
+            return tzOffsetSecondsAt(olsonTimezone, t) > Math.min(janOff, julOff) ? 1 : 0;
         }
         // Browser timezone: compare January offset to current offset
-        const now = getNow();
         const jan = new Date(now.getFullYear(), 0, 1);
         const jul = new Date(now.getFullYear(), 6, 1);
         const stdOffset = Math.max(jan.getTimezoneOffset(), jul.getTimezoneOffset());
@@ -540,22 +650,26 @@ export function registerAstroFunctions(
 
     /** Check if two date intervals fall on the same local calendar day (in the target timezone) */
     function isSameLocalDay(di1: number, di2: number): boolean {
-        // Shift to target timezone for comparison
-        const d1 = new Date((di1 + 978307200) * 1000 + tzDeltaMs);
-        const d2 = new Date((di2 + 978307200) * 1000 + tzDeltaMs);
-        return d1.getFullYear() === d2.getFullYear()
-            && d1.getMonth() === d2.getMonth()
-            && d1.getDate() === d2.getDate();
+        // Per-instant offset for each: di1/di2 may straddle a DST transition, so a
+        // single captured offset could misclassify them (and pick the wrong event).
+        const d1 = targetLocalDate((di1 + 978307200) * 1000);
+        const d2 = targetLocalDate((di2 + 978307200) * 1000);
+        return d1.getUTCFullYear() === d2.getUTCFullYear()
+            && d1.getUTCMonth() === d2.getUTCMonth()
+            && d1.getUTCDate() === d2.getUTCDate();
     }
 
     /** Convert a dateInterval rise/set result into hour12/minute/hour24 values (in target timezone) */
     function riseSetAngles(di: number): { hour12: number; minute: number; hour24: number } {
-        // Shift to target timezone so getHours/getMinutes return local values
-        const d = new Date((di + 978307200) * 1000 + tzDeltaMs);
+        // Per-instant offset: the event may be on a different DST side than "now"
+        // (e.g. a sunrise after a transition viewed before it), so use the offset
+        // AT the event, not the captured tzDeltaMs.
+        const d = targetLocalDate((di + 978307200) * 1000);
+        const h = d.getUTCHours(), m = d.getUTCMinutes(), s = d.getUTCSeconds();
         return {
-            hour12: (d.getHours() % 12) + d.getMinutes() / 60 + d.getSeconds() / 3600,
-            minute: d.getMinutes() + d.getSeconds() / 60,
-            hour24: d.getHours(),
+            hour12: (h % 12) + m / 60 + s / 3600,
+            minute: m + s / 60,
+            hour24: h,
         };
     }
 
@@ -1385,8 +1499,8 @@ export function registerAstroFunctions(
             // Polar fallback: use noon (12.0) as midpoint, sunrise at 6.0
             return 6.0;
         }
-        const d = new Date((sr + 978307200) * 1000 + tzDeltaMs);
-        return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+        const d = targetLocalDate((sr + 978307200) * 1000);
+        return d.getUTCHours() + d.getUTCMinutes() / 60 + d.getUTCSeconds() / 3600;
     }
 
     function sunsetHour24ForDay(): number {
@@ -1395,8 +1509,8 @@ export function registerAstroFunctions(
             // Polar fallback: use noon (12.0) as midpoint, sunset at 18.0
             return 18.0;
         }
-        const d = new Date((ss + 978307200) * 1000 + tzDeltaMs);
-        return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+        const d = targetLocalDate((ss + 978307200) * 1000);
+        return d.getUTCHours() + d.getUTCMinutes() / 60 + d.getUTCSeconds() / 3600;
     }
 
     /**
@@ -1442,8 +1556,8 @@ export function registerAstroFunctions(
 
         // Convert dateIntervals to fractional hours in local time
         function diToHour24(di: number): number {
-            const d = new Date((di + 978307200) * 1000 + tzDeltaMs);
-            return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+            const d = targetLocalDate((di + 978307200) * 1000);
+            return d.getUTCHours() + d.getUTCMinutes() / 60 + d.getUTCSeconds() / 3600;
         }
 
         if (isNoRiseSet(riseDI) && isNoRiseSet(setDI)) {

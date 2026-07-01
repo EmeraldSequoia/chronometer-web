@@ -11,6 +11,7 @@
 import { loadCityData, searchCities, findClosestCity, isCityDataLoaded, loadError } from './shared/city-search.js';
 import type { CityResult } from './shared/city-search.js';
 import { renderGlobe, loadOSMTile } from './shared/mini-map.js';
+import { resolveTimezone } from './shared/tz-resolve.js';
 import { initAppState, getState, setState } from './shared/app-state.js';
 
 // Select the state backend before any getState()/setState() call.
@@ -194,7 +195,7 @@ function updateMapPreview(mapLat: number, mapLon: number) {
     lpLocationName.innerHTML = buildLocationNameHTML();
 }
 
-function applyLocation(newLat: number, newLon: number, source: string, fullLabel: string, sourceType: typeof locationSourceType, writeToUrl: boolean) {
+function applyLocation(newLat: number, newLon: number, source: string, fullLabel: string, sourceType: typeof locationSourceType, writeToUrl: boolean, cityTz: string | null = null) {
     hasLocation = true;
     currentLat = newLat;
     currentLon = newLon;
@@ -202,7 +203,17 @@ function applyLocation(newLat: number, newLon: number, source: string, fullLabel
     locationFullLabel = fullLabel;
     locationSourceType = sourceType;
     if (writeToUrl) {
-        setState({ lat: newLat, lon: newLon, city: source || null });
+        // Persist the location's timezone so a face opened from here reads it
+        // straight from shared state — no DB-load race, no nearest-city
+        // approximation. Only persist a *confident* tz: a city pick carries its
+        // exact zone; a manual pick uses nearest-city ONLY if the DB is already
+        // loaded. Otherwise leave tz unset and let the face resolve+persist it
+        // once its own DB loads (backstop-then-update). Never persist a bare
+        // browser fallback as the location's tz.
+        const tz = cityTz
+            ? cityTz
+            : (isCityDataLoaded() ? resolveTimezone(newLat, newLon, null) : null);
+        setState({ lat: newLat, lon: newLon, city: source || null, ...(tz ? { tz } : {}) });
     }
     updateLinks();
     updateMapPreview(newLat, newLon);
@@ -282,7 +293,7 @@ function renderCityResults(results: CityResult[]) {
             div.textContent = r.label;
         }
         div.addEventListener('click', () => {
-            applyLocation(r.lat, r.lon, r.shortLabel, r.label, 'url-city', true);
+            applyLocation(r.lat, r.lon, r.shortLabel, r.label, 'url-city', true, r.timezone || null);
             lpCityInput.value = '';
             lpCityResults.innerHTML = '';
             lpLatInput.value = r.lat.toFixed(3);

@@ -54,7 +54,7 @@ import { loadCityData, prefetchCityData, releaseCityData, searchCities, findClos
 import { showStorageWarning } from './shared/incoming-settings-dialog.js';
 import type { CityResult } from './shared/city-search.js';
 import { renderGlobe, loadOSMTile } from './shared/mini-map.js';
-import { resolveTimezone } from './shared/tz-resolve.js';
+import { resolveTimezone, resolveTimezoneFromDb } from './shared/tz-resolve.js';
 import { findNextDstTransition, findPrevDstTransition } from './shared/dst-detect.js';
 
 import { initTimeControls, writeTimeStateToUrl } from './shared/time-controls-ui.js';
@@ -310,6 +310,9 @@ async function main() {
     // Resolved IANA timezone for the current location (e.g. "America/Los_Angeles")
     let locationTimezone: string | undefined = urlState.tz || undefined;
     let tzDeltaMs = computeTzDeltaMs(locationTimezone);
+    // True when locationTimezone is a transient browser-tz backstop (the city DB
+    // wasn't loaded when we needed to resolve), to be re-resolved once it loads.
+    let tzNeedsResolution = false;
     // Track whether browser geolocation is available
     // 'granted' = we got a position, 'denied' = user rejected or unavailable, 'unknown' = never tried
     let geoPermission: 'granted' | 'denied' | 'unknown' = 'unknown';
@@ -333,11 +336,21 @@ async function main() {
         // Seeded bloc: keep showing this stored location, but refresh geolocation
         // quietly in the background once the watch is up (see below).
         needsBlocRefresh = urlState.bloc === true;
-        // If no tz in URL (old link), resolve it now
+        // If no tz in stored state (e.g. a shared link, or pre-tz state), resolve
+        // it. Prefer a confident answer: a loaded city DB gives the nearest-city
+        // zone, which we persist. If the DB isn't ready, fall back to the browser
+        // zone as a TRANSIENT backstop — don't persist it (that would poison
+        // future loads) — and re-resolve once the DB loads (see ensureTzResolved).
         if (!locationTimezone) {
-            locationTimezone = resolveTimezone(lat, lon, null);
-            tzDeltaMs = computeTzDeltaMs(locationTimezone);
-            setState({ tz: locationTimezone });
+            if (isCityDataLoaded()) {
+                locationTimezone = resolveTimezone(lat, lon, null);
+                tzDeltaMs = computeTzDeltaMs(locationTimezone);
+                setState({ tz: locationTimezone });
+            } else {
+                locationTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                tzDeltaMs = computeTzDeltaMs(locationTimezone);
+                tzNeedsResolution = true;
+            }
         }
         // We haven't tried geolocation — check the Permissions API if available
         if (navigator.permissions) {
@@ -2451,6 +2464,25 @@ async function main() {
         } else if (!timeController.isRealTime) { timeController.reset(); changed = true; }
         if (changed) { stopScheduler(); startScheduler(); }
     });
+
+    // --- Backstop timezone re-resolution ---
+    // If startup fell back to the browser zone because the city DB wasn't loaded
+    // (e.g. a shared link carrying lat/lon but no tz), correct it once the DB is
+    // available. resolveTimezoneFromDb awaits the load and tolerates a racing
+    // releaseCityData() from the location-name path (there is no refcount), then
+    // we rebuild the env and persist only the corrected, DB-derived zone.
+    if (tzNeedsResolution) {
+        resolveTimezoneFromDb(lat, lon).then(resolved => {
+            tzNeedsResolution = false;
+            if (resolved && resolved !== locationTimezone) {
+                locationTimezone = resolved;
+                handleDstTransition();   // rebuild envs + refresh tz display + restart scheduler
+                scheduleDstRebuild();
+                if (isPersistentMode()) setState({ tz: locationTimezone });
+            }
+            if (!dialogOpen()) releaseCityData();  // drop the ~22 MB unless the dialog needs it
+        });
+    }
 
     // --- Info button & popup (shared wiring + face-specific fixups) ---
     initHelpPopover({

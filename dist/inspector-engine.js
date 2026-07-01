@@ -11162,29 +11162,58 @@
       });
     }
   }
+  var _tzFmtCache = /* @__PURE__ */ new Map();
+  function tzFormatter(tz) {
+    let fmt = _tzFmtCache.get(tz);
+    if (!fmt) {
+      fmt = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz,
+        hourCycle: "h23",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+      _tzFmtCache.set(tz, fmt);
+    }
+    return fmt;
+  }
+  function rawTzOffsetSecondsAt(tz, utcMs) {
+    const parts = tzFormatter(tz).formatToParts(new Date(utcMs));
+    const p = {};
+    for (const part of parts) if (part.type !== "literal") p[part.type] = +part.value;
+    const asUTC = Date.UTC(p.year, p.month - 1, p.day, p.hour % 24, p.minute, p.second);
+    return Math.round((asUTC - utcMs) / 1e3);
+  }
+  var _tzOffsetWindow = /* @__PURE__ */ new Map();
+  var _PROBE_RADII_MS = [10 * 864e5, 2 * 864e5, 6 * 36e5, 36e5];
+  function extendTzWindow(tz, utcMs, offsetSec, dir) {
+    for (const r of _PROBE_RADII_MS) {
+      if (rawTzOffsetSecondsAt(tz, utcMs + dir * r) === offsetSec) return utcMs + dir * r;
+    }
+    return utcMs + dir;
+  }
+  function tzOffsetSecondsAt(tz, utcMs) {
+    if (!Number.isFinite(utcMs)) return 0;
+    const w = _tzOffsetWindow.get(tz);
+    if (w !== void 0 && utcMs >= w.fromMs && utcMs < w.untilMs) return w.offsetSec;
+    const offsetSec = rawTzOffsetSecondsAt(tz, utcMs);
+    _tzOffsetWindow.set(tz, {
+      offsetSec,
+      fromMs: extendTzWindow(tz, utcMs, offsetSec, -1),
+      untilMs: extendTzWindow(tz, utcMs, offsetSec, 1)
+    });
+    return offsetSec;
+  }
   function computeTzDeltaMs(olsonTimezone, referenceDate) {
     if (!olsonTimezone) return 0;
     const ref = referenceDate || /* @__PURE__ */ new Date();
     const browserOffsetSec = -ref.getTimezoneOffset() * 60;
     let targetOffsetSec;
     try {
-      const fmt = new Intl.DateTimeFormat("en-US", {
-        timeZone: olsonTimezone,
-        timeZoneName: "longOffset"
-      });
-      const parts = fmt.formatToParts(ref);
-      const tzStr = parts.find((p) => p.type === "timeZoneName")?.value || "";
-      if (tzStr === "GMT" || tzStr === "UTC" || !tzStr) {
-        targetOffsetSec = 0;
-      } else {
-        const m = tzStr.match(/GMT([+-])(\d{1,2}):?(\d{2})?/);
-        if (m) {
-          const sign = m[1] === "+" ? 1 : -1;
-          targetOffsetSec = sign * (parseInt(m[2], 10) * 3600 + (m[3] ? parseInt(m[3], 10) * 60 : 0));
-        } else {
-          targetOffsetSec = browserOffsetSec;
-        }
-      }
+      targetOffsetSec = tzOffsetSecondsAt(olsonTimezone, ref.getTime());
     } catch {
       targetOffsetSec = browserOffsetSec;
     }
@@ -11242,12 +11271,21 @@
       const raw = getNow2();
       return tzDeltaMs2 !== 0 ? new Date(raw.getTime() + tzDeltaMs2) : raw;
     };
+    const targetLocalDate = (utcMs) => {
+      const offMs = olsonTimezone ? tzOffsetSecondsAt(olsonTimezone, utcMs) * 1e3 : -new Date(utcMs).getTimezoneOffset() * 6e4;
+      return new Date(utcMs + offMs);
+    };
     const liveTime = () => {
-      const t = liveDate();
-      const s = t.getSeconds() + t.getMilliseconds() / 1e3;
-      const m = t.getMinutes() + s / 60;
-      const h = t.getHours() % 12 + m / 60;
-      return { h, m, s, h24: t.getHours() };
+      if (tzDeltaMs2 === 0) {
+        const t2 = getNow2();
+        const s2 = t2.getSeconds() + t2.getMilliseconds() / 1e3;
+        const m2 = t2.getMinutes() + s2 / 60;
+        return { h: t2.getHours() % 12 + m2 / 60, m: m2, s: s2, h24: t2.getHours() };
+      }
+      const t = new Date(getNow2().getTime() + tzOffsetSeconds * 1e3);
+      const s = t.getUTCSeconds() + t.getUTCMilliseconds() / 1e3;
+      const m = t.getUTCMinutes() + s / 60;
+      return { h: t.getUTCHours() % 12 + m / 60, m, s, h24: t.getUTCHours() };
     };
     functions.set("hour12ValueAngle", () => liveTime().h * 2 * Math.PI / 12);
     functions.set("minuteValueAngle", () => liveTime().m * 2 * Math.PI / 60);
@@ -11296,15 +11334,14 @@
       return di > kECJulianGregorianSwitchoverTimeInterval ? 1 : 0;
     });
     functions.set("DSTNumber", () => {
-      if (olsonTimezone) {
-        const now3 = getNow2();
-        const yr = liveDate().getFullYear();
-        const janDelta = computeTzDeltaMs(olsonTimezone, new Date(yr, 0, 1));
-        const julDelta = computeTzDeltaMs(olsonTimezone, new Date(yr, 6, 1));
-        const stdDelta = Math.min(janDelta, julDelta);
-        return tzDeltaMs2 > stdDelta ? 1 : 0;
-      }
       const now2 = getNow2();
+      if (olsonTimezone) {
+        const t = now2.getTime();
+        const yr = targetLocalDate(t).getUTCFullYear();
+        const janOff = tzOffsetSecondsAt(olsonTimezone, Date.UTC(yr, 0, 1, 12));
+        const julOff = tzOffsetSecondsAt(olsonTimezone, Date.UTC(yr, 6, 1, 12));
+        return tzOffsetSecondsAt(olsonTimezone, t) > Math.min(janOff, julOff) ? 1 : 0;
+      }
       const jan = new Date(now2.getFullYear(), 0, 1);
       const jul = new Date(now2.getFullYear(), 6, 1);
       const stdOffset = Math.max(jan.getTimezoneOffset(), jul.getTimezoneOffset());
@@ -11385,16 +11422,17 @@
       });
     }
     function isSameLocalDay(di1, di2) {
-      const d1 = new Date((di1 + 978307200) * 1e3 + tzDeltaMs2);
-      const d2 = new Date((di2 + 978307200) * 1e3 + tzDeltaMs2);
-      return d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
+      const d1 = targetLocalDate((di1 + 978307200) * 1e3);
+      const d2 = targetLocalDate((di2 + 978307200) * 1e3);
+      return d1.getUTCFullYear() === d2.getUTCFullYear() && d1.getUTCMonth() === d2.getUTCMonth() && d1.getUTCDate() === d2.getUTCDate();
     }
     function riseSetAngles(di) {
-      const d = new Date((di + 978307200) * 1e3 + tzDeltaMs2);
+      const d = targetLocalDate((di + 978307200) * 1e3);
+      const h = d.getUTCHours(), m = d.getUTCMinutes(), s = d.getUTCSeconds();
       return {
-        hour12: d.getHours() % 12 + d.getMinutes() / 60 + d.getSeconds() / 3600,
-        minute: d.getMinutes() + d.getSeconds() / 60,
-        hour24: d.getHours()
+        hour12: h % 12 + m / 60 + s / 3600,
+        minute: m + s / 60,
+        hour24: h
       };
     }
     functions.set("sunriseForDayValid", () => {
@@ -12021,16 +12059,16 @@
       if (isNaN(sr)) {
         return 6;
       }
-      const d = new Date((sr + 978307200) * 1e3 + tzDeltaMs2);
-      return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+      const d = targetLocalDate((sr + 978307200) * 1e3);
+      return d.getUTCHours() + d.getUTCMinutes() / 60 + d.getUTCSeconds() / 3600;
     }
     function sunsetHour24ForDay() {
       const ss = riseSetForDay(false, 0 /* Sun */);
       if (isNaN(ss)) {
         return 18;
       }
-      const d = new Date((ss + 978307200) * 1e3 + tzDeltaMs2);
-      return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+      const d = targetLocalDate((ss + 978307200) * 1e3);
+      return d.getUTCHours() + d.getUTCMinutes() / 60 + d.getUTCSeconds() / 3600;
     }
     function sunriseSunsetBracketing() {
       const calcDate = dateToDateInterval(getNow2());
@@ -12062,8 +12100,8 @@
       const riseDI = riseResult.eventTime;
       const setDI = setResult.eventTime;
       function diToHour24(di) {
-        const d = new Date((di + 978307200) * 1e3 + tzDeltaMs2);
-        return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+        const d = targetLocalDate((di + 978307200) * 1e3);
+        return d.getUTCHours() + d.getUTCMinutes() / 60 + d.getUTCSeconds() / 3600;
       }
       if (isNoRiseSet(riseDI) && isNoRiseSet(setDI)) {
         const transitDI = planettransitTimeRefined(
@@ -12253,7 +12291,7 @@
       return computeClosestSunEclipticLongQuarter366Angle(quarterNumber, getNow2(), tzDeltaMs2);
     });
     functions.set("planetrise24HourIndicatorAngleLST", (planetNumber) => {
-      return computeDayNightLeafAngleLST(
+      return computeDayNightLeafAngle(
         planetNumber,
         0,
         0,
@@ -12261,11 +12299,12 @@
         OBSERVER_LAT,
         OBSERVER_LON,
         pool,
-        tzOffsetSeconds
-      );
+        tzOffsetSeconds,
+        "LST"
+      ).angle;
     });
     functions.set("planetset24HourIndicatorAngleLST", (planetNumber) => {
-      return computeDayNightLeafAngleLST(
+      return computeDayNightLeafAngle(
         planetNumber,
         1,
         0,
@@ -12273,8 +12312,9 @@
         OBSERVER_LAT,
         OBSERVER_LON,
         pool,
-        tzOffsetSeconds
-      );
+        tzOffsetSeconds,
+        "LST"
+      ).angle;
     });
     functions.set("dayNightLeafAngle", (planetNumber, leafNumber, numLeaves) => {
       return computeDayNightLeafAngle(
@@ -12289,7 +12329,7 @@
       ).angle;
     });
     functions.set("dayNightLeafAngleLST", (planetNumber, leafNumber, numLeaves) => {
-      return computeDayNightLeafAngleLST(
+      return computeDayNightLeafAngle(
         planetNumber,
         leafNumber,
         numLeaves,
@@ -12297,8 +12337,9 @@
         OBSERVER_LAT,
         OBSERVER_LON,
         pool,
-        tzOffsetSeconds
-      );
+        tzOffsetSeconds,
+        "LST"
+      ).angle;
     });
     functions.set("planettransit24HourIndicatorAngle", (planetNumber) => {
       return computeDayNightLeafAngle(
@@ -12543,7 +12584,7 @@
     popECAstroCacheToInPool(pool, prior);
     return result;
   }
-  function computeDayNightLeafAngle(planetNumber, leafNumber, numLeaves, getNow2, observerLat, observerLon, pool, tzOffsetSeconds) {
+  function computeDayNightLeafAngle(planetNumber, leafNumber, numLeaves, getNow2, observerLat, observerLon, pool, tzOffsetSeconds, timeBaseKind = "LT") {
     astroProfile.leafCalls++;
     if (!astroProfilingEnabled) {
       return computeDayNightLeafAngleImpl(
@@ -12554,7 +12595,8 @@
         observerLat,
         observerLon,
         pool,
-        tzOffsetSeconds
+        tzOffsetSeconds,
+        timeBaseKind
       );
     }
     const _t0 = performance.now();
@@ -12566,13 +12608,15 @@
       observerLat,
       observerLon,
       pool,
-      tzOffsetSeconds
+      tzOffsetSeconds,
+      timeBaseKind
     );
     astroProfile.leafMs += performance.now() - _t0;
     return r;
   }
-  function computeDayNightLeafAngleImpl(planetNumber, leafNumber, numLeaves, getNow2, observerLat, observerLon, pool, tzOffsetSeconds) {
+  function computeDayNightLeafAngleImpl(planetNumber, leafNumber, numLeaves, getNow2, observerLat, observerLon, pool, tzOffsetSeconds, timeBaseKind) {
     const calcDate = dateToDateInterval(getNow2());
+    const toAngle = timeBaseKind === "LST" ? (t) => angle24HourLSTForDate(t, observerLon) : (t) => angle24HourForDate(t, tzOffsetSeconds);
     const nightTime = planetNumber === 11 /* MidnightSun */;
     if (nightTime) {
       planetNumber = 0 /* Sun */;
@@ -12586,7 +12630,7 @@
         planetNumber,
         pool
       );
-      return { angle: angle24HourForDate(transitDI, tzOffsetSeconds), isRiseSet: true, aboveHorizon: false };
+      return { angle: toAngle(transitDI), isRiseSet: true, aboveHorizon: false };
     }
     const isSpecial = numLeaves === 0;
     if (numLeaves < 0) {
@@ -12595,16 +12639,16 @@
     const master = getMasterRiseSet(planetNumber, calcDate, observerLat, observerLon, pool);
     const riseTime = master.riseTime;
     const setTime = master.setTime;
-    let rTransitAngle = angle24HourForDate(master.riseTransitTime, tzOffsetSeconds);
-    let sTransitAngle = angle24HourForDate(master.setTransitTime, tzOffsetSeconds);
-    if (isNaN(riseTime) && isAlwaysAbove(riseTime)) {
+    let rTransitAngle = toAngle(master.riseTransitTime);
+    let sTransitAngle = toAngle(master.setTransitTime);
+    if (isAlwaysAbove(riseTime)) {
       rTransitAngle = fmod(rTransitAngle + Math.PI, 2 * Math.PI);
     }
-    if (isNaN(setTime) && isAlwaysAbove(setTime)) {
+    if (isAlwaysAbove(setTime)) {
       sTransitAngle = fmod(sTransitAngle + Math.PI, 2 * Math.PI);
     }
-    let riseTimeAngle = isNoRiseSet(riseTime) ? NaN : angle24HourForDate(riseTime, tzOffsetSeconds);
-    let setTimeAngle = isNoRiseSet(setTime) ? NaN : angle24HourForDate(setTime, tzOffsetSeconds);
+    let riseTimeAngle = isNoRiseSet(riseTime) ? NaN : toAngle(riseTime);
+    let setTimeAngle = isNoRiseSet(setTime) ? NaN : toAngle(setTime);
     if (numLeaves === 0 && leafNumber === 0) {
       const riseIsRS = !isNaN(riseTimeAngle);
       return {
@@ -12874,105 +12918,6 @@
   function angle24HourLSTForDate(dateInterval, observerLon) {
     const lstRadians = localSiderealTime(dateInterval, observerLon, null);
     return fmod(lstRadians, 2 * Math.PI);
-  }
-  function computeDayNightLeafAngleLST(planetNumber, leafNumber, numLeaves, getNow2, observerLat, observerLon, pool, tzOffsetSeconds) {
-    const calcDate = dateToDateInterval(getNow2());
-    const fudgeFactorSeconds = 5;
-    const lookahead = 3600 * 13.2;
-    const planetIsUp = planetIsUpForRiseSet(planetNumber, calcDate, observerLat, observerLon);
-    const riseResult = nextPrevRiseSetInternal(
-      calcDate,
-      observerLat,
-      observerLon,
-      true,
-      planetNumber,
-      !planetIsUp,
-      -fudgeFactorSeconds,
-      lookahead,
-      pool
-    );
-    const setResult = nextPrevRiseSetInternal(
-      calcDate,
-      observerLat,
-      observerLon,
-      false,
-      planetNumber,
-      planetIsUp,
-      -fudgeFactorSeconds,
-      lookahead,
-      pool
-    );
-    const riseTime = riseResult.eventTime;
-    const setTime = setResult.eventTime;
-    let rTransitAngle = angle24HourLSTForDate(riseResult.transitTime, observerLon);
-    let sTransitAngle = angle24HourLSTForDate(setResult.transitTime, observerLon);
-    if (isAlwaysAbove(riseTime)) {
-      rTransitAngle = fmod(rTransitAngle + Math.PI, 2 * Math.PI);
-    }
-    if (isAlwaysAbove(setTime)) {
-      sTransitAngle = fmod(sTransitAngle + Math.PI, 2 * Math.PI);
-    }
-    let riseTimeAngle = isNoRiseSet(riseTime) ? NaN : angle24HourLSTForDate(riseTime, observerLon);
-    let setTimeAngle = isNoRiseSet(setTime) ? NaN : angle24HourLSTForDate(setTime, observerLon);
-    if (numLeaves === 0) {
-      if (leafNumber === 0) {
-        if (isNaN(riseTimeAngle)) {
-          return rTransitAngle;
-        } else {
-          return riseTimeAngle;
-        }
-      } else if (leafNumber === 1) {
-        if (isNaN(setTimeAngle)) {
-          return sTransitAngle;
-        } else {
-          return setTimeAngle;
-        }
-      }
-      return 0;
-    }
-    const leafWidth = 2 * Math.PI / numLeaves;
-    if (isNaN(riseTimeAngle)) {
-      if (isNaN(setTimeAngle)) {
-        let sTA = sTransitAngle;
-        if (sTA > rTransitAngle + Math.PI) sTA -= 2 * Math.PI;
-        else if (sTA < rTransitAngle - Math.PI) sTA += 2 * Math.PI;
-        const avgTransit = (rTransitAngle + sTA) / 2;
-        if (isAlwaysAbove(riseTime)) {
-          riseTimeAngle = avgTransit - Math.PI;
-          setTimeAngle = avgTransit + Math.PI;
-        } else {
-          riseTimeAngle = avgTransit - leafWidth / 2 - 1e-5;
-          setTimeAngle = avgTransit + leafWidth / 2 + 1e-5;
-        }
-      } else {
-        if (isAlwaysAbove(riseTime)) {
-          riseTimeAngle = setTimeAngle - 2 * Math.PI;
-        } else {
-          riseTimeAngle = setTimeAngle - leafWidth;
-        }
-      }
-    } else if (isNaN(setTimeAngle)) {
-      if (isAlwaysAbove(setTime)) {
-        setTimeAngle = riseTimeAngle + 2 * Math.PI;
-      } else {
-        setTimeAngle = riseTimeAngle + leafWidth;
-      }
-    }
-    riseTimeAngle = fmod(riseTimeAngle, 2 * Math.PI);
-    setTimeAngle = fmod(setTimeAngle, 2 * Math.PI);
-    if (setTimeAngle <= riseTimeAngle + 1e-4) {
-      setTimeAngle += 2 * Math.PI;
-    }
-    setTimeAngle -= leafWidth / 2;
-    riseTimeAngle += leafWidth / 2;
-    if (setTimeAngle < riseTimeAngle) {
-      riseTimeAngle = setTimeAngle = (riseTimeAngle + setTimeAngle) / 2;
-    }
-    let leafCenterAngle = riseTimeAngle + (setTimeAngle - riseTimeAngle) / (numLeaves - 1) * leafNumber;
-    if (leafCenterAngle > 2 * Math.PI) {
-      leafCenterAngle -= 2 * Math.PI;
-    }
-    return leafCenterAngle;
   }
 
   // src/shared/obs-value.ts
@@ -16236,6 +16181,17 @@
       return "Etc/UTC";
     }
   }
+  async function resolveTimezoneFromDb(lat2, lon2) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await loadCityData();
+      } catch {
+        return null;
+      }
+      if (isCityDataLoaded()) return findClosestCity(lat2, lon2)?.timezone ?? null;
+    }
+    return null;
+  }
 
   // src/blue-marble-data.ts
   var BLUE_MARBLE = "data:image/jpeg;base64,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";
@@ -17124,8 +17080,14 @@
     const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
     return 2 * R * Math.asin(Math.sqrt(a));
   }
+  var tzNeedsResolution = false;
   if (!locationTimezone && hasUrlLocation) {
-    locationTimezone = resolveTimezone(lat, lon, null);
+    if (isCityDataLoaded()) {
+      locationTimezone = resolveTimezone(lat, lon, null);
+    } else {
+      locationTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      tzNeedsResolution = true;
+    }
   }
   var tzDeltaMs = computeTzDeltaMs(locationTimezone);
   function formatTimezoneInfo(olsonId, referenceDate) {
@@ -18003,6 +17965,23 @@
   renderBrowserTime();
   timeUI?.updateTimeUI();
   scheduleFrame();
+  if (tzNeedsResolution) {
+    resolveTimezoneFromDb(lat, lon).then((resolved) => {
+      tzNeedsResolution = false;
+      if (resolved && resolved !== locationTimezone) {
+        locationTimezone = resolved;
+        tzDeltaMs = computeTzDeltaMs(locationTimezone);
+        env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
+        if (isPersistentMode()) setState({ tz: locationTimezone });
+        updateLocationDisplay();
+        updateTimeDisplay();
+        rebuildExprValues();
+        resetAllSchedules();
+        scheduleFrame();
+      }
+      if (!dialogShown()) releaseCityData();
+    });
+  }
   console.log(
     "[Inspector] Initialized \u2014 lat:",
     lat,

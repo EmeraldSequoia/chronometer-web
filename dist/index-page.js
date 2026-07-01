@@ -465,6 +465,18 @@
     return Promise.all(promises).then((results) => results.some((ok) => ok));
   }
 
+  // src/shared/tz-resolve.ts
+  function resolveTimezone(lat, lon, cityTz) {
+    if (cityTz) return cityTz;
+    const closest = findClosestCity(lat, lon);
+    if (closest?.timezone) return closest.timezone;
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch {
+      return "Etc/UTC";
+    }
+  }
+
   // src/shared/url-state.ts
   function readUrlState() {
     const params = new URLSearchParams(window.location.search);
@@ -1441,7 +1453,7 @@
     }
     lpLocationName.innerHTML = buildLocationNameHTML();
   }
-  function applyLocation(newLat, newLon, source, fullLabel, sourceType, writeToUrl) {
+  function applyLocation(newLat, newLon, source, fullLabel, sourceType, writeToUrl, cityTz = null) {
     hasLocation = true;
     currentLat = newLat;
     currentLon = newLon;
@@ -1449,7 +1461,8 @@
     locationFullLabel = fullLabel;
     locationSourceType = sourceType;
     if (writeToUrl) {
-      setState({ lat: newLat, lon: newLon, city: source || null });
+      const tz = cityTz ? cityTz : isCityDataLoaded() ? resolveTimezone(newLat, newLon, null) : null;
+      setState({ lat: newLat, lon: newLon, city: source || null, ...tz ? { tz } : {} });
     }
     updateLinks();
     updateMapPreview(newLat, newLon);
@@ -1507,7 +1520,7 @@
         div.textContent = r.label;
       }
       div.addEventListener("click", () => {
-        applyLocation(r.lat, r.lon, r.shortLabel, r.label, "url-city", true);
+        applyLocation(r.lat, r.lon, r.shortLabel, r.label, "url-city", true, r.timezone || null);
         lpCityInput.value = "";
         lpCityResults.innerHTML = "";
         lpLatInput.value = r.lat.toFixed(3);

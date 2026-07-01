@@ -11180,29 +11180,58 @@
       });
     }
   }
+  var _tzFmtCache = /* @__PURE__ */ new Map();
+  function tzFormatter(tz) {
+    let fmt = _tzFmtCache.get(tz);
+    if (!fmt) {
+      fmt = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz,
+        hourCycle: "h23",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+      _tzFmtCache.set(tz, fmt);
+    }
+    return fmt;
+  }
+  function rawTzOffsetSecondsAt(tz, utcMs) {
+    const parts = tzFormatter(tz).formatToParts(new Date(utcMs));
+    const p = {};
+    for (const part of parts) if (part.type !== "literal") p[part.type] = +part.value;
+    const asUTC = Date.UTC(p.year, p.month - 1, p.day, p.hour % 24, p.minute, p.second);
+    return Math.round((asUTC - utcMs) / 1e3);
+  }
+  var _tzOffsetWindow = /* @__PURE__ */ new Map();
+  var _PROBE_RADII_MS = [10 * 864e5, 2 * 864e5, 6 * 36e5, 36e5];
+  function extendTzWindow(tz, utcMs, offsetSec, dir) {
+    for (const r of _PROBE_RADII_MS) {
+      if (rawTzOffsetSecondsAt(tz, utcMs + dir * r) === offsetSec) return utcMs + dir * r;
+    }
+    return utcMs + dir;
+  }
+  function tzOffsetSecondsAt(tz, utcMs) {
+    if (!Number.isFinite(utcMs)) return 0;
+    const w = _tzOffsetWindow.get(tz);
+    if (w !== void 0 && utcMs >= w.fromMs && utcMs < w.untilMs) return w.offsetSec;
+    const offsetSec = rawTzOffsetSecondsAt(tz, utcMs);
+    _tzOffsetWindow.set(tz, {
+      offsetSec,
+      fromMs: extendTzWindow(tz, utcMs, offsetSec, -1),
+      untilMs: extendTzWindow(tz, utcMs, offsetSec, 1)
+    });
+    return offsetSec;
+  }
   function computeTzDeltaMs(olsonTimezone, referenceDate) {
     if (!olsonTimezone) return 0;
     const ref = referenceDate || /* @__PURE__ */ new Date();
     const browserOffsetSec = -ref.getTimezoneOffset() * 60;
     let targetOffsetSec;
     try {
-      const fmt = new Intl.DateTimeFormat("en-US", {
-        timeZone: olsonTimezone,
-        timeZoneName: "longOffset"
-      });
-      const parts = fmt.formatToParts(ref);
-      const tzStr = parts.find((p) => p.type === "timeZoneName")?.value || "";
-      if (tzStr === "GMT" || tzStr === "UTC" || !tzStr) {
-        targetOffsetSec = 0;
-      } else {
-        const m = tzStr.match(/GMT([+-])(\d{1,2}):?(\d{2})?/);
-        if (m) {
-          const sign = m[1] === "+" ? 1 : -1;
-          targetOffsetSec = sign * (parseInt(m[2], 10) * 3600 + (m[3] ? parseInt(m[3], 10) * 60 : 0));
-        } else {
-          targetOffsetSec = browserOffsetSec;
-        }
-      }
+      targetOffsetSec = tzOffsetSecondsAt(olsonTimezone, ref.getTime());
     } catch {
       targetOffsetSec = browserOffsetSec;
     }
@@ -11260,12 +11289,21 @@
       const raw = getNow2();
       return tzDeltaMs2 !== 0 ? new Date(raw.getTime() + tzDeltaMs2) : raw;
     };
+    const targetLocalDate = (utcMs) => {
+      const offMs = olsonTimezone ? tzOffsetSecondsAt(olsonTimezone, utcMs) * 1e3 : -new Date(utcMs).getTimezoneOffset() * 6e4;
+      return new Date(utcMs + offMs);
+    };
     const liveTime = () => {
-      const t = liveDate();
-      const s = t.getSeconds() + t.getMilliseconds() / 1e3;
-      const m = t.getMinutes() + s / 60;
-      const h = t.getHours() % 12 + m / 60;
-      return { h, m, s, h24: t.getHours() };
+      if (tzDeltaMs2 === 0) {
+        const t2 = getNow2();
+        const s2 = t2.getSeconds() + t2.getMilliseconds() / 1e3;
+        const m2 = t2.getMinutes() + s2 / 60;
+        return { h: t2.getHours() % 12 + m2 / 60, m: m2, s: s2, h24: t2.getHours() };
+      }
+      const t = new Date(getNow2().getTime() + tzOffsetSeconds * 1e3);
+      const s = t.getUTCSeconds() + t.getUTCMilliseconds() / 1e3;
+      const m = t.getUTCMinutes() + s / 60;
+      return { h: t.getUTCHours() % 12 + m / 60, m, s, h24: t.getUTCHours() };
     };
     functions.set("hour12ValueAngle", () => liveTime().h * 2 * Math.PI / 12);
     functions.set("minuteValueAngle", () => liveTime().m * 2 * Math.PI / 60);
@@ -11314,15 +11352,14 @@
       return di > kECJulianGregorianSwitchoverTimeInterval ? 1 : 0;
     });
     functions.set("DSTNumber", () => {
-      if (olsonTimezone) {
-        const now3 = getNow2();
-        const yr = liveDate().getFullYear();
-        const janDelta = computeTzDeltaMs(olsonTimezone, new Date(yr, 0, 1));
-        const julDelta = computeTzDeltaMs(olsonTimezone, new Date(yr, 6, 1));
-        const stdDelta = Math.min(janDelta, julDelta);
-        return tzDeltaMs2 > stdDelta ? 1 : 0;
-      }
       const now2 = getNow2();
+      if (olsonTimezone) {
+        const t = now2.getTime();
+        const yr = targetLocalDate(t).getUTCFullYear();
+        const janOff = tzOffsetSecondsAt(olsonTimezone, Date.UTC(yr, 0, 1, 12));
+        const julOff = tzOffsetSecondsAt(olsonTimezone, Date.UTC(yr, 6, 1, 12));
+        return tzOffsetSecondsAt(olsonTimezone, t) > Math.min(janOff, julOff) ? 1 : 0;
+      }
       const jan = new Date(now2.getFullYear(), 0, 1);
       const jul = new Date(now2.getFullYear(), 6, 1);
       const stdOffset = Math.max(jan.getTimezoneOffset(), jul.getTimezoneOffset());
@@ -11403,16 +11440,17 @@
       });
     }
     function isSameLocalDay(di1, di2) {
-      const d1 = new Date((di1 + 978307200) * 1e3 + tzDeltaMs2);
-      const d2 = new Date((di2 + 978307200) * 1e3 + tzDeltaMs2);
-      return d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
+      const d1 = targetLocalDate((di1 + 978307200) * 1e3);
+      const d2 = targetLocalDate((di2 + 978307200) * 1e3);
+      return d1.getUTCFullYear() === d2.getUTCFullYear() && d1.getUTCMonth() === d2.getUTCMonth() && d1.getUTCDate() === d2.getUTCDate();
     }
     function riseSetAngles(di) {
-      const d = new Date((di + 978307200) * 1e3 + tzDeltaMs2);
+      const d = targetLocalDate((di + 978307200) * 1e3);
+      const h = d.getUTCHours(), m = d.getUTCMinutes(), s = d.getUTCSeconds();
       return {
-        hour12: d.getHours() % 12 + d.getMinutes() / 60 + d.getSeconds() / 3600,
-        minute: d.getMinutes() + d.getSeconds() / 60,
-        hour24: d.getHours()
+        hour12: h % 12 + m / 60 + s / 3600,
+        minute: m + s / 60,
+        hour24: h
       };
     }
     functions.set("sunriseForDayValid", () => {
@@ -12039,16 +12077,16 @@
       if (isNaN(sr)) {
         return 6;
       }
-      const d = new Date((sr + 978307200) * 1e3 + tzDeltaMs2);
-      return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+      const d = targetLocalDate((sr + 978307200) * 1e3);
+      return d.getUTCHours() + d.getUTCMinutes() / 60 + d.getUTCSeconds() / 3600;
     }
     function sunsetHour24ForDay() {
       const ss = riseSetForDay(false, 0 /* Sun */);
       if (isNaN(ss)) {
         return 18;
       }
-      const d = new Date((ss + 978307200) * 1e3 + tzDeltaMs2);
-      return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+      const d = targetLocalDate((ss + 978307200) * 1e3);
+      return d.getUTCHours() + d.getUTCMinutes() / 60 + d.getUTCSeconds() / 3600;
     }
     function sunriseSunsetBracketing() {
       const calcDate = dateToDateInterval(getNow2());
@@ -12080,8 +12118,8 @@
       const riseDI = riseResult.eventTime;
       const setDI = setResult.eventTime;
       function diToHour24(di) {
-        const d = new Date((di + 978307200) * 1e3 + tzDeltaMs2);
-        return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+        const d = targetLocalDate((di + 978307200) * 1e3);
+        return d.getUTCHours() + d.getUTCMinutes() / 60 + d.getUTCSeconds() / 3600;
       }
       if (isNoRiseSet(riseDI) && isNoRiseSet(setDI)) {
         const transitDI = planettransitTimeRefined(
@@ -12271,7 +12309,7 @@
       return computeClosestSunEclipticLongQuarter366Angle(quarterNumber, getNow2(), tzDeltaMs2);
     });
     functions.set("planetrise24HourIndicatorAngleLST", (planetNumber) => {
-      return computeDayNightLeafAngleLST(
+      return computeDayNightLeafAngle(
         planetNumber,
         0,
         0,
@@ -12279,11 +12317,12 @@
         OBSERVER_LAT,
         OBSERVER_LON,
         pool,
-        tzOffsetSeconds
-      );
+        tzOffsetSeconds,
+        "LST"
+      ).angle;
     });
     functions.set("planetset24HourIndicatorAngleLST", (planetNumber) => {
-      return computeDayNightLeafAngleLST(
+      return computeDayNightLeafAngle(
         planetNumber,
         1,
         0,
@@ -12291,8 +12330,9 @@
         OBSERVER_LAT,
         OBSERVER_LON,
         pool,
-        tzOffsetSeconds
-      );
+        tzOffsetSeconds,
+        "LST"
+      ).angle;
     });
     functions.set("dayNightLeafAngle", (planetNumber, leafNumber, numLeaves) => {
       return computeDayNightLeafAngle(
@@ -12307,7 +12347,7 @@
       ).angle;
     });
     functions.set("dayNightLeafAngleLST", (planetNumber, leafNumber, numLeaves) => {
-      return computeDayNightLeafAngleLST(
+      return computeDayNightLeafAngle(
         planetNumber,
         leafNumber,
         numLeaves,
@@ -12315,8 +12355,9 @@
         OBSERVER_LAT,
         OBSERVER_LON,
         pool,
-        tzOffsetSeconds
-      );
+        tzOffsetSeconds,
+        "LST"
+      ).angle;
     });
     functions.set("planettransit24HourIndicatorAngle", (planetNumber) => {
       return computeDayNightLeafAngle(
@@ -12561,7 +12602,7 @@
     popECAstroCacheToInPool(pool, prior);
     return result;
   }
-  function computeDayNightLeafAngle(planetNumber, leafNumber, numLeaves, getNow2, observerLat, observerLon, pool, tzOffsetSeconds) {
+  function computeDayNightLeafAngle(planetNumber, leafNumber, numLeaves, getNow2, observerLat, observerLon, pool, tzOffsetSeconds, timeBaseKind = "LT") {
     astroProfile.leafCalls++;
     if (!astroProfilingEnabled) {
       return computeDayNightLeafAngleImpl(
@@ -12572,7 +12613,8 @@
         observerLat,
         observerLon,
         pool,
-        tzOffsetSeconds
+        tzOffsetSeconds,
+        timeBaseKind
       );
     }
     const _t0 = performance.now();
@@ -12584,13 +12626,15 @@
       observerLat,
       observerLon,
       pool,
-      tzOffsetSeconds
+      tzOffsetSeconds,
+      timeBaseKind
     );
     astroProfile.leafMs += performance.now() - _t0;
     return r;
   }
-  function computeDayNightLeafAngleImpl(planetNumber, leafNumber, numLeaves, getNow2, observerLat, observerLon, pool, tzOffsetSeconds) {
+  function computeDayNightLeafAngleImpl(planetNumber, leafNumber, numLeaves, getNow2, observerLat, observerLon, pool, tzOffsetSeconds, timeBaseKind) {
     const calcDate = dateToDateInterval(getNow2());
+    const toAngle = timeBaseKind === "LST" ? (t) => angle24HourLSTForDate(t, observerLon) : (t) => angle24HourForDate(t, tzOffsetSeconds);
     const nightTime = planetNumber === 11 /* MidnightSun */;
     if (nightTime) {
       planetNumber = 0 /* Sun */;
@@ -12604,7 +12648,7 @@
         planetNumber,
         pool
       );
-      return { angle: angle24HourForDate(transitDI, tzOffsetSeconds), isRiseSet: true, aboveHorizon: false };
+      return { angle: toAngle(transitDI), isRiseSet: true, aboveHorizon: false };
     }
     const isSpecial = numLeaves === 0;
     if (numLeaves < 0) {
@@ -12613,16 +12657,16 @@
     const master = getMasterRiseSet(planetNumber, calcDate, observerLat, observerLon, pool);
     const riseTime = master.riseTime;
     const setTime = master.setTime;
-    let rTransitAngle = angle24HourForDate(master.riseTransitTime, tzOffsetSeconds);
-    let sTransitAngle = angle24HourForDate(master.setTransitTime, tzOffsetSeconds);
-    if (isNaN(riseTime) && isAlwaysAbove(riseTime)) {
+    let rTransitAngle = toAngle(master.riseTransitTime);
+    let sTransitAngle = toAngle(master.setTransitTime);
+    if (isAlwaysAbove(riseTime)) {
       rTransitAngle = fmod(rTransitAngle + Math.PI, 2 * Math.PI);
     }
-    if (isNaN(setTime) && isAlwaysAbove(setTime)) {
+    if (isAlwaysAbove(setTime)) {
       sTransitAngle = fmod(sTransitAngle + Math.PI, 2 * Math.PI);
     }
-    let riseTimeAngle = isNoRiseSet(riseTime) ? NaN : angle24HourForDate(riseTime, tzOffsetSeconds);
-    let setTimeAngle = isNoRiseSet(setTime) ? NaN : angle24HourForDate(setTime, tzOffsetSeconds);
+    let riseTimeAngle = isNoRiseSet(riseTime) ? NaN : toAngle(riseTime);
+    let setTimeAngle = isNoRiseSet(setTime) ? NaN : toAngle(setTime);
     if (numLeaves === 0 && leafNumber === 0) {
       const riseIsRS = !isNaN(riseTimeAngle);
       return {
@@ -12915,105 +12959,6 @@
   function angle24HourLSTForDate(dateInterval, observerLon) {
     const lstRadians = localSiderealTime(dateInterval, observerLon, null);
     return fmod(lstRadians, 2 * Math.PI);
-  }
-  function computeDayNightLeafAngleLST(planetNumber, leafNumber, numLeaves, getNow2, observerLat, observerLon, pool, tzOffsetSeconds) {
-    const calcDate = dateToDateInterval(getNow2());
-    const fudgeFactorSeconds = 5;
-    const lookahead = 3600 * 13.2;
-    const planetIsUp = planetIsUpForRiseSet(planetNumber, calcDate, observerLat, observerLon);
-    const riseResult = nextPrevRiseSetInternal(
-      calcDate,
-      observerLat,
-      observerLon,
-      true,
-      planetNumber,
-      !planetIsUp,
-      -fudgeFactorSeconds,
-      lookahead,
-      pool
-    );
-    const setResult = nextPrevRiseSetInternal(
-      calcDate,
-      observerLat,
-      observerLon,
-      false,
-      planetNumber,
-      planetIsUp,
-      -fudgeFactorSeconds,
-      lookahead,
-      pool
-    );
-    const riseTime = riseResult.eventTime;
-    const setTime = setResult.eventTime;
-    let rTransitAngle = angle24HourLSTForDate(riseResult.transitTime, observerLon);
-    let sTransitAngle = angle24HourLSTForDate(setResult.transitTime, observerLon);
-    if (isAlwaysAbove(riseTime)) {
-      rTransitAngle = fmod(rTransitAngle + Math.PI, 2 * Math.PI);
-    }
-    if (isAlwaysAbove(setTime)) {
-      sTransitAngle = fmod(sTransitAngle + Math.PI, 2 * Math.PI);
-    }
-    let riseTimeAngle = isNoRiseSet(riseTime) ? NaN : angle24HourLSTForDate(riseTime, observerLon);
-    let setTimeAngle = isNoRiseSet(setTime) ? NaN : angle24HourLSTForDate(setTime, observerLon);
-    if (numLeaves === 0) {
-      if (leafNumber === 0) {
-        if (isNaN(riseTimeAngle)) {
-          return rTransitAngle;
-        } else {
-          return riseTimeAngle;
-        }
-      } else if (leafNumber === 1) {
-        if (isNaN(setTimeAngle)) {
-          return sTransitAngle;
-        } else {
-          return setTimeAngle;
-        }
-      }
-      return 0;
-    }
-    const leafWidth = 2 * Math.PI / numLeaves;
-    if (isNaN(riseTimeAngle)) {
-      if (isNaN(setTimeAngle)) {
-        let sTA = sTransitAngle;
-        if (sTA > rTransitAngle + Math.PI) sTA -= 2 * Math.PI;
-        else if (sTA < rTransitAngle - Math.PI) sTA += 2 * Math.PI;
-        const avgTransit = (rTransitAngle + sTA) / 2;
-        if (isAlwaysAbove(riseTime)) {
-          riseTimeAngle = avgTransit - Math.PI;
-          setTimeAngle = avgTransit + Math.PI;
-        } else {
-          riseTimeAngle = avgTransit - leafWidth / 2 - 1e-5;
-          setTimeAngle = avgTransit + leafWidth / 2 + 1e-5;
-        }
-      } else {
-        if (isAlwaysAbove(riseTime)) {
-          riseTimeAngle = setTimeAngle - 2 * Math.PI;
-        } else {
-          riseTimeAngle = setTimeAngle - leafWidth;
-        }
-      }
-    } else if (isNaN(setTimeAngle)) {
-      if (isAlwaysAbove(setTime)) {
-        setTimeAngle = riseTimeAngle + 2 * Math.PI;
-      } else {
-        setTimeAngle = riseTimeAngle + leafWidth;
-      }
-    }
-    riseTimeAngle = fmod(riseTimeAngle, 2 * Math.PI);
-    setTimeAngle = fmod(setTimeAngle, 2 * Math.PI);
-    if (setTimeAngle <= riseTimeAngle + 1e-4) {
-      setTimeAngle += 2 * Math.PI;
-    }
-    setTimeAngle -= leafWidth / 2;
-    riseTimeAngle += leafWidth / 2;
-    if (setTimeAngle < riseTimeAngle) {
-      riseTimeAngle = setTimeAngle = (riseTimeAngle + setTimeAngle) / 2;
-    }
-    let leafCenterAngle = riseTimeAngle + (setTimeAngle - riseTimeAngle) / (numLeaves - 1) * leafNumber;
-    if (leafCenterAngle > 2 * Math.PI) {
-      leafCenterAngle -= 2 * Math.PI;
-    }
-    return leafCenterAngle;
   }
 
   // src/shared/url-state.ts
