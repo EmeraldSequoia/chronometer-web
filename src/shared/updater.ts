@@ -484,13 +484,24 @@ function shortestPathDistance(current: number, target: number, period: number): 
 /**
  * On-beat **arrival**: the value has reached its current boundary and is now
  * deciding where (and when) to go next. Compute the next update boundary in
- * display time, evaluate the target *there* (eval-ahead), and schedule the snap to
- * *begin* at `boundaryRealMs − d` so it *arrives on the boundary* rather than
- * starting at it. Stores the plan in `v.pendingTarget` and points `nextUpdateTime`
- * at the start (so the idle scheduler wakes exactly then).
+ * display time, evaluate the target *there* (eval-ahead), and schedule the snap
+ * toward it. Stores the plan in `v.pendingTarget` and points `nextUpdateTime` at
+ * the start (so the idle scheduler wakes exactly then).
  *
- * Mode-aware exactly like the eval-ahead branch, but only in the *budget* mapping:
- * the boundary sequence is the value's own update boundaries either way (see
+ * **When the snap starts is mode-dependent — this is the dead-beat gate.**
+ *   - **1× / reverse:** begin at `boundaryRealMs − d` so the snap *arrives on the
+ *     boundary* rather than starting at it. This is the "jumping seconds"
+ *     complication: a 1-bps hand sits, then ticks onto the beat.
+ *   - **Scrub:** begin *now* and sweep across the whole budget to the boundary, so
+ *     the hand moves every frame instead of sitting most of the tick and snapping.
+ *     The dead-beat aesthetic is meaningless here — the "beat" is just the 10 Hz
+ *     render tick — and slow hands (e.g. Firenze's Earth/planet markers, ~1°/day)
+ *     otherwise sit ~90% of each tick and step. Eval cadence is unchanged (arrival
+ *     still lands on the boundary), so the boundary-batched astronomy the on-beat
+ *     scheme buys during scrub is fully preserved; only the interpolation *shape*
+ *     changes (fill-the-budget sweep vs. sit-then-land).
+ *
+ * The boundary sequence is the value's own update boundaries either way (see
  * planning/2026-06-26-worker-eval-ahead-pipeline.md, "Computing T+1, T+2").
  */
 function onArrivalOnBeat(
@@ -509,8 +520,9 @@ function onArrivalOnBeat(
     if (profileEnabled) tickProfile.boundaryMs += performance.now() - _b0;
 
     // Real time at which that boundary lands.
+    const scrubbing = tickIntervalMs !== null && tickIntervalMs > 0;
     let boundaryRealMs: number;
-    if (tickIntervalMs !== null && tickIntervalMs > 0) {
+    if (scrubbing) {
         // Scrub: compress display-time-to-boundary into whole ticks (the value is
         // re-evaluated only when accelerated display time reaches its boundary —
         // NOT every tick).
@@ -533,15 +545,24 @@ function onArrivalOnBeat(
         : v.evalFn(env);
     if (profileEnabled) { tickProfile.evalMs += performance.now() - _e0; tickProfile.evalCalls++; }
 
-    // Sweep duration d = distance / speed (0 when NaN/instant → snap on boundary).
-    const dist = shortestPathDistance(v.anim.currentValue, target, v.period);
-    const d = (v.animSpeed > 0 && isFinite(dist)) ? (dist / v.animSpeed) * 1000 : 0;
-
-    let startTime = isFinite(boundaryRealMs) ? boundaryRealMs - d : Infinity;
-    // Can't start in the past: if the snap should already be underway, begin now
-    // (the budget compresses to land on the boundary; or sweeps continuously when
-    // d ≥ interval — the bps=0 graceful-degrade case).
-    if (startTime < perfNow) startTime = perfNow;
+    // When to *start* the snap — the dead-beat gate (see doc comment).
+    let startTime: number;
+    if (!isFinite(boundaryRealMs)) {
+        startTime = Infinity;
+    } else if (scrubbing) {
+        // Scrub: start now and fill the whole budget → move every frame, no sit.
+        startTime = perfNow;
+    } else {
+        // 1× / reverse: land on the beat — begin at boundary − sweepDuration so the
+        // snap *arrives* on the boundary (the jumping-seconds tick).
+        const dist = shortestPathDistance(v.anim.currentValue, target, v.period);
+        const d = (v.animSpeed > 0 && isFinite(dist)) ? (dist / v.animSpeed) * 1000 : 0;
+        startTime = boundaryRealMs - d;
+        // Can't start in the past: if the snap should already be underway, begin now
+        // (the budget compresses to land on the boundary; or sweeps continuously when
+        // d ≥ interval — the bps=0 graceful-degrade case).
+        if (startTime < perfNow) startTime = perfNow;
+    }
 
     v.pendingTarget = { target, boundaryRealMs, startTime };
     v.nextUpdateDisplayTime = nextDisplayMs;

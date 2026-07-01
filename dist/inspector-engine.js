@@ -13660,8 +13660,9 @@
       env2
     );
     if (profileEnabled) tickProfile.boundaryMs += performance.now() - _b0;
+    const scrubbing = tickIntervalMs !== null && tickIntervalMs > 0;
     let boundaryRealMs;
-    if (tickIntervalMs !== null && tickIntervalMs > 0) {
+    if (scrubbing) {
       const displayNowMs = getNow2().getTime();
       const displayDeltaMs = Math.abs(nextDisplayMs - displayNowMs);
       const perTickMs = displayDeltaPerTickSec * 1e3;
@@ -13676,10 +13677,17 @@
       tickProfile.evalMs += performance.now() - _e0;
       tickProfile.evalCalls++;
     }
-    const dist = shortestPathDistance(v.anim.currentValue, target, v.period);
-    const d = v.animSpeed > 0 && isFinite(dist) ? dist / v.animSpeed * 1e3 : 0;
-    let startTime = isFinite(boundaryRealMs) ? boundaryRealMs - d : Infinity;
-    if (startTime < perfNow) startTime = perfNow;
+    let startTime;
+    if (!isFinite(boundaryRealMs)) {
+      startTime = Infinity;
+    } else if (scrubbing) {
+      startTime = perfNow;
+    } else {
+      const dist = shortestPathDistance(v.anim.currentValue, target, v.period);
+      const d = v.animSpeed > 0 && isFinite(dist) ? dist / v.animSpeed * 1e3 : 0;
+      startTime = boundaryRealMs - d;
+      if (startTime < perfNow) startTime = perfNow;
+    }
     v.pendingTarget = { target, boundaryRealMs, startTime };
     v.nextUpdateDisplayTime = nextDisplayMs;
     v.nextUpdateTime = startTime;
