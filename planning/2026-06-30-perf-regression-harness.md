@@ -61,6 +61,16 @@ Two layers let the agent distinguish a real regression from a different/loaded h
 Plus a **noise floor**: a face is only surfaced if `|Δ%| ≥ 15%` **and** `|Δ ms| ≥ 0.01` — so sub-ms
 faces (milano 0.003→0.002) don't flag on rounding.
 
+> **Correction (2026-06-30, after using it on the tz fix):** point 1 above is weaker than written.
+> Same-machine, same-VM, a single face's median swings **~±10% run-to-run** (run ordering, thermal
+> state, JIT/GC) — *not* just across machines. So a "localized spike" is often noise, and the calibration
+> factor (which only handles *uniform* shifts) doesn't catch it. A single-shot per-face Δ under
+> ~10–15% is not evidence of a regression, even against a same-machine baseline. **Confirm a suspected
+> per-face regression with an interleaved same-machine A/B** (stash vs. apply, measured alternately over
+> several rounds, so drift cancels) — only a gap that survives swapping which side runs first is real.
+> The operational guidance in [docs/perf-regression.md § Stability](../docs/perf-regression.md) and
+> [development rules §18](../docs/development-rules.md) now reflects this.
+
 ## Re-baseline discipline (perf analog of golden capture)
 
 `--capture` rewrites `perf-baseline.json`. Treat it like `CAPTURE=1` for the golden files: do it
@@ -88,6 +98,14 @@ Run against the working tree carrying the per-instant tz change, it produced exa
 `geneva` → **CRASH (Invalid time value)**; `kyoto` **+41%**, `haleakala` **+38%**, `hana` **+17%**
 flagged `⚠ slower`; the rest flat; TOTAL +3.7% at a 0.93× machine factor. That's the regression report
 we'd want a future agent to surface automatically.
+
+> **Follow-up (2026-06-30, later):** the **crash** signal was the genuinely valuable one, and the perf
+> flags correctly prompted a look. But the flagged **percentages were mostly artifact.** After the
+> crash guard + offset-window memo removed the `formatToParts` cost, an *interleaved same-machine* A/B
+> (see the Correction above) put the real deltas at **~+1.5% (kyoto) down to noise** — several faces
+> even flipped sign with measurement order. The headline `+41%/+38%/+17%` combined the real
+> `formatToParts` cost *with* a cross-machine hand-entered baseline *and* run-ordering drift. Lesson:
+> trust the harness to say "look here," not "it's N% slower."
 
 ## Canonical docs
 

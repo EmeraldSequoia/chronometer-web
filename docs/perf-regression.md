@@ -35,14 +35,37 @@ Then **surface to the user**: the TOTAL Δ (with the machine-speed factor) and a
 ## Reading the output
 
 - **Per-face Δ%**, plus a TOTAL. A face is flagged only if `|Δ%| ≥ 15%` **and** `|Δ ms| ≥ 0.01` (so
-  sub-ms faces don't trip on rounding).
-- **Localized vs uniform.** One face up while others are flat ⇒ likely a real regression — flag it. A
-  roughly-uniform shift across all faces ⇒ usually a different/loaded machine — say so.
+  sub-ms faces don't trip on rounding). A flag is a **prompt to investigate, not proof** — see
+  [Stability](#stability--how-much-a-per-face-number-really-means).
+- **Localized vs uniform.** One face up while others are flat *can* be a real regression — but on the
+  measurement machine it is just as often run-ordering/thermal noise (see Stability). A roughly-uniform
+  shift across all faces ⇒ usually a different/loaded machine.
 - **Machine-speed calibration.** The runner times a fixed arithmetic loop and reports `this / baseline`
   as a factor. ≈1.0 ⇒ comparable machines; far from 1.0 ⇒ discount a uniform shift of about that size.
 - **Crashes** show as `🔴 CRASH` for a face whose tick threw — that's a correctness regression the
   Vitest suite should also catch.
 - Report **speedups** too: they confirm an optimization, or hint that work was skipped.
+
+## Stability — how much a per-face number really means
+
+These numbers are **noisier than they look.** Measured empirically (same machine, same VM), a single
+face's median swings by **~±10% run-to-run** — driven by run *ordering*, thermal state, and JIT/GC
+timing, not just cross-machine differences. In one incident the per-instant timezone-conversion change
+appeared to regress faces by **+5 – +44% vs the committed baseline**; an interleaved same-machine
+re-measurement put the *real* deltas at ~+1.5% or within noise, and several faces **flipped sign purely
+with the order they were measured in** (whichever version ran first measured faster).
+
+So:
+
+- A per-face Δ under **~10–15% is not, on its own, evidence of a regression** — even against a baseline
+  captured on the same machine. And the committed baseline may come from a *different* machine (check
+  its `machine`/`note` fields), which inflates everything at once.
+- **To confirm a suspected per-face regression, A/B on the same machine, interleaved.** Stash the
+  change vs. apply it and measure *alternately* over several rounds (`git stash` → measure → `git stash
+  pop` → measure, repeat), so ordering/thermal drift affects both sides equally. Only a **consistent
+  gap that survives swapping which side runs first** is real; a gap that shrinks or flips is noise.
+- `medianFaceTickMs` (and `--runs`) reduce noise but do **not** remove the ordering/thermal component —
+  interleaving is what cancels it.
 
 ## Re-baselining (`--capture`)
 
