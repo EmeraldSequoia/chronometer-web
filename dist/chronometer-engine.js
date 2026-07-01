@@ -21902,16 +21902,20 @@ return {${names2.join(",")}};`;
       const timingCtx = timingContextForFrame(timeController);
       for (const face of faces) {
         if (!face.enabled || !face.cachesBuilt) continue;
-        const tickStart = performance.now();
-        face.updater.tick(face.env, now, face.getNow, face.withDisplayTime, timingCtx);
-        tickCpuMs += performance.now() - tickStart;
-        const renderStart = performance.now();
-        renderFrame(face.ctx, face.watch, face.env, face.scale, face.images, face.terminatorLeaves, face.analemmaState);
-        renderMs += performance.now() - renderStart;
-        const faceAnimating = face.updater.anyAnimating();
-        if (faceAnimating) {
-          stillAnimating = true;
-          animatingFaceCount++;
+        try {
+          const tickStart = performance.now();
+          face.updater.tick(face.env, now, face.getNow, face.withDisplayTime, timingCtx);
+          tickCpuMs += performance.now() - tickStart;
+          const renderStart = performance.now();
+          renderFrame(face.ctx, face.watch, face.env, face.scale, face.images, face.terminatorLeaves, face.analemmaState);
+          renderMs += performance.now() - renderStart;
+          const faceAnimating = face.updater.anyAnimating();
+          if (faceAnimating) {
+            stillAnimating = true;
+            animatingFaceCount++;
+          }
+        } catch (err) {
+          console.error(`[frame] face "${face.watch?.name ?? "?"}" tick/render threw; skipping this frame:`, err);
         }
       }
       if (isScrubbing) {

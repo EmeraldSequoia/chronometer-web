@@ -1148,21 +1148,35 @@ async function main() {
 
         for (const face of faces) {
             if (!face.enabled || !face.cachesBuilt) continue;
-            // Drive all ObsValues for this face — hands, wheels, dials, wedges,
-            // masterOffset, and the terminator leaves (all on the per-face Updater).
-            const tickStart = performance.now();
-            face.updater.tick(face.env, now, face.getNow, face.withDisplayTime, timingCtx);
-            tickCpuMs += performance.now() - tickStart;
+            // Per-face error boundary. The whole rAF loop is a single chain
+            // (setTimeout → onIdleWakeup → rAF → frame → armIdle → …) with no
+            // watchdog: if this frame throws before the re-arm at the bottom, the
+            // loop is left with rafId === null and idleTimerId === null and stays
+            // frozen until some unrelated event calls ensureSchedulerRunning(). In
+            // the all-faces grid that means one face's transient failure freezes
+            // *every* face. Contain a face's tick/render here so the loop always
+            // reaches its re-arm; the display time keeps advancing, so a transient
+            // (time-dependent) failure clears itself on a later frame.
+            try {
+                // Drive all ObsValues for this face — hands, wheels, dials, wedges,
+                // masterOffset, and the terminator leaves (all on the per-face Updater).
+                const tickStart = performance.now();
+                face.updater.tick(face.env, now, face.getNow, face.withDisplayTime, timingCtx);
+                tickCpuMs += performance.now() - tickStart;
 
-            const renderStart = performance.now();
-            renderFrame(face.ctx, face.watch, face.env, face.scale, face.images, face.terminatorLeaves, face.analemmaState);
+                const renderStart = performance.now();
+                renderFrame(face.ctx, face.watch, face.env, face.scale, face.images, face.terminatorLeaves, face.analemmaState);
 
-            renderMs += performance.now() - renderStart;
+                renderMs += performance.now() - renderStart;
 
-            const faceAnimating = face.updater.anyAnimating();
-            if (faceAnimating) {
-                stillAnimating = true;
-                animatingFaceCount++;
+                const faceAnimating = face.updater.anyAnimating();
+                if (faceAnimating) {
+                    stillAnimating = true;
+                    animatingFaceCount++;
+                }
+            } catch (err) {
+                // Log loudly (this should never happen) but keep the loop alive.
+                console.error(`[frame] face "${face.watch?.name ?? '?'}" tick/render threw; skipping this frame:`, err);
             }
         }
 
