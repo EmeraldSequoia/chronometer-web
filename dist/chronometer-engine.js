@@ -21693,7 +21693,12 @@ return {${names2.join(",")}};`;
           onDone();
           return;
         }
-        buildCache(facesToBuild[idx++]);
+        const face = facesToBuild[idx++];
+        try {
+          buildCache(face);
+        } catch (err) {
+          console.error(`[buildCache] face "${face.watch?.name ?? "?"}" threw; leaving it unbuilt:`, err);
+        }
         setTimeout(buildNext, 0);
       }
       buildNext();
@@ -22265,7 +22270,6 @@ return {${names2.join(",")}};`;
       if (newPhys === faces[0]?.canvas.width && !positionChanged) return;
       wasShifted = useTopLeftAlign;
       wasAstroTab = isAstroTab;
-      stopScheduler();
       cols = result.cols;
       rows = result.rows;
       if (useTopLeftAlign) {

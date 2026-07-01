@@ -831,7 +831,16 @@ async function main() {
         let idx = 0;
         function buildNext() {
             if (idx >= facesToBuild.length) { onDone(); return; }
-            buildCache(facesToBuild[idx++]);
+            const face = facesToBuild[idx++];
+            try {
+                buildCache(face);
+            } catch (err) {
+                // A single face's cache build must never strand the batch: onDone()
+                // re-kicks the render loop, so skipping it would leave the grid dark.
+                // Log and carry on — the face stays cachesBuilt=false (skipped by the
+                // frame loop) and is retried on the next rebuild (resize / location).
+                console.error(`[buildCache] face "${face.watch?.name ?? '?'}" threw; leaving it unbuilt:`, err);
+            }
             setTimeout(buildNext, 0);
         }
         buildNext();
@@ -1706,7 +1715,17 @@ async function main() {
         wasShifted = useTopLeftAlign;
         wasAstroTab = isAstroTab;
 
-        stopScheduler();
+        // Deliberately NOT stopScheduler() here. The render loop keeps running
+        // across the (async, per-face) cache rebuild below: a face whose cache we
+        // invalidate (cachesBuilt=false) is skipped by the frame loop and re-appears
+        // when its rebuild completes, while every already-built face keeps animating.
+        // Previously we stopped the loop and only restarted it in the rebuild's
+        // completion callback — which made grid liveness hostage to that async
+        // setTimeout chain: a throttled timer (backgrounded tab) or a thrown
+        // buildCache would strand *every* face frozen for seconds. The build is
+        // ~100–350ms for the full grid (measured), so faces resolve to the new
+        // values within a few hundred ms; the startScheduler() at the end is now
+        // just a prompt-render kick, not a restart-from-stopped.
 
         cols = result.cols;
         rows = result.rows;
