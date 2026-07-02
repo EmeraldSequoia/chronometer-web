@@ -214,14 +214,21 @@ partial stays a single source of truth.)
 
 ### 2.2 Header app-nav icons (all app pages)
 
-Two monochrome inline-SVG icon buttons in the top-right of every app page,
-linking to the other two apps, consistent with the existing icon-button styling:
+Two icon buttons in the top-right of every app page, linking to the other two
+apps:
 
-- **Chronometer icon:** a watch face — circle with hour/minute hands.
-- **Observatory icon:** an orrery/orbit glyph — circle with an orbital ring and
-  planet dot, echoing the round EO identity. (Distinct from the noon-toggle
-  half-disc already in Observatory's footer.)
-- **Inspector icon:** magnifying glass.
+- **Chronometer icon:** the colored app icon (`apple-touch-icon.png`, the
+  index page's favicon), cropped round.
+- **Observatory icon:** the colored round EO dial (`thumb-observatory.png`,
+  Observatory's favicon image).
+- **Inspector icon:** monochrome magnifying glass SVG, matching the existing
+  button style.
+
+*(Revised same day: the first cut used monochrome SVG glyphs for all three,
+but the watch-face and orrery glyphs were hard to tell apart. Steve: use the
+colored favicon images at the same size — they have different functionality
+(switching apps) and should stand out for discoverability, so deliberately
+breaking the monochrome chrome style is fine.)*
 
 Placement:
 

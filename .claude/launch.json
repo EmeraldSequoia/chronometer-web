@@ -7,11 +7,11 @@
       "runtimeArgs": [
         "-m",
         "http.server",
-        "8747",
+        "8748",
         "--directory",
         "dist"
       ],
-      "port": 8747
+      "port": 8748
     },
     {
       "name": "dev",

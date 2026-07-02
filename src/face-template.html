@@ -128,7 +128,6 @@
       #info-btn,
       #share-btn,
       #fullscreen-btn,
-      #observatory-link,
       #inspector-link {
           position: absolute;
           top: 16px;
@@ -208,10 +207,30 @@
       }
 
       /* Cross-app links (Observatory / Inspector) continue the right-edge
-         stack below fullscreen; hrefs are wired by shared/app-nav.ts. */
+         stack below fullscreen; hrefs are wired by shared/app-nav.ts.
+         Observatory shows its colored app icon — deliberately breaking the
+         monochrome style, since these switch apps (discoverability). */
       #observatory-link {
+          position: absolute;
           right: 16px;
           top: 148px;
+          display: block;
+          width: 36px;
+          height: 36px;
+          z-index: 10;
+          transition: filter 0.2s;
+      }
+
+      #observatory-link img {
+          width: 100%;
+          height: 100%;
+          border-radius: 50%;
+          object-fit: cover;
+          display: block;
+      }
+
+      #observatory-link:hover {
+          filter: brightness(1.35);
       }
 
       #inspector-link {
@@ -219,7 +238,6 @@
           top: 192px;
       }
 
-      #observatory-link svg,
       #inspector-link svg {
           width: 18px;
           height: 18px;
@@ -255,7 +273,6 @@
       #info-btn:hover,
       #share-btn:hover,
       #fullscreen-btn:hover,
-      #observatory-link:hover,
       #inspector-link:hover {
           background: rgba(255, 255, 255, 0.15);
           color: #bbd;
@@ -746,7 +763,7 @@
         <svg class="fs-compress" viewBox="0 0 24 24"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>
       </button>
       <a id="observatory-link" class="app-nav-link" data-page="observatory.html" href="observatory.html" title="Observatory">
-        <svg viewBox="0 0 24 24"><path d="M12 2.2A9.8 9.8 0 1 0 21.8 12 9.81 9.81 0 0 0 12 2.2zm0 1.8A8 8 0 1 1 4 12a8 8 0 0 1 8-8z"/><circle cx="12" cy="12" r="3"/><circle cx="12" cy="4" r="2"/></svg>
+        <img src="thumb-observatory.png" alt="Observatory" />
       </a>
       <a id="inspector-link" class="app-nav-link" data-page="inspector.html" href="inspector.html" title="Inspector">
         <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.51 6.51 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
