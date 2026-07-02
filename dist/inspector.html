@@ -197,6 +197,19 @@
           letter-spacing: 0.3px;
       }
 
+      /* Short landscape viewports (phones): the 48px time display is the
+         biggest consumer of pinned height — shrink it so the catalog keeps
+         a usable share of the screen. */
+      @media (orientation: landscape) and (max-height: 480px) {
+          #time-display {
+              font-size: 28px;
+              margin-bottom: 2px;
+          }
+          .time-section {
+              margin-bottom: 4px;
+          }
+      }
+
       /* ── Location Section ─────────────────────────── */
       .section-card {
           background: rgba(31, 41, 55, 0.6);
@@ -294,7 +307,8 @@
           flex: 1 1 auto;
           min-height: 0;        /* allow the flex child to shrink so it can scroll */
           overflow-y: auto;
-          margin-top: 16px;
+          /* No top margin: the time bar's bottom margin provides the gap above
+             the location card at the top of the scroll region. */
           padding-bottom: 16px;
       }
 
@@ -341,9 +355,23 @@
           white-space: nowrap;
       }
 
-      /* Distance spans all three value columns so the AU + km reading has room. */
-      .cat-cell.dist-cell {
+      /* Cells live in a .cat-cells wrapper: display:contents here, so the
+         cells place directly into the row grid (or the fields row's flex);
+         on narrow screens it becomes a real wrapping flex container so that
+         wrapped lines indent past the row label. */
+      .cat-cells {
+          display: contents;
+      }
+
+      /* A row's last cell extends across any empty value columns to its right,
+         so e.g. a lone HMS value or the Distance row's AU + km reading gets the
+         full row width. (Cell k of the wrapper sits in grid column k+1, after
+         the label track.) */
+      .cat-row:not(.cat-row-fields) .cat-cells > .cat-cell:nth-child(1):last-child {
           grid-column: 2 / -1;
+      }
+      .cat-row:not(.cat-row-fields) .cat-cells > .cat-cell:nth-child(2):last-child {
+          grid-column: 3 / -1;
       }
 
       /* "Fields" rows (Date/Clock): compact content-sized cells on a line,
@@ -387,6 +415,34 @@
       .kilo-sep {
           font-family: 'Inter', system-ui, sans-serif;
           margin: 0 -0.03em;
+      }
+
+      /* Phones: the fixed value columns can't fit the widest cells — let rows
+         wrap instead of truncating. The row becomes label + .cat-cells, and
+         the cells wrap *inside* the wrapper, so continuation lines start under
+         the first value column rather than under the row label. Column
+         alignment across rows is intentionally sacrificed at this width. */
+      @media (max-width: 540px) {
+          .cat-row {
+              display: flex;
+          }
+          .cat-row .cat-cells {
+              display: flex;
+              flex: 1 1 0;
+              min-width: 0;
+              flex-wrap: wrap;
+              column-gap: 14px;
+              align-items: baseline;
+          }
+          .cat-row-fields .cat-cells {
+              column-gap: 20px;   /* match the fields rows' wide-layout gap */
+          }
+          .cat-row .cat-cell {
+              flex: 0 0 auto;
+          }
+          .cat-row .cat-cell-value {
+              overflow: visible;
+          }
       }
 
       /* ── Info popup overlay (mirrors Observatory; behavior wired by the
@@ -1890,22 +1946,24 @@
       </div>
 
 
-      <!-- Location -->
-      <div class="section-card">
-        <p class="section-label">Location</p>
-        <div class="location-row">
-          <div>
-            <p id="location-name">Detecting…</p>
-            <p id="location-detail">—</p>
-          </div>
-          <button id="set-location-btn">Set</button>
-        </div>
-      </div>
-
       </div><!-- /.pinned-top -->
 
-      <!-- Ephemeris catalog (populated by inspector-entry.ts) -->
-      <div id="catalog" class="catalog"></div>
+      <!-- Scrolling region: the location card scrolls with the catalog (it
+           doesn't need to stay pinned); inspector-entry.ts appends the
+           ephemeris groups after it. -->
+      <div id="catalog" class="catalog">
+        <!-- Location -->
+        <div class="section-card">
+          <p class="section-label">Location</p>
+          <div class="location-row">
+            <div>
+              <p id="location-name">Detecting…</p>
+              <p id="location-detail">—</p>
+            </div>
+            <button id="set-location-btn">Set</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div id="info-overlay">
@@ -2037,7 +2095,7 @@
             <div id="help-content">
               <!-- Populated from help-template on first info click -->
             </div>
-            <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.8</div>
+            <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.9</div>
           </div>
 
           <div id="info-sub-view">

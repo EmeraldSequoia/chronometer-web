@@ -15,6 +15,8 @@ export type Tag =
     | 'A'      // full-circle angle: linear=false, shown 0–360°
     | 'Ldeg'   // bounded angle (decl/alt/lat): linear=true, signed degrees
     | 'Num'    // continuous fractional number: linear=true
+    | 'SEC'    // seconds-of-minute (clock): linear=true, zero-padded "SS.sss"
+               // (fixed width, so the wrapped Clock row doesn't re-wrap each minute)
     | 'DIST'   // distance in AU: linear=true, shown as AU + km
     | 'HMS'    // clock quantity in seconds: linear=true, "HH:MM:SS.sss"
     | 'MS'     // small signed duration (EOT): linear=true, "±MM:SS.sss"
@@ -96,7 +98,7 @@ const TIME_GROUP: CatalogGroup = {
             cells: [
                 { label: 'Hour', expr: 'hour24Number()', tag: 'Int', updateInterval: NORMAL },
                 { label: 'Minute', expr: 'minuteNumber()', tag: 'Int', updateInterval: NORMAL },
-                { label: 'Second', expr: 'secondValue()', tag: 'Num', updateInterval: FAST },
+                { label: 'Second', expr: 'secondValue()', tag: 'SEC', updateInterval: FAST },
             ],
         },
         { rowLabel: 'Sidereal time', cells: [{ label: '', expr: 'lstValue()', tag: 'HMS', updateInterval: FAST }] },

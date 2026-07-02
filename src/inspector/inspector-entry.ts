@@ -477,9 +477,14 @@ function buildCatalog(): void {
             lbl.className = 'cat-row-label';
             lbl.textContent = row.rowLabel ?? '';
             rowEl.appendChild(lbl);
+            // Cells go in a wrapper (display:contents on wide layouts, the
+            // wrapping flex container on narrow ones — see inspector.html CSS).
+            const cellsEl = document.createElement('div');
+            cellsEl.className = 'cat-cells';
+            rowEl.appendChild(cellsEl);
             for (const cell of row.cells) {
                 const cellEl = document.createElement('div');
-                cellEl.className = cell.tag === 'DIST' ? 'cat-cell dist-cell' : 'cat-cell';
+                cellEl.className = 'cat-cell';
                 if (cell.label) {
                     const cl = document.createElement('span');
                     cl.className = 'cat-cell-label';
@@ -490,7 +495,7 @@ function buildCatalog(): void {
                 valueEl.className = 'cat-cell-value';
                 valueEl.textContent = '—';
                 cellEl.appendChild(valueEl);
-                rowEl.appendChild(cellEl);
+                cellsEl.appendChild(cellEl);
 
                 const discrete = tagIsDiscrete(cell.tag);
                 const obs = createObsValue(
@@ -520,13 +525,16 @@ function buildCatalog(): void {
         btLabel.className = 'cat-row-label';
         btLabel.textContent = 'Browser time';
         btRow.appendChild(btLabel);
+        const btCells = document.createElement('div');
+        btCells.className = 'cat-cells';
+        btRow.appendChild(btCells);
         const btCell = document.createElement('div');
         btCell.className = 'cat-cell';
         const btValue = document.createElement('span');
         btValue.className = 'cat-cell-value';
         btValue.textContent = '—';
         btCell.appendChild(btValue);
-        btRow.appendChild(btCell);
+        btCells.appendChild(btCell);
         timeGroupEl.appendChild(btRow);
         browserTimeEl = btValue;
         browserTimeRowEl = btRow;
@@ -574,6 +582,16 @@ function fmtInt(v: number): string {
 function fmtNum(v: number): string {
     if (!isFinite(v)) return '—';
     return Number.isInteger(v) ? v.toString() : v.toFixed(3);
+}
+
+/** Seconds-of-minute → zero-padded "SS.sss" (constant width — a varying width
+ *  makes the wrapped Clock row blip between one and two lines). */
+function fmtSec(v: number): string {
+    if (!isFinite(v)) return '—';
+    const totalMs = Math.round(v * 1000);
+    const ms = totalMs % 1000;
+    const ss = Math.floor(totalMs / 1000);
+    return `${pad2(ss)}.${pad3(ms)}`;
 }
 
 function fmtBool(v: number): string {
@@ -657,6 +675,7 @@ function formatCell(tag: Tag, v: number): string {
         case 'A': return fmtAngle(v);
         case 'Ldeg': return fmtDeg(v);
         case 'Num': return fmtNum(v);
+        case 'SEC': return fmtSec(v);
         case 'Int': return fmtInt(v);
         case 'BOOL': return fmtBool(v);
         case 'WD': return fmtWeekday(v);

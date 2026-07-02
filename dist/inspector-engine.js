@@ -16953,7 +16953,7 @@
         cells: [
           { label: "Hour", expr: "hour24Number()", tag: "Int", updateInterval: NORMAL },
           { label: "Minute", expr: "minuteNumber()", tag: "Int", updateInterval: NORMAL },
-          { label: "Second", expr: "secondValue()", tag: "Num", updateInterval: FAST }
+          { label: "Second", expr: "secondValue()", tag: "SEC", updateInterval: FAST }
         ]
       },
       { rowLabel: "Sidereal time", cells: [{ label: "", expr: "lstValue()", tag: "HMS", updateInterval: FAST }] },
@@ -17420,9 +17420,12 @@
         lbl.className = "cat-row-label";
         lbl.textContent = row.rowLabel ?? "";
         rowEl.appendChild(lbl);
+        const cellsEl = document.createElement("div");
+        cellsEl.className = "cat-cells";
+        rowEl.appendChild(cellsEl);
         for (const cell of row.cells) {
           const cellEl = document.createElement("div");
-          cellEl.className = cell.tag === "DIST" ? "cat-cell dist-cell" : "cat-cell";
+          cellEl.className = "cat-cell";
           if (cell.label) {
             const cl = document.createElement("span");
             cl.className = "cat-cell-label";
@@ -17433,7 +17436,7 @@
           valueEl.className = "cat-cell-value";
           valueEl.textContent = "\u2014";
           cellEl.appendChild(valueEl);
-          rowEl.appendChild(cellEl);
+          cellsEl.appendChild(cellEl);
           const discrete = tagIsDiscrete(cell.tag);
           const obs = createObsValue(
             {
@@ -17466,13 +17469,16 @@
       btLabel.className = "cat-row-label";
       btLabel.textContent = "Browser time";
       btRow.appendChild(btLabel);
+      const btCells = document.createElement("div");
+      btCells.className = "cat-cells";
+      btRow.appendChild(btCells);
       const btCell = document.createElement("div");
       btCell.className = "cat-cell";
       const btValue = document.createElement("span");
       btValue.className = "cat-cell-value";
       btValue.textContent = "\u2014";
       btCell.appendChild(btValue);
-      btRow.appendChild(btCell);
+      btCells.appendChild(btCell);
       timeGroupEl.appendChild(btRow);
       browserTimeEl = btValue;
       browserTimeRowEl = btRow;
@@ -17513,6 +17519,13 @@
   function fmtNum(v) {
     if (!isFinite(v)) return "\u2014";
     return Number.isInteger(v) ? v.toString() : v.toFixed(3);
+  }
+  function fmtSec(v) {
+    if (!isFinite(v)) return "\u2014";
+    const totalMs = Math.round(v * 1e3);
+    const ms = totalMs % 1e3;
+    const ss = Math.floor(totalMs / 1e3);
+    return `${pad2(ss)}.${pad3(ms)}`;
   }
   function fmtBool(v) {
     if (!isFinite(v)) return "\u2014";
@@ -17585,6 +17598,8 @@
         return fmtDeg(v);
       case "Num":
         return fmtNum(v);
+      case "SEC":
+        return fmtSec(v);
       case "Int":
         return fmtInt(v);
       case "BOOL":
