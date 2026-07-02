@@ -19,6 +19,7 @@ import {
     interpolateValue,
     computeNextBoundary,
     displayTimeToPerfNow,
+    EC_UPDATE_ENV_CHANGE_ONLY,
 } from './animation.js';
 import type { ObsValue } from './obs-value.js';
 import type { TimeController } from './time-controller.js';
@@ -658,8 +659,18 @@ function onBeatStep(
     // is excluded: there onArrivalOnBeat already re-evaluates on every compressed
     // beat, so a separate instant settle isn't needed and would perturb the tick
     // trajectory.
+    //
+    // EXCEPTION — env-change-only values (update='updateAtEnvChangeOnly' or 0):
+    // their boundary is Infinity, so "onArrivalOnBeat re-evaluates on every
+    // compressed beat" never applies — without the instant settle they'd ignore a
+    // mid-scrub reset() entirely and freeze until scrub end. (Seen as the Geneva
+    // DST-indicator hand not flipping while scrubbing across a DST transition:
+    // rebuildEnvironments resets schedules at the crossing, but the indicator sat
+    // on its Infinity boundary until mouse-up.) They have no tick trajectory to
+    // perturb, so the settle is safe during scrub.
+    const envChangeOnly = v.updateInterval === 0 || v.updateInterval === EC_UPDATE_ENV_CHANGE_ONLY;
     if (v.nextUpdateTime === 0 && !v.anim.animating
-        && (tickIntervalMs === null || tickIntervalMs <= 0)) {
+        && (tickIntervalMs === null || tickIntervalMs <= 0 || envChangeOnly)) {
         const target = v.evalFn(env);
         startAnimationRaw(v.anim, target, perfNow, multiplier, undefined, v.period);
         v.pendingTarget = null;

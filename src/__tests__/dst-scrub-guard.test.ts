@@ -35,7 +35,11 @@ import { JSDOM } from 'jsdom';
 import { loadFaceXML, TEST_LOCATIONS } from './face-registry.js';
 import { parseWatchXML } from '../watch/xml-parser.js';
 import { createWatchEnvironment } from '../watch/watch-env.js';
+import { buildHandValues } from '../watch/hand-values.js';
 import { envTzStateStale } from '../shared/astro-env.js';
+import {
+    type Updater, type WithDisplayTime, makeOverridableGetNow, timingContextForFrame,
+} from '../shared/updater.js';
 import type { Environment } from '../expr/env.js';
 import type { Watch } from '../watch/types.js';
 import { TimeController, RATE_OPTIONS, TICK_INTERVAL_MS, type TimeUnit } from '../shared/time-controller.js';
@@ -65,20 +69,41 @@ class GuardedScrub {
     readonly watch: Watch;
     readonly tc = new TimeController();
     env: Environment;
+    /** Set by useUpdater(): the face's real ObsValue updater, ticked like the engine. */
+    updater: Updater | null = null;
+    private readonly getNow: () => Date;
+    private readonly withDisplayTime: WithDisplayTime;
     private perfMs = 0;
 
     constructor(faceName: string, start: Date) {
         const dom = new JSDOM('', { contentType: 'text/html' });
         this.watch = parseWatchXML(loadFaceXML(faceName), 'front', new dom.window.DOMParser());
         this.tc.setTime(start);
+        const seam = makeOverridableGetNow(() => this.tc.getDisplayTime());
+        this.getNow = seam.getNow;
+        this.withDisplayTime = seam.withDisplayTime;
         this.env = this.buildEnv();
     }
 
     private buildEnv(): Environment {
         return createWatchEnvironment(
             this.watch, CUPERTINO.lat, CUPERTINO.lon,
-            () => this.tc.getDisplayTime(), CUPERTINO.olsonTimezone,
+            this.getNow, CUPERTINO.olsonTimezone,
         );
+    }
+
+    /** Build the face's real hand ObsValues (engine's buildHandValues wiring). */
+    useUpdater(): void {
+        this.updater = buildHandValues(this.watch.name, this.watch, this.env, this.perfMs);
+    }
+
+    /** Run one engine-style animation frame (no tick check): updater only. */
+    frame(deltaMs = 17): void {
+        this.perfMs += deltaMs;
+        this.tc.beginFrame();
+        this.updater!.tick(this.env, this.perfMs, this.getNow, this.withDisplayTime,
+            timingContextForFrame(this.tc));
+        this.tc.endFrame();
     }
 
     start(unit: TimeUnit, direction: 1 | -1): void {
@@ -93,18 +118,35 @@ class GuardedScrub {
     }
 
     /**
-     * One scrub tick with the engine's guard (rebuildEnvironments semantics).
+     * One scrub tick with the engine's guard (rebuildEnvironments semantics),
+     * including the engine's schedule reset when the tz offset changed at the
+     * crossing. When useUpdater() was called, also runs the frame's updater tick
+     * (engine order: checkTick → rebuild/reset → beginFrame → updater.tick).
      * Returns true if the env was rebuilt, false if the guard skipped.
      */
     tick(): boolean {
         this.perfMs += TICK_INTERVAL_MS;
         this.tc.checkTick(this.perfMs);
+        let rebuilt = false;
         if (envTzStateStale(this.env, CUPERTINO.olsonTimezone) || this.env.captureStale?.()) {
+            const oldTzOffset = this.env.tzOffsetSec;
             this.env = this.buildEnv();
-            return true;
+            rebuilt = true;
+            // Engine parity (rebuildEnvironments): a tz-offset change resets all
+            // value schedules so hands re-evaluate immediately at the new offset.
+            if (this.updater && this.env.tzOffsetSec !== oldTzOffset) {
+                this.updater.reset();
+            }
+        } else {
+            this.env.invalidateAstroCaches?.();
         }
-        this.env.invalidateAstroCaches?.();
-        return false;
+        if (this.updater) {
+            this.tc.beginFrame();
+            this.updater.tick(this.env, this.perfMs, this.getNow, this.withDisplayTime,
+                timingContextForFrame(this.tc));
+            this.tc.endFrame();
+        }
+        return rebuilt;
     }
 
     /** A from-scratch env at the current display time — the pre-guard behavior. */
@@ -191,6 +233,43 @@ describe('DST-crossing scrub with the rebuild guard (Carl LaCombe bugs #7–#9)'
         expect(rebuilt).toEqual([false, false, true, false]);
         expect(samples['DSTNumber']).toEqual([1, 1, 0, 0]);
         expect(samples['hour24Value']).toEqual([13, 13, 12, 12]);
+    });
+
+    test('DST indicator hand (updateAtEnvChangeOnly) re-evaluates DURING the scrub at the crossing, not on release', () => {
+        // Regression for the frozen-indicator bug: env-change-only on-beat values
+        // have an Infinity boundary, so the crossing-tick reset() used to be
+        // swallowed by onBeatStep's scrub exclusion — the Geneva DST hand stayed
+        // put until mouse-up. Angle expr: `DSTNumber() ? pi*7/4 : pi/4`.
+        const scrub = new GuardedScrub('Geneva', new Date('2026-03-05T20:00:00Z'));
+        scrub.useUpdater();
+        const dstHand = scrub.updater!.all.find(v => v.name.includes('DST hand'))!;
+        expect(dstHand, 'DST hand ObsValue must exist').toBeDefined();
+
+        const TWO_PI = 2 * Math.PI;
+        const norm = (a: number) => ((a % TWO_PI) + TWO_PI) % TWO_PI;
+
+        scrub.start('day', 1);
+        const targets: number[] = [];
+        for (let i = 0; i < 5; i++) {
+            scrub.tick();
+            // A few animation frames after the tick, as the engine would render.
+            scrub.frame(); scrub.frame(); scrub.frame();
+            targets.push(norm(dstHand.anim.targetValue));
+        }
+
+        // Ticks land Mar 6, 7 (standard: π/4), then Mar 8, 9, 10 (DST: 7π/4).
+        // The flip must happen AT the crossing tick, while still scrubbing.
+        const QUARTER = Math.PI / 4, SEVEN_QUARTER = 7 * Math.PI / 4;
+        expect(targets[0]).toBeCloseTo(QUARTER, 9);
+        expect(targets[1]).toBeCloseTo(QUARTER, 9);
+        expect(targets[2]).toBeCloseTo(SEVEN_QUARTER, 9);
+        expect(targets[3]).toBeCloseTo(SEVEN_QUARTER, 9);
+        expect(targets[4]).toBeCloseTo(SEVEN_QUARTER, 9);
+
+        // And the hand physically arrives at the DST position while the scrub is
+        // still running (animSpeed 3 → 6 rad/s; π distance ≈ 0.5 s of frames).
+        for (let f = 0; f < 40; f++) scrub.frame();
+        expect(norm(dstHand.currentValue)).toBeCloseTo(SEVEN_QUARTER, 6);
     });
 
     test('hour-rate scrub through the spring-forward instant: offset flips within the day', () => {

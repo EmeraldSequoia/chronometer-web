@@ -13732,7 +13732,8 @@
       v.currentValue = interpolateValue(v.anim, perfNow);
       return;
     }
-    if (v.nextUpdateTime === 0 && !v.anim.animating && (tickIntervalMs === null || tickIntervalMs <= 0)) {
+    const envChangeOnly = v.updateInterval === 0 || v.updateInterval === EC_UPDATE_ENV_CHANGE_ONLY;
+    if (v.nextUpdateTime === 0 && !v.anim.animating && (tickIntervalMs === null || tickIntervalMs <= 0 || envChangeOnly)) {
       const target = v.evalFn(env2);
       startAnimationRaw(v.anim, target, perfNow, multiplier, void 0, v.period);
       v.pendingTarget = null;
