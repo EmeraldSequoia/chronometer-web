@@ -62,14 +62,27 @@ or opening a shared deep link — lands at the same instant and location.
 
 ### Cross-App Navigation
 
-The fixed top-right row holds Chronometer and Observatory icon links (plus
-Share). Their hrefs and the pre-navigation time-state flush are wired by
-`initAppNavLinks()` (`src/shared/app-nav.ts`) — clean URLs in storage mode, so
-mid-scrub time survives the hop via storage rather than query params. The
-`i`/`o`/`c`/`a` hotkeys navigate the same way; `t`/`n`/`l` drive the time
-controller and location dialog (`src/shared/hotkeys.ts`; key table in
-help.html's Keyboard Shortcuts section). The Inspector has no ℹ help popup yet,
-so `h`/`?` are deliberately not registered here.
+The fixed top-right row holds Chronometer and Observatory icon links (plus ℹ
+help and Share). Their hrefs and the pre-navigation time-state flush are wired
+by `initAppNavLinks()` (`src/shared/app-nav.ts`) — clean URLs in storage mode,
+so mid-scrub time survives the hop via storage rather than query params. The
+`i`/`o`/`c`/`a` hotkeys navigate the same way; `h`/`?` open the help popover,
+and `t`/`n`/`l` drive the time controller and location dialog
+(`src/shared/hotkeys.ts`; key table in help.html's Keyboard Shortcuts section).
+
+### Help Popover
+
+The ℹ button opens the shared help popover (`src/shared/help-popover.ts`, same
+wiring as Observatory): the Inspector's own help content
+(`src/help/inspector.html`, injected at build time via `{{HELP_CONTENT}}`) plus
+the Privacy/Support/Disclaimer sub-views, the Other Apps section, and the
+General Help iframe (`help.html?embed=1&app=inspector` — the inspector flavor
+drops the Complications, Physics, and Eclipses topics). The Inspector's help
+includes the **precision-vs-accuracy disclaimer**: unlike Chronometer and
+Observatory, the Inspector deliberately displays more digits than the astronomy
+engine's accuracy supports, so the motion of the trailing digits shows how fast
+(and in which direction) each value is changing. help.html's accuracy topic
+carries the matching qualification.
 
 Under the hood the catalog's values are owned by a shared **`Updater`** driven by
 a **`TimingContext`** (built each frame from the controller). The Inspector hands
@@ -158,6 +171,7 @@ environment and refresh all displays, and live-sync across tabs via
 | `src/inspector/inspector-entry.ts` | Main app: tick loop, time display, catalog |
 | `src/inspector/inspector.html` | HTML template |
 | `src/inspector/catalog.ts` | Declarative ephemeris catalog definition |
+| `src/help/inspector.html` | Help popover content (incl. the precision-vs-accuracy disclaimer) |
 | `src/shared/obs-value.ts` | ObsValue type + `createObsValue` (shared with Observatory) |
 | `src/shared/updater.ts` | ObsValue update/animate passes + `makeOverridableGetNow` (eval-ahead) |
 | `src/shared/astro-env.ts` | Astronomy environment factory (shared with Chronometer and Observatory) |

@@ -329,8 +329,12 @@ rm -f "$COMBINED_HELP"
 cp "$SRC/pick.html" "$DIST/pick.html"
 echo "  → pick.html"
 
-# inspector.html — Inspector app page (with location dialog injection)
-inject_partials < "$SRC/inspector/inspector.html" > "$DIST/inspector.html"
+# inspector.html — Inspector app page (with location dialog + help injection)
+if [ ! -f "$SRC/help/inspector.html" ]; then
+  echo "ERROR: missing $SRC/help/inspector.html" >&2
+  exit 1
+fi
+inject_partials "$SRC/help/inspector.html" "Inspector" < "$SRC/inspector/inspector.html" > "$DIST/inspector.html"
 echo "  → inspector.html"
 
 # observatory.html — Observatory app page (with location dialog + help injection)

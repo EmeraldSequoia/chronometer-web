@@ -90,8 +90,38 @@
           color: #aab;
       }
 
+      /* Info ("ℹ") button — same fixed top-right row as share; behavior is
+         wired by the shared src/shared/help-popover.ts module. */
+      #info-btn {
+          position: fixed;
+          top: 12px;
+          right: 54px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 34px;
+          height: 34px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.06);
+          color: #6b7280;
+          border: none;
+          cursor: pointer;
+          padding: 0;
+          z-index: 20;
+          font-size: 17px;
+          font-family: serif;
+          font-style: italic;
+          font-weight: 700;
+          transition: background 0.2s, color 0.2s;
+      }
+
+      #info-btn:hover {
+          background: rgba(255, 255, 255, 0.12);
+          color: #aab;
+      }
+
       /* Cross-app links (Chronometer / Observatory) — continue the fixed
-         top-right row left of share; hrefs wired by shared/app-nav.ts.
+         top-right row left of info + share; hrefs wired by shared/app-nav.ts.
          Both show their colored app icons — deliberately breaking the
          monochrome style, since these switch apps (discoverability). */
       #chronometer-link,
@@ -106,11 +136,11 @@
       }
 
       #observatory-link {
-          right: 54px;
+          right: 96px;
       }
 
       #chronometer-link {
-          right: 96px;
+          right: 138px;
       }
 
       #chronometer-link img,
@@ -359,6 +389,143 @@
           margin: 0 -0.03em;
       }
 
+      /* ── Info popup overlay (mirrors Observatory; behavior wired by the
+         shared src/shared/help-popover.ts module) ─────────────────────── */
+      #info-overlay {
+          display: none;
+          position: fixed;
+          inset: 0;
+          z-index: 100;
+          background: rgba(0, 0, 0, 0.6);
+          backdrop-filter: blur(6px);
+          -webkit-backdrop-filter: blur(6px);
+          align-items: center;
+          justify-content: center;
+      }
+
+      #info-overlay.visible {
+          display: flex;
+      }
+
+      #info-popup {
+          background: rgba(30, 30, 50, 0.98);
+          border: 1px solid #3a3a5e;
+          border-radius: 16px;
+          padding: 0;
+          max-width: 600px;
+          width: 90%;
+          max-height: 90vh;
+          overflow-x: hidden;
+          overflow-y: auto;
+          color: #bbc;
+          box-shadow: 0 8px 48px rgba(0, 0, 0, 0.6);
+          position: relative;
+          font-size: 14px;
+          line-height: 1.6;
+          transition: height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+          display: flex;
+          flex-direction: column;
+      }
+
+      #info-slider {
+          display: flex;
+          width: 200%;
+          transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+          align-items: flex-start;
+      }
+
+      #info-main-view,
+      #info-sub-view {
+          padding: 28px 32px;
+          width: 50%;
+          flex-shrink: 0;
+          box-sizing: border-box;
+      }
+
+      #info-popup h2 {
+          margin: 0 0 12px;
+          font-size: 18px;
+          color: #dde;
+          font-weight: 600;
+      }
+
+      #info-popup a {
+          color: #8af;
+          text-decoration: none;
+      }
+
+      #info-popup a:hover {
+          text-decoration: underline;
+      }
+
+      #info-close {
+          position: absolute;
+          top: 10px;
+          right: 14px;
+          z-index: 10;
+          background: none;
+          border: none;
+          color: #667;
+          font-size: 20px;
+          cursor: pointer;
+          padding: 2px 6px;
+          line-height: 1;
+          transition: color 0.15s;
+      }
+
+      #info-close:hover {
+          color: #ccf;
+      }
+
+      /* Help content styles */
+      .help-separator {
+          border: none;
+          border-top: 1px solid #3a3a5e;
+          margin: 16px 0;
+      }
+
+      #help-content img[src*="extlink"] {
+          display: inline;
+          width: 12px;
+          height: 12px;
+          vertical-align: middle;
+          margin: 0 1px;
+          border-radius: 0;
+      }
+
+      #help-content h3 {
+          font-size: 16px;
+          color: #dde;
+          margin: 16px 0 8px;
+      }
+
+      /* General help iframe section */
+      #general-help-section {
+          margin: 0 0 4px;
+          border: 1px solid #3a3a5e;
+          border-radius: 8px;
+          padding: 8px 14px;
+      }
+
+      #general-help-section summary {
+          cursor: pointer;
+          color: #8af;
+          font-size: 14px;
+      }
+
+      #general-help-section summary:hover {
+          text-decoration: underline;
+      }
+
+      #general-help-iframe {
+          width: 100%;
+          border: none;
+          border-radius: 8px;
+          margin-top: 8px;
+      }
+
+      {{HELP_SUBVIEW_CSS}}
+
       /* ── Time controller injection ────────────────── */
       {{TIME_CSS}}
 
@@ -407,6 +574,7 @@
       <a id="observatory-link" class="app-nav-link" data-page="observatory.html" href="observatory.html" title="Observatory">
         <img src="thumb-observatory.png" alt="Observatory" />
       </a>
+      <button id="info-btn" title="About Inspector">ℹ&#xFE0E;</button>
       <button id="share-btn" title="Share this view">
         <svg viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>
       </button>
@@ -438,6 +606,92 @@
       <!-- Ephemeris catalog (populated by inspector-entry.ts) -->
       <div id="catalog" class="catalog"></div>
     </div>
+
+    <div id="info-overlay">
+      <div id="info-popup">
+        <button id="info-close">&times;</button>
+        <div id="info-slider">
+          <div id="info-main-view">
+            <h2>Inspector</h2>
+            <p>
+              A live data explorer for the astronomy engine shared by
+              Chronometer and Observatory — rise/set times, planetary
+              positions, and calendar and clock values, at any time and
+              location.
+            </p>
+            <p>
+              View the project on
+              <a
+                href="https://github.com/EmeraldSequoia/chronometer-web/blob/main/README.md"
+                target="_blank"
+                rel="noopener"
+                >GitHub</a
+              >
+              ·
+              <a
+                href="https://github.com/EmeraldSequoia/chronometer-web/blob/main/README.md#credits"
+                target="_blank"
+                rel="noopener"
+                >Credits</a
+              >
+              ·
+              <a
+                href="privacy.html"
+                class="help-subpage-link"
+                data-template="privacy-template"
+                >Privacy</a
+              >
+              ·
+              <a
+                href="support.html"
+                class="help-subpage-link"
+                data-template="support-template"
+                >Support</a
+              >
+              ·
+              <a
+                href="disclaimer.html"
+                class="help-subpage-link"
+                data-template="disclaimer-template"
+                >Disclaimer</a
+              >
+            </p>
+            <hr class="help-separator" />
+            <p>
+              Your settings are saved in this browser's local storage on this
+              device. Use the Share button to copy a link to a view. See
+              <a
+                href="privacy.html"
+                class="help-subpage-link"
+                data-template="privacy-template"
+                >Privacy</a
+              >
+              for more information.
+            </p>
+            <hr class="help-separator" />
+            {{OTHER_APPS}}
+            <details id="general-help-section">
+              <summary>General Help Topics</summary>
+              <iframe id="general-help-iframe"></iframe>
+            </details>
+            <hr class="help-separator" />
+            <div id="help-content">
+              <!-- Populated from help-template on first info click -->
+            </div>
+            <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v{{VERSION}}</div>
+          </div>
+
+          <div id="info-sub-view">
+            <button id="info-back-btn">← Help</button>
+            <div id="info-sub-content"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <template id="privacy-template"> {{PRIVACY_CONTENT}} </template>
+    <template id="support-template"> {{SUPPORT_CONTENT}} </template>
+    <template id="disclaimer-template"> {{DISCLAIMER_CONTENT}} </template>
+    <template id="help-template"> {{HELP_CONTENT}} </template>
 
     {{LOCATION_DIALOG}}
 

@@ -22,6 +22,7 @@ import { initAppNavLinks, registerAppNavHotkeys } from '../shared/app-nav.js';
 import { createFpsIndicator } from '../shared/fps-indicator.js';
 import { getState, setState, initAppState, onSharedChange, isPersistentMode } from '../shared/app-state.js';
 import { initShareButton } from '../shared/share-button.js';
+import { initHelpPopover, openGeneralHelpTopic } from '../shared/help-popover.js';
 import { resolveTimezone, resolveTimezoneFromDb } from '../shared/tz-resolve.js';
 import { findClosestCity, prefetchCityData, loadCityData, releaseCityData, isCityDataLoaded } from '../shared/city-search.js';
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
@@ -391,6 +392,10 @@ function formatDateIntervalTime(value: number): string {
 
 // Share button — copy a link encoding the current time/location/config.
 initShareButton({ getState });
+
+// Help ("ℹ") popover — shared wiring; the General Help iframe drops the
+// topics that don't apply via the app=inspector param (see help.html).
+initHelpPopover({ generalHelpUrl: 'help.html?embed=1&app=inspector', app: 'inspector' });
 
 // Live cross-tab sync: when another tab (or app) changes the shared location
 // or time, apply it here without a reload.
@@ -772,10 +777,12 @@ const timeUI: TimeControlsAPI | null = initTimeControls({
 
 // --- Cross-app navigation (header icons + i/o/c/a) and page hotkeys ---
 // Time state is flushed (writeTimeState) just before navigation so the target
-// app opens at the exact current time, even mid-scrub. No 'h'/'?' here — the
-// Inspector has no help popup yet. Key table: help.html#hotkeys.
+// app opens at the exact current time, even mid-scrub. Key table:
+// help.html#hotkeys.
 initAppNavLinks(writeTimeState);
 registerAppNavHotkeys(writeTimeState);
+registerHotkey('h', () => document.getElementById('info-btn')?.click());
+registerHotkey('?', () => openGeneralHelpTopic('#hotkeys'));
 registerHotkey('t', () => document.getElementById('time-bar-label')?.click());
 registerHotkey('n', () => document.getElementById('time-bar-now')?.click());
 registerHotkey('l', () => document.getElementById('set-location-btn')?.click());

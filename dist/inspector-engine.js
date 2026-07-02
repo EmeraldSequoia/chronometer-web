@@ -15873,6 +15873,113 @@
     selectAll();
   }
 
+  // src/shared/help-popover.ts
+  var activeGeneralHelpUrl = "help.html?embed=1";
+  function initHelpPopover(options = {}) {
+    const generalHelpUrl = options.generalHelpUrl ?? "help.html?embed=1";
+    activeGeneralHelpUrl = generalHelpUrl;
+    if (options.app) {
+      document.querySelectorAll(`#other-apps-section .other-app[data-app="${options.app}"]`).forEach((el) => el.remove());
+    }
+    const infoBtn = document.getElementById("info-btn");
+    const infoOverlay = document.getElementById("info-overlay");
+    const infoClose = document.getElementById("info-close");
+    const helpContent = document.getElementById("help-content");
+    const helpTemplate = document.getElementById("help-template");
+    let helpLoaded = false;
+    if (infoBtn && infoOverlay && infoClose) {
+      let updatePopupHeight2 = function(targetView) {
+        if (!popup || !targetView) return;
+        const currentHeight = popup.offsetHeight;
+        popup.style.height = currentHeight + "px";
+        const targetHeight = targetView.scrollHeight;
+        popup.style.height = targetHeight + "px";
+      };
+      var updatePopupHeight = updatePopupHeight2;
+      infoBtn.addEventListener("click", () => {
+        const slider2 = document.getElementById("info-slider");
+        const popup2 = document.getElementById("info-popup");
+        if (slider2) slider2.style.transform = "translateX(0)";
+        if (popup2) popup2.style.height = "auto";
+        infoOverlay.classList.add("visible");
+        if (!helpLoaded && helpContent && helpTemplate?.content) {
+          helpLoaded = true;
+          helpContent.appendChild(helpTemplate.content.cloneNode(true));
+          helpContent.querySelectorAll('a[href^="http"]').forEach((a) => {
+            a.setAttribute("target", "_blank");
+            a.setAttribute("rel", "noopener");
+          });
+          options.onFirstOpen?.(helpContent);
+        }
+      });
+      infoClose.addEventListener("click", () => {
+        infoOverlay.classList.remove("visible");
+      });
+      infoOverlay.addEventListener("click", (e) => {
+        if (e.target === infoOverlay) {
+          infoOverlay.classList.remove("visible");
+        }
+      });
+      const mainView = document.getElementById("info-main-view");
+      const subView = document.getElementById("info-sub-view");
+      const subContent = document.getElementById("info-sub-content");
+      const backBtn = document.getElementById("info-back-btn");
+      const popup = document.getElementById("info-popup");
+      const slider = document.getElementById("info-slider");
+      document.querySelectorAll(".help-subpage-link").forEach((link) => {
+        const el = link;
+        el.addEventListener("click", (e) => {
+          e.preventDefault();
+          const templateId = el.dataset.template;
+          const template = document.getElementById(templateId);
+          if (template && mainView && subView && subContent && slider) {
+            subContent.innerHTML = template.innerHTML;
+            slider.style.transform = "translateX(-50%)";
+            updatePopupHeight2(subView);
+            if (helpContent) helpContent.scrollTop = 0;
+          }
+        });
+      });
+      if (backBtn) {
+        backBtn.addEventListener("click", () => {
+          if (mainView && subView && slider) {
+            slider.style.transform = "translateX(0)";
+            updatePopupHeight2(mainView);
+            if (helpContent) helpContent.scrollTop = 0;
+          }
+        });
+      }
+    }
+    const generalHelpSection = document.getElementById("general-help-section");
+    const generalHelpIframe = document.getElementById("general-help-iframe");
+    if (generalHelpSection && generalHelpIframe) {
+      generalHelpSection.addEventListener("toggle", () => {
+        if (generalHelpSection.open && !generalHelpIframe.src) {
+          generalHelpIframe.src = generalHelpUrl;
+        }
+      });
+      window.addEventListener("message", (e) => {
+        if (e.data?.type === "help-resize" && typeof e.data.height === "number") {
+          generalHelpIframe.style.height = e.data.height + "px";
+        }
+      });
+    }
+  }
+  function openGeneralHelpTopic(hash) {
+    const infoBtn = document.getElementById("info-btn");
+    const section = document.getElementById("general-help-section");
+    const iframe = document.getElementById("general-help-iframe");
+    if (!infoBtn || !section || !iframe) return;
+    infoBtn.click();
+    if (!iframe.src) {
+      iframe.src = activeGeneralHelpUrl + hash;
+    } else {
+      const w = iframe.contentWindow;
+      if (w) w.location.hash = hash;
+    }
+    section.open = true;
+  }
+
   // src/shared/city-search.ts
   var TZ = [];
   var CC = [];
@@ -17222,6 +17329,7 @@
     return d.toISOString().slice(11, 19);
   }
   initShareButton({ getState });
+  initHelpPopover({ generalHelpUrl: "help.html?embed=1&app=inspector", app: "inspector" });
   function applyTimeFromState(s) {
     if (s.off !== null) {
       timeController.setOffset(s.off);
@@ -17562,6 +17670,8 @@
   });
   initAppNavLinks(writeTimeState);
   registerAppNavHotkeys(writeTimeState);
+  registerHotkey("h", () => document.getElementById("info-btn")?.click());
+  registerHotkey("?", () => openGeneralHelpTopic("#hotkeys"));
   registerHotkey("t", () => document.getElementById("time-bar-label")?.click());
   registerHotkey("n", () => document.getElementById("time-bar-now")?.click());
   registerHotkey("l", () => document.getElementById("set-location-btn")?.click());

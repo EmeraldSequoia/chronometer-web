@@ -90,8 +90,38 @@
           color: #aab;
       }
 
+      /* Info ("ℹ") button — same fixed top-right row as share; behavior is
+         wired by the shared src/shared/help-popover.ts module. */
+      #info-btn {
+          position: fixed;
+          top: 12px;
+          right: 54px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 34px;
+          height: 34px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.06);
+          color: #6b7280;
+          border: none;
+          cursor: pointer;
+          padding: 0;
+          z-index: 20;
+          font-size: 17px;
+          font-family: serif;
+          font-style: italic;
+          font-weight: 700;
+          transition: background 0.2s, color 0.2s;
+      }
+
+      #info-btn:hover {
+          background: rgba(255, 255, 255, 0.12);
+          color: #aab;
+      }
+
       /* Cross-app links (Chronometer / Observatory) — continue the fixed
-         top-right row left of share; hrefs wired by shared/app-nav.ts.
+         top-right row left of info + share; hrefs wired by shared/app-nav.ts.
          Both show their colored app icons — deliberately breaking the
          monochrome style, since these switch apps (discoverability). */
       #chronometer-link,
@@ -106,11 +136,11 @@
       }
 
       #observatory-link {
-          right: 54px;
+          right: 96px;
       }
 
       #chronometer-link {
-          right: 96px;
+          right: 138px;
       }
 
       #chronometer-link img,
@@ -358,6 +388,272 @@
           font-family: 'Inter', system-ui, sans-serif;
           margin: 0 -0.03em;
       }
+
+      /* ── Info popup overlay (mirrors Observatory; behavior wired by the
+         shared src/shared/help-popover.ts module) ─────────────────────── */
+      #info-overlay {
+          display: none;
+          position: fixed;
+          inset: 0;
+          z-index: 100;
+          background: rgba(0, 0, 0, 0.6);
+          backdrop-filter: blur(6px);
+          -webkit-backdrop-filter: blur(6px);
+          align-items: center;
+          justify-content: center;
+      }
+
+      #info-overlay.visible {
+          display: flex;
+      }
+
+      #info-popup {
+          background: rgba(30, 30, 50, 0.98);
+          border: 1px solid #3a3a5e;
+          border-radius: 16px;
+          padding: 0;
+          max-width: 600px;
+          width: 90%;
+          max-height: 90vh;
+          overflow-x: hidden;
+          overflow-y: auto;
+          color: #bbc;
+          box-shadow: 0 8px 48px rgba(0, 0, 0, 0.6);
+          position: relative;
+          font-size: 14px;
+          line-height: 1.6;
+          transition: height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+          display: flex;
+          flex-direction: column;
+      }
+
+      #info-slider {
+          display: flex;
+          width: 200%;
+          transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+          align-items: flex-start;
+      }
+
+      #info-main-view,
+      #info-sub-view {
+          padding: 28px 32px;
+          width: 50%;
+          flex-shrink: 0;
+          box-sizing: border-box;
+      }
+
+      #info-popup h2 {
+          margin: 0 0 12px;
+          font-size: 18px;
+          color: #dde;
+          font-weight: 600;
+      }
+
+      #info-popup a {
+          color: #8af;
+          text-decoration: none;
+      }
+
+      #info-popup a:hover {
+          text-decoration: underline;
+      }
+
+      #info-close {
+          position: absolute;
+          top: 10px;
+          right: 14px;
+          z-index: 10;
+          background: none;
+          border: none;
+          color: #667;
+          font-size: 20px;
+          cursor: pointer;
+          padding: 2px 6px;
+          line-height: 1;
+          transition: color 0.15s;
+      }
+
+      #info-close:hover {
+          color: #ccf;
+      }
+
+      /* Help content styles */
+      .help-separator {
+          border: none;
+          border-top: 1px solid #3a3a5e;
+          margin: 16px 0;
+      }
+
+      #help-content img[src*="extlink"] {
+          display: inline;
+          width: 12px;
+          height: 12px;
+          vertical-align: middle;
+          margin: 0 1px;
+          border-radius: 0;
+      }
+
+      #help-content h3 {
+          font-size: 16px;
+          color: #dde;
+          margin: 16px 0 8px;
+      }
+
+      /* General help iframe section */
+      #general-help-section {
+          margin: 0 0 4px;
+          border: 1px solid #3a3a5e;
+          border-radius: 8px;
+          padding: 8px 14px;
+      }
+
+      #general-help-section summary {
+          cursor: pointer;
+          color: #8af;
+          font-size: 14px;
+      }
+
+      #general-help-section summary:hover {
+          text-decoration: underline;
+      }
+
+      #general-help-iframe {
+          width: 100%;
+          border: none;
+          border-radius: 8px;
+          margin-top: 8px;
+      }
+
+      /* Styles for privacy/support content when shown inside the info popup */
+
+#info-sub-view {
+    padding-top: 14px;
+}
+
+#info-back-btn {
+    background: none;
+    border: none;
+    color: #8af;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: color 0.15s;
+}
+
+#info-back-btn:hover {
+    color: #ccf;
+    text-decoration: underline;
+}
+
+#info-sub-content h1 {
+    font-size: 20px;
+    margin: 0 0 4px;
+    color: #dde;
+}
+
+#info-sub-content .subtitle {
+    font-size: 12px;
+    color: #776;
+    font-style: italic;
+    margin: 0 0 20px;
+}
+
+#info-sub-content h2 {
+    font-size: 15px;
+    color: #dde;
+    margin: 20px 0 8px;
+    font-weight: 600;
+}
+
+#info-sub-content p, 
+#info-sub-content li {
+    font-size: 13px;
+    line-height: 1.5;
+    margin: 8px 0;
+    color: #bbc;
+}
+
+#info-sub-content ul {
+    padding-left: 20px;
+}
+
+#info-sub-content hr {
+    border: none;
+    border-top: 1px solid #3a3a5e;
+    margin: 20px 0;
+}
+
+#info-sub-content .last-updated {
+    font-size: 11px;
+    color: #556;
+}
+
+/* "Other Apps" info-popup section (partials/other-apps.html) — boxed
+   collapsible styled like the General Help Topics section below it. */
+#other-apps-section {
+    margin: 12px 0;
+    border: 1px solid #3a3a5e;
+    border-radius: 8px;
+    padding: 8px 14px;
+}
+
+#other-apps-section summary {
+    cursor: pointer;
+    color: #8af;
+    font-size: 14px;
+}
+
+#other-apps-section summary:hover {
+    text-decoration: underline;
+}
+
+.other-app {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    margin: 14px 0 6px;
+}
+
+.other-app-icon {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.05);
+    overflow: hidden;
+}
+
+.other-app-icon img {
+    width: 48px;
+    height: 48px;
+    display: block;
+    object-fit: cover;
+}
+
+.other-app-icon svg {
+    width: 26px;
+    height: 26px;
+    fill: #8af;
+}
+
+.other-app-text p {
+    margin: 0 0 4px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.other-app-title {
+    font-size: 14px;
+    font-weight: 600;
+}
+
 
       /* ── Time controller injection ────────────────── */
             /* ============= Time Controller ============= */
@@ -1270,6 +1566,7 @@
       <a id="observatory-link" class="app-nav-link" data-page="observatory.html" href="observatory.html" title="Observatory">
         <img src="thumb-observatory.png" alt="Observatory" />
       </a>
+      <button id="info-btn" title="About Inspector">ℹ&#xFE0E;</button>
       <button id="share-btn" title="Share this view">
         <svg viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>
       </button>
@@ -1610,6 +1907,387 @@
       <!-- Ephemeris catalog (populated by inspector-entry.ts) -->
       <div id="catalog" class="catalog"></div>
     </div>
+
+    <div id="info-overlay">
+      <div id="info-popup">
+        <button id="info-close">&times;</button>
+        <div id="info-slider">
+          <div id="info-main-view">
+            <h2>Inspector</h2>
+            <p>
+              A live data explorer for the astronomy engine shared by
+              Chronometer and Observatory — rise/set times, planetary
+              positions, and calendar and clock values, at any time and
+              location.
+            </p>
+            <p>
+              View the project on
+              <a
+                href="https://github.com/EmeraldSequoia/chronometer-web/blob/main/README.md"
+                target="_blank"
+                rel="noopener"
+                >GitHub</a
+              >
+              ·
+              <a
+                href="https://github.com/EmeraldSequoia/chronometer-web/blob/main/README.md#credits"
+                target="_blank"
+                rel="noopener"
+                >Credits</a
+              >
+              ·
+              <a
+                href="privacy.html"
+                class="help-subpage-link"
+                data-template="privacy-template"
+                >Privacy</a
+              >
+              ·
+              <a
+                href="support.html"
+                class="help-subpage-link"
+                data-template="support-template"
+                >Support</a
+              >
+              ·
+              <a
+                href="disclaimer.html"
+                class="help-subpage-link"
+                data-template="disclaimer-template"
+                >Disclaimer</a
+              >
+            </p>
+            <hr class="help-separator" />
+            <p>
+              Your settings are saved in this browser's local storage on this
+              device. Use the Share button to copy a link to a view. See
+              <a
+                href="privacy.html"
+                class="help-subpage-link"
+                data-template="privacy-template"
+                >Privacy</a
+              >
+              for more information.
+            </p>
+            <hr class="help-separator" />
+            <!-- "Other Apps" info-popup section, injected via {{OTHER_APPS}} (build.sh)
+     into the index, face-page, and Observatory popups. Contains an entry for
+     all three apps; the current app's own entry is removed at runtime
+     (help-popover.ts `app` option / index.html page script). Styles live in
+     help-subview.css. Links are wired by app-nav.ts (clean URLs in storage
+     mode — see that module's header comment). -->
+<details id="other-apps-section">
+  <summary>Other Apps</summary>
+  <div class="other-app" data-app="chronometer">
+    <a href="index.html" class="app-nav-link other-app-icon" data-page="index.html" title="Chronometer">
+      <img src="thumb-all-faces.png" alt="Chronometer" />
+    </a>
+    <div class="other-app-text">
+      <p class="other-app-title">
+        <a href="index.html" class="app-nav-link" data-page="index.html">Chronometer</a>
+      </p>
+      <p>
+        A web port of
+        <a href="https://emeraldsequoia.com/h/index.html" target="_blank" rel="noopener">Emerald Chronometer</a>
+        (<a href="https://github.com/EmeraldSequoia/Chronometer" target="_blank" rel="noopener">GitHub</a>),
+        an astronomical watch-face app originally built for iPhone and iPad.
+      </p>
+    </div>
+  </div>
+  <div class="other-app" data-app="observatory">
+    <a href="observatory.html" class="app-nav-link other-app-icon" data-page="observatory.html" title="Observatory">
+      <img src="thumb-observatory.png" alt="Observatory" />
+    </a>
+    <div class="other-app-text">
+      <p class="other-app-title">
+        <a href="observatory.html" class="app-nav-link" data-page="observatory.html">Observatory</a>
+      </p>
+      <p>
+        A web port of
+        <a href="https://emeraldsequoia.com/eo/index.html" target="_blank" rel="noopener">Emerald Observatory</a>
+        (<a href="https://github.com/EmeraldSequoia/Observatory" target="_blank" rel="noopener">GitHub</a>),
+        an astronomical clock app originally built for iPad.
+      </p>
+    </div>
+  </div>
+  <div class="other-app" data-app="inspector">
+    <a href="inspector.html" class="app-nav-link other-app-icon" data-page="inspector.html" title="Inspector">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M15.5 14h-.79l-.28-.27a6.51 6.51 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/>
+      </svg>
+    </a>
+    <div class="other-app-text">
+      <p class="other-app-title">
+        <a href="inspector.html" class="app-nav-link" data-page="inspector.html">Inspector</a>
+      </p>
+      <p>
+        A live data explorer for the astronomy engine shared by Chronometer and
+        Observatory &mdash; rise/set times, planetary positions, and calendar
+        and clock values, at any time and location.
+      </p>
+    </div>
+  </div>
+</details>
+
+            <details id="general-help-section">
+              <summary>General Help Topics</summary>
+              <iframe id="general-help-iframe"></iframe>
+            </details>
+            <hr class="help-separator" />
+            <div id="help-content">
+              <!-- Populated from help-template on first info click -->
+            </div>
+            <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.7</div>
+          </div>
+
+          <div id="info-sub-view">
+            <button id="info-back-btn">← Help</button>
+            <div id="info-sub-content"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <template id="privacy-template"> <h1>Privacy</h1>
+<p class="subtitle">Emerald Inspector for the Web</p>
+
+<h2>Overview</h2>
+<p>
+  Emerald Inspector for the Web is a fully client-side application. It runs
+  entirely in your browser and does not communicate with any application server
+  for its core functionality.
+</p>
+
+<h2>Data Collection</h2>
+<p>
+  The app itself does not collect, store, or transmit any personal data to any
+  application server. There are no app-level analytics, tracking pixels,
+  cookies, or telemetry of any kind.
+</p>
+
+<h2>Web Server Logs</h2>
+<p>
+  When the app is served over HTTP or HTTPS, the hosting provider (SiteGround)
+  records standard web server access logs for each page and resource request.
+  These logs include:
+</p>
+<ul>
+  <li>Your <strong>IP address</strong></li>
+  <li>
+    The <strong>URL requested</strong>. The app normally keeps the URL clean;
+    query-string parameters (latitude, longitude, city name, timezone, etc.)
+    appear only when you create or open a shared link
+  </li>
+  <li>
+    <strong>Timestamp</strong>, HTTP status code, referrer, and browser
+    user-agent string
+  </li>
+</ul>
+<p>
+  These logs are retained by SiteGround for up to 30 days and are used solely
+  for security monitoring and troubleshooting. They are not analyzed for user
+  tracking purposes.
+</p>
+<p>
+  When running from <code>file://</code> URLs (a local copy of the app), no
+  server is involved and no logs are generated.
+</p>
+
+<h2>Map Tile Requests</h2>
+<p>
+  When you use the location dialog (on pages served via <code>http://</code> or
+  <code>https://</code>), the app fetches map tile images from
+  <a href="https://www.openstreetmap.org/" target="_blank" rel="noopener"
+    >OpenStreetMap</a
+  >
+  to display a preview of the selected location.
+</p>
+<p>
+  These requests are standard image fetches and
+  <strong
+    >do not include any metadata identifying the tile coordinates as your
+    location</strong
+  >
+  — OpenStreetMap sees only which map tile was requested, the same as any map
+  browsing.
+</p>
+
+<h2>Browser Location (Geolocation API)</h2>
+<p>
+  If you tap "Use device location via browser", the app uses the browser's
+  Geolocation API to obtain your coordinates. This data is processed entirely
+  within the browser — the app never sends it to any application server.
+</p>
+<p>
+  The resolved coordinates are matched against a bundled database of
+  approximately 47,000 cities to display a human-readable location name. This
+  reverse-geolocation lookup happens entirely in the browser — no external
+  geocoding service is contacted.
+</p>
+
+<h2>Local Storage &amp; Sharing</h2>
+<p>
+  The app saves your settings (location, time, and per-app configuration) in your
+  browser's <strong>local storage</strong> — on your device only. This data is
+  never sent to any application server, and it persists across visits without any
+  cookies.
+</p>
+<p>
+  You can clear local storage at any time through your browser's settings
+  (typically alongside your browsing history).
+</p>
+<p>
+  When you use the <strong>Share</strong> button, the app builds a URL that
+  encodes the current view so you can send it to someone else or open it on
+  another device. Opening such a link lets you either use those settings just for
+  that visit or save them as your defaults.
+</p>
+<p>
+  <strong>Note:</strong> Because shared links carry settings as URL query
+  parameters, those parameters are visible in your browser history and, when
+  served over HTTP or HTTPS, in the hosting provider's access logs — but only for
+  links you deliberately create or open. On <code>file://</code> pages where
+  local storage is unavailable, the app falls back to keeping settings in the
+  URL.
+</p>
+
+<h2>Third-Party Services</h2>
+<ul>
+  <li>
+    <strong>OpenStreetMap</strong> (map tiles only, HTTP/HTTPS only) — governed
+    by
+    <a
+      href="https://wiki.osmfoundation.org/wiki/Privacy_Policy"
+      target="_blank"
+      rel="noopener"
+      >OSM's privacy policy</a
+    >.
+  </li>
+</ul>
+
+<h2>Contact</h2>
+<p>
+  For questions about this privacy policy, please visit the
+  <a
+    href="https://github.com/EmeraldSequoia/chronometer-web"
+    target="_blank"
+    rel="noopener"
+    >project on GitHub</a
+  >.
+</p>
+
+<hr />
+<p class="last-updated">Last updated: May 2026</p>
+ </template>
+    <template id="support-template"> <h1>Support</h1>
+<p class="subtitle">Emerald Inspector for the Web</p>
+
+<p>
+  This free web app is served by a site run by volunteers and provides no
+  support. All the website does is serve, as a convenience, files available from
+  the
+  <a
+    href="https://github.com/EmeraldSequoia/chronometer-web/releases"
+    target="_blank"
+    rel="noopener"
+    >GitHub releases page</a
+  >
+  (see instructions for running the app
+  <a
+    href="https://github.com/EmeraldSequoia/chronometer-web#option-3-run-from-your-own-local-web-server"
+    target="_blank"
+    rel="noopener"
+    >here</a
+  >).
+</p>
+
+<p>
+  You are encouraged to report issues to the developers at the GitHub issues
+  page
+  <a
+    href="https://github.com/EmeraldSequoia/chronometer-web/issues"
+    target="_blank"
+    rel="noopener"
+    >here</a
+  >, but as the developers are also volunteers you may not get a response in a
+  timely fashion.
+</p>
+
+<hr />
+ </template>
+    <template id="disclaimer-template"> <h1>Disclaimer</h1>
+<p class="subtitle">Emerald Inspector for the Web</p>
+
+<p>
+  THIS FREE WEB APP IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS
+  OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+</p>
+
+<p>
+  The pages served to your browser are available at the
+  <a
+    href="https://github.com/EmeraldSequoia/chronometer-web/releases"
+    target="_blank"
+    rel="noopener"
+    >GitHub releases page</a
+  >
+  (see instructions for running the app
+  <a
+    href="https://github.com/EmeraldSequoia/chronometer-web#option-3-run-from-your-own-local-web-server"
+    target="_blank"
+    rel="noopener"
+    >here</a
+  >).
+</p>
+
+<hr />
+ </template>
+    <template id="help-template"> <b>Inspector</b> is a live data explorer for the astronomy engine shared by
+<a href="index.html">Emerald Chronometer</a> and
+<a href="observatory.html">Emerald Observatory</a>. It displays the engine's
+values directly — calendar and clock quantities, sidereal and solar time, the
+equation of time, and positions, distances, and rise/set/transit times for the
+Sun, the Moon, and the planets — updating live as the clock runs, for any time
+and location.
+
+<h3>Reading the catalog</h3>
+<p>
+  Values are grouped <b>Time → Sun → Moon → Mercury … Neptune</b>. Angles are
+  in degrees; rise, set, and transit are local times at the configured
+  location (shown as "—" when the event does not occur, for example during
+  polar day or night); distances are given in both astronomical units and
+  kilometers. Each value is fully re-evaluated on its own schedule (fractional
+  seconds many times per second, coordinates every second, rise/set times once
+  a minute) and animated smoothly in between.
+</p>
+
+<h3>Precision and accuracy</h3>
+<p>
+  Chronometer and Observatory never display a value more precisely than the
+  underlying astronomical algorithms can support. The Inspector deliberately
+  breaks that rule: its readouts show <i>more</i> digits than the engine's
+  accuracy warrants. The extra digits are there so you can watch a value
+  <i>move</i> — how fast it is changing, in which direction, and when it
+  reverses — which a data explorer can only show by running past the point
+  where the digits stop being meaningful. Treat the trailing digits as rate
+  information, not as measurement; the engine's real accuracy is described in
+  "Accuracy of the Astronomical Algorithms" under General Help Topics, above.
+</p>
+
+<h3>Time and location</h3>
+<p>
+  The time controller (under the clock) and the location card work exactly as
+  in Chronometer and Observatory, and all three apps share their settings —
+  set a time or place here and the other apps follow. The <b>Browser time</b>
+  row at the bottom of the Time group shows your device's raw clock for
+  comparison with the Inspector's display time; it is dimmed while the clock
+  is stopped.
+</p>
+ </template>
 
     <!-- Location prompt overlay (hidden by default) -->
 <div id="location-prompt" style="display: none">

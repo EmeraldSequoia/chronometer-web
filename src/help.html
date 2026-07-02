@@ -549,9 +549,9 @@
 
           <h3>General rule</h3>
           As a general rule, you can assume that all of the astronomical
-          displays within Emerald Chronometer are at least as accurate as the
-          precision with which you can read the display, from about 4000 BCE to
-          about 2800 CE. For example,
+          displays within Chronometer and Observatory are at least as accurate
+          as the precision with which you can read the display, from about
+          4000 BCE to about 2800 CE. For example,
           <span class="chrono-only">the azimuth displays on Haleakalā</span
           ><span class="obs-only">the azimuth dial</span> can be read
           approximately to the nearest degree, and there is far more accuracy in
@@ -576,6 +576,16 @@
             If you have an accurate time source and have set the correct
             location, you can presume that everything you are looking at is as
             accurate as you can read it.
+          </p>
+
+          <p>
+            Note that this rule applies only to Chronometer and Observatory.
+            The Inspector is the deliberate exception: it displays the same
+            engine's values with more digits than the underlying accuracy can
+            support, so that you can see how quickly each value is changing —
+            and in which direction — by watching its trailing digits move.
+            Treat those extra digits as rate information, not as measurement;
+            see the Inspector's own help for details.
           </p>
 
           <h3>Specifics</h3>
@@ -1157,8 +1167,8 @@
           <p>
             The <kbd>h</kbd>, <kbd>?</kbd>, <kbd>t</kbd>, <kbd>n</kbd>,
             <kbd>l</kbd>, and <kbd>f</kbd> keys apply on pages that have the
-            corresponding control — for example, the Inspector has no help
-            popup yet, and the face-selection page has no time controller.
+            corresponding control — for example, the face-selection page has
+            no time controller.
           </p>
         </div>
       </details>
@@ -1221,12 +1231,19 @@
           })
           .join(", ");
       });
-      // Observatory flavor: drop the Chronometer-only topics (and their nav
-      // links) — complications and the watch-movement physics don't apply.
+      // Observatory/Inspector flavors: drop the Chronometer-only topics (and
+      // their nav links) — complications and the watch-movement physics don't
+      // apply. The Inspector additionally drops the eclipse how-to (it has no
+      // eclipse displays).
       const params = new URLSearchParams(location.search);
-      const isObservatory = params.get("app") === "observatory";
-      if (isObservatory) {
-        for (const id of ["complications", "physics"]) {
+      const app = params.get("app");
+      const isObservatory = app === "observatory";
+      const isInspector = app === "inspector";
+      if (isObservatory || isInspector) {
+        const dropIds = isInspector
+          ? ["complications", "physics", "eclipses"]
+          : ["complications", "physics"];
+        for (const id of dropIds) {
           document.getElementById(id)?.remove();
           const navLink = document.querySelector(`.help-nav a[href="#${id}"]`);
           if (navLink) {
@@ -1235,7 +1252,12 @@
             navLink.remove();
           }
         }
-        // Swap the app name in the remaining text (incl. section titles)
+        // Swap the app name in the remaining text (incl. section titles).
+        // The Inspector flavor also swaps to Observatory: the remaining
+        // passages describe the shared engine and time controller, and
+        // sentences that must distinguish the apps (the accuracy rule) name
+        // them explicitly without the "Emerald" prefix, so the swap skips
+        // them.
         const walker = document.createTreeWalker(
           document.body,
           NodeFilter.SHOW_TEXT,
@@ -1251,9 +1273,11 @@
         }
       }
       // Passages that apply to only one app are tagged .chrono-only /
-      // .obs-only — remove the flavor that doesn't apply here.
+      // .obs-only — remove the flavor that doesn't apply here. The Inspector
+      // keeps the Observatory flavor (its interactions are time-controller
+      // based, like Observatory's).
       document
-        .querySelectorAll(isObservatory ? ".chrono-only" : ".obs-only")
+        .querySelectorAll(isObservatory || isInspector ? ".chrono-only" : ".obs-only")
         .forEach((el) => el.remove());
       // Embed mode: hide nav/title, report height to parent
       const isEmbed = params.has("embed");

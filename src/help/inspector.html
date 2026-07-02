@@ -1,0 +1,41 @@
+<b>Inspector</b> is a live data explorer for the astronomy engine shared by
+<a href="index.html">Emerald Chronometer</a> and
+<a href="observatory.html">Emerald Observatory</a>. It displays the engine's
+values directly — calendar and clock quantities, sidereal and solar time, the
+equation of time, and positions, distances, and rise/set/transit times for the
+Sun, the Moon, and the planets — updating live as the clock runs, for any time
+and location.
+
+<h3>Reading the catalog</h3>
+<p>
+  Values are grouped <b>Time → Sun → Moon → Mercury … Neptune</b>. Angles are
+  in degrees; rise, set, and transit are local times at the configured
+  location (shown as "—" when the event does not occur, for example during
+  polar day or night); distances are given in both astronomical units and
+  kilometers. Each value is fully re-evaluated on its own schedule (fractional
+  seconds many times per second, coordinates every second, rise/set times once
+  a minute) and animated smoothly in between.
+</p>
+
+<h3>Precision and accuracy</h3>
+<p>
+  Chronometer and Observatory never display a value more precisely than the
+  underlying astronomical algorithms can support. The Inspector deliberately
+  breaks that rule: its readouts show <i>more</i> digits than the engine's
+  accuracy warrants. The extra digits are there so you can watch a value
+  <i>move</i> — how fast it is changing, in which direction, and when it
+  reverses — which a data explorer can only show by running past the point
+  where the digits stop being meaningful. Treat the trailing digits as rate
+  information, not as measurement; the engine's real accuracy is described in
+  "Accuracy of the Astronomical Algorithms" under General Help Topics, above.
+</p>
+
+<h3>Time and location</h3>
+<p>
+  The time controller (under the clock) and the location card work exactly as
+  in Chronometer and Observatory, and all three apps share their settings —
+  set a time or place here and the other apps follow. The <b>Browser time</b>
+  row at the bottom of the Time group shows your device's raw clock for
+  comparison with the Inspector's display time; it is dimmed while the clock
+  is stopped.
+</p>
