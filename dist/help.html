@@ -1299,7 +1299,14 @@
         document
           .querySelectorAll("details")
           .forEach((d) => d.addEventListener("toggle", reportHeight));
+        // Escape pressed while focus is inside this iframe never reaches the
+        // host page — forward it so the popup can close (help-popover.ts).
+        window.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") {
+            parent.postMessage({ type: "help-escape" }, "*");
+          }
+        });
       }
     </script>
-  <div style="text-align:center; margin-top: 24px; color: #667; font-size: 11px;">v2.0.7</div></body>
+  <div style="text-align:center; margin-top: 24px; color: #667; font-size: 11px;">v2.0.8</div></body>
 </html>

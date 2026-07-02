@@ -19591,6 +19591,16 @@ return {${names2.join(",")}};`;
           infoOverlay.classList.remove("visible");
         }
       });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && infoOverlay.classList.contains("visible")) {
+          infoOverlay.classList.remove("visible");
+        }
+      });
+      window.addEventListener("message", (e) => {
+        if (e.data?.type === "help-escape" && infoOverlay.classList.contains("visible")) {
+          infoOverlay.classList.remove("visible");
+        }
+      });
       const mainView = document.getElementById("info-main-view");
       const subView = document.getElementById("info-sub-view");
       const subContent = document.getElementById("info-sub-content");

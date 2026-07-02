@@ -69,6 +69,20 @@ export function initHelpPopover(options: HelpPopoverOptions = {}): void {
                 infoOverlay.classList.remove('visible');
             }
         });
+        // Escape closes the popup (matching the share popover and location
+        // dialog). A keydown while focus is inside the General Help iframe
+        // stays in that document, so help.html's embed mode forwards it as a
+        // 'help-escape' message.
+        document.addEventListener('keydown', (e: KeyboardEvent) => {
+            if (e.key === 'Escape' && infoOverlay.classList.contains('visible')) {
+                infoOverlay.classList.remove('visible');
+            }
+        });
+        window.addEventListener('message', (e) => {
+            if (e.data?.type === 'help-escape' && infoOverlay.classList.contains('visible')) {
+                infoOverlay.classList.remove('visible');
+            }
+        });
 
         // Sub-view navigation (Privacy/Support/Disclaimer)
         const mainView = document.getElementById('info-main-view');
