@@ -1118,6 +1118,9 @@
       void promptSessionReprompt();
     }
   }
+  function isPersistentMode() {
+    return backend() instanceof LocalStorageBackend;
+  }
   function getSlotOverrides() {
     const b = backend();
     if (b instanceof LocalStorageBackend) return storedSlotMap();
@@ -1168,8 +1171,49 @@
     }
   }
 
+  // src/shared/hotkeys.ts
+  var handlers = /* @__PURE__ */ new Map();
+  var listenerInstalled = false;
+  function registerHotkey(key, handler) {
+    handlers.set(key.toLowerCase(), handler);
+    if (listenerInstalled || typeof window === "undefined") return;
+    listenerInstalled = true;
+    window.addEventListener("keydown", (ev) => {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      const target = ev.target;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+        return;
+      }
+      const handler2 = handlers.get(ev.key.toLowerCase());
+      if (handler2) {
+        ev.preventDefault();
+        handler2();
+      }
+    });
+  }
+
+  // src/shared/app-nav.ts
+  function appNavHref(page) {
+    if (!isPersistentMode()) return page + window.location.search;
+    const fps = new URLSearchParams(window.location.search).get("fps");
+    return fps !== null ? `${page}?fps=${encodeURIComponent(fps)}` : page;
+  }
+  function registerAppNavHotkeys(flushState) {
+    const go = (page) => {
+      const current = window.location.pathname.split("/").pop() || "index.html";
+      if (current === page) return;
+      flushState?.();
+      window.location.href = appNavHref(page);
+    };
+    registerHotkey("i", () => go("inspector.html"));
+    registerHotkey("o", () => go("observatory.html"));
+    registerHotkey("c", () => go("index.html"));
+    registerHotkey("a", () => go("all.html"));
+  }
+
   // src/pick-page.ts
   initAppState({ app: "pick" });
+  registerAppNavHotkeys();
   var faceByAbbrev = new Map(FACES.map((f) => [f.abbrev, f]));
   var selectedOrder = [];
   var pickGrid = document.getElementById("pick-grid");

@@ -68,8 +68,8 @@ export interface TimeControlsConfig {
     /** Kick the app's (idle) render loop. Required — the rAF loop is app-owned. */
     ensureSchedulerRunning: () => void;
     /**
-     * Write current time state to the URL. Optional — defaults to the shared
-     * `writeTimeStateToUrl(timeController)` (the `t`/`off`/`dir` params, identical
+     * Persist current time state. Optional — defaults to the shared
+     * `flushTimeState(timeController)` (the `t`/`off`/`dir` fields, identical
      * across apps). Pass to override.
      */
     writeTimeState?: () => void;
@@ -125,12 +125,14 @@ const stepMap: Record<string, [TimeUnit, 1 | -1]> = {
  * Returns an API for the consumer, or null if required DOM elements are missing.
  */
 /**
- * Default time-state URL persistence: writes the `t` / `off` / `dir` params from
- * the controller state. Identical across apps, so it's the default `writeTimeState`
- * — the time params are the controller's domain (broader URL params are each app's
+ * Default time-state persistence: writes the `t` / `off` / `dir` fields from
+ * the controller state to the **active backend** via `setState` — localStorage
+ * (`ec:shared`) in persistent mode, the URL only in the file:///session
+ * fallbacks. Identical across apps, so it's the default `writeTimeState` —
+ * the time fields are the controller's domain (broader state is each app's
  * own business). Exported for reuse / testing.
  */
-export function writeTimeStateToUrl(tc: TimeController): void {
+export function flushTimeState(tc: TimeController): void {
     if (tc.isRealTime) {
         setState({ t: null, off: null, dir: 1 });
     } else if (!tc.isStopped && tc.currentRate === null && tc.currentDirection === 1) {
@@ -156,7 +158,7 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
         onNowClicked = () => {},
         onTransportChange = () => {},
         ensureSchedulerRunning,
-        writeTimeState = () => writeTimeStateToUrl(timeController),
+        writeTimeState = () => flushTimeState(timeController),
         onPopoverToggle,
     } = config;
 

@@ -1270,6 +1270,9 @@
       void promptSessionReprompt();
     }
   }
+  function isPersistentMode() {
+    return backend() instanceof LocalStorageBackend;
+  }
   function getSlotOverrides() {
     const b = backend();
     if (b instanceof LocalStorageBackend) return storedSlotMap();
@@ -1318,6 +1321,78 @@
     if (choice === "save") {
       adoptCurrentStateAsDefault(new LocalStorageBackend(appName));
     }
+  }
+
+  // src/shared/hotkeys.ts
+  var handlers = /* @__PURE__ */ new Map();
+  var listenerInstalled = false;
+  function registerHotkey(key, handler) {
+    handlers.set(key.toLowerCase(), handler);
+    if (listenerInstalled || typeof window === "undefined") return;
+    listenerInstalled = true;
+    window.addEventListener("keydown", (ev) => {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      const target = ev.target;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+        return;
+      }
+      const handler2 = handlers.get(ev.key.toLowerCase());
+      if (handler2) {
+        ev.preventDefault();
+        handler2();
+      }
+    });
+  }
+
+  // src/shared/app-nav.ts
+  function appNavHref(page) {
+    if (!isPersistentMode()) return page + window.location.search;
+    const fps = new URLSearchParams(window.location.search).get("fps");
+    return fps !== null ? `${page}?fps=${encodeURIComponent(fps)}` : page;
+  }
+  function initAppNavLinks(flushState) {
+    document.querySelectorAll("a.app-nav-link").forEach((a) => {
+      const page = a.dataset.page || a.getAttribute("href") || "index.html";
+      const setHref = () => {
+        a.href = appNavHref(page);
+      };
+      const flushAndSet = () => {
+        flushState?.();
+        setHref();
+      };
+      a.addEventListener("pointerdown", flushAndSet);
+      a.addEventListener("focus", flushAndSet);
+      setHref();
+    });
+  }
+  function registerAppNavHotkeys(flushState) {
+    const go = (page) => {
+      const current = window.location.pathname.split("/").pop() || "index.html";
+      if (current === page) return;
+      flushState?.();
+      window.location.href = appNavHref(page);
+    };
+    registerHotkey("i", () => go("inspector.html"));
+    registerHotkey("o", () => go("observatory.html"));
+    registerHotkey("c", () => go("index.html"));
+    registerHotkey("a", () => go("all.html"));
+  }
+
+  // src/shared/help-popover.ts
+  var activeGeneralHelpUrl = "help.html?embed=1";
+  function openGeneralHelpTopic(hash) {
+    const infoBtn = document.getElementById("info-btn");
+    const section = document.getElementById("general-help-section");
+    const iframe = document.getElementById("general-help-iframe");
+    if (!infoBtn || !section || !iframe) return;
+    infoBtn.click();
+    if (!iframe.src) {
+      iframe.src = activeGeneralHelpUrl + hash;
+    } else {
+      const w = iframe.contentWindow;
+      if (w) w.location.hash = hash;
+    }
+    section.open = true;
   }
 
   // src/index-page.ts
@@ -1602,6 +1677,12 @@
       lpCityInput.value = "";
     }
   });
+  document.querySelectorAll('#other-apps-section .other-app[data-app="chronometer"]').forEach((el) => el.remove());
+  initAppNavLinks();
+  registerAppNavHotkeys();
+  registerHotkey("h", () => document.getElementById("info-btn")?.click());
+  registerHotkey("?", () => openGeneralHelpTopic("#hotkeys"));
+  registerHotkey("l", () => showPrompt(false));
   (async function init() {
     const urlState = getState();
     if (urlState.lat !== null && urlState.lon !== null) {

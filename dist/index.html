@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
     <link rel="icon" type="image/png" href="apple-touch-icon.png" />
+    <meta name="description" content="Emerald Chronometer — astronomical watch faces for the browser, with sunrise/sunset, moon phase, planets, and eclipses. Companion apps: Emerald Observatory and the Inspector." />
     <title>Emerald Chronometer</title>
     <style>
       *,
@@ -131,6 +132,46 @@
           color: #bbd;
       }
 
+      /* Cross-app links (Observatory / Inspector) — fixed top-right row left
+         of the ℹ button; hrefs wired by shared/app-nav.ts. */
+      #observatory-link,
+      #inspector-link {
+          position: fixed;
+          top: 16px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          background: rgba(255,255,255,0.08);
+          color: #889;
+          text-decoration: none;
+          z-index: 10;
+          transition: background 0.2s, color 0.2s;
+      }
+
+      #inspector-link {
+          right: 60px;
+      }
+
+      #observatory-link {
+          right: 104px;
+      }
+
+      #observatory-link svg,
+      #inspector-link svg {
+          width: 18px;
+          height: 18px;
+          fill: currentColor;
+      }
+
+      #observatory-link:hover,
+      #inspector-link:hover {
+          background: rgba(255,255,255,0.15);
+          color: #bbd;
+      }
+
       #info-overlay {
           display: none;
           position: fixed;
@@ -226,6 +267,40 @@
       }
 
       .pick-icon-svg {
+          width: 80px;
+          height: 80px;
+      }
+
+      /* "Other Apps" section below the face grid */
+      .section-divider {
+          border: none;
+          border-top: 1px solid #2a2a44;
+          max-width: 1104px;  /* face-grid width minus its side padding */
+          margin: 0 auto;
+      }
+
+      .other-apps-heading {
+          text-align: center;
+          font-size: 20px;
+          font-weight: 300;
+          letter-spacing: 3px;
+          text-transform: uppercase;
+          color: #e0d8c8;
+          margin: 36px 0 0;
+      }
+
+      .other-apps-grid {
+          padding-top: 24px;
+      }
+
+      .inspector-icon-thumb {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: linear-gradient(145deg, #2a2a48 0%, #1e1e36 100%);
+      }
+
+      .inspector-icon-svg {
           width: 80px;
           height: 80px;
       }
@@ -778,10 +853,78 @@
     color: #556;
 }
 
+/* "Other Apps" info-popup section (partials/other-apps.html) — boxed
+   collapsible styled like the General Help Topics section below it. */
+#other-apps-section {
+    margin: 12px 0;
+    border: 1px solid #3a3a5e;
+    border-radius: 8px;
+    padding: 8px 14px;
+}
+
+#other-apps-section summary {
+    cursor: pointer;
+    color: #8af;
+    font-size: 14px;
+}
+
+#other-apps-section summary:hover {
+    text-decoration: underline;
+}
+
+.other-app {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    margin: 14px 0 6px;
+}
+
+.other-app-icon {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.05);
+    overflow: hidden;
+}
+
+.other-app-icon img {
+    width: 48px;
+    height: 48px;
+    display: block;
+    object-fit: cover;
+}
+
+.other-app-icon svg {
+    width: 26px;
+    height: 26px;
+    fill: #8af;
+}
+
+.other-app-text p {
+    margin: 0 0 4px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.other-app-title {
+    font-size: 14px;
+    font-weight: 600;
+}
+
     </style>
   </head>
 
   <body>
+    <a id="observatory-link" class="app-nav-link" data-page="observatory.html" href="observatory.html" title="Observatory">
+      <svg viewBox="0 0 24 24"><path d="M12 2.2A9.8 9.8 0 1 0 21.8 12 9.81 9.81 0 0 0 12 2.2zm0 1.8A8 8 0 1 1 4 12a8 8 0 0 1 8-8z"/><circle cx="12" cy="12" r="3"/><circle cx="12" cy="4" r="2"/></svg>
+    </a>
+    <a id="inspector-link" class="app-nav-link" data-page="inspector.html" href="inspector.html" title="Inspector">
+      <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.51 6.51 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+    </a>
     <button id="info-btn" title="About Chronometer">ℹ&#xFE0E;</button>
     <div id="info-overlay">
       <div id="info-popup">
@@ -868,11 +1011,70 @@
                 margin: 12px 0;
               "
             />
+            <!-- "Other Apps" info-popup section, injected via {{OTHER_APPS}} (build.sh)
+     into the index, face-page, and Observatory popups. Contains an entry for
+     all three apps; the current app's own entry is removed at runtime
+     (help-popover.ts `app` option / index.html page script). Styles live in
+     help-subview.css. Links are wired by app-nav.ts (clean URLs in storage
+     mode — see that module's header comment). -->
+<details id="other-apps-section">
+  <summary>Other Apps</summary>
+  <div class="other-app" data-app="chronometer">
+    <a href="index.html" class="app-nav-link other-app-icon" data-page="index.html" title="Chronometer">
+      <img src="thumb-all-faces.png" alt="Chronometer" />
+    </a>
+    <div class="other-app-text">
+      <p class="other-app-title">
+        <a href="index.html" class="app-nav-link" data-page="index.html">Chronometer</a>
+      </p>
+      <p>
+        A web port of
+        <a href="https://emeraldsequoia.com/h/index.html" target="_blank" rel="noopener">Emerald Chronometer</a>
+        (<a href="https://github.com/EmeraldSequoia/Chronometer" target="_blank" rel="noopener">GitHub</a>),
+        an astronomical watch-face app originally built for iPhone and iPad.
+      </p>
+    </div>
+  </div>
+  <div class="other-app" data-app="observatory">
+    <a href="observatory.html" class="app-nav-link other-app-icon" data-page="observatory.html" title="Observatory">
+      <img src="thumb-observatory.png" alt="Observatory" />
+    </a>
+    <div class="other-app-text">
+      <p class="other-app-title">
+        <a href="observatory.html" class="app-nav-link" data-page="observatory.html">Observatory</a>
+      </p>
+      <p>
+        A web port of
+        <a href="https://emeraldsequoia.com/eo/index.html" target="_blank" rel="noopener">Emerald Observatory</a>
+        (<a href="https://github.com/EmeraldSequoia/Observatory" target="_blank" rel="noopener">GitHub</a>),
+        an astronomical clock app originally built for iPad.
+      </p>
+    </div>
+  </div>
+  <div class="other-app" data-app="inspector">
+    <a href="inspector.html" class="app-nav-link other-app-icon" data-page="inspector.html" title="Inspector">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M15.5 14h-.79l-.28-.27a6.51 6.51 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/>
+      </svg>
+    </a>
+    <div class="other-app-text">
+      <p class="other-app-title">
+        <a href="inspector.html" class="app-nav-link" data-page="inspector.html">Inspector</a>
+      </p>
+      <p>
+        A live data explorer for the astronomy engine shared by Chronometer and
+        Observatory &mdash; rise/set times, planetary positions, and an evaluator
+        for the expressions that drive the watch faces, at any time and location.
+      </p>
+    </div>
+  </div>
+</details>
+
             <details id="general-help-section">
               <summary>General Help Topics</summary>
               <iframe id="general-help-iframe"></iframe>
             </details>
-            <div id="version-label" style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v1.4.371</div>
+            <div id="version-label" style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v1.4.372</div>
           </div>
 
           <div id="info-sub-view">
@@ -2266,6 +2468,27 @@ of Japan, shows traditional Japanese time like an
         <p class="desc">Retrograde calendar hands, plus power reserve indicator if browser supports it</p>
       </a>
 
+    </div>
+
+    <hr class="section-divider" />
+    <h2 class="other-apps-heading">Other Apps</h2>
+
+    <div class="face-grid other-apps-grid">
+      <a class="face-card" href="observatory.html">
+        <img class="thumb" src="thumb-observatory.png" alt="Observatory" />
+        <h2>Observatory</h2>
+        <p class="desc">Astronomical clock — planets, Moon, rise/set, eclipses</p>
+      </a>
+
+      <a class="face-card" href="inspector.html">
+        <div class="thumb thumb-square inspector-icon-thumb">
+          <svg viewBox="0 0 24 24" class="inspector-icon-svg">
+            <path fill="#5ca0d3" d="M15.5 14h-.79l-.28-.27a6.51 6.51 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/>
+          </svg>
+        </div>
+        <h2>Inspector</h2>
+        <p class="desc">Live astronomy values and expression evaluator</p>
+      </a>
     </div>
 
     <!-- Location prompt overlay (hidden by default) -->

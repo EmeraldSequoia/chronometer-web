@@ -4,19 +4,34 @@
     {
       "name": "dist",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8741", "--directory", "dist"],
-      "port": 8741
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8747",
+        "--directory",
+        "dist"
+      ],
+      "port": 8747
     },
     {
       "name": "dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 5173
     },
     {
       "name": "harness",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8742", "--directory", "harness"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8742",
+        "--directory",
+        "harness"
+      ],
       "port": 8742
     }
   ]

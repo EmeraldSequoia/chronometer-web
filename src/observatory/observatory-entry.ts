@@ -19,8 +19,10 @@ import { findClosestCity, findLargestCityNear, prefetchCityData, loadCityData, r
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
 import { showStorageWarning } from '../shared/incoming-settings-dialog.js';
 import { TimeController } from '../shared/time-controller.js';
-import { initTimeControls } from '../shared/time-controls-ui.js';
-import { initHelpPopover } from '../shared/help-popover.js';
+import { initTimeControls, flushTimeState } from '../shared/time-controls-ui.js';
+import { initHelpPopover, openGeneralHelpTopic } from '../shared/help-popover.js';
+import { registerHotkey } from '../shared/hotkeys.js';
+import { initAppNavLinks, registerAppNavHotkeys } from '../shared/app-nav.js';
 import { initShareButton } from '../shared/share-button.js';
 import type { TimeControlsAPI } from '../shared/time-controls-ui.js';
 import { updateDynamicCompositeIcon } from '../shared/composite-icon.js';
@@ -1086,8 +1088,19 @@ function init(): void {
 
     // Help ("ℹ") popover — shared wiring; the General Help iframe drops the
     // Chronometer-only sections via the app=observatory param (see help.html).
-    initHelpPopover({ generalHelpUrl: 'help.html?embed=1&app=observatory' });
+    initHelpPopover({ generalHelpUrl: 'help.html?embed=1&app=observatory', app: 'observatory' });
     initShareButton({ getState });
+
+    // --- Cross-app navigation (header icons + i/o/c/a) and page hotkeys ---
+    // Key table: help.html#hotkeys.
+    const flushTime = () => flushTimeState(timeController);
+    initAppNavLinks(flushTime);
+    registerAppNavHotkeys(flushTime);
+    registerHotkey('h', () => document.getElementById('info-btn')?.click());
+    registerHotkey('?', () => openGeneralHelpTopic('#hotkeys'));
+    registerHotkey('t', () => document.getElementById('time-bar-label')?.click());
+    registerHotkey('n', () => document.getElementById('time-bar-now')?.click());
+    registerHotkey('l', () => document.getElementById('set-location-btn')?.click());
 
     // --- Fullscreen toggle button ---
     const fullscreenBtn = document.getElementById('fullscreen-btn');

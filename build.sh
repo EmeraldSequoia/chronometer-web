@@ -105,7 +105,8 @@ echo "=== Generating HTML files ==="
 # Helper: inject partial files into a template.
 # Reads from stdin, writes to stdout.
 # Replaces lines containing {{LOCATION_CSS}}, {{LOCATION_DIALOG}},
-# {{TIME_CSS}}, {{TIME_CONTROLLER}}, and terra city dialog placeholders.
+# {{TIME_CSS}}, {{TIME_CONTROLLER}}, {{OTHER_APPS}}, and terra city dialog
+# placeholders.
 inject_partials() {
     local HELP_FILE="${1:-}"
     local APP_NAME="${2:-Chronometer}"
@@ -130,7 +131,12 @@ inject_partials() {
         while ((getline line < (P"/location-dialog.html")) > 0) print line; close(P"/location-dialog.html");
         s=$0; sub(/.*\{\{ *LOCATION_DIALOG *\}\}/, "", s); print s; next
     }
-    /\{\{ *TIME_CSS *\}\}/ { 
+    /\{\{ *OTHER_APPS *\}\}/ {
+        s=$0; sub(/\{\{ *OTHER_APPS *\}\}.*/, "", s); printf "%s", s;
+        while ((getline line < (P"/other-apps.html")) > 0) print line; close(P"/other-apps.html");
+        s=$0; sub(/.*\{\{ *OTHER_APPS *\}\}/, "", s); print s; next
+    }
+    /\{\{ *TIME_CSS *\}\}/ {
         s=$0; sub(/\{\{ *TIME_CSS *\}\}.*/, "", s); printf "%s", s;
         while ((getline line < (P"/time-controller.css")) > 0) print line; close(P"/time-controller.css");
         s=$0; sub(/.*\{\{ *TIME_CSS *\}\}/, "", s); print s; next
@@ -189,7 +195,12 @@ inject_partials_terra() {
         while ((getline line < (P"/location-dialog.html")) > 0) print line; close(P"/location-dialog.html");
         s=$0; sub(/.*\{\{ *LOCATION_DIALOG *\}\}/, "", s); print s; next
     }
-    /\{\{ *TIME_CSS *\}\}/ { 
+    /\{\{ *OTHER_APPS *\}\}/ {
+        s=$0; sub(/\{\{ *OTHER_APPS *\}\}.*/, "", s); printf "%s", s;
+        while ((getline line < (P"/other-apps.html")) > 0) print line; close(P"/other-apps.html");
+        s=$0; sub(/.*\{\{ *OTHER_APPS *\}\}/, "", s); print s; next
+    }
+    /\{\{ *TIME_CSS *\}\}/ {
         s=$0; sub(/\{\{ *TIME_CSS *\}\}.*/, "", s); printf "%s", s;
         while ((getline line < (P"/time-controller.css")) > 0) print line; close(P"/time-controller.css");
         s=$0; sub(/.*\{\{ *TIME_CSS *\}\}/, "", s); print s; next

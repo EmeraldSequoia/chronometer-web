@@ -11,6 +11,11 @@ export interface HelpPopoverOptions {
     /** URL loaded into #general-help-iframe on first expand (default 'help.html?embed=1'). */
     generalHelpUrl?: string;
     /**
+     * The running app. Its own entry is removed from the "Other Apps" section
+     * (partials/other-apps.html), which ships all three entries.
+     */
+    app?: 'chronometer' | 'observatory' | 'inspector';
+    /**
      * Called once, after the help template has been cloned into #help-content
      * and external links have been retargeted — for page-specific fixups such
      * as the face pages' thumbnail/reorder pass.
@@ -18,8 +23,17 @@ export interface HelpPopoverOptions {
     onFirstOpen?: (helpContent: HTMLElement) => void;
 }
 
+/** The URL initHelpPopover configured, for openGeneralHelpTopic's lazy load. */
+let activeGeneralHelpUrl = 'help.html?embed=1';
+
 export function initHelpPopover(options: HelpPopoverOptions = {}): void {
     const generalHelpUrl = options.generalHelpUrl ?? 'help.html?embed=1';
+    activeGeneralHelpUrl = generalHelpUrl;
+
+    if (options.app) {
+        document.querySelectorAll(`#other-apps-section .other-app[data-app="${options.app}"]`)
+            .forEach((el) => el.remove());
+    }
 
     const infoBtn = document.getElementById('info-btn');
     const infoOverlay = document.getElementById('info-overlay');
@@ -117,4 +131,26 @@ export function initHelpPopover(options: HelpPopoverOptions = {}): void {
             }
         });
     }
+}
+
+/**
+ * Open the info popup with the General Help Topics section expanded and the
+ * iframe routed to `hash` (e.g. '#hotkeys') — help.html opens and scrolls to
+ * the section on load and on hashchange. Used by the `?` hotkey.
+ */
+export function openGeneralHelpTopic(hash: string): void {
+    const infoBtn = document.getElementById('info-btn');
+    const section = document.getElementById('general-help-section') as HTMLDetailsElement | null;
+    const iframe = document.getElementById('general-help-iframe') as HTMLIFrameElement | null;
+    if (!infoBtn || !section || !iframe) return;
+    infoBtn.click();
+    // Set the src (with hash) before opening so the toggle-driven lazy load
+    // doesn't beat us to it with a hashless URL.
+    if (!iframe.src) {
+        iframe.src = activeGeneralHelpUrl + hash;
+    } else {
+        const w = iframe.contentWindow;
+        if (w) w.location.hash = hash;
+    }
+    section.open = true;
 }

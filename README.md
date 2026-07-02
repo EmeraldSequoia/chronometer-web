@@ -1,10 +1,20 @@
-# Emerald Chronometer — Web Edition
+# Emerald Chronometer & Observatory — Web Edition
 
-A web port of [Emerald Chronometer](https://github.com/EmeraldSequoia/Chronometer), an astronomical watch-face app originally built for iPhone and iPad in Objective-C, C++, and C. This project re-implements the app entirely in TypeScript, rendering animated watch faces to HTML Canvas. Like the original iOS app, it requires **no backend server** — it runs completely in the browser using only the device's clock and location (while the location is being set a map will be displayed using OpenStreetMap if the internet is available, but it is not required for any functionality).
+Web ports of [Emerald Chronometer](https://github.com/EmeraldSequoia/Chronometer) and [Emerald Observatory](https://github.com/EmeraldSequoia/Observatory), the astronomical watch-face and astronomical clock apps originally built for iPhone and iPad in Objective-C, C++, and C. This project re-implements both apps entirely in TypeScript, rendering animated watch faces and an astronomical clock to HTML Canvas. Like the original iOS apps, it requires **no backend server** — everything runs completely in the browser using only the device's clock and location (while the location is being set a map will be displayed using OpenStreetMap if the internet is available, but it is not required for any functionality).
 
-The original Emerald Chronometer was developed by Steve Pucci and Bill Arnett of [Emerald Sequoia LLC](https://emeraldsequoia.com) and was one of the first 500 apps in the App Store in 2008. The iOS app has **a new owner** and can be found [here](https://www.scapaflowllc.com/new-page-1).
+The original iOS apps were developed by Steve Pucci and Bill Arnett of [Emerald Sequoia LLC](https://emeraldsequoia.com); Emerald Chronometer was one of the first 500 apps in the App Store in 2008. The iOS apps have **a new owner** and can be found [here](https://www.scapaflowllc.com/new-page-1).
 
 This project (the web version here) is under very active development as of May 2026.
+
+## The apps
+
+Three apps share one astronomy engine, one location/time system, and one build:
+
+- **Chronometer** (`index.html`) — thirteen animated astronomical watch faces: sunrise/sunset, moon phase and position, planets, eclipses, world time, and more. View them individually, all together (`all.html`), or as a custom selection.
+- **Observatory** (`observatory.html`) — an astronomical clock designed for a larger display: an orrery with planetary positions, rise/set rings, moon with earthshine, day/night terminator map, equation of time, and an eclipse simulator.
+- **Inspector** (`inspector.html`) — a live data explorer for the shared astronomy engine: rise/set times, planetary positions, and an evaluator for the expressions that drive the watch faces, at any time and location.
+
+Every page links to the other apps via the icons in the top-right corner, and your location and time settings follow you between them. Single-key [keyboard shortcuts](#keyboard-shortcuts) jump between apps too.
 
 ## How to Run
 
@@ -15,7 +25,7 @@ This project (the web version here) is under very active development as of May 2
 ### Option 2: Download and open locally
 
 1. Download the `dist/` directory from this repository. The easiest way is to download the `dist.zip` archive from the [latest release](https://github.com/emeraldsequoia/chronometer-web/releases), or clone the repo and use the `dist/` directory directly.
-2. Unzip (if needed) and double-click **`index.html`** to open it in your browser, or open any of the individual face HTML files (e.g. `mauna-kea.html`). Your location and other settings are saved in the browser's local storage on your device, so you only set them once. (On `file://` pages where local storage is unavailable, the app falls back to keeping settings in the URL — bookmark the page to keep them.)
+2. Unzip (if needed) and double-click **`index.html`** to open it in your browser — or open `observatory.html`, `inspector.html`, or any of the individual face HTML files (e.g. `mauna-kea.html`). Your location and other settings are saved in the browser's local storage on your device and shared by all three apps, so you only set them once. (On `file://` pages where local storage is unavailable, the apps fall back to keeping settings in the URL — bookmark the page to keep them.)
 
 Almost everything works when opened via `file://` URLs. The exceptions are:
 
@@ -36,15 +46,11 @@ The build requires **Node.js ≥ 22** (pinned in `package.json` `engines` and `.
 ./build.sh
 ```
 
-This produces the `dist/` directory containing all HTML, JS, and image assets, as well as a `dist.zip` archive.
+This produces the `dist/` directory containing all HTML, JS, and image assets.
 
 ### URL parameters
 
-Settings normally live in the browser's local storage and the address bar stays
-clean. The **Share** button builds a URL that encodes the current view for
-sending to another person or device; opening such a link lets you use the
-settings just for that visit or save them as your defaults. You can also pass
-these parameters by hand to control the observer location:
+Settings normally live in the browser's local storage — shared by Chronometer, Observatory, and the Inspector — and the address bar stays clean. The **Share** button builds a URL that encodes the current view for sending to another person or device; opening such a link lets you use the settings just for that visit or save them as your defaults. You can also pass these parameters by hand to control the observer location:
 
 | Parameter | Description |
 |-----------|-------------|
@@ -59,12 +65,34 @@ For example:
 
 ```
 file:///path/to/dist/mauna-kea.html?lat=37.335&lon=-122.009
+file:///path/to/dist/observatory.html?lat=37.335&lon=-122.009
 file:///path/to/dist/index.html?bloc=1
 ```
 
+Share links may carry additional app-specific parameters (time state, face selection, Observatory's noon-on-top, and so on); those are best produced with the Share button rather than by hand.
+
+### Keyboard shortcuts
+
+On a physical keyboard, these single-key shortcuts work on every page (they're ignored while typing in a text field). Navigation keeps your current location and time settings:
+
+| Key | Action |
+|-----|--------|
+| `c` | Go to the Chronometer face-selection page |
+| `a` | Go to the Chronometer all-faces page |
+| `o` | Go to Observatory |
+| `i` | Go to the Inspector |
+| `h` | Open the help popup for the current app |
+| `?` | Open help to the Keyboard Shortcuts section |
+| `t` | Show or hide the time controller |
+| `n` | Reset the clock to now |
+| `l` | Open the location dialog |
+| `f` | Toggle the frame-rate (fps) indicator |
+
+The `h`, `?`, `t`, `n`, `l`, and `f` keys apply on pages that have the corresponding control.
+
 ## Development
 
-There is no need to run a development server. After building, simply open `dist/index.html` (or the specific watch face HTML file you are working on) directly in your browser. To skip the location prompt, add `?lat=…&lon=…` URL parameters as described above.
+There is no need to run a development server. After building, simply open `dist/index.html`, `dist/observatory.html`, or the specific watch face HTML file you are working on directly in your browser.
 
 Other useful commands:
 
@@ -89,20 +117,23 @@ The [`docs/`](docs/) directory contains permanent, subsystem-focused reference d
 
 ## Architecture
 
-The app is structured as a pure client-side renderer:
+The project is a pure client-side monorepo — three apps over one shared engine:
 
-- **`src/watch/`** — Core rendering engine: parses watch-face XML, evaluates dynamic expressions, composites layers onto Canvas.
-- **`src/expr/`** — Expression tokenizer and parser for the arithmetic expressions embedded in watch-face definitions.
-- **`src/astronomy/`** — Ported astronomical routines (sun/moon positions, rise/set times, twilight, lunar phase).
+- **`src/watch/`** — Chronometer's core rendering engine: parses watch-face XML, evaluates dynamic expressions, composites layers onto Canvas.
+- **`src/observatory/`** — The Observatory app: a custom (non-XML) astronomical clock — orrery dial, rise/set rings, moon, terminator map, eclipse simulator.
+- **`src/inspector/`** — The Inspector app: live catalog of astronomical values plus a free-form expression evaluator.
+- **`src/shared/`** — Infrastructure shared by all three apps: state persistence, location dialog and city search, time controller, help popover, cross-app navigation.
+- **`src/expr/`** — Expression support for the arithmetic expressions embedded in watch-face definitions.
+- **`src/astronomy/`** — Ported astronomical routines (sun/moon/planet positions, rise/set times, twilight, lunar phase, eclipses).
 - **`src/faces/`** — Per-face entry points that bundle the XML definition and image assets for each watch face.
 
 ## Credits
 
-**Emerald Chronometer** (the iOS app)was created by **Steve Pucci** and **Bill Arnett** of [Emerald Sequoia LLC](https://emeraldsequoia.com). This web version was ported to TypeScript from the [web app source](https://github.com/EmeraldSequoia/Chronometer) by [Steve Pucci](https://github.com/slpucci) with AI assistance, mostly from Claude, and much invaluable advice from Bill Arnett.
+**Emerald Chronometer** (the iOS app) was created by **Steve Pucci** and **Bill Arnett** of [Emerald Sequoia LLC](https://emeraldsequoia.com). **Emerald Observatory** (the iPad app) was created by **Bill Arnett** and **Steve Pucci** of the same. This web version was ported to TypeScript from the [iOS app source](https://github.com/EmeraldSequoia/Chronometer) by [Steve Pucci](https://github.com/slpucci) with AI assistance, mostly from Claude, and much invaluable advice from Bill Arnett.
 
 ### Astronomical algorithms
 
-The algorithms employed in Emerald Chronometer are very high-precision series calculations originally developed by astronomers at the Bureau des Longitudes in Paris in the 1980s and 1990s. They are particularly well-suited to run in a browser tab because the data tables they are based on can fit in about 500 kilobytes of memory (this includes data for most planets for the same period), and yet still produce accuracy of less than a degree for the next 100 years. No Internet connection is required for any astronomical calculation.
+The algorithms employed in Emerald Chronometer and Emerald Observatory are very high-precision series calculations originally developed by astronomers at the Bureau des Longitudes in Paris in the 1980s and 1990s. They are particularly well-suited to run in a browser tab because the data tables they are based on can fit in about 500 kilobytes of memory (this includes data for most planets for the same period), and yet still produce accuracy of less than a degree for the next 100 years. No Internet connection is required for any astronomical calculation.
 
 Specifically, the tables employed are from [*Lunar Tables and Programs from 4000 B.C. to A.D. 8000*](https://www.amazon.com/exec/obidos/ASIN/0943396336), by Michelle Chapront-Touzé & Jean Chapront, copyright 1991, and [*Planetary Programs and Tables from -4000 to +2800*](https://www.amazon.com/exec/obidos/ASIN/0943396085), by Pierre Bretagnon & Jean-Louis Simon, copyright 1986, both published by Willmann-Bell, Inc. (the latter includes the Sun motion tables).
 

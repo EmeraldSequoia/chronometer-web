@@ -169,6 +169,26 @@ ls -lh dist/chronometer-engine.js dist/<app-name>-engine.js
 
 If you add regression tests for the new app, update the test metrics in [testing.md](testing.md).
 
+### 9. Integrate with cross-app navigation
+
+Every app is reachable from every other app (see [help-system.md](help-system.md)):
+
+- **"Other Apps" popup section** — add an entry (icon + title + lead paragraph)
+  to `src/partials/other-apps.html`, tagged `data-app="<app-name>"`. Pass
+  `app: '<app-name>'` to `initHelpPopover()` so the app's own entry is removed
+  on its own pages.
+- **Header icons** — add an icon link (`class="app-nav-link"
+  data-page="<app-name>.html"`) to the top-right cluster of the other apps'
+  pages, and give the new page its own cluster. Hrefs and the pre-navigation
+  time-state flush are wired by `initAppNavLinks()` in `src/shared/app-nav.ts`
+  (clean URLs in storage mode — see that module's header comment).
+- **Hotkey** — register a navigation key in `registerAppNavHotkeys()`
+  (`src/shared/app-nav.ts`) and document it in `help.html`'s Keyboard
+  Shortcuts section and the README table. Wire the page-local keys
+  (`h`/`t`/`n`/`l`/…) in the app's entry via `registerHotkey()`.
+- **Index card** — add a card to the "Other Apps" grid at the bottom of
+  `src/index.html`.
+
 ---
 
 ## Reference: Inspector as a Template

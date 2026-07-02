@@ -48,7 +48,9 @@ import { TimeController, TICK_INTERVAL_MS, displaySecondsPerTick } from './share
 import { initNavigationLinks, updateNavigationLinks } from './shared/url-state.js';
 import { getState, setState, initAppState, onSharedChange, getSlotOverrides, setSlotOverrides, isPersistentMode } from './shared/app-state.js';
 import { createFpsIndicator } from './shared/fps-indicator.js';
-import { initHelpPopover } from './shared/help-popover.js';
+import { initHelpPopover, openGeneralHelpTopic } from './shared/help-popover.js';
+import { registerHotkey } from './shared/hotkeys.js';
+import { initAppNavLinks, registerAppNavHotkeys } from './shared/app-nav.js';
 import { initShareButton } from './shared/share-button.js';
 import { loadCityData, prefetchCityData, releaseCityData, searchCities, findClosestCity, isCityDataLoaded, loadError } from './shared/city-search.js';
 import { showStorageWarning } from './shared/incoming-settings-dialog.js';
@@ -57,7 +59,7 @@ import { renderGlobe, loadOSMTile } from './shared/mini-map.js';
 import { resolveTimezone, resolveTimezoneFromDb } from './shared/tz-resolve.js';
 import { findNextDstTransition, findPrevDstTransition } from './shared/dst-detect.js';
 
-import { initTimeControls, writeTimeStateToUrl } from './shared/time-controls-ui.js';
+import { initTimeControls, flushTimeState } from './shared/time-controls-ui.js';
 import { MIN_DISPLAY_DATE_MS, MAX_DISPLAY_DATE_MS } from './astronomy/es-time.js';
 import { getBezelBackgroundColor, updateDynamicCompositeIcon } from './shared/composite-icon.js';
 
@@ -2410,13 +2412,12 @@ async function main() {
     }
 
     /**
-     * Write the current time state to the URL.
+     * Persist the current time state (t/off/dir) via the shared layer.
      * Uses 'off' for 1× forward with offset (stays valid as real time advances),
      * and 't'+'dir' for all other modes (stopped, reverse, accelerated).
      */
-    // Time-state (t/off/dir) URL persistence now lives in the shared layer.
     function writeTimeState() {
-        writeTimeStateToUrl(timeController);
+        flushTimeState(timeController);
     }
 
     const timeUI = initTimeControls({
@@ -2538,6 +2539,7 @@ async function main() {
 
     // --- Info button & popup (shared wiring + face-specific fixups) ---
     initHelpPopover({
+        app: 'chronometer',
         onFirstOpen: (helpContent) => {
             // Add thumbnail images to per-face help section summaries
             helpContent.querySelectorAll('.face-help-section[data-face]').forEach(el => {
@@ -2575,6 +2577,19 @@ async function main() {
             }
         },
     });
+
+    // --- Cross-app navigation (header icons + i/o/c/a) and page hotkeys ---
+    // Skipped in embed mode: the chrome is removed and hotkeys must not
+    // navigate the host page's iframe. Key table: help.html#hotkeys.
+    if (!isEmbedMode) {
+        initAppNavLinks(writeTimeState);
+        registerAppNavHotkeys(writeTimeState);
+        registerHotkey('h', () => document.getElementById('info-btn')?.click());
+        registerHotkey('?', () => openGeneralHelpTopic('#hotkeys'));
+        registerHotkey('t', () => document.getElementById('time-bar-label')?.click());
+        registerHotkey('n', () => document.getElementById('time-bar-now')?.click());
+        registerHotkey('l', () => document.getElementById('set-location-btn')?.click());
+    }
 
     // --- Fullscreen toggle button ---
     const fullscreenBtn = document.getElementById('fullscreen-btn');
@@ -3576,6 +3591,7 @@ async function main() {
             'location-prompt', 'planet-selector', 'vienna-noon-toggle',
             'kyoto-hand-toggle', 'kyoto-mode-toggle',
             'change-cities-btn', 'edit-picks-link', 'info-overlay',
+            'observatory-link', 'inspector-link',
         ];
         for (const id of removeIds) {
             document.getElementById(id)?.remove();

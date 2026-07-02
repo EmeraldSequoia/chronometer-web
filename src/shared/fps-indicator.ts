@@ -39,6 +39,7 @@
  */
 
 import { updateNavigationLinks } from './url-state.js';
+import { registerHotkey } from './hotkeys.js';
 
 /** Throughput window + display refresh interval, in ms. */
 const FPS_WATCHDOG_MS = 1000;
@@ -114,28 +115,22 @@ export function createFpsIndicator(enabled: boolean): FpsIndicator | null {
         el.style.display = 'none';
     }
 
-    window.addEventListener('keydown', (ev: KeyboardEvent) => {
-        const target = ev.target as HTMLElement;
-        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-            return;
+    registerHotkey('f', () => {
+        const params = new URLSearchParams(window.location.search);
+        const isVisible = el.style.display !== 'none';
+        if (isVisible) {
+            el.style.display = 'none';
+            document.body.classList.remove('has-fps');
+            params.delete('fps');
+        } else {
+            el.style.display = '';
+            document.body.classList.add('has-fps');
+            params.set('fps', '1');
         }
-        if (ev.key.toLowerCase() === 'f' && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
-            const params = new URLSearchParams(window.location.search);
-            const isVisible = el.style.display !== 'none';
-            if (isVisible) {
-                el.style.display = 'none';
-                document.body.classList.remove('has-fps');
-                params.delete('fps');
-            } else {
-                el.style.display = '';
-                document.body.classList.add('has-fps');
-                params.set('fps', '1');
-            }
-            const qs = params.toString();
-            const newUrl = window.location.pathname + (qs ? '?' + qs : '');
-            window.history.replaceState(null, '', newUrl);
-            updateNavigationLinks();
-        }
+        const qs = params.toString();
+        const newUrl = window.location.pathname + (qs ? '?' + qs : '');
+        window.history.replaceState(null, '', newUrl);
+        updateNavigationLinks();
     });
 
     setInterval(() => {

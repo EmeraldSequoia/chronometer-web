@@ -15065,7 +15065,7 @@
     "+month": ["month", 1],
     "+year": ["year", 1]
   };
-  function writeTimeStateToUrl(tc) {
+  function flushTimeState(tc) {
     if (tc.isRealTime) {
       setState({ t: null, off: null, dir: 1 });
     } else if (!tc.isStopped && tc.currentRate === null && tc.currentDirection === 1) {
@@ -15095,7 +15095,7 @@
       onTransportChange = () => {
       },
       ensureSchedulerRunning,
-      writeTimeState: writeTimeState2 = () => writeTimeStateToUrl(timeController2),
+      writeTimeState: writeTimeState2 = () => flushTimeState(timeController2),
       onPopoverToggle
     } = config;
     const _timeBar = document.getElementById("time-bar");
@@ -15654,6 +15654,61 @@
     };
   }
 
+  // src/shared/hotkeys.ts
+  var handlers = /* @__PURE__ */ new Map();
+  var listenerInstalled = false;
+  function registerHotkey(key, handler) {
+    handlers.set(key.toLowerCase(), handler);
+    if (listenerInstalled || typeof window === "undefined") return;
+    listenerInstalled = true;
+    window.addEventListener("keydown", (ev) => {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      const target = ev.target;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+        return;
+      }
+      const handler2 = handlers.get(ev.key.toLowerCase());
+      if (handler2) {
+        ev.preventDefault();
+        handler2();
+      }
+    });
+  }
+
+  // src/shared/app-nav.ts
+  function appNavHref(page) {
+    if (!isPersistentMode()) return page + window.location.search;
+    const fps = new URLSearchParams(window.location.search).get("fps");
+    return fps !== null ? `${page}?fps=${encodeURIComponent(fps)}` : page;
+  }
+  function initAppNavLinks(flushState) {
+    document.querySelectorAll("a.app-nav-link").forEach((a) => {
+      const page = a.dataset.page || a.getAttribute("href") || "index.html";
+      const setHref = () => {
+        a.href = appNavHref(page);
+      };
+      const flushAndSet = () => {
+        flushState?.();
+        setHref();
+      };
+      a.addEventListener("pointerdown", flushAndSet);
+      a.addEventListener("focus", flushAndSet);
+      setHref();
+    });
+  }
+  function registerAppNavHotkeys(flushState) {
+    const go = (page) => {
+      const current = window.location.pathname.split("/").pop() || "index.html";
+      if (current === page) return;
+      flushState?.();
+      window.location.href = appNavHref(page);
+    };
+    registerHotkey("i", () => go("inspector.html"));
+    registerHotkey("o", () => go("observatory.html"));
+    registerHotkey("c", () => go("index.html"));
+    registerHotkey("a", () => go("all.html"));
+  }
+
   // src/shared/fps-indicator.ts
   var FPS_WATCHDOG_MS = 1e3;
   var TARGET_FRAME_MS = 1e3 / 60;
@@ -15693,28 +15748,22 @@
     } else {
       el.style.display = "none";
     }
-    window.addEventListener("keydown", (ev) => {
-      const target = ev.target;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
-        return;
+    registerHotkey("f", () => {
+      const params = new URLSearchParams(window.location.search);
+      const isVisible = el.style.display !== "none";
+      if (isVisible) {
+        el.style.display = "none";
+        document.body.classList.remove("has-fps");
+        params.delete("fps");
+      } else {
+        el.style.display = "";
+        document.body.classList.add("has-fps");
+        params.set("fps", "1");
       }
-      if (ev.key.toLowerCase() === "f" && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
-        const params = new URLSearchParams(window.location.search);
-        const isVisible = el.style.display !== "none";
-        if (isVisible) {
-          el.style.display = "none";
-          document.body.classList.remove("has-fps");
-          params.delete("fps");
-        } else {
-          el.style.display = "";
-          document.body.classList.add("has-fps");
-          params.set("fps", "1");
-        }
-        const qs = params.toString();
-        const newUrl = window.location.pathname + (qs ? "?" + qs : "");
-        window.history.replaceState(null, "", newUrl);
-        updateNavigationLinks();
-      }
+      const qs = params.toString();
+      const newUrl = window.location.pathname + (qs ? "?" + qs : "");
+      window.history.replaceState(null, "", newUrl);
+      updateNavigationLinks();
     });
     setInterval(() => {
       const nowW = performance.now();
@@ -17940,7 +17989,7 @@
     }
   }
   function writeTimeState() {
-    writeTimeStateToUrl(timeController);
+    flushTimeState(timeController);
   }
   function resetExprBox() {
     rebuildExprValues();
@@ -17964,22 +18013,11 @@
       scheduleFrame();
     }
   });
-  function wireAppLink(id, page) {
-    const a = document.getElementById(id);
-    if (!a) return;
-    const setHref = () => {
-      a.href = page + window.location.search;
-    };
-    const flushAndSet = () => {
-      writeTimeState();
-      setHref();
-    };
-    a.addEventListener("pointerdown", flushAndSet);
-    a.addEventListener("focus", flushAndSet);
-    setHref();
-  }
-  wireAppLink("open-observatory", "observatory.html");
-  wireAppLink("open-chronometer", "all.html");
+  initAppNavLinks(writeTimeState);
+  registerAppNavHotkeys(writeTimeState);
+  registerHotkey("t", () => document.getElementById("time-bar-label")?.click());
+  registerHotkey("n", () => document.getElementById("time-bar-now")?.click());
+  registerHotkey("l", () => document.getElementById("set-location-btn")?.click());
   buildCatalog();
   updateTimeDisplay();
   renderBrowserTime();

@@ -15361,7 +15361,7 @@
     "+month": ["month", 1],
     "+year": ["year", 1]
   };
-  function writeTimeStateToUrl(tc) {
+  function flushTimeState(tc) {
     if (tc.isRealTime) {
       setState({ t: null, off: null, dir: 1 });
     } else if (!tc.isStopped && tc.currentRate === null && tc.currentDirection === 1) {
@@ -15391,7 +15391,7 @@
       onTransportChange = () => {
       },
       ensureSchedulerRunning,
-      writeTimeState = () => writeTimeStateToUrl(timeController2),
+      writeTimeState = () => flushTimeState(timeController2),
       onPopoverToggle
     } = config;
     const _timeBar = document.getElementById("time-bar");
@@ -15951,8 +15951,13 @@
   }
 
   // src/shared/help-popover.ts
+  var activeGeneralHelpUrl = "help.html?embed=1";
   function initHelpPopover(options = {}) {
     const generalHelpUrl = options.generalHelpUrl ?? "help.html?embed=1";
+    activeGeneralHelpUrl = generalHelpUrl;
+    if (options.app) {
+      document.querySelectorAll(`#other-apps-section .other-app[data-app="${options.app}"]`).forEach((el) => el.remove());
+    }
     const infoBtn = document.getElementById("info-btn");
     const infoOverlay = document.getElementById("info-overlay");
     const infoClose = document.getElementById("info-close");
@@ -16036,6 +16041,75 @@
         }
       });
     }
+  }
+  function openGeneralHelpTopic(hash) {
+    const infoBtn = document.getElementById("info-btn");
+    const section = document.getElementById("general-help-section");
+    const iframe = document.getElementById("general-help-iframe");
+    if (!infoBtn || !section || !iframe) return;
+    infoBtn.click();
+    if (!iframe.src) {
+      iframe.src = activeGeneralHelpUrl + hash;
+    } else {
+      const w = iframe.contentWindow;
+      if (w) w.location.hash = hash;
+    }
+    section.open = true;
+  }
+
+  // src/shared/hotkeys.ts
+  var handlers = /* @__PURE__ */ new Map();
+  var listenerInstalled = false;
+  function registerHotkey(key, handler) {
+    handlers.set(key.toLowerCase(), handler);
+    if (listenerInstalled || typeof window === "undefined") return;
+    listenerInstalled = true;
+    window.addEventListener("keydown", (ev) => {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      const target = ev.target;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+        return;
+      }
+      const handler2 = handlers.get(ev.key.toLowerCase());
+      if (handler2) {
+        ev.preventDefault();
+        handler2();
+      }
+    });
+  }
+
+  // src/shared/app-nav.ts
+  function appNavHref(page) {
+    if (!isPersistentMode()) return page + window.location.search;
+    const fps = new URLSearchParams(window.location.search).get("fps");
+    return fps !== null ? `${page}?fps=${encodeURIComponent(fps)}` : page;
+  }
+  function initAppNavLinks(flushState) {
+    document.querySelectorAll("a.app-nav-link").forEach((a) => {
+      const page = a.dataset.page || a.getAttribute("href") || "index.html";
+      const setHref = () => {
+        a.href = appNavHref(page);
+      };
+      const flushAndSet = () => {
+        flushState?.();
+        setHref();
+      };
+      a.addEventListener("pointerdown", flushAndSet);
+      a.addEventListener("focus", flushAndSet);
+      setHref();
+    });
+  }
+  function registerAppNavHotkeys(flushState) {
+    const go = (page) => {
+      const current = window.location.pathname.split("/").pop() || "index.html";
+      if (current === page) return;
+      flushState?.();
+      window.location.href = appNavHref(page);
+    };
+    registerHotkey("i", () => go("inspector.html"));
+    registerHotkey("o", () => go("observatory.html"));
+    registerHotkey("c", () => go("index.html"));
+    registerHotkey("a", () => go("all.html"));
   }
 
   // src/shared/share-button.ts
@@ -21001,28 +21075,22 @@
     } else {
       el.style.display = "none";
     }
-    window.addEventListener("keydown", (ev) => {
-      const target = ev.target;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
-        return;
+    registerHotkey("f", () => {
+      const params = new URLSearchParams(window.location.search);
+      const isVisible = el.style.display !== "none";
+      if (isVisible) {
+        el.style.display = "none";
+        document.body.classList.remove("has-fps");
+        params.delete("fps");
+      } else {
+        el.style.display = "";
+        document.body.classList.add("has-fps");
+        params.set("fps", "1");
       }
-      if (ev.key.toLowerCase() === "f" && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
-        const params = new URLSearchParams(window.location.search);
-        const isVisible = el.style.display !== "none";
-        if (isVisible) {
-          el.style.display = "none";
-          document.body.classList.remove("has-fps");
-          params.delete("fps");
-        } else {
-          el.style.display = "";
-          document.body.classList.add("has-fps");
-          params.set("fps", "1");
-        }
-        const qs = params.toString();
-        const newUrl = window.location.pathname + (qs ? "?" + qs : "");
-        window.history.replaceState(null, "", newUrl);
-        updateNavigationLinks();
-      }
+      const qs = params.toString();
+      const newUrl = window.location.pathname + (qs ? "?" + qs : "");
+      window.history.replaceState(null, "", newUrl);
+      updateNavigationLinks();
     });
     setInterval(() => {
       const nowW = performance.now();
@@ -21695,8 +21763,16 @@
     setupNoonToggle();
     setupMapDrag();
     updateLocationDisplay();
-    initHelpPopover({ generalHelpUrl: "help.html?embed=1&app=observatory" });
+    initHelpPopover({ generalHelpUrl: "help.html?embed=1&app=observatory", app: "observatory" });
     initShareButton({ getState });
+    const flushTime = () => flushTimeState(timeController);
+    initAppNavLinks(flushTime);
+    registerAppNavHotkeys(flushTime);
+    registerHotkey("h", () => document.getElementById("info-btn")?.click());
+    registerHotkey("?", () => openGeneralHelpTopic("#hotkeys"));
+    registerHotkey("t", () => document.getElementById("time-bar-label")?.click());
+    registerHotkey("n", () => document.getElementById("time-bar-now")?.click());
+    registerHotkey("l", () => document.getElementById("set-location-btn")?.click());
     const fullscreenBtn = document.getElementById("fullscreen-btn");
     if (fullscreenBtn) {
       const isFullscreenSupported = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled || document.mozFullScreenEnabled || document.msFullscreenEnabled);

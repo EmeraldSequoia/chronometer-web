@@ -166,6 +166,20 @@
         color: #99b;
       }
 
+      kbd {
+        display: inline-block;
+        min-width: 18px;
+        padding: 1px 6px;
+        border: 1px solid #3a3a5e;
+        border-bottom-width: 2px;
+        border-radius: 4px;
+        background: #2a2a44;
+        color: #dde;
+        font-family: ui-monospace, 'SF Mono', monospace;
+        font-size: 12px;
+        text-align: center;
+      }
+
       .back-link {
         display: inline-flex;
         align-items: center;
@@ -213,6 +227,8 @@
         <a href="#astro-stepping" target="_self">Astro Stepping</a>
         <span class="sep">·</span>
         <a href="#physics" target="_self">Physics</a>
+        <span class="sep">·</span>
+        <a href="#hotkeys" target="_self">Shortcuts</a>
       </div>
 
       <h1>General Help Topics</h1>
@@ -1077,6 +1093,75 @@
           </p>
         </div>
       </details>
+
+      <!-- ================================================================ -->
+      <details class="help-section" id="hotkeys">
+        <summary>Keyboard Shortcuts</summary>
+        <div class="section-body">
+          <!-- ================================================================ -->
+
+          <p>
+            On a physical keyboard, these single-key shortcuts work on every
+            page. They are ignored while you are typing in a text field, and
+            navigation keeps your current location and time settings (all
+            three apps share them).
+          </p>
+
+          <table class="comp-table hotkey-table">
+            <tr>
+              <th>Key</th>
+              <th>Action</th>
+            </tr>
+            <tr>
+              <td><kbd>c</kbd></td>
+              <td>Go to the Chronometer face-selection page</td>
+            </tr>
+            <tr>
+              <td><kbd>a</kbd></td>
+              <td>Go to the Chronometer all-faces page</td>
+            </tr>
+            <tr>
+              <td><kbd>o</kbd></td>
+              <td>Go to Observatory</td>
+            </tr>
+            <tr>
+              <td><kbd>i</kbd></td>
+              <td>Go to the Inspector</td>
+            </tr>
+            <tr>
+              <td><kbd>h</kbd></td>
+              <td>Open the help popup for the current app</td>
+            </tr>
+            <tr>
+              <td><kbd>?</kbd></td>
+              <td>Open help to this Keyboard Shortcuts section</td>
+            </tr>
+            <tr>
+              <td><kbd>t</kbd></td>
+              <td>Show or hide the time controller</td>
+            </tr>
+            <tr>
+              <td><kbd>n</kbd></td>
+              <td>Reset the clock to now</td>
+            </tr>
+            <tr>
+              <td><kbd>l</kbd></td>
+              <td>Open the location dialog</td>
+            </tr>
+            <tr>
+              <td><kbd>f</kbd></td>
+              <td>Toggle the frame-rate (fps) indicator</td>
+            </tr>
+          </table>
+
+          <p>
+            The <kbd>h</kbd>, <kbd>?</kbd>, <kbd>t</kbd>, <kbd>n</kbd>,
+            <kbd>l</kbd>, and <kbd>f</kbd> keys apply on pages that have the
+            corresponding control — for example, the Inspector has no help
+            popup yet, and the face-selection page has no time controller.
+          </p>
+        </div>
+      </details>
     </div>
 
     <script>
@@ -1092,6 +1177,11 @@
       }
       // On page load
       if (location.hash) openAndScroll(location.hash);
+      // On external hash updates (the parent page's `?` hotkey retargets the
+      // already-loaded embed iframe by setting contentWindow.location.hash)
+      window.addEventListener("hashchange", () => {
+        if (location.hash) openAndScroll(location.hash);
+      });
       // On in-page anchor click
       document.addEventListener("click", (e) => {
         const a = e.target.closest('a[href^="#"]');

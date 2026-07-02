@@ -17,7 +17,9 @@ import {
     Updater, timingContextForFrame, type TimingContext,
 } from '../shared/updater.js';
 import { TimeController } from '../shared/time-controller.js';
-import { initTimeControls, writeTimeStateToUrl, type TimeControlsAPI } from '../shared/time-controls-ui.js';
+import { initTimeControls, flushTimeState, type TimeControlsAPI } from '../shared/time-controls-ui.js';
+import { registerHotkey } from '../shared/hotkeys.js';
+import { initAppNavLinks, registerAppNavHotkeys } from '../shared/app-nav.js';
 import { createFpsIndicator } from '../shared/fps-indicator.js';
 import { getState, setState, initAppState, onSharedChange, isPersistentMode } from '../shared/app-state.js';
 import { initShareButton } from '../shared/share-button.js';
@@ -1119,10 +1121,10 @@ function tick(): void {
 }
 
 // --- Wire the time-controls UI ---
-// Time-state (t/off/dir) URL persistence lives in the shared layer; the footer
-// "open in <app>" links flush it just before navigating.
+// Time-state (t/off/dir) persistence lives in the shared layer; the header
+// app-nav links flush it just before navigating.
 function writeTimeState(): void {
-    writeTimeStateToUrl(timeController);
+    flushTimeState(timeController);
 }
 
 // The free-form expression box lives OUTSIDE the catalog updater (for error
@@ -1149,21 +1151,15 @@ const timeUI: TimeControlsAPI | null = initTimeControls({
     ensureSchedulerRunning: () => { scheduleFrame(); },
 });
 
-// --- "Open in <app>" footer links ---
-// Carry the current location + time state to Observatory / Chronometer in a new
-// tab. The URL is flushed (writeTimeState) just before navigation so the link
-// always reflects the exact current time, even mid-scrub.
-function wireAppLink(id: string, page: string): void {
-    const a = document.getElementById(id) as HTMLAnchorElement | null;
-    if (!a) return;
-    const setHref = () => { a.href = page + window.location.search; };
-    const flushAndSet = () => { writeTimeState(); setHref(); };
-    a.addEventListener('pointerdown', flushAndSet);  // before click / middle-click
-    a.addEventListener('focus', flushAndSet);         // before keyboard activation
-    setHref();                                        // initial href (no flush)
-}
-wireAppLink('open-observatory', 'observatory.html');
-wireAppLink('open-chronometer', 'all.html');
+// --- Cross-app navigation (header icons + i/o/c/a) and page hotkeys ---
+// Time state is flushed (writeTimeState) just before navigation so the target
+// app opens at the exact current time, even mid-scrub. No 'h'/'?' here — the
+// Inspector has no help popup yet. Key table: help.html#hotkeys.
+initAppNavLinks(writeTimeState);
+registerAppNavHotkeys(writeTimeState);
+registerHotkey('t', () => document.getElementById('time-bar-label')?.click());
+registerHotkey('n', () => document.getElementById('time-bar-now')?.click());
+registerHotkey('l', () => document.getElementById('set-location-btn')?.click());
 
 // Initial build + start
 buildCatalog();

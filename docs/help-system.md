@@ -7,6 +7,7 @@ The help system has two layers:
 
 Both are accessed through the ℹ info popup. When the user clicks the ℹ button, the popup shows:
 - Generic project info (title, GitHub links)
+- An expandable "Other Apps" section (cross-links to the other two apps)
 - An expandable "General Help Topics" section (iframe)
 - Per-face help content (details sections)
 
@@ -96,7 +97,17 @@ The general help content in `src/help.html` was ported from four sources:
 
 Eclipse prediction images (8 files) were copied from `.chronometer-ref/Help/Geneva/` to `src/help/images/basel/`.
 
+### Keyboard Shortcuts section
+
+`help.html` also contains a **Keyboard Shortcuts** section (`#hotkeys`) documenting the single-key hotkeys (`c a o i h ? t n l f`). It is app-neutral, so both the Chronometer and Observatory flavors show it. The runtime registry lives in `src/shared/hotkeys.ts` (one keydown listener, input-focus guard); the cross-app navigation keys are registered by `registerAppNavHotkeys()` in `src/shared/app-nav.ts`, and each entry script registers its page-local keys. **Keep help.html's table, the README table, and the registrations in sync.** The `?` hotkey calls `openGeneralHelpTopic('#hotkeys')` (help-popover.ts), which opens the popup, expands the General Help section, and routes the iframe to `#hotkeys` (help.html opens/scrolls on load and on `hashchange`).
+
 ## Architecture
+
+### "Other Apps" popup section
+
+`src/partials/other-apps.html` contains one entry per app (icon + title + lead paragraph), each tagged `data-app="chronometer|observatory|inspector"`. `build.sh` injects it via the `{{OTHER_APPS}}` placeholder into the three popups (index, face template, Observatory) above the General Help Topics section. At runtime the current app's own entry is removed — the `app:` option to `initHelpPopover()` (face pages, Observatory) or a line in `index-page.ts`. Styles live in `partials/help-subview.css` (`#other-apps-section`, `.other-app*`), which all three pages inject.
+
+The entry links (and the header app icons on every page) carry class `app-nav-link` and are wired by `initAppNavLinks()` in `src/shared/app-nav.ts`: in persistent (localStorage) mode they navigate with a clean URL (state travels via the shared `ec:shared` namespace; only the URL-only `fps` param is carried), while the non-persistent fallbacks copy the full query string. Pending time state is flushed on pointerdown/focus before navigation.
 
 ### General Help — Standalone Page with Embed Mode
 
@@ -191,12 +202,16 @@ During build, these are copied to `dist/help/images/`.
 
 | File | Purpose |
 |------|---------|
-| `src/help.html` | General help page (Complications, Accuracy, Eclipses, Physics) |
+| `src/help.html` | General help page (Complications, Accuracy, Eclipses, Astro Stepping, Physics, Keyboard Shortcuts) |
 | `src/help/<face>.html` | Per-face help HTML fragments (13 files, one per face) |
 | `src/help/images/` | Inline help images (55+ files across 9 subdirectories) |
-| `src/face-template.html` | Contains General Help iframe, `#help-content` div, `<template>`, and help CSS |
-| `src/index.html` | Contains General Help iframe (no per-face help) |
-| `build.sh` | `get_help_file()`, `{{HELP_CONTENT}}` injection, combined help generation |
+| `src/face-template.html` | Contains Other Apps + General Help iframe, `#help-content` div, `<template>`, and help CSS |
+| `src/index.html` | Contains Other Apps + General Help iframe (no per-face help) |
+| `src/partials/other-apps.html` | "Other Apps" popup section (all three entries; current app removed at runtime) |
+| `src/shared/help-popover.ts` | Shared popup wiring, `app:` filtering, `openGeneralHelpTopic()` for the `?` hotkey |
+| `src/shared/app-nav.ts` | Cross-app link hrefs (clean in storage mode), `.app-nav-link` wiring, i/o/c/a hotkeys |
+| `src/shared/hotkeys.ts` | Single-key hotkey registry (input-focus guard, no-modifier match) |
+| `build.sh` | `get_help_file()`, `{{HELP_CONTENT}}`/`{{OTHER_APPS}}` injection, combined help generation |
 | `src/engine-entry.ts` | Template cloning, external link targeting, thumbnail injection, reordering, filtering, iframe resize listener |
 
 ## Adding Help for a New Face

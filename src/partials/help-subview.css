@@ -65,3 +65,65 @@
     font-size: 11px;
     color: #556;
 }
+
+/* "Other Apps" info-popup section (partials/other-apps.html) — boxed
+   collapsible styled like the General Help Topics section below it. */
+#other-apps-section {
+    margin: 12px 0;
+    border: 1px solid #3a3a5e;
+    border-radius: 8px;
+    padding: 8px 14px;
+}
+
+#other-apps-section summary {
+    cursor: pointer;
+    color: #8af;
+    font-size: 14px;
+}
+
+#other-apps-section summary:hover {
+    text-decoration: underline;
+}
+
+.other-app {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    margin: 14px 0 6px;
+}
+
+.other-app-icon {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.05);
+    overflow: hidden;
+}
+
+.other-app-icon img {
+    width: 48px;
+    height: 48px;
+    display: block;
+    object-fit: cover;
+}
+
+.other-app-icon svg {
+    width: 26px;
+    height: 26px;
+    fill: #8af;
+}
+
+.other-app-text p {
+    margin: 0 0 4px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.other-app-title {
+    font-size: 14px;
+    font-weight: 600;
+}

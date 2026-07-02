@@ -1,0 +1,58 @@
+<!-- "Other Apps" info-popup section, injected via {{OTHER_APPS}} (build.sh)
+     into the index, face-page, and Observatory popups. Contains an entry for
+     all three apps; the current app's own entry is removed at runtime
+     (help-popover.ts `app` option / index.html page script). Styles live in
+     help-subview.css. Links are wired by app-nav.ts (clean URLs in storage
+     mode — see that module's header comment). -->
+<details id="other-apps-section">
+  <summary>Other Apps</summary>
+  <div class="other-app" data-app="chronometer">
+    <a href="index.html" class="app-nav-link other-app-icon" data-page="index.html" title="Chronometer">
+      <img src="thumb-all-faces.png" alt="Chronometer" />
+    </a>
+    <div class="other-app-text">
+      <p class="other-app-title">
+        <a href="index.html" class="app-nav-link" data-page="index.html">Chronometer</a>
+      </p>
+      <p>
+        A web port of
+        <a href="https://emeraldsequoia.com/h/index.html" target="_blank" rel="noopener">Emerald Chronometer</a>
+        (<a href="https://github.com/EmeraldSequoia/Chronometer" target="_blank" rel="noopener">GitHub</a>),
+        an astronomical watch-face app originally built for iPhone and iPad.
+      </p>
+    </div>
+  </div>
+  <div class="other-app" data-app="observatory">
+    <a href="observatory.html" class="app-nav-link other-app-icon" data-page="observatory.html" title="Observatory">
+      <img src="thumb-observatory.png" alt="Observatory" />
+    </a>
+    <div class="other-app-text">
+      <p class="other-app-title">
+        <a href="observatory.html" class="app-nav-link" data-page="observatory.html">Observatory</a>
+      </p>
+      <p>
+        A web port of
+        <a href="https://emeraldsequoia.com/eo/index.html" target="_blank" rel="noopener">Emerald Observatory</a>
+        (<a href="https://github.com/EmeraldSequoia/Observatory" target="_blank" rel="noopener">GitHub</a>),
+        an astronomical clock app originally built for iPad.
+      </p>
+    </div>
+  </div>
+  <div class="other-app" data-app="inspector">
+    <a href="inspector.html" class="app-nav-link other-app-icon" data-page="inspector.html" title="Inspector">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M15.5 14h-.79l-.28-.27a6.51 6.51 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/>
+      </svg>
+    </a>
+    <div class="other-app-text">
+      <p class="other-app-title">
+        <a href="inspector.html" class="app-nav-link" data-page="inspector.html">Inspector</a>
+      </p>
+      <p>
+        A live data explorer for the astronomy engine shared by Chronometer and
+        Observatory &mdash; rise/set times, planetary positions, and an evaluator
+        for the expressions that drive the watch faces, at any time and location.
+      </p>
+    </div>
+  </div>
+</details>

@@ -13,6 +13,9 @@ import type { CityResult } from './shared/city-search.js';
 import { renderGlobe, loadOSMTile } from './shared/mini-map.js';
 import { resolveTimezone } from './shared/tz-resolve.js';
 import { initAppState, getState, setState } from './shared/app-state.js';
+import { registerHotkey } from './shared/hotkeys.js';
+import { initAppNavLinks, registerAppNavHotkeys } from './shared/app-nav.js';
+import { openGeneralHelpTopic } from './shared/help-popover.js';
 
 // Select the state backend before any getState()/setState() call.
 initAppState({ app: 'index' });
@@ -389,6 +392,23 @@ lpCityInput.addEventListener('keydown', (e: KeyboardEvent) => {
 // ============================================================================
 // Startup: check for existing location or prompt
 // ============================================================================
+
+// ============================================================================
+// Cross-app navigation (header icons + i/o/c/a) and page hotkeys
+// ============================================================================
+
+// This page IS Chronometer, so drop its own entry from the Other Apps section
+// (the popup wiring is inline in index.html, not help-popover.ts).
+document.querySelectorAll('#other-apps-section .other-app[data-app="chronometer"]')
+    .forEach(el => el.remove());
+
+// No time controller here, so there is no state to flush before navigating.
+// Key table: help.html#hotkeys.
+initAppNavLinks();
+registerAppNavHotkeys();
+registerHotkey('h', () => document.getElementById('info-btn')?.click());
+registerHotkey('?', () => openGeneralHelpTopic('#hotkeys'));
+registerHotkey('l', () => showPrompt(false));
 
 (async function init() {
     const urlState = getState();

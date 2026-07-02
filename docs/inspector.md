@@ -63,9 +63,21 @@ offset / stopped state (not just `new Date()`).
 The Inspector uses the shared `TimeController` + `initTimeControls` transport bar
 (`{{TIME_CONTROLLER}}` / `{{TIME_CSS}}` partials, pinned under the time display),
 exactly like Chronometer and Observatory: play / pause, reverse, hold-to-scrub at
-various rates, single-step, offset, and "Now". Time state round-trips through the
-URL (`t` / `off` / `dir`), so a Chronometer view can deep-link to the Inspector at
-the same instant and location.
+various rates, single-step, offset, and "Now". Time state (`t` / `off` / `dir`)
+persists through the shared app-state layer (the `ec:shared` localStorage
+namespace in storage mode, the URL in the fallbacks), so hopping between apps —
+or opening a shared deep link — lands at the same instant and location.
+
+### Cross-App Navigation
+
+The fixed top-right row holds Chronometer and Observatory icon links (plus
+Share). Their hrefs and the pre-navigation time-state flush are wired by
+`initAppNavLinks()` (`src/shared/app-nav.ts`) — clean URLs in storage mode, so
+mid-scrub time survives the hop via storage rather than query params. The
+`i`/`o`/`c`/`a` hotkeys navigate the same way; `t`/`n`/`l` drive the time
+controller and location dialog (`src/shared/hotkeys.ts`; key table in
+help.html's Keyboard Shortcuts section). The Inspector has no ℹ help popup yet,
+so `h`/`?` are deliberately not registered here.
 
 Under the hood the catalog's values are owned by a shared **`Updater`** driven by
 a **`TimingContext`** (built each frame from the controller). The Inspector hands

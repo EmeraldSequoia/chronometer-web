@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Inspector — live astronomy data explorer. View sunrise, sunset, and evaluate astronomy expressions in real time." />
+    <!-- Magnifying-glass favicon (inline SVG data URL — no extra asset to ship) -->
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='12' fill='%23111827'/%3E%3Cpath fill='%23c7d2fe' d='M16.62 15.4h-.64l-.23-.22a5.29 5.29 0 1 0-.57.57l.22.23v.64l4.07 4.06 1.21-1.21zm-4.88 0a3.66 3.66 0 1 1 3.66-3.66 3.65 3.65 0 0 1-3.66 3.66z'/%3E%3C/svg%3E" />
     <title>Inspector</title>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
     <style>
@@ -84,6 +86,47 @@
       }
 
       #share-btn:hover {
+          background: rgba(255, 255, 255, 0.12);
+          color: #aab;
+      }
+
+      /* Cross-app links (Chronometer / Observatory) — continue the fixed
+         top-right row left of share; hrefs wired by shared/app-nav.ts. */
+      #chronometer-link,
+      #observatory-link {
+          position: fixed;
+          top: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 34px;
+          height: 34px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.06);
+          color: #6b7280;
+          padding: 0;
+          z-index: 20;
+          text-decoration: none;
+          transition: background 0.2s, color 0.2s;
+      }
+
+      #observatory-link {
+          right: 54px;
+      }
+
+      #chronometer-link {
+          right: 96px;
+      }
+
+      #chronometer-link svg,
+      #observatory-link svg {
+          width: 17px;
+          height: 17px;
+          fill: currentColor;
+      }
+
+      #chronometer-link:hover,
+      #observatory-link:hover {
           background: rgba(255, 255, 255, 0.12);
           color: #aab;
       }
@@ -585,38 +628,6 @@
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-      }
-
-      /* ── Footer ───────────────────────────────────── */
-      .app-footer {
-          padding-top: 12px;
-          padding-bottom: 4px;
-          display: flex;
-          gap: 10px;
-          justify-content: center;
-          font-size: 12px;
-      }
-
-      /* "Open the other app at this time + location, in a new tab" buttons. */
-      .app-footer a {
-          display: inline-flex;
-          align-items: center;
-          gap: 5px;
-          padding: 5px 12px;
-          border: 1px solid rgba(75, 85, 99, 0.5);
-          border-radius: 8px;
-          background: rgba(31, 41, 55, 0.5);
-          color: #c7d2fe;
-          text-decoration: none;
-      }
-
-      .app-footer a:hover {
-          background: rgba(55, 65, 81, 0.6);
-      }
-
-      .app-footer .ext-icon {
-          font-size: 11px;
-          opacity: 0.7;
       }
 
       /* ── Time controller injection ────────────────── */
@@ -1524,6 +1535,12 @@
       <header class="app-header">
         <h1 class="app-title">Inspector</h1>
       </header>
+      <a id="chronometer-link" class="app-nav-link" data-page="index.html" href="index.html" title="Chronometer">
+        <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 1.8A8.2 8.2 0 1 1 3.8 12 8.2 8.2 0 0 1 12 3.8zM11.2 6v6.37l4.2 2.52.9-1.48-3.6-2.16V6z"/></svg>
+      </a>
+      <a id="observatory-link" class="app-nav-link" data-page="observatory.html" href="observatory.html" title="Observatory">
+        <svg viewBox="0 0 24 24"><path d="M12 2.2A9.8 9.8 0 1 0 21.8 12 9.81 9.81 0 0 0 12 2.2zm0 1.8A8 8 0 1 1 4 12a8 8 0 0 1 8-8z"/><circle cx="12" cy="12" r="3"/><circle cx="12" cy="4" r="2"/></svg>
+      </a>
       <button id="share-btn" title="Share this view">
         <svg viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>
       </button>
@@ -1896,16 +1913,6 @@
 
       <!-- Ephemeris catalog (populated by inspector-entry.ts) -->
       <div id="catalog" class="catalog"></div>
-
-      <!-- Footer: open the other apps at the same location + time, in a new tab -->
-      <footer class="app-footer">
-        <a id="open-observatory" href="observatory.html" target="_blank" rel="noopener">
-          Observatory <span class="ext-icon" aria-hidden="true">↗</span>
-        </a>
-        <a id="open-chronometer" href="all.html" target="_blank" rel="noopener">
-          Chronometer <span class="ext-icon" aria-hidden="true">↗</span>
-        </a>
-      </footer>
     </div>
 
     <!-- Location prompt overlay (hidden by default) -->
