@@ -16800,144 +16800,6 @@
     };
   }
 
-  // src/inspector/expr-metadata.ts
-  var EXPR_METADATA = [
-    // ── Constants: Planets ──────────────────────────────────────────────
-    { name: "Sun", category: "Planet Constants", desc: "Sun (0)", kind: "const" },
-    { name: "Moon", category: "Planet Constants", desc: "Moon (1)", kind: "const" },
-    { name: "Mercury", category: "Planet Constants", desc: "Mercury (2)", kind: "const" },
-    { name: "Venus", category: "Planet Constants", desc: "Venus (3)", kind: "const" },
-    { name: "Mars", category: "Planet Constants", desc: "Mars (5)", kind: "const" },
-    { name: "Jupiter", category: "Planet Constants", desc: "Jupiter (6)", kind: "const" },
-    { name: "Saturn", category: "Planet Constants", desc: "Saturn (7)", kind: "const" },
-    { name: "Uranus", category: "Planet Constants", desc: "Uranus (8)", kind: "const" },
-    { name: "Neptune", category: "Planet Constants", desc: "Neptune (9)", kind: "const" },
-    { name: "Pluto", category: "Planet Constants", desc: "Pluto (10)", kind: "const" },
-    // ── Constants: Math ─────────────────────────────────────────────────
-    { name: "pi", category: "Math Constants", desc: "\u03C0 \u2248 3.14159", kind: "const" },
-    { name: "true", category: "Math Constants", desc: "1", kind: "const" },
-    { name: "false", category: "Math Constants", desc: "0", kind: "const" },
-    // ── Sun Times ───────────────────────────────────────────────────────
-    { name: "nextSunrise", category: "Sun Times", desc: "Next sunrise (date interval)", kind: "fn" },
-    { name: "nextSunset", category: "Sun Times", desc: "Next sunset (date interval)", kind: "fn" },
-    { name: "nextSunTransit", category: "Sun Times", desc: "Next solar noon (date interval)", kind: "fn" },
-    { name: "prevSunrise", category: "Sun Times", desc: "Previous sunrise (date interval)", kind: "fn" },
-    { name: "prevSunset", category: "Sun Times", desc: "Previous sunset (date interval)", kind: "fn" },
-    { name: "prevSunTransit", category: "Sun Times", desc: "Previous solar noon (date interval)", kind: "fn" },
-    { name: "sunriseForDayTime", category: "Sun Times", desc: "Today's sunrise (NaN if none)", kind: "fn" },
-    { name: "sunsetForDayTime", category: "Sun Times", desc: "Today's sunset (NaN if none)", kind: "fn" },
-    { name: "sunTransitForDayTime", category: "Sun Times", desc: "Today's solar noon (NaN if none)", kind: "fn" },
-    // ── Moon Times ──────────────────────────────────────────────────────
-    { name: "nextMoonrise", category: "Moon Times", desc: "Next moonrise (date interval)", kind: "fn" },
-    { name: "nextMoonset", category: "Moon Times", desc: "Next moonset (date interval)", kind: "fn" },
-    { name: "nextMoonTransit", category: "Moon Times", desc: "Next moon transit (date interval)", kind: "fn" },
-    { name: "prevMoonrise", category: "Moon Times", desc: "Previous moonrise (date interval)", kind: "fn" },
-    { name: "prevMoonset", category: "Moon Times", desc: "Previous moonset (date interval)", kind: "fn" },
-    { name: "prevMoonTransit", category: "Moon Times", desc: "Previous moon transit (date interval)", kind: "fn" },
-    { name: "moonriseForDayTime", category: "Moon Times", desc: "Today's moonrise (NaN if none)", kind: "fn" },
-    { name: "moonsetForDayTime", category: "Moon Times", desc: "Today's moonset (NaN if none)", kind: "fn" },
-    { name: "moonTransitForDayTime", category: "Moon Times", desc: "Today's moon transit (NaN if none)", kind: "fn" },
-    // ── Planet Times ────────────────────────────────────────────────────
-    { name: "nextRiseOfPlanet", category: "Planet Times", desc: "Next rise of planet", kind: "fn", sig: "(planet)" },
-    { name: "nextSetOfPlanet", category: "Planet Times", desc: "Next set of planet", kind: "fn", sig: "(planet)" },
-    { name: "nextTransitOfPlanet", category: "Planet Times", desc: "Next transit of planet", kind: "fn", sig: "(planet)" },
-    { name: "prevRiseOfPlanet", category: "Planet Times", desc: "Previous rise of planet", kind: "fn", sig: "(planet)" },
-    { name: "prevSetOfPlanet", category: "Planet Times", desc: "Previous set of planet", kind: "fn", sig: "(planet)" },
-    { name: "prevTransitOfPlanet", category: "Planet Times", desc: "Previous transit of planet", kind: "fn", sig: "(planet)" },
-    { name: "riseOfPlanetForDayTime", category: "Planet Times", desc: "Today's rise of planet", kind: "fn", sig: "(planet)" },
-    { name: "setOfPlanetForDayTime", category: "Planet Times", desc: "Today's set of planet", kind: "fn", sig: "(planet)" },
-    { name: "transitOfPlanetForDayTime", category: "Planet Times", desc: "Today's transit of planet", kind: "fn", sig: "(planet)" },
-    // ── Sun Position ────────────────────────────────────────────────────
-    { name: "sunAltitude", category: "Sun Position", desc: "Sun altitude (radians)", kind: "fn" },
-    { name: "sunAzimuth", category: "Sun Position", desc: "Sun azimuth (radians)", kind: "fn" },
-    { name: "sunRA", category: "Sun Position", desc: "Sun right ascension (radians)", kind: "fn" },
-    { name: "sunDecl", category: "Sun Position", desc: "Sun declination (radians)", kind: "fn" },
-    { name: "sunEclipticLongitude", category: "Sun Position", desc: "Sun ecliptic longitude (radians)", kind: "fn" },
-    { name: "subSolarLatitude", category: "Sun Position", desc: "Sub-solar point latitude (= sun declination, radians)", kind: "fn" },
-    { name: "subSolarLongitude", category: "Sun Position", desc: "Sub-solar point longitude (radians, [-\u03C0, \u03C0])", kind: "fn" },
-    // ── Moon Position ───────────────────────────────────────────────────
-    { name: "moonAltitude", category: "Moon Position", desc: "Moon altitude (radians)", kind: "fn" },
-    { name: "moonAzimuth", category: "Moon Position", desc: "Moon azimuth (radians)", kind: "fn" },
-    { name: "moonAgeAngle", category: "Moon Position", desc: "Moon phase angle (radians, 0=new)", kind: "fn" },
-    { name: "realMoonAgeAngle", category: "Moon Position", desc: "Moon age in days since new moon", kind: "fn" },
-    { name: "moonRelativeAngle", category: "Moon Position", desc: "Moon relative angle (radians)", kind: "fn" },
-    // ── Planet Position ─────────────────────────────────────────────────
-    { name: "RAOfPlanet", category: "Planet Position", desc: "Right ascension (radians)", kind: "fn", sig: "(planet)" },
-    { name: "declinationOfPlanet", category: "Planet Position", desc: "Geocentric apparent declination (radians)", kind: "fn", sig: "(planet)" },
-    { name: "altitudeOfPlanet", category: "Planet Position", desc: "Topocentric altitude (radians)", kind: "fn", sig: "(planet)" },
-    { name: "azimuthOfPlanet", category: "Planet Position", desc: "Topocentric azimuth (radians)", kind: "fn", sig: "(planet)" },
-    { name: "ELongitudeOfPlanet", category: "Planet Position", desc: "Geocentric ecliptic longitude (radians)", kind: "fn", sig: "(planet)" },
-    { name: "ELatitudeOfPlanet", category: "Planet Position", desc: "Geocentric ecliptic latitude (radians)", kind: "fn", sig: "(planet)" },
-    { name: "HLongitudeOfPlanet", category: "Planet Position", desc: "Heliocentric longitude (radians)", kind: "fn", sig: "(planet)" },
-    { name: "HLatitudeOfPlanet", category: "Planet Position", desc: "Heliocentric latitude (radians)", kind: "fn", sig: "(planet)" },
-    { name: "distanceFromEarthOfPlanet", category: "Planet Position", desc: "Geocentric distance (AU)", kind: "fn", sig: "(planet)" },
-    { name: "planetIsUp", category: "Planet Position", desc: "1 if planet is above the horizon, else 0", kind: "fn", sig: "(planet)" },
-    // ── Clock / Calendar ────────────────────────────────────────────────
-    { name: "hour24Value", category: "Clock", desc: "Current hour (0\u201323, fractional)", kind: "fn" },
-    { name: "hour24Number", category: "Clock", desc: "Current hour (integer 0\u201323)", kind: "fn" },
-    { name: "minuteValue", category: "Clock", desc: "Current minute (fractional)", kind: "fn" },
-    { name: "minuteNumber", category: "Clock", desc: "Current minute (integer 0\u201359)", kind: "fn" },
-    { name: "secondValue", category: "Clock", desc: "Current second (fractional)", kind: "fn" },
-    { name: "dayOfWeekNumber", category: "Clock", desc: "Day of week (0=Sun, 6=Sat)", kind: "fn" },
-    { name: "dayOfMonthNumber", category: "Clock", desc: "Day of month (1\u201331)", kind: "fn" },
-    { name: "monthOfYearNumber", category: "Clock", desc: "Month of year (1\u201312)", kind: "fn" },
-    { name: "yearNumber", category: "Clock", desc: "Current year", kind: "fn" },
-    { name: "dayOfYear", category: "Clock", desc: "Day of year (1\u2013366)", kind: "fn" },
-    { name: "leapYear", category: "Clock", desc: "1 if leap year, 0 otherwise", kind: "fn" },
-    { name: "tzOffset", category: "Clock", desc: "Timezone offset in hours", kind: "fn" },
-    // ── Sidereal / Astronomical ─────────────────────────────────────────
-    { name: "siderealTime", category: "Astronomical", desc: "Local sidereal time (radians)", kind: "fn" },
-    { name: "julianDayNumber", category: "Astronomical", desc: "Julian day number", kind: "fn" },
-    { name: "eot", category: "Astronomical", desc: "Equation of time (radians)", kind: "fn" },
-    { name: "precession", category: "Astronomical", desc: "General precession since J2000", kind: "fn" },
-    { name: "obliquity", category: "Astronomical", desc: "Obliquity of ecliptic (radians)", kind: "fn" },
-    // ── Math Functions ──────────────────────────────────────────────────
-    { name: "sin", category: "Math", desc: "Sine", kind: "fn", sig: "(x)" },
-    { name: "cos", category: "Math", desc: "Cosine", kind: "fn", sig: "(x)" },
-    { name: "tan", category: "Math", desc: "Tangent", kind: "fn", sig: "(x)" },
-    { name: "asin", category: "Math", desc: "Arc sine", kind: "fn", sig: "(x)" },
-    { name: "acos", category: "Math", desc: "Arc cosine", kind: "fn", sig: "(x)" },
-    { name: "atan", category: "Math", desc: "Arc tangent", kind: "fn", sig: "(x)" },
-    { name: "atan2", category: "Math", desc: "Two-argument arc tangent", kind: "fn", sig: "(y, x)" },
-    { name: "sqrt", category: "Math", desc: "Square root", kind: "fn", sig: "(x)" },
-    { name: "abs", category: "Math", desc: "Absolute value", kind: "fn", sig: "(x)" },
-    { name: "floor", category: "Math", desc: "Floor (round down)", kind: "fn", sig: "(x)" },
-    { name: "ceil", category: "Math", desc: "Ceiling (round up)", kind: "fn", sig: "(x)" },
-    { name: "round", category: "Math", desc: "Round to nearest", kind: "fn", sig: "(x)" },
-    { name: "log", category: "Math", desc: "Natural logarithm", kind: "fn", sig: "(x)" },
-    { name: "exp", category: "Math", desc: "Exponential (e^x)", kind: "fn", sig: "(x)" },
-    { name: "pow", category: "Math", desc: "Power", kind: "fn", sig: "(base, exp)" },
-    { name: "min", category: "Math", desc: "Minimum", kind: "fn", sig: "(a, b)" },
-    { name: "max", category: "Math", desc: "Maximum", kind: "fn", sig: "(a, b)" },
-    { name: "fmod", category: "Math", desc: "Floating-point modulus", kind: "fn", sig: "(a, b)" },
-    // ── Day/Night Ring ──────────────────────────────────────────────────
-    { name: "dayNightLeafAngle", category: "Day/Night Ring", desc: "Rise/set/leaf angle for planet ring", kind: "fn", sig: "(planet, leaf, numLeaves)" },
-    { name: "dayNightLeafAngleLST", category: "Day/Night Ring", desc: "Rise/set/leaf angle (LST time base)", kind: "fn", sig: "(planet, leaf, numLeaves)" },
-    { name: "dayNightLeafAngleIsRiseSet", category: "Day/Night Ring", desc: "1 if planet actually rises/sets, 0 if transit fallback", kind: "fn", sig: "(planet, leaf)" },
-    { name: "dayNightLeafAngleAboveHorizon", category: "Day/Night Ring", desc: "1 if planet always above horizon (polar), 0 otherwise", kind: "fn", sig: "(planet, leaf)" },
-    { name: "planettransit24HourIndicatorAngle", category: "Day/Night Ring", desc: "Planet transit angle on 24h dial", kind: "fn", sig: "(planet)" },
-    { name: "planetTransitAngle", category: "Day/Night Ring", desc: "Planet high transit angle on 24h dial", kind: "fn", sig: "(planet)" },
-    { name: "sunSpecialAngle", category: "Day/Night Ring", desc: "Sun altitude crossing angle (rise/set/twilight)", kind: "fn", sig: "(kind)" },
-    { name: "solarNoonAngle", category: "Day/Night Ring", desc: "Solar noon angle on wadokei dial (+\u03C0 offset)", kind: "fn" },
-    { name: "solarNoonAngle24h", category: "Day/Night Ring", desc: "Solar noon angle on 24h dial (raw, no offset)", kind: "fn" },
-    { name: "polarSummer", category: "Day/Night Ring", desc: "1 if sun always above horizon", kind: "fn" },
-    { name: "polarWinter", category: "Day/Night Ring", desc: "1 if sun always below horizon", kind: "fn" }
-  ];
-  var CATEGORY_ORDER = [
-    "Sun Times",
-    "Moon Times",
-    "Planet Times",
-    "Sun Position",
-    "Moon Position",
-    "Planet Position",
-    "Clock",
-    "Astronomical",
-    "Day/Night Ring",
-    "Planet Constants",
-    "Math Constants",
-    "Math"
-  ];
-
   // src/inspector/catalog.ts
   function tagIsAngular(tag) {
     return tag === "A";
@@ -17111,12 +16973,6 @@
   var locationDetail = document.getElementById("location-detail");
   var setLocationBtn = document.getElementById("set-location-btn");
   var catalogEl = document.getElementById("catalog");
-  var exprInput = document.getElementById("expr-input");
-  var exprResults = document.getElementById("expr-results");
-  var exprNumber = document.getElementById("expr-number");
-  var exprAngle = document.getElementById("expr-angle");
-  var exprDate = document.getElementById("expr-date");
-  var exprError = document.getElementById("expr-error");
   var tzDisplay = document.getElementById("tz-display");
   var timeMainEl = document.createElement("span");
   var timeSubsecEl = document.createElement("span");
@@ -17239,7 +17095,6 @@
       env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
       updateLocationDisplay();
       updateTimeDisplay();
-      rebuildExprValues();
       resetAllSchedules();
       scheduleFrame();
     }
@@ -17270,7 +17125,6 @@
           env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
           updateLocationDisplay();
           updateTimeDisplay();
-          rebuildExprValues();
           resetAllSchedules();
           scheduleFrame();
         } else {
@@ -17300,7 +17154,6 @@
         env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
         updateLocationDisplay();
         updateTimeDisplay();
-        rebuildExprValues();
         resetAllSchedules();
         scheduleFrame();
       }).catch(() => notifyBlocRefreshFailed()).finally(() => {
@@ -17368,234 +17221,6 @@
     }
     return d.toISOString().slice(11, 19);
   }
-  var EXPR_UPDATE_INTERVAL_SEC = 0.1;
-  var lastExprText = "";
-  var exprAngleVal = null;
-  var exprLinearVal = null;
-  var exprValues = [];
-  function rebuildExprValues() {
-    const text = exprInput.value.trim();
-    if (!text) {
-      exprResults.classList.remove("visible");
-      exprError.classList.remove("visible");
-      lastExprText = "";
-      exprAngleVal = null;
-      exprLinearVal = null;
-      exprValues = [];
-      return;
-    }
-    lastExprText = text;
-    const now = performance.now();
-    try {
-      const base = {
-        name: "expr",
-        expr: text,
-        updateInterval: EXPR_UPDATE_INTERVAL_SEC,
-        evalAhead: true,
-        animSpeed: JUMP
-      };
-      exprAngleVal = createObsValue({ ...base, linear: false }, env, now, getNow);
-      exprLinearVal = createObsValue({ ...base, linear: true }, env, now, getNow);
-      exprValues = [exprAngleVal, exprLinearVal];
-      exprError.classList.remove("visible");
-      exprResults.classList.add("visible");
-      renderExprValues();
-      scheduleFrame();
-    } catch (e) {
-      exprAngleVal = null;
-      exprLinearVal = null;
-      exprValues = [];
-      exprResults.classList.remove("visible");
-      exprError.textContent = e.message || "Parse error";
-      exprError.classList.add("visible");
-    }
-  }
-  function renderExprValues() {
-    if (!exprAngleVal || !exprLinearVal) return;
-    const value = exprLinearVal.currentValue;
-    const angleRad = exprAngleVal.currentValue;
-    if (Number.isInteger(value) && Math.abs(value) < 1e15) {
-      exprNumber.textContent = value.toString();
-    } else {
-      exprNumber.textContent = value.toPrecision(10);
-    }
-    const degrees = angleRad * 180 / Math.PI;
-    exprAngle.textContent = `${degrees.toFixed(4)}\xB0`;
-    const dateMs = value * 1e3 + EPOCH_2001_MS;
-    if (isFinite(dateMs) && dateMs > -62e12 && dateMs < 25e13) {
-      const d = new Date(dateMs);
-      if (locationTimezone) {
-        try {
-          const fmt = new Intl.DateTimeFormat("en-US", {
-            timeZone: locationTimezone,
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-            hour12: false
-          });
-          const tzAbbr = new Intl.DateTimeFormat("en-US", {
-            timeZone: locationTimezone,
-            timeZoneName: "short"
-          }).formatToParts(d).find((p) => p.type === "timeZoneName")?.value || "";
-          exprDate.textContent = `${fmt.format(d)} ${tzAbbr}`;
-        } catch {
-          exprDate.textContent = d.toISOString().replace("T", " ").replace("Z", " UTC");
-        }
-      } else {
-        exprDate.textContent = d.toISOString().replace("T", " ").replace("Z", " UTC");
-      }
-    } else {
-      exprDate.textContent = "\u2014";
-    }
-  }
-  function tickExprValues(perfNow, ctx) {
-    if (exprValues.length === 0) return;
-    try {
-      updateObsValues(
-        exprValues,
-        env,
-        perfNow,
-        getNow,
-        ctx.tickIntervalMs,
-        ctx.displayDeltaSec,
-        ctx.direction,
-        withDisplayTime
-      );
-      animateObsValues(exprValues, perfNow);
-      exprError.classList.remove("visible");
-      exprResults.classList.add("visible");
-      renderExprValues();
-    } catch (e) {
-      exprResults.classList.remove("visible");
-      exprError.textContent = e.message || "Evaluation error";
-      exprError.classList.add("visible");
-    }
-  }
-  exprInput.addEventListener("input", () => {
-    rebuildExprValues();
-    updateAutocomplete();
-  });
-  var acDropdown = document.getElementById("expr-autocomplete");
-  var acItems = [];
-  var acSelectedIdx = -1;
-  function getWordAtCursor() {
-    const pos = exprInput.selectionStart ?? exprInput.value.length;
-    const text = exprInput.value;
-    let start = pos;
-    while (start > 0 && /[a-zA-Z0-9_]/.test(text[start - 1])) start--;
-    let end = pos;
-    while (end < text.length && /[a-zA-Z0-9_]/.test(text[end])) end++;
-    return { word: text.slice(start, pos), start, end };
-  }
-  function getAllCompletions() {
-    const seen = new Set(EXPR_METADATA.map((e) => e.name));
-    const extras = [];
-    if (env) {
-      for (const name of env.functions.keys()) {
-        if (!seen.has(name)) {
-          extras.push({ name, category: "Other", desc: "", kind: "fn" });
-          seen.add(name);
-        }
-      }
-      for (const name of env.variables.keys()) {
-        if (!seen.has(name)) {
-          extras.push({ name, category: "Other", desc: "", kind: "const" });
-          seen.add(name);
-        }
-      }
-    }
-    return [...EXPR_METADATA, ...extras];
-  }
-  function updateAutocomplete() {
-    const { word } = getWordAtCursor();
-    if (word.length < 2) {
-      acDropdown.classList.remove("visible");
-      acItems = [];
-      return;
-    }
-    const lc = word.toLowerCase();
-    const all = getAllCompletions();
-    const prefixMatches = all.filter((e) => e.name.toLowerCase().startsWith(lc));
-    const subMatches = all.filter((e) => !e.name.toLowerCase().startsWith(lc) && e.name.toLowerCase().includes(lc));
-    acItems = [...prefixMatches, ...subMatches].slice(0, 20);
-    if (acItems.length === 0 || acItems.length === 1 && acItems[0].name.toLowerCase() === lc) {
-      acDropdown.classList.remove("visible");
-      acItems = [];
-      return;
-    }
-    acSelectedIdx = -1;
-    renderAutocomplete();
-    acDropdown.classList.add("visible");
-  }
-  function renderAutocomplete() {
-    acDropdown.innerHTML = acItems.map((entry, i) => {
-      const kindClass = entry.kind === "fn" ? "fn" : "const";
-      const kindLabel = entry.kind === "fn" ? "fn" : "var";
-      const sig = entry.kind === "fn" ? entry.sig || "()" : "";
-      const selected = i === acSelectedIdx ? " selected" : "";
-      return `<div class="ac-item${selected}" data-idx="${i}">
-            <span class="ac-kind ${kindClass}">${kindLabel}</span>
-            <span class="ac-name">${entry.name}</span>
-            <span class="ac-sig">${sig}</span>
-            <span class="ac-desc">${entry.desc}</span>
-        </div>`;
-    }).join("");
-  }
-  function acceptAutocomplete(idx) {
-    const entry = acItems[idx];
-    if (!entry) return;
-    const { start, end } = getWordAtCursor();
-    const text = exprInput.value;
-    let insert = entry.name;
-    if (entry.kind === "fn") {
-      insert += entry.sig || "()";
-    }
-    exprInput.value = text.slice(0, start) + insert + text.slice(end);
-    const cursorPos = entry.kind === "fn" && entry.sig && entry.sig !== "()" ? start + entry.name.length + 1 : start + insert.length;
-    exprInput.setSelectionRange(cursorPos, cursorPos);
-    acDropdown.classList.remove("visible");
-    acItems = [];
-    rebuildExprValues();
-  }
-  exprInput.addEventListener("keydown", (e) => {
-    if (!acDropdown.classList.contains("visible")) return;
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      acSelectedIdx = Math.min(acSelectedIdx + 1, acItems.length - 1);
-      renderAutocomplete();
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      acSelectedIdx = Math.max(acSelectedIdx - 1, 0);
-      renderAutocomplete();
-    } else if (e.key === "Enter" || e.key === "Tab") {
-      if (acSelectedIdx >= 0) {
-        e.preventDefault();
-        acceptAutocomplete(acSelectedIdx);
-      }
-    } else if (e.key === "Escape") {
-      acDropdown.classList.remove("visible");
-      acItems = [];
-    }
-  });
-  acDropdown.addEventListener("mousedown", (e) => {
-    e.preventDefault();
-    const item = e.target.closest(".ac-item");
-    if (item) {
-      const idx = parseInt(item.dataset.idx, 10);
-      acceptAutocomplete(idx);
-    }
-  });
-  exprInput.addEventListener("blur", () => {
-    setTimeout(() => {
-      acDropdown.classList.remove("visible");
-      acItems = [];
-    }, 150);
-  });
-  var refToggle = document.getElementById("ref-toggle");
-  var refPanel = document.getElementById("ref-panel");
   initShareButton({ getState });
   function applyTimeFromState(s) {
     if (s.off !== null) {
@@ -17630,7 +17255,6 @@
       urlState.city = s.city;
       env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
       updateLocationDisplay();
-      rebuildExprValues();
       resetAllSchedules();
       changed = true;
     }
@@ -17638,71 +17262,6 @@
     if (changed) {
       updateTimeDisplay();
       scheduleFrame();
-    }
-  });
-  function buildReferencePanel() {
-    const all = getAllCompletions();
-    const groups = /* @__PURE__ */ new Map();
-    for (const entry of all) {
-      const cat = entry.category;
-      if (!groups.has(cat)) groups.set(cat, []);
-      groups.get(cat).push(entry);
-    }
-    const catOrder = [...CATEGORY_ORDER];
-    for (const cat of groups.keys()) {
-      if (!catOrder.includes(cat)) catOrder.push(cat);
-    }
-    let html = "";
-    for (const cat of catOrder) {
-      const entries = groups.get(cat);
-      if (!entries || entries.length === 0) continue;
-      html += `<div class="ref-category">`;
-      html += `<div class="ref-cat-header"><span class="ref-cat-arrow">\u25B6</span> ${cat} <span style="color:#4b5563;font-weight:400">(${entries.length})</span></div>`;
-      html += `<div class="ref-cat-body">`;
-      for (const entry of entries) {
-        const sig = entry.kind === "fn" ? entry.sig || "()" : "";
-        html += `<div class="ref-item" data-name="${entry.name}" data-kind="${entry.kind}" data-sig="${entry.sig || ""}">`;
-        html += `<span class="ref-item-name">${entry.name}${sig}</span>`;
-        html += `<span class="ref-item-desc">${entry.desc}</span>`;
-        html += `</div>`;
-      }
-      html += `</div></div>`;
-    }
-    refPanel.innerHTML = html;
-    refPanel.querySelectorAll(".ref-cat-header").forEach((header) => {
-      header.addEventListener("click", () => {
-        header.parentElement.classList.toggle("open");
-      });
-    });
-    refPanel.querySelectorAll(".ref-item").forEach((item) => {
-      item.addEventListener("click", () => {
-        const el = item;
-        const name = el.dataset.name;
-        const kind = el.dataset.kind;
-        const sig = el.dataset.sig || "";
-        let insert = name;
-        if (kind === "fn") {
-          insert += sig || "()";
-        }
-        if (exprInput.value.trim() === "") {
-          exprInput.value = insert;
-        } else {
-          const pos = exprInput.selectionStart ?? exprInput.value.length;
-          const text = exprInput.value;
-          exprInput.value = text.slice(0, pos) + insert + text.slice(pos);
-        }
-        const cursorPos = kind === "fn" && sig && sig !== "()" ? exprInput.value.indexOf(insert) + name.length + 1 : exprInput.value.indexOf(insert) + insert.length;
-        exprInput.setSelectionRange(cursorPos, cursorPos);
-        exprInput.focus();
-        rebuildExprValues();
-      });
-    });
-  }
-  refToggle.addEventListener("click", () => {
-    const isOpen = refPanel.classList.toggle("visible");
-    refToggle.classList.toggle("active", isOpen);
-    if (isOpen && refPanel.innerHTML === "") {
-      buildReferencePanel();
     }
   });
   var catalogHandles = [];
@@ -17803,7 +17362,6 @@
   }
   function resetAllSchedules() {
     updater.reset();
-    resetObsValueSchedules(exprValues);
   }
   function pad2(n) {
     return n.toString().padStart(2, "0");
@@ -17975,7 +17533,6 @@
     timeController.beginFrame();
     const ctx = timingContextForFrame(timeController);
     updater.tick(env, perfNow, getNow, withDisplayTime, ctx);
-    tickExprValues(perfNow, ctx);
     updateTimeDisplay();
     renderCatalog();
     renderBrowserTime();
@@ -17992,10 +17549,6 @@
   function writeTimeState() {
     flushTimeState(timeController);
   }
-  function resetExprBox() {
-    rebuildExprValues();
-    resetObsValueSchedules(exprValues);
-  }
   var timeUI = initTimeControls({
     timeController,
     updater,
@@ -18003,13 +17556,6 @@
     getTzDeltaMs: () => tzDeltaMs,
     getLat: () => lat,
     getLon: () => lon,
-    onTimeStep: resetExprBox,
-    onScrubStart: () => {
-      resetObsValueSchedules(exprValues);
-    },
-    onScrubEnd: resetExprBox,
-    onNowClicked: resetExprBox,
-    onTransportChange: resetExprBox,
     ensureSchedulerRunning: () => {
       scheduleFrame();
     }
@@ -18034,7 +17580,6 @@
         if (isPersistentMode()) setState({ tz: locationTimezone });
         updateLocationDisplay();
         updateTimeDisplay();
-        rebuildExprValues();
         resetAllSchedules();
         scheduleFrame();
       }

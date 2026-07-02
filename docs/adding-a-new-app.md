@@ -197,16 +197,15 @@ Inspector (`src/inspector/`) is the minimal reference implementation of a non-Ch
 
 | File | What to learn from it |
 |------|-----------------------|
-| [inspector-entry.ts](../src/inspector/inspector-entry.ts) | How to create an `AstroEnvironment`, handle location, use the expression evaluator, and update the DOM on a timer |
+| [inspector-entry.ts](../src/inspector/inspector-entry.ts) | How to create an `AstroEnvironment`, handle location, evaluate expressions via ObsValues, and update the DOM per frame |
 | [inspector.html](../src/inspector/inspector.html) | Self-contained HTML page with inline CSS, font loading, and script tag |
-| [expr-metadata.ts](../src/inspector/expr-metadata.ts) | How to provide curated metadata about available functions and constants |
 
 Key patterns from Inspector:
 
 1. **Environment lifecycle**: Module-level `let env: Environment` variable, recreated when location changes
 2. **Location flow**: Read URL → resolve timezone → create environment. If no URL location, open dialog or use `bloc=1` for browser geolocation
 3. **Timezone handling**: Use `Intl.DateTimeFormat` with the Olson timezone for formatting. Use `computeTzDeltaMs()` for offset calculations
-4. **Live updates**: `setInterval` at 1s for clock updates; expression evaluator re-evaluates on each tick
+4. **Live updates**: rAF loop with an idle scheduler; each catalog ObsValue re-evaluates on its own cadence and interpolates between evaluations
 
 ---
 

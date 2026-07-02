@@ -41,7 +41,7 @@ PATH="/usr/local/bin:$PATH" bash build.sh
    - Astronomy library
    - Expression parser and evaluator
    - Shared modules (`astro-env.ts`, `location-dialog.ts`, `url-state.ts`, etc.)
-   - Inspector-specific code (`inspector-entry.ts`, `expr-metadata.ts`)
+   - Inspector-specific code (`inspector-entry.ts`, `catalog.ts`)
    - **Does not include** watch-specific code (XML parser, renderer, watch-env)
 
    The Inspector bundle is built from `src/inspector/inspector-entry.ts` by esbuild. It shares the same source modules as `chronometer-engine.js` but tree-shakes out all watch-specific code.

@@ -7,7 +7,7 @@ This repository is a monorepo containing multiple web apps that share a common a
 | App | Entry point | Bundle | Purpose |
 |-----|-------------|--------|---------|
 | **Chronometer** | `src/engine-entry.ts` | `chronometer-engine.js` | Canvas-rendered watch faces from XML definitions |
-| **Inspector** | `src/inspector/inspector-entry.ts` | `inspector-engine.js` | Text-based astronomy data explorer with expression evaluator |
+| **Inspector** | `src/inspector/inspector-entry.ts` | `inspector-engine.js` | Text-based astronomy data explorer |
 | **Observatory** | `src/observatory/observatory-entry.ts` | `observatory-engine.js` | Port of Emerald Observatory — astronomical clock with orrery, moon phase, earth map |
 
 ## Source Directory Layout
@@ -40,8 +40,7 @@ src/
 │   └── ...
 ├── inspector/           # Inspector app
 │   ├── inspector-entry.ts   # Entry point (imports only shared/, expr/, astronomy/)
-│   ├── inspector.html       # Self-contained HTML page
-│   └── expr-metadata.ts     # Curated function/constant descriptions for autocomplete
+│   └── inspector.html       # Self-contained HTML page
 ├── observatory/         # Observatory app (Emerald Observatory port)
 │   ├── observatory-entry.ts # Entry point (imports only shared/, expr/, astronomy/)
 │   ├── observatory.html     # Full-viewport canvas page

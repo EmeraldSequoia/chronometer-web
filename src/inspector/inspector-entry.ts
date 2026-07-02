@@ -3,7 +3,7 @@
  *
  * Entry point for the Inspector app. Imports ONLY from:
  *   - src/shared/   (astro-env, url-state, tz-resolve, city-search)
- *   - src/expr/     (parser, evaluator)
+ *   - src/expr/     (expression compiler, via obs-value)
  *   - src/astronomy/ (rise/set for sunrise/sunset)
  *
  * Does NOT import from src/watch/ — keeps the bundle clean of
@@ -13,8 +13,7 @@
 import { createAstroEnvironment, computeTzDeltaMs } from '../shared/astro-env.js';
 import { createObsValue, JUMP, type ObsValue } from '../shared/obs-value.js';
 import {
-    updateObsValues, animateObsValues, resetObsValueSchedules, makeOverridableGetNow,
-    Updater, timingContextForFrame, type TimingContext,
+    makeOverridableGetNow, Updater, timingContextForFrame,
 } from '../shared/updater.js';
 import { TimeController } from '../shared/time-controller.js';
 import { initTimeControls, flushTimeState, type TimeControlsAPI } from '../shared/time-controls-ui.js';
@@ -27,7 +26,6 @@ import { resolveTimezone, resolveTimezoneFromDb } from '../shared/tz-resolve.js'
 import { findClosestCity, prefetchCityData, loadCityData, releaseCityData, isCityDataLoaded } from '../shared/city-search.js';
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
 import { showStorageWarning } from '../shared/incoming-settings-dialog.js';
-import { EXPR_METADATA, CATEGORY_ORDER, type ExprEntry } from './expr-metadata.js';
 import { CATALOG, tagIsAngular, tagIsDiscrete, type CatalogCell, type Tag } from './catalog.js';
 
 // ============================================================================
@@ -41,12 +39,6 @@ const locationName = document.getElementById('location-name')!;
 const locationDetail = document.getElementById('location-detail')!;
 const setLocationBtn = document.getElementById('set-location-btn')!;
 const catalogEl = document.getElementById('catalog')!;
-const exprInput = document.getElementById('expr-input') as HTMLInputElement;
-const exprResults = document.getElementById('expr-results')!;
-const exprNumber = document.getElementById('expr-number')!;
-const exprAngle = document.getElementById('expr-angle')!;
-const exprDate = document.getElementById('expr-date')!;
-const exprError = document.getElementById('expr-error')!;
 const tzDisplay = document.getElementById('tz-display')!;
 
 // Split the time display into a main HH:MM:SS span and a dimmer subsecond span
@@ -226,7 +218,6 @@ const locationDialog = initLocationDialog({
         // Refresh all displays
         updateLocationDisplay();
         updateTimeDisplay();
-        rebuildExprValues();   // snap expression to the new environment
         resetAllSchedules();   // re-evaluate the catalog against the new env
         scheduleFrame();
     },
@@ -266,7 +257,6 @@ if (locationDialog) {
                 env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
                 updateLocationDisplay();
                 updateTimeDisplay();
-                rebuildExprValues();   // snap expression to the new environment
                 resetAllSchedules();   // re-evaluate the catalog against the new env
                 scheduleFrame();
             } else {
@@ -301,7 +291,6 @@ if (locationDialog) {
             env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
             updateLocationDisplay();
             updateTimeDisplay();
-            rebuildExprValues();
             resetAllSchedules();
             scheduleFrame();
         }).catch(() => notifyBlocRefreshFailed()).finally(() => {
@@ -331,8 +320,7 @@ const { getNow, withDisplayTime } = makeOverridableGetNow(() => timeController.g
 
 let env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
 
-// The updater owns the catalog's ObsValue collection (the expression box is
-// managed separately — it has user-input error handling and rebuilds on edit).
+// The updater owns the catalog's ObsValue collection.
 const updater = new Updater();
 
 // ============================================================================
@@ -369,7 +357,7 @@ function updateTimeDisplay(): void {
 }
 
 // ============================================================================
-// Date-interval formatting (shared by the expression box and catalog LT cells)
+// Date-interval formatting (catalog LT cells)
 // ============================================================================
 
 /** Epoch reference for date interval conversion: 2001-01-01T00:00:00Z */
@@ -398,291 +386,8 @@ function formatDateIntervalTime(value: number): string {
 }
 
 // ============================================================================
-// Expression evaluator
+// Share button + cross-tab sync
 // ============================================================================
-
-// The expression result is driven by two ObsValues sharing the same parsed
-// expression: one with **angle** semantics (for the Angle° readout — shortest-
-// path wrap to [0,360°)) and one with **linear** semantics (for the Number and
-// Date readouts — raw straight-line interpolation). Both use lag-free eval-ahead
-// (evaluate the next 0.1s boundary, sweep there), so the readouts track real
-// time with no perceptible lag while updating only 10×/s.
-const EXPR_UPDATE_INTERVAL_SEC = 0.1;  // full re-eval cadence (epoch-aligned)
-
-let lastExprText = '';
-let exprAngleVal: ObsValue | null = null;   // linear:false → Angle readout
-let exprLinearVal: ObsValue | null = null;  // linear:true  → Number + Date readouts
-let exprValues: ObsValue[] = [];
-
-/**
- * Rebuild (and snap) the expression ObsValues. Called when the expression text
- * or the location/environment changes — we never animate from the old
- * expression's value to the new one. Parse/eval errors are surfaced here.
- */
-function rebuildExprValues(): void {
-    const text = exprInput.value.trim();
-
-    if (!text) {
-        exprResults.classList.remove('visible');
-        exprError.classList.remove('visible');
-        lastExprText = '';
-        exprAngleVal = null;
-        exprLinearVal = null;
-        exprValues = [];
-        return;
-    }
-
-    lastExprText = text;
-    const now = performance.now();
-    try {
-        // animSpeed: JUMP so a stopped/stepped value jumps to its new value
-        // (digital readout) rather than creeping at a mis-scaled settle speed.
-        const base = {
-            name: 'expr', expr: text, updateInterval: EXPR_UPDATE_INTERVAL_SEC,
-            evalAhead: true, animSpeed: JUMP,
-        };
-        exprAngleVal = createObsValue({ ...base, linear: false }, env, now, getNow);
-        exprLinearVal = createObsValue({ ...base, linear: true }, env, now, getNow);
-        exprValues = [exprAngleVal, exprLinearVal];
-        exprError.classList.remove('visible');
-        exprResults.classList.add('visible');
-        renderExprValues();
-        scheduleFrame();  // restart the loop if idle (e.g. while time is stopped)
-    } catch (e: any) {
-        exprAngleVal = null;
-        exprLinearVal = null;
-        exprValues = [];
-        exprResults.classList.remove('visible');
-        exprError.textContent = e.message || 'Parse error';
-        exprError.classList.add('visible');
-    }
-}
-
-/** Format the current (interpolated) ObsValue values into the three readouts. */
-function renderExprValues(): void {
-    if (!exprAngleVal || !exprLinearVal) return;
-    const value = exprLinearVal.currentValue;     // raw number / date interval
-    const angleRad = exprAngleVal.currentValue;   // angle, wrapped to [0,2π)
-
-    // Number format (raw, linear)
-    if (Number.isInteger(value) && Math.abs(value) < 1e15) {
-        exprNumber.textContent = value.toString();
-    } else {
-        exprNumber.textContent = value.toPrecision(10);
-    }
-
-    // Angle format (radians → degrees, angle semantics)
-    const degrees = angleRad * 180 / Math.PI;
-    exprAngle.textContent = `${degrees.toFixed(4)}°`;
-
-    // Date format: interpret the raw value as a dateInterval (seconds since
-    // 2001-01-01T00:00:00Z)
-    const dateMs = value * 1000 + EPOCH_2001_MS;
-    if (isFinite(dateMs) && dateMs > -6.2e13 && dateMs < 2.5e14) {
-        const d = new Date(dateMs);
-        if (locationTimezone) {
-            try {
-                const fmt = new Intl.DateTimeFormat('en-US', {
-                    timeZone: locationTimezone,
-                    year: 'numeric', month: '2-digit', day: '2-digit',
-                    hour: '2-digit', minute: '2-digit', second: '2-digit',
-                    hour12: false,
-                });
-                const tzAbbr = new Intl.DateTimeFormat('en-US', {
-                    timeZone: locationTimezone,
-                    timeZoneName: 'short',
-                }).formatToParts(d).find(p => p.type === 'timeZoneName')?.value || '';
-                exprDate.textContent = `${fmt.format(d)} ${tzAbbr}`;
-            } catch {
-                exprDate.textContent = d.toISOString().replace('T', ' ').replace('Z', ' UTC');
-            }
-        } else {
-            exprDate.textContent = d.toISOString().replace('T', ' ').replace('Z', ' UTC');
-        }
-    } else {
-        exprDate.textContent = '—';
-    }
-}
-
-/**
- * Per-frame drive of the expression ObsValues. Managed separately from the
- * Updater because the user-typed expression can fail to evaluate; this guards
- * evaluation so a per-frame error shows in the UI without breaking the rAF loop
- * (or aborting the catalog's update pass).
- */
-function tickExprValues(perfNow: number, ctx: TimingContext): void {
-    if (exprValues.length === 0) return;
-    try {
-        updateObsValues(exprValues, env, perfNow, getNow,
-            ctx.tickIntervalMs, ctx.displayDeltaSec, ctx.direction, withDisplayTime);
-        animateObsValues(exprValues, perfNow);
-        exprError.classList.remove('visible');
-        exprResults.classList.add('visible');
-        renderExprValues();
-    } catch (e: any) {
-        exprResults.classList.remove('visible');
-        exprError.textContent = e.message || 'Evaluation error';
-        exprError.classList.add('visible');
-    }
-}
-
-// Listen for input changes
-exprInput.addEventListener('input', () => {
-    rebuildExprValues();
-    updateAutocomplete();
-});
-
-// ============================================================================
-// Autocomplete
-// ============================================================================
-
-const acDropdown = document.getElementById('expr-autocomplete')!;
-let acItems: ExprEntry[] = [];
-let acSelectedIdx = -1;
-
-/** Extract the word fragment at the cursor for autocomplete matching. */
-function getWordAtCursor(): { word: string; start: number; end: number } {
-    const pos = exprInput.selectionStart ?? exprInput.value.length;
-    const text = exprInput.value;
-    // Walk backward from cursor to find word start
-    let start = pos;
-    while (start > 0 && /[a-zA-Z0-9_]/.test(text[start - 1])) start--;
-    // Walk forward from cursor to find word end
-    let end = pos;
-    while (end < text.length && /[a-zA-Z0-9_]/.test(text[end])) end++;
-    return { word: text.slice(start, pos), start, end };
-}
-
-/** Build the merged list of completions from metadata + env keys. */
-function getAllCompletions(): ExprEntry[] {
-    // Start with curated metadata
-    const seen = new Set(EXPR_METADATA.map(e => e.name));
-    const extras: ExprEntry[] = [];
-    // Add any env functions not in metadata
-    if (env) {
-        for (const name of env.functions.keys()) {
-            if (!seen.has(name)) {
-                extras.push({ name, category: 'Other', desc: '', kind: 'fn' });
-                seen.add(name);
-            }
-        }
-        for (const name of env.variables.keys()) {
-            if (!seen.has(name)) {
-                extras.push({ name, category: 'Other', desc: '', kind: 'const' });
-                seen.add(name);
-            }
-        }
-    }
-    return [...EXPR_METADATA, ...extras];
-}
-
-function updateAutocomplete(): void {
-    const { word } = getWordAtCursor();
-    if (word.length < 2) {
-        acDropdown.classList.remove('visible');
-        acItems = [];
-        return;
-    }
-    const lc = word.toLowerCase();
-    const all = getAllCompletions();
-    // Filter: prefix match first, then substring match
-    const prefixMatches = all.filter(e => e.name.toLowerCase().startsWith(lc));
-    const subMatches = all.filter(e => !e.name.toLowerCase().startsWith(lc) && e.name.toLowerCase().includes(lc));
-    acItems = [...prefixMatches, ...subMatches].slice(0, 20);
-
-    if (acItems.length === 0 || (acItems.length === 1 && acItems[0].name.toLowerCase() === lc)) {
-        acDropdown.classList.remove('visible');
-        acItems = [];
-        return;
-    }
-
-    acSelectedIdx = -1;
-    renderAutocomplete();
-    acDropdown.classList.add('visible');
-}
-
-function renderAutocomplete(): void {
-    acDropdown.innerHTML = acItems.map((entry, i) => {
-        const kindClass = entry.kind === 'fn' ? 'fn' : 'const';
-        const kindLabel = entry.kind === 'fn' ? 'fn' : 'var';
-        const sig = entry.kind === 'fn' ? (entry.sig || '()') : '';
-        const selected = i === acSelectedIdx ? ' selected' : '';
-        return `<div class="ac-item${selected}" data-idx="${i}">
-            <span class="ac-kind ${kindClass}">${kindLabel}</span>
-            <span class="ac-name">${entry.name}</span>
-            <span class="ac-sig">${sig}</span>
-            <span class="ac-desc">${entry.desc}</span>
-        </div>`;
-    }).join('');
-}
-
-function acceptAutocomplete(idx: number): void {
-    const entry = acItems[idx];
-    if (!entry) return;
-    const { start, end } = getWordAtCursor();
-    const text = exprInput.value;
-    let insert = entry.name;
-    if (entry.kind === 'fn') {
-        insert += entry.sig || '()';
-    }
-    exprInput.value = text.slice(0, start) + insert + text.slice(end);
-    // Place cursor: inside parens if fn with args, after everything otherwise
-    const cursorPos = entry.kind === 'fn' && entry.sig && entry.sig !== '()'
-        ? start + entry.name.length + 1  // after '('
-        : start + insert.length;
-    exprInput.setSelectionRange(cursorPos, cursorPos);
-    acDropdown.classList.remove('visible');
-    acItems = [];
-    rebuildExprValues();
-}
-
-// Keyboard navigation for autocomplete
-exprInput.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (!acDropdown.classList.contains('visible')) return;
-    if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        acSelectedIdx = Math.min(acSelectedIdx + 1, acItems.length - 1);
-        renderAutocomplete();
-    } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        acSelectedIdx = Math.max(acSelectedIdx - 1, 0);
-        renderAutocomplete();
-    } else if (e.key === 'Enter' || e.key === 'Tab') {
-        if (acSelectedIdx >= 0) {
-            e.preventDefault();
-            acceptAutocomplete(acSelectedIdx);
-        }
-    } else if (e.key === 'Escape') {
-        acDropdown.classList.remove('visible');
-        acItems = [];
-    }
-});
-
-// Click on autocomplete item
-acDropdown.addEventListener('mousedown', (e: MouseEvent) => {
-    e.preventDefault(); // keep focus on input
-    const item = (e.target as HTMLElement).closest('.ac-item') as HTMLElement;
-    if (item) {
-        const idx = parseInt(item.dataset.idx!, 10);
-        acceptAutocomplete(idx);
-    }
-});
-
-// Close autocomplete when input loses focus
-exprInput.addEventListener('blur', () => {
-    // Delay to allow click events on dropdown items
-    setTimeout(() => {
-        acDropdown.classList.remove('visible');
-        acItems = [];
-    }, 150);
-});
-
-// ============================================================================
-// Reference Panel
-// ============================================================================
-
-const refToggle = document.getElementById('ref-toggle')!;
-const refPanel = document.getElementById('ref-panel')!;
 
 // Share button — copy a link encoding the current time/location/config.
 initShareButton({ getState });
@@ -714,91 +419,11 @@ onSharedChange((s) => {
         urlState.city = s.city;
         env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
         updateLocationDisplay();
-        rebuildExprValues();
         resetAllSchedules();
         changed = true;
     }
     if (applyTimeFromState(s)) changed = true;
     if (changed) { updateTimeDisplay(); scheduleFrame(); }
-});
-
-function buildReferencePanel(): void {
-    const all = getAllCompletions();
-    // Group by category
-    const groups = new Map<string, ExprEntry[]>();
-    for (const entry of all) {
-        const cat = entry.category;
-        if (!groups.has(cat)) groups.set(cat, []);
-        groups.get(cat)!.push(entry);
-    }
-
-    // Sort categories by CATEGORY_ORDER, then alphabetical for unlisted
-    const catOrder = [...CATEGORY_ORDER];
-    for (const cat of groups.keys()) {
-        if (!catOrder.includes(cat)) catOrder.push(cat);
-    }
-
-    let html = '';
-    for (const cat of catOrder) {
-        const entries = groups.get(cat);
-        if (!entries || entries.length === 0) continue;
-        html += `<div class="ref-category">`;
-        html += `<div class="ref-cat-header"><span class="ref-cat-arrow">▶</span> ${cat} <span style="color:#4b5563;font-weight:400">(${entries.length})</span></div>`;
-        html += `<div class="ref-cat-body">`;
-        for (const entry of entries) {
-            const sig = entry.kind === 'fn' ? (entry.sig || '()') : '';
-            html += `<div class="ref-item" data-name="${entry.name}" data-kind="${entry.kind}" data-sig="${entry.sig || ''}">`;
-            html += `<span class="ref-item-name">${entry.name}${sig}</span>`;
-            html += `<span class="ref-item-desc">${entry.desc}</span>`;
-            html += `</div>`;
-        }
-        html += `</div></div>`;
-    }
-    refPanel.innerHTML = html;
-
-    // Category toggle
-    refPanel.querySelectorAll('.ref-cat-header').forEach(header => {
-        header.addEventListener('click', () => {
-            header.parentElement!.classList.toggle('open');
-        });
-    });
-
-    // Click to insert
-    refPanel.querySelectorAll('.ref-item').forEach(item => {
-        item.addEventListener('click', () => {
-            const el = item as HTMLElement;
-            const name = el.dataset.name!;
-            const kind = el.dataset.kind!;
-            const sig = el.dataset.sig || '';
-            let insert = name;
-            if (kind === 'fn') {
-                insert += sig || '()';
-            }
-            // Append to current input (or replace if empty)
-            if (exprInput.value.trim() === '') {
-                exprInput.value = insert;
-            } else {
-                // Insert at cursor
-                const pos = exprInput.selectionStart ?? exprInput.value.length;
-                const text = exprInput.value;
-                exprInput.value = text.slice(0, pos) + insert + text.slice(pos);
-            }
-            const cursorPos = kind === 'fn' && sig && sig !== '()'
-                ? exprInput.value.indexOf(insert) + name.length + 1
-                : exprInput.value.indexOf(insert) + insert.length;
-            exprInput.setSelectionRange(cursorPos, cursorPos);
-            exprInput.focus();
-            rebuildExprValues();
-        });
-    });
-}
-
-refToggle.addEventListener('click', () => {
-    const isOpen = refPanel.classList.toggle('visible');
-    refToggle.classList.toggle('active', isOpen);
-    if (isOpen && refPanel.innerHTML === '') {
-        buildReferencePanel();
-    }
 });
 
 // ============================================================================
@@ -903,10 +528,9 @@ function buildCatalog(): void {
     }
 }
 
-/** Re-evaluate the catalog and the expression box against the current env/time. */
+/** Re-evaluate the catalog against the current env/time. */
 function resetAllSchedules(): void {
     updater.reset();
-    resetObsValueSchedules(exprValues);
 }
 
 // ── Value formatters by tag ─────────────────────────────────────────────────
@@ -1105,10 +729,9 @@ function tick(): void {
     timeController.checkTick(perfNow);
     timeController.beginFrame();
 
-    // Advance everything from one timing context (the controller↔updater seam).
+    // Advance the catalog from one timing context (the controller↔updater seam).
     const ctx = timingContextForFrame(timeController);
-    updater.tick(env, perfNow, getNow, withDisplayTime, ctx);   // catalog
-    tickExprValues(perfNow, ctx);                                // expression box
+    updater.tick(env, perfNow, getNow, withDisplayTime, ctx);
 
     updateTimeDisplay();
     renderCatalog();
@@ -1134,15 +757,9 @@ function writeTimeState(): void {
     flushTimeState(timeController);
 }
 
-// The free-form expression box lives OUTSIDE the catalog updater (for error
-// isolation), so it needs a custom re-arm hook on transitions. The catalog
-// updater itself is reset automatically by the shared controls (we pass it
-// below), and `writeTimeState` defaults to the shared writer.
-function resetExprBox(): void {
-    rebuildExprValues();                  // re-parse the expression against env
-    resetObsValueSchedules(exprValues);   // re-evaluate the expr box next frame
-}
-
+// The catalog updater is reset automatically on transitions by the shared
+// controls (we pass it below), and `writeTimeState` defaults to the shared
+// writer — no custom transition callbacks needed.
 const timeUI: TimeControlsAPI | null = initTimeControls({
     timeController,
     updater,
@@ -1150,11 +767,6 @@ const timeUI: TimeControlsAPI | null = initTimeControls({
     getTzDeltaMs: () => tzDeltaMs,
     getLat: () => lat,
     getLon: () => lon,
-    onTimeStep: resetExprBox,
-    onScrubStart: () => { resetObsValueSchedules(exprValues); },
-    onScrubEnd: resetExprBox,
-    onNowClicked: resetExprBox,
-    onTransportChange: resetExprBox,
     ensureSchedulerRunning: () => { scheduleFrame(); },
 });
 
@@ -1190,7 +802,6 @@ if (tzNeedsResolution) {
             if (isPersistentMode()) setState({ tz: locationTimezone });
             updateLocationDisplay();
             updateTimeDisplay();
-            rebuildExprValues();   // snap expression to the new environment
             resetAllSchedules();   // re-evaluate the catalog against the new env
             scheduleFrame();
         }

@@ -12,7 +12,7 @@ Three apps share one astronomy engine, one location/time system, and one build:
 
 - **Chronometer** (`index.html`) — thirteen animated astronomical watch faces: sunrise/sunset, moon phase and position, planets, eclipses, world time, and more. View them individually, all together (`all.html`), or as a custom selection.
 - **Observatory** (`observatory.html`) — an astronomical clock designed for a larger display: an orrery with planetary positions, rise/set rings, moon with earthshine, day/night terminator map, equation of time, and an eclipse simulator.
-- **Inspector** (`inspector.html`) — a live data explorer for the shared astronomy engine: rise/set times, planetary positions, and an evaluator for the expressions that drive the watch faces, at any time and location.
+- **Inspector** (`inspector.html`) — a live data explorer for the shared astronomy engine: rise/set times, planetary positions, and calendar and clock values, at any time and location.
 
 Every page links to the other apps via the icons in the top-right corner, and your location and time settings follow you between them. Single-key [keyboard shortcuts](#keyboard-shortcuts) jump between apps too.
 
@@ -121,7 +121,7 @@ The project is a pure client-side monorepo — three apps over one shared engine
 
 - **`src/watch/`** — Chronometer's core rendering engine: parses watch-face XML, evaluates dynamic expressions, composites layers onto Canvas.
 - **`src/observatory/`** — The Observatory app: a custom (non-XML) astronomical clock — orrery dial, rise/set rings, moon, terminator map, eclipse simulator.
-- **`src/inspector/`** — The Inspector app: live catalog of astronomical values plus a free-form expression evaluator.
+- **`src/inspector/`** — The Inspector app: live catalog of astronomical values.
 - **`src/shared/`** — Infrastructure shared by all three apps: state persistence, location dialog and city search, time controller, help popover, cross-app navigation.
 - **`src/expr/`** — Expression support for the arithmetic expressions embedded in watch-face definitions.
 - **`src/astronomy/`** — Ported astronomical routines (sun/moon/planet positions, rise/set times, twilight, lunar phase, eclipses).

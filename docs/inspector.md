@@ -1,33 +1,25 @@
 # Inspector
 
-Developer documentation for the Inspector — a live astronomy data explorer and
-expression debugger. The Inspector is a standalone app (separate from Chronometer
-and Observatory) that provides a real-time view of all expression function
-values, useful for debugging watch face expressions and verifying astronomy
-calculations.
+Developer documentation for the Inspector — a live astronomy data explorer. The
+Inspector is a standalone app (separate from Chronometer and Observatory) that
+provides a real-time view of the shared astronomy engine's values — rise/set
+times, planetary positions, calendar and clock values — useful for verifying
+astronomy calculations at any time and location.
 
-## Purpose
-
-The Inspector serves two roles:
-
-1. **Debugging tool**: Type any expression from a watch face XML or Observatory
-   ObsValue and see its live value — as a number, angle (degrees), and date
-   (interpreting the value as a dateInterval). The expression is fully
-   re-evaluated 10×/s and **smoothly animated between updates** via the shared
-   `ObsValue` system (see [Expression Evaluator](#expression-evaluator)).
-
-2. **Reference**: The Reference panel lists all curated expression functions
-   with descriptions and signatures, grouped by category. Clicking an entry
-   inserts it into the expression input.
+> The Inspector originally also had a free-form **expression evaluator** (with
+> autocomplete and a reference panel). It was removed after the expression
+> system migrated to plain JavaScript via `new Function`
+> (`planning/2026-06-15-eval-vs-custom-parser.md`) — a "type an expression, see
+> its value" box that just runs JS is redundant with devtools, and its metadata
+> tables were dead weight in the bundle.
 
 ## Source Layout
 
 ```
 src/inspector/
-├── inspector-entry.ts    Main app: time display, expression evaluator, autocomplete, reference, catalog
+├── inspector-entry.ts    Main app: time display, time controller, ephemeris catalog
 ├── inspector.html        HTML template with all UI elements
-├── catalog.ts            Declarative ephemeris catalog (groups → rows → cells)
-└── expr-metadata.ts      Curated function/constant metadata for autocomplete and reference
+└── catalog.ts            Declarative ephemeris catalog (groups → rows → cells)
 ```
 
 ## Architecture
@@ -40,14 +32,14 @@ Terra slots, etc.).
 ```
 inspector-entry.ts
   ├── createAstroEnvironment()    ← src/shared/astro-env.ts
-  ├── parse() / evaluate()        ← src/expr/
-  ├── EXPR_METADATA               ← ./expr-metadata.ts
+  ├── createObsValue()            ← src/shared/obs-value.ts (compiles catalog expressions)
   └── planetaryRiseSetTimeRefined ← src/astronomy/ (for sunrise/sunset display)
 ```
 
 The astronomy environment is created with the user's location and timezone,
-identical to how Observatory and Chronometer create theirs. All ~160 expression
-functions registered by `createAstroEnvironment()` are available for evaluation.
+identical to how Observatory and Chronometer create theirs. The catalog's cells
+are expressions evaluated against the ~160 functions registered by
+`createAstroEnvironment()`.
 
 ## Main Features
 
@@ -82,49 +74,12 @@ so `h`/`?` are deliberately not registered here.
 Under the hood the catalog's values are owned by a shared **`Updater`** driven by
 a **`TimingContext`** (built each frame from the controller). The Inspector hands
 that `Updater` to `initTimeControls`, so the shared UI re-arms the catalog schedules
-on every transition automatically; the Inspector's only transport callback rebuilds
-the **expression box** (which lives outside the updater for error isolation) so it
-re-evaluates against the new display time. An **idle scheduler** parks the render
+on every transition automatically — the Inspector needs no custom transition
+callbacks (like Observatory). An **idle scheduler** parks the render
 loop when the clock is stopped and everything has settled, and restarts it on any
-transport action or edit. Continuous catalog values track the scrubbed time via
+transport action. Continuous catalog values track the scrubbed time via
 mode-aware eval-ahead (lag-free at each tick); discrete values snap. See
 [Animation — Eval-ahead](animation.md#eval-ahead-lag-free-tracking).
-
-### Expression Evaluator
-
-The expression input accepts any valid expression (same syntax as watch XML
-attributes). The result is displayed three ways simultaneously:
-
-| Format | Description | Semantics |
-|--------|-------------|-----------|
-| Number | Raw numeric value (integer or 10-digit precision) | linear |
-| Angle | Value converted to degrees (× 180/π), wrapped to [0,360°) | angular |
-| Date | Value interpreted as a dateInterval (seconds since 2001-01-01T00:00:00Z) | linear |
-
-#### ObsValue-driven, eval-ahead
-
-The result is driven by the shared **`ObsValue`** system
-([src/shared/obs-value.ts](../src/shared/obs-value.ts) +
-[src/shared/updater.ts](../src/shared/updater.ts)) rather than a bare per-frame
-`evaluate()`. The expression text is parsed once (re-parsed only on change) into
-**two** ObsValues sharing the AST:
-
-- an **angle**-semantics value (`linear:false` — shortest-path wrap) feeding the
-  Angle° readout, and
-- a **linear**-semantics value (`linear:true` — straight-line) feeding the Number
-  and Date readouts.
-
-Both use **eval-ahead** (`evalAhead:true`, `updateInterval` 0.1 s): each 0.1 s
-boundary the expression is evaluated *one interval into the future* and the value
-sweeps there, arriving exactly as that boundary occurs. The readouts therefore
-update only 10×/s but **animate smoothly at the full frame rate with no
-perceptible lag** vs. wall-clock time. Changing the expression text or the
-location **snaps** (rebuilds the ObsValues) rather than animating across
-expressions. A per-frame evaluation error is caught and surfaced without
-breaking the render loop.
-
-The lag-free future-target idea generalizes Observatory's `naturalSpeed` sweep;
-see [Animation — Eval-ahead](animation.md#eval-ahead-lag-free-tracking).
 
 ### FPS overlay (`?fps`)
 
@@ -139,28 +94,11 @@ animating (`1000/median(Δ)`); `cpuFrame` is CPU's share of that actual frame
 (`median(workMs)/16.67`, can exceed 100%). The animating values are dimmed once the
 clock is stopped and everything has settled; `avg` is throughput including idle.
 Useful for confirming the readouts interpolate at the full frame rate while
-expressions are fully re-evaluated only 10×/s.
-
-### Autocomplete
-
-Typing ≥2 characters shows a dropdown of matching functions/constants from the
-curated metadata plus any additional entries from the environment. Matches are
-ordered prefix-first, then substring. The dropdown supports keyboard navigation
-(↑/↓/Enter/Tab/Escape) and mouse clicks.
-
-Functions not in the curated metadata still appear in autocomplete (from the
-live environment), but without descriptions — they show as category "Other".
-
-### Reference Panel
-
-The Reference button toggles a categorized list of all expression functions
-and constants. Built lazily on first open from `EXPR_METADATA` merged with
-the live environment. Categories are collapsible. Clicking an entry inserts
-it into the expression input.
+expressions are fully re-evaluated only on their cadence.
 
 ### Ephemeris Catalog
 
-Below the expression evaluator, a scrolling **catalog** shows ~130 live
+Below the location card, a scrolling **catalog** shows ~130 live
 astronomical / time values grouped **Time → Sun → Moon → Planets (Mercury →
 Neptune)**. Each value is one shared **`ObsValue`** (eval-ahead, lag-free):
 fully re-evaluated on its cadence (seconds 0.1 s, coordinates 1 s,
@@ -199,47 +137,10 @@ cross their change-point early. Discreteness is determined by the tag
 | `HM` | **discrete** | `true` | signed clock offset → `±HH:MM` (TZ offset) |
 | `LT` | **discrete** | `true` | dateInterval → local time, `—` for polar no-event (rise/set/transit) |
 
-Per frame the Inspector runs `updateObsValues` + `animateObsValues` over the
-catalog's `ObsValue[]` and writes each changed cell (a per-cell string compare
-skips redundant DOM writes). Location changes call `resetObsValueSchedules` so
-the catalog re-evaluates against the new environment.
-
-## Expression Metadata (`expr-metadata.ts`)
-
-The curated metadata table drives both autocomplete descriptions and the
-reference panel. Each entry has:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | `string` | Function/constant name as used in expressions |
-| `category` | `string` | Grouping for the reference panel |
-| `desc` | `string` | One-line human-readable description |
-| `kind` | `'fn' \| 'const'` | Whether to show parens in autocomplete |
-| `sig` | `string?` | Parameter signature, e.g. `'(planet, leaf)'` |
-
-`CATEGORY_ORDER` controls the display order of categories in the reference
-panel. Categories not in this list appear at the end.
-
-> [!IMPORTANT]
-> This table must be updated whenever expression functions are added or changed.
-> See [Development Rules §13](development-rules.md#13-keep-inspector-expression-metadata-in-sync).
-
-### Current Categories
-
-| Category | Contents |
-|----------|----------|
-| Sun Times | Next/prev/today sunrise, sunset, solar noon |
-| Moon Times | Next/prev/today moonrise, moonset, moon transit |
-| Planet Times | Next/prev/today rise, set, transit for any planet |
-| Sun Position | Altitude, azimuth, RA, declination, ecliptic longitude |
-| Moon Position | Altitude, azimuth, age angle, relative angle |
-| Planet Position | RA/declination, alt/az, ecliptic & heliocentric lon/lat, distance, up |
-| Clock | Hour, minute, second, day/month/year, timezone |
-| Astronomical | Sidereal time, Julian day, equation of time, precession |
-| Day/Night Ring | Rise/set angles, leaf angles, polar detection, transit angles |
-| Planet Constants | Sun(0), Moon(1), Mercury(2), ..., Pluto(10) |
-| Math Constants | pi, true, false |
-| Math | sin, cos, atan2, sqrt, abs, floor, ceil, fmod, etc. |
+Per frame the Inspector runs `updater.tick(...)` over the catalog's ObsValues
+and writes each changed cell (a per-cell string compare skips redundant DOM
+writes). Location changes call `updater.reset()` so the catalog re-evaluates
+against the new environment.
 
 ## Location
 
@@ -254,10 +155,9 @@ environment and refresh all displays, and live-sync across tabs via
 
 | File | Purpose |
 |------|---------|
-| `src/inspector/inspector-entry.ts` | Main app: tick loop, expression evaluator, autocomplete, reference, catalog |
+| `src/inspector/inspector-entry.ts` | Main app: tick loop, time display, catalog |
 | `src/inspector/inspector.html` | HTML template |
 | `src/inspector/catalog.ts` | Declarative ephemeris catalog definition |
-| `src/inspector/expr-metadata.ts` | Curated function/constant metadata |
 | `src/shared/obs-value.ts` | ObsValue type + `createObsValue` (shared with Observatory) |
 | `src/shared/updater.ts` | ObsValue update/animate passes + `makeOverridableGetNow` (eval-ahead) |
 | `src/shared/astro-env.ts` | Astronomy environment factory (shared with Chronometer and Observatory) |
@@ -268,5 +168,4 @@ environment and refresh all displays, and live-sync across tabs via
 
 - [Expressions](expressions.md) — Expression language syntax and pipeline
 - [Astronomy](astronomy.md) — Astronomy functions available in the environment
-- [Development Rules §13](development-rules.md#13-keep-inspector-expression-metadata-in-sync) — Keep metadata in sync
 - [Architecture Overview](architecture-overview.md) — Import boundaries between apps

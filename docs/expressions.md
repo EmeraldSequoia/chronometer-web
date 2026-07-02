@@ -87,12 +87,11 @@ These are:
 | `src/watch/watch-env.ts` | Imports `astro-env.ts`, adds Chronometer-specific functions (Terra slots, Kyoto wadokei, Venezia body), runs init via `runInit()` |
 | `src/watch/xml-parser.ts` | `attrExpr()` helper returning the raw attribute string |
 | `src/watch/types.ts` | Expression attributes typed `string` |
-| `src/inspector/expr-metadata.ts` | Curated descriptions of all functions/constants for autocomplete and reference panel |
 
 ## Related Docs
 
 - [XML Parsing](xml-parsing.md) — How attributes are read from XML
 - [Astronomy](astronomy.md) — Astronomy functions available in the expression environment
-- [Inspector](inspector.md) — Live expression evaluator with autocomplete and reference panel
+- [Inspector](inspector.md) — Live catalog of expression-driven astronomy values
 - [Animation](animation.md) — How `evalAttr`/`evalFn` are called during animation ticks
 - [Architecture Overview](architecture-overview.md) — Shared environment architecture and import discipline

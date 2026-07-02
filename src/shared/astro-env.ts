@@ -941,7 +941,7 @@ export function registerAstroFunctions(
     });
 
     // =========================================================================
-    // Time-returning functions (date intervals, for Inspector expression evaluator)
+    // Time-returning functions (date intervals, e.g. for the Inspector catalog)
     //
     // "ForDay" variants: restricted to current calendar day (NaN if no event).
     // "Next" variants: search forward from now (can cross into next day).

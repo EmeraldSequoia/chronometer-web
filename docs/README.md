@@ -24,7 +24,7 @@ Permanent reference documentation for the Chronometer Web codebase, organized by
 
 ### Feature Systems
 - [**Observatory**](observatory.md) — Observatory orrery face: ObsValue system, animation, rise/set rings
-- [**Inspector**](inspector.md) — Live astronomy data explorer and expression debugger
+- [**Inspector**](inspector.md) — Live astronomy data explorer
 - [**Astronomy**](astronomy.md) — Ported astronomical routines, opcode tracing guide
 - [**Calendar**](calendar.md) — Hybrid Julian/Gregorian calendar system, known correctness issues
 - [**World-Time Slots**](world-time-slots.md) — Slot architecture for Terra/Gaia world-time features

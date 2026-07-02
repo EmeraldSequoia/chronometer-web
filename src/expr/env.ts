@@ -69,7 +69,7 @@ export function createDefaultEnvironment(): Environment {
     variables.set('lightGray', 0xFFAAAAAA >>> 0);   // iOS [UIColor lightGrayColor] = 2/3
 
     // Planet number constants (matching ECPlanetNumber enum)
-    // Short names for convenient use in the Inspector expression evaluator
+    // Short names for convenient use in expressions (e.g. the Inspector catalog)
     variables.set('Sun', 0);
     variables.set('Moon', 1);
     variables.set('Mercury', 2);
