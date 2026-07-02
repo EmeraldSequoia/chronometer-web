@@ -11247,7 +11247,7 @@
     const browserOffsetSec = -now.getTimezoneOffset() * 60;
     return browserOffsetSec + computeTzDeltaMs(olsonTimezone, now) / 1e3;
   }
-  function createAstroEnvironment(observerLatDeg = DEFAULT_LAT_DEG, observerLonDeg = DEFAULT_LON_DEG, getNow2 = () => /* @__PURE__ */ new Date(), olsonTimezone) {
+  function createAstroEnvironment(observerLatDeg = DEFAULT_LAT_DEG, observerLonDeg = DEFAULT_LON_DEG, getNow2 = () => /* @__PURE__ */ new Date(), olsonTimezone, liveAstroSlopSec) {
     const OBSERVER_LAT = observerLatDeg * Math.PI / 180;
     const OBSERVER_LON = observerLonDeg * Math.PI / 180;
     initBatteryState();
@@ -11283,11 +11283,11 @@
     env2.variables.set("topAnchorClockMidnight", 1);
     env2.variables.set("topAnchorSolarNoon", 2);
     env2.variables.set("topAnchorSolarMidnight", 3);
-    const internals = registerAstroFunctions(env2, OBSERVER_LAT, OBSERVER_LON, getNow2, olsonTimezone);
+    const internals = registerAstroFunctions(env2, OBSERVER_LAT, OBSERVER_LON, getNow2, olsonTimezone, liveAstroSlopSec);
     releaseCachePool(internals.pool);
     return env2;
   }
-  function registerAstroFunctions(env2, OBSERVER_LAT, OBSERVER_LON, getNow2 = () => /* @__PURE__ */ new Date(), olsonTimezone) {
+  function registerAstroFunctions(env2, OBSERVER_LAT, OBSERVER_LON, getNow2 = () => /* @__PURE__ */ new Date(), olsonTimezone, liveAstroSlopSec) {
     const { functions } = env2;
     const now = getNow2();
     const dateInterval = dateToDateInterval(now);
@@ -11426,7 +11426,7 @@
     function liveAstro(compute) {
       const di = dateToDateInterval(getNow2());
       const cache = pool.finalCache;
-      const prior = pushECAstroCacheInPool(pool, cache, di);
+      const prior = liveAstroSlopSec !== void 0 ? pushECAstroCacheWithSlopInPool(pool, cache, di, liveAstroSlopSec) : pushECAstroCacheInPool(pool, cache, di);
       const r = compute(cache, di);
       popECAstroCacheToInPool(pool, prior);
       return r;

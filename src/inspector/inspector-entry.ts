@@ -57,6 +57,13 @@ timeSubsecEl.className = 'time-subsec';
 timeDisplay.textContent = '';
 timeDisplay.append(timeMainEl, timeSubsecEl);
 
+// Live-astronomy cache slop for the Inspector's environments. The catalog
+// displays sub-second digits at a 0.1 s eval cadence, so the shared 0.5 s
+// ASTRO_SLOP would hold fully-cached values (e.g. lstValue) frozen across
+// several evals — visible as a hold-then-jump in the readout. Zero re-keys
+// the cache whenever the eval time changes; same-time cells still share it.
+const INSPECTOR_LIVE_ASTRO_SLOP_SEC = 0;
+
 // --- Resolve location from URL params ---
 initAppState({ app: 'inspector' });
 const urlState = getState();
@@ -214,7 +221,7 @@ const locationDialog = initLocationDialog({
         }
 
         // Rebuild the astronomy environment with new location
-        env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
+        env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
 
         // Refresh all displays
         updateLocationDisplay();
@@ -256,7 +263,7 @@ if (locationDialog) {
                 // filled by updateLocationDisplay's reverse-geocode.
                 if (isPersistentMode()) setState({ bloc: true, lat, lon, tz: locationTimezone || null });
                 locationDialog.updateState(lat, lon, 'browser', '', '');
-                env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
+                env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
                 updateLocationDisplay();
                 updateTimeDisplay();
                 rebuildExprValues();   // snap expression to the new environment
@@ -291,7 +298,7 @@ if (locationDialog) {
             // reverse-geocodes the new spot.
             if (isPersistentMode()) setState({ bloc: true, lat, lon, city: null, tz });
             locationDialog.updateState(lat, lon, 'browser', '', '');
-            env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
+            env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
             updateLocationDisplay();
             updateTimeDisplay();
             rebuildExprValues();
@@ -322,7 +329,7 @@ if (urlState.off !== null && !isNaN(urlState.off)) {
 // transiently evaluate "ahead" at a future display time (eval-ahead).
 const { getNow, withDisplayTime } = makeOverridableGetNow(() => timeController.getDisplayTime());
 
-let env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
+let env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
 
 // The updater owns the catalog's ObsValue collection (the expression box is
 // managed separately — it has user-input error handling and rebuilds on edit).
@@ -705,7 +712,7 @@ onSharedChange((s) => {
         tzDeltaMs = computeTzDeltaMs(locationTimezone);
         needsPrompt = false;
         urlState.city = s.city;
-        env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
+        env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
         updateLocationDisplay();
         rebuildExprValues();
         resetAllSchedules();
@@ -1179,7 +1186,7 @@ if (tzNeedsResolution) {
         if (resolved && resolved !== locationTimezone) {
             locationTimezone = resolved;
             tzDeltaMs = computeTzDeltaMs(locationTimezone);
-            env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
+            env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
             if (isPersistentMode()) setState({ tz: locationTimezone });
             updateLocationDisplay();
             updateTimeDisplay();

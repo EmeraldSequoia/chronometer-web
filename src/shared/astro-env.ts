@@ -35,7 +35,8 @@ import {
 } from './animation.js';
 import {
     AstroCache, AstroCachePool, CacheSlot, initializeCachePool, releaseCachePool,
-    invalidateCachePool, pushECAstroCacheInPool, popECAstroCacheToInPool,
+    invalidateCachePool, pushECAstroCacheInPool, pushECAstroCacheWithSlopInPool,
+    popECAstroCacheToInPool,
 } from '../astronomy/astro-cache.js';
 import {
     sunAltitude, sunAzimuth, moonAltitude, moonAzimuth, moonAge,
@@ -331,6 +332,8 @@ export interface AstroInternals {
  * @param observerLonDeg Observer longitude in degrees (negative = west)
  * @param getNow Time source function
  * @param olsonTimezone IANA timezone override (e.g. 'America/New_York')
+ * @param liveAstroSlopSec Cache-key tolerance (seconds) for live display-time
+ *   astronomy; see {@link registerAstroFunctions}
  * @returns The populated Environment
  */
 export function createAstroEnvironment(
@@ -338,6 +341,7 @@ export function createAstroEnvironment(
     observerLonDeg: number = DEFAULT_LON_DEG,
     getNow: () => Date = () => new Date(),
     olsonTimezone?: string,
+    liveAstroSlopSec?: number,
 ): Environment {
     const OBSERVER_LAT = observerLatDeg * Math.PI / 180;
     const OBSERVER_LON = observerLonDeg * Math.PI / 180;
@@ -387,7 +391,7 @@ export function createAstroEnvironment(
     env.variables.set('topAnchorSolarMidnight', 3);
 
     // Register the shared functions
-    const internals = registerAstroFunctions(env, OBSERVER_LAT, OBSERVER_LON, getNow, olsonTimezone);
+    const internals = registerAstroFunctions(env, OBSERVER_LAT, OBSERVER_LON, getNow, olsonTimezone, liveAstroSlopSec);
 
     // Release the cache pool (callers who need it should use registerAstroFunctions directly)
     releaseCachePool(internals.pool);
@@ -402,6 +406,14 @@ export function createAstroEnvironment(
  *
  * The caller is responsible for calling releaseCachePool(internals.pool)
  * when done with the returned internals.
+ *
+ * `liveAstroSlopSec` overrides the ASTRO_SLOP cache-key tolerance used by
+ * {@link liveAstro} pushes (default 0.5 s). The Inspector passes 0: its
+ * readouts display sub-second digits at a 0.1 s eval cadence, and any slop
+ * larger than the cadence holds fully-cached values (e.g. lstValue's
+ * CacheSlot.lst) frozen between re-keys, which shows up as a visible
+ * hold-then-jump. Faces/Observatory evaluate at cadences well above the
+ * default slop, so they keep it for cross-part cache sharing.
  */
 export function registerAstroFunctions(
     env: Environment,
@@ -409,6 +421,7 @@ export function registerAstroFunctions(
     OBSERVER_LON: number,
     getNow: () => Date = () => new Date(),
     olsonTimezone?: string,
+    liveAstroSlopSec?: number,
 ): AstroInternals {
     const { functions } = env;
 
@@ -659,7 +672,9 @@ export function registerAstroFunctions(
     function liveAstro<T>(compute: (cache: AstroCache, di: number) => T): T {
         const di = dateToDateInterval(getNow());
         const cache = pool.finalCache;
-        const prior = pushECAstroCacheInPool(pool, cache, di);
+        const prior = liveAstroSlopSec !== undefined
+            ? pushECAstroCacheWithSlopInPool(pool, cache, di, liveAstroSlopSec)
+            : pushECAstroCacheInPool(pool, cache, di);
         const r = compute(cache, di);
         popECAstroCacheToInPool(pool, prior);
         return r;

@@ -12888,7 +12888,7 @@ return {${names2.join(",")}};`;
     const b = v & 255;
     return `rgba(${r},${g},${b},${a.toFixed(3)})`;
   }
-  function registerAstroFunctions(env, OBSERVER_LAT, OBSERVER_LON, getNow = () => /* @__PURE__ */ new Date(), olsonTimezone) {
+  function registerAstroFunctions(env, OBSERVER_LAT, OBSERVER_LON, getNow = () => /* @__PURE__ */ new Date(), olsonTimezone, liveAstroSlopSec) {
     const { functions } = env;
     const now = getNow();
     const dateInterval = dateToDateInterval(now);
@@ -13027,7 +13027,7 @@ return {${names2.join(",")}};`;
     function liveAstro(compute) {
       const di = dateToDateInterval(getNow());
       const cache = pool.finalCache;
-      const prior = pushECAstroCacheInPool(pool, cache, di);
+      const prior = liveAstroSlopSec !== void 0 ? pushECAstroCacheWithSlopInPool(pool, cache, di, liveAstroSlopSec) : pushECAstroCacheInPool(pool, cache, di);
       const r = compute(cache, di);
       popECAstroCacheToInPool(pool, prior);
       return r;
