@@ -390,8 +390,15 @@ export class TimeController {
             // 1×/-1× toggle
             this._setupReverseOneX(prevTime);
         } else {
-            // Re-snap for new direction
-            this.tickTime = snapToUnit(prevTime, this.rate.unit, dir);
+            // Same snap policy as setRate: only snap for seconds (zeroing
+            // invisible milliseconds). Snapping other units would zero
+            // visible hands — and since stop() leaves the rate in place,
+            // this fired on the *leftover* rate when a new opposite-direction
+            // scrub started (hold-to-scrub calls setDirection before setRate),
+            // jumping seconds (or the whole time-of-day) to 0.
+            this.tickTime = this.rate.unit === 'second'
+                ? snapToUnit(prevTime, this.rate.unit, dir)
+                : new Date(prevTime.getTime());
             this.nextTickTime = advanceByUnit(this.tickTime, this.rate.unit, dir);
             this.lastTickRealMs = performance.now();
         }
