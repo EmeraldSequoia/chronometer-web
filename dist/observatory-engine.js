@@ -15093,7 +15093,7 @@
       if (this.rate === null) {
         this._setupReverseOneX(prevTime);
       } else {
-        this.tickTime = snapToUnit(prevTime, this.rate.unit, dir);
+        this.tickTime = this.rate.unit === "second" ? snapToUnit(prevTime, this.rate.unit, dir) : new Date(prevTime.getTime());
         this.nextTickTime = advanceByUnit(this.tickTime, this.rate.unit, dir);
         this.lastTickRealMs = performance.now();
       }
