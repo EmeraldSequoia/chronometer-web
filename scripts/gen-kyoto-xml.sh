@@ -1,5 +1,10 @@
 #!/bin/bash
 # Generate Kyoto unified XML from iOS reference, with mode-conditional expressions.
+#
+# HISTORICAL ONLY — DO NOT RUN. Kyoto-I.xml has since been edited directly
+# (e.g. displayName/description attributes on <watch>) and this script would
+# overwrite those changes. Kept for reference on how the face was originally
+# generated; src/watch/assets/kyoto/Kyoto-I.xml is the source of truth.
 cat > src/watch/assets/kyoto/Kyoto-I.xml << 'XMLEOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Kyoto: unified wadokei face (Kyoto I + Kyoto II merged)

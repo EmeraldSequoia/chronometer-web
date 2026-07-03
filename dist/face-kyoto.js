@@ -6,7 +6,7 @@
      kyMode=0: Constant hand rate (moving dial, constant-speed hand)
      kyMode=1: Variable hand rate (fixed dial, variable-speed hand)
 -->
-<watch name='Kyoto' landscapeZoomFactor='0.9' beatsPerSecond='5' bezelColor='rgb(160,160,160)' urlAbbrev='ky' wadokei='1' displayName="Kyoto" description="Traditional Japanese Wadokei clock">
+<watch name='Kyoto' landscapeZoomFactor='0.9' beatsPerSecond='5' bezelColor='rgb(160,160,160)' urlAbbrev='ky' wadokei='1' displayName="Kyoto" description="Traditional Japanese wadokei">
 
   <init expr='faceRad=136, outrRad=135, jSignRad=145, midoRad=109, jNumbRad=116, midiRad=88, innRad=82, hrRad=67' />
   <init expr='jhrRad=(midoRad+outrRad)/2, jstRad=(midiRad+midoRad)/2-2' />
