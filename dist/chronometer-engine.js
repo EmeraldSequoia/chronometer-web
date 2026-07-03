@@ -10416,6 +10416,14 @@ return {${names2.join(",")}};`;
     return 1.01 * moonParallax - sunAngularRadius + sunParallax;
   }
   function calculateEclipse(dateInterval, observerLatitude, observerLongitude, cache) {
+    if (cache && cache.isValid(168 /* eclipseSeparation */)) {
+      return {
+        abstractSeparation: cache.get(168 /* eclipseSeparation */),
+        angularSeparation: cache.get(167 /* eclipseAngularSeparation */),
+        shadowAngularSize: cache.get(169 /* eclipseShadowAngularSize */),
+        eclipseKind: cache.get(170 /* eclipseKind */)
+      };
+    }
     const gst = convertUTToGSTP03(dateInterval, cache);
     const lst = convertGSTtoLST(gst, observerLongitude);
     const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(dateInterval, cache);
@@ -10492,6 +10500,12 @@ return {${names2.join(",")}};`;
     } else if (abstractSeparation > 3) {
       abstractSeparation = 3;
       eclipseKind = solarNotLunar ? 0 /* NoneSolar */ : 1 /* NoneLunar */;
+    }
+    if (cache) {
+      cache.set(168 /* eclipseSeparation */, abstractSeparation);
+      cache.set(167 /* eclipseAngularSeparation */, physicalSeparation);
+      cache.set(169 /* eclipseShadowAngularSize */, shadowAngularSize);
+      cache.set(170 /* eclipseKind */, eclipseKind);
     }
     return {
       abstractSeparation,
@@ -13115,6 +13129,10 @@ return {${names2.join(",")}};`;
     }));
     functions.set("ELatitudeOfPlanet", (n) => liveAstro((cache, di) => planetEclipticLatitude(n, di, cache)));
     functions.set("distanceFromEarthOfPlanet", (n) => liveAstro((cache, di) => planetGeocentricDistance(n, di, cache)));
+    functions.set("distanceFromSunOfPlanet", (n) => liveAstro((cache, di) => {
+      const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, cache);
+      return WB_planetHeliocentricRadius(n, julianCenturiesSince2000Epoch / 100, cache);
+    }));
     functions.set("azimuthOfPlanet", (planetNumber) => liveAstro((cache, di) => {
       if (planetNumber === 0 /* Sun */) return sunAzimuth(di, OBSERVER_LAT, OBSERVER_LON, cache);
       if (planetNumber === 1 /* Moon */) return moonAzimuth(di, OBSERVER_LAT, OBSERVER_LON, cache);
@@ -13458,6 +13476,26 @@ return {${names2.join(",")}};`;
       const di = dateToDateInterval(getNow());
       return lunarAscendingNodeLongitude(di, null);
     });
+    const moonIsNearDescendingNode = (cache, di) => {
+      const asc = lunarAscendingNodeLongitude(di, cache);
+      const moonLon = planetEclipticLongitude(1 /* Moon */, di, cache);
+      let d = fmod(moonLon - asc, 2 * Math.PI);
+      if (d < 0) d += 2 * Math.PI;
+      return d > Math.PI / 2 && d < 3 * Math.PI / 2;
+    };
+    const nearestNodeLongitude = (cache, di) => {
+      const asc = lunarAscendingNodeLongitude(di, cache);
+      if (!moonIsNearDescendingNode(cache, di)) return asc;
+      const lon = asc + Math.PI;
+      return lon >= 2 * Math.PI ? lon - 2 * Math.PI : lon;
+    };
+    functions.set("lunarNearestNodeLongitude", () => liveAstro((cache, di) => nearestNodeLongitude(cache, di)));
+    functions.set("lunarNearestNodeIsDescending", () => liveAstro((cache, di) => moonIsNearDescendingNode(cache, di) ? 1 : 0));
+    functions.set("lunarNearestNodeMinusSunLongitude", () => liveAstro((cache, di) => {
+      const delta = nearestNodeLongitude(cache, di) - planetEclipticLongitude(0 /* Sun */, di, cache);
+      const folded = fmod(delta, 2 * Math.PI);
+      return folded < 0 ? folded + 2 * Math.PI : folded;
+    }));
     const moonDeltaCompute = (n) => {
       const nowDate = liveDate();
       const targetMidnight = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() + n);

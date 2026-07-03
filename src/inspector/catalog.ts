@@ -13,6 +13,7 @@
 export type Tag =
     // Continuous (eval-ahead, smoothly animated):
     | 'A'      // full-circle angle: linear=false, shown 0–360°
+    | 'NGAP'   // node–syzygy angle: linear=false, shown "N° from new/full moon"
     | 'Ldeg'   // bounded angle (decl/alt/lat): linear=true, signed degrees
     | 'Num'    // continuous fractional number: linear=true
     | 'SEC'    // seconds-of-minute (clock): linear=true, zero-padded "SS.sss"
@@ -27,17 +28,20 @@ export type Tag =
     | 'MO'     // month number (0-based): discrete, shown "0 (January)"
     | 'DAY'    // day-of-month (0-based): discrete, shown "4 (5th)"
     | 'HM'     // signed clock offset in seconds: discrete, "±HH:MM"
-    | 'LT';    // dateInterval (event time): discrete, local time/date
+    | 'LT'     // dateInterval (event time): discrete, local time/date
+    | 'EK'     // eclipse kind (collapsed wheel value 0–7): discrete, Basel wheel text
+    | 'ND';    // nearest lunar node (0/1): discrete, "Ascending"/"Descending"
 
 /** True if a tag animates with angular (wrapping) semantics. */
 export function tagIsAngular(tag: Tag): boolean {
-    return tag === 'A';
+    return tag === 'A' || tag === 'NGAP';
 }
 
 /** True if a tag is discrete (evaluate-at-now + snap, no interpolation). */
 export function tagIsDiscrete(tag: Tag): boolean {
     return tag === 'Int' || tag === 'BOOL' || tag === 'WD' || tag === 'MO'
-        || tag === 'DAY' || tag === 'HM' || tag === 'LT';
+        || tag === 'DAY' || tag === 'HM' || tag === 'LT' || tag === 'EK'
+        || tag === 'ND';
 }
 
 export interface CatalogCell {
@@ -192,6 +196,44 @@ const MOON_GROUP: CatalogGroup = {
 };
 
 // ============================================================================
+// Eclipse
+// ============================================================================
+
+// The eclipse story in row order: how close the Moon is to new/full (an
+// eclipse needs a syzygy), whether the Moon is near the ecliptic (latitude
+// ≈ 0 means it's near a node), how the node the Moon is closest to relates
+// to where new/full moons currently occur, and finally Basel's verdict — the
+// abstract separation level (<1 total, 1–2 partial, >2 none) and the kind
+// wheel text.
+const ECLIPSE_GROUP: CatalogGroup = {
+    name: 'Eclipse',
+    rows: [
+        { rowLabel: 'Separation', cells: [
+            { label: 'Δ Lon (geo)', expr: 'moonAgeAngle()', tag: 'A', updateInterval: NORMAL },
+            { label: 'Elongation', expr: 'moonElongation()', tag: 'A', updateInterval: NORMAL },
+        ] },
+        { rowLabel: 'Moon ecl. lat (geo)', cells: [
+            { label: '', expr: 'ELatitudeOfPlanet(1)', tag: 'Ldeg', updateInterval: NORMAL },
+        ] },
+        {
+            rowLabel: 'Nearest node',
+            // 'fields': the gap cell ("NN.NN° from full moon") is wider than a
+            // pairs value column; content-sized cells wrap instead of truncating.
+            layout: 'fields',
+            cells: [
+                { label: '', expr: 'lunarNearestNodeIsDescending()', tag: 'ND', updateInterval: NORMAL },
+                { label: 'Lon (geo)', expr: 'lunarNearestNodeLongitude()', tag: 'A', updateInterval: NORMAL },
+                { label: '', expr: 'lunarNearestNodeMinusSunLongitude()', tag: 'NGAP', updateInterval: NORMAL },
+            ],
+        },
+        { rowLabel: 'Level', cells: [
+            { label: '', expr: 'eclipseSeparation()', tag: 'Num', updateInterval: NORMAL },
+            { label: 'Kind', expr: 'legacyEclipseKind()', tag: 'EK', updateInterval: NORMAL },
+        ] },
+    ],
+};
+
+// ============================================================================
 // Planets (template × list, inner → outer)
 // ============================================================================
 
@@ -226,8 +268,11 @@ function planetGroup(name: string, n: number): CatalogGroup {
                 { label: 'Lon', expr: `HLongitudeOfPlanet(${n})`, tag: 'A', updateInterval: NORMAL },
                 { label: 'Lat', expr: `HLatitudeOfPlanet(${n})`, tag: 'Ldeg', updateInterval: NORMAL },
             ] },
-            { rowLabel: 'Distance', cells: [
+            { rowLabel: 'Distance (geo)', cells: [
                 { label: '', expr: `distanceFromEarthOfPlanet(${n})`, tag: 'DIST', updateInterval: SLOW },
+            ] },
+            { rowLabel: 'Distance (helio)', cells: [
+                { label: '', expr: `distanceFromSunOfPlanet(${n})`, tag: 'DIST', updateInterval: SLOW },
             ] },
             { rowLabel: 'Rise / Set / Transit', cells: [
                 { label: 'Rise', expr: `riseOfPlanetForDayTime(${n})`, tag: 'LT', updateInterval: SLOW },
@@ -246,6 +291,7 @@ export const CATALOG: CatalogGroup[] = [
     TIME_GROUP,
     SUN_GROUP,
     MOON_GROUP,
+    ECLIPSE_GROUP,
     ...PLANETS.map(p => planetGroup(p.name, p.n)),
 ];
 

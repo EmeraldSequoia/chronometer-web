@@ -376,11 +376,11 @@
 
       /* "Fields" rows (Date/Clock): compact content-sized cells on a line,
          wrapping if needed — avoids the big inter-field gaps and weekday clipping
-         that equal-width columns produce. */
+         that equal-width columns produce. Keeps the base .cat-row column-gap so
+         the first field aligns with the grid rows' first value column. */
       .cat-row-fields {
           display: flex;
           flex-wrap: wrap;
-          column-gap: 20px;
       }
       .cat-row-fields .cat-cell {
           flex: 0 0 auto;
@@ -433,9 +433,6 @@
               flex-wrap: wrap;
               column-gap: 14px;
               align-items: baseline;
-          }
-          .cat-row-fields .cat-cells {
-              column-gap: 20px;   /* match the fields rows' wide-layout gap */
           }
           .cat-row .cat-cell {
               flex: 0 0 auto;
@@ -2095,7 +2092,7 @@
             <div id="help-content">
               <!-- Populated from help-template on first info click -->
             </div>
-            <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.11</div>
+            <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.12</div>
           </div>
 
           <div id="info-sub-view">
@@ -2314,13 +2311,35 @@ and location.
 
 <h3>Reading the catalog</h3>
 <p>
-  Values are grouped <b>Time → Sun → Moon → Mercury … Neptune</b>. Angles are
-  in degrees; rise, set, and transit are local times at the configured
-  location (shown as "—" when the event does not occur, for example during
-  polar day or night); distances are given in both astronomical units and
-  kilometers. Each value is fully re-evaluated on its own schedule (fractional
+  Values are grouped <b>Time → Sun → Moon → Eclipse → Mercury … Neptune</b>.
+  Angles are in degrees; rise, set, and transit are local times at the
+  configured location (shown as "—" when the event does not occur, for example
+  during polar day or night); distances are given in both astronomical units
+  and kilometers. Each planet shows two distances: <b>geo</b> (from Earth) and
+  <b>helio</b> (from the Sun), qualified the same way as its ecliptic
+  coordinates. Each value is fully re-evaluated on its own schedule (fractional
   seconds many times per second, coordinates every second, rise/set times once
   a minute) and animated smoothly in between.
+</p>
+
+<h3>The Eclipse group</h3>
+<p>
+  An eclipse needs two things at once: a new or full moon, and the Moon near
+  the plane of Earth's orbit. The Eclipse group shows both conditions and the
+  verdict. <b>Separation</b> is how close the Moon is to new or full — the
+  Moon−Sun difference in ecliptic longitude (0° at new moon, 180° at full)
+  and the true angular elongation. <b>Moon ecl. lat</b> is the Moon's distance
+  from the ecliptic plane; an eclipse requires it to be near zero, which
+  happens when the Moon is near one of its orbit's nodes. <b>Nearest node</b>
+  is the node the Moon is currently closest to — ascending or descending, the
+  crossing the Moon just made or is about to make — with its ecliptic
+  longitude and how far it sits from the point where new or full moons occur.
+  When that gap is small, the Moon reaches new or full just as it crosses the
+  ecliptic there, and an eclipse follows. <b>Level</b> is the eclipse indicator shown on the Basel
+  watch face: the needle value runs from 0 to 3 (below 1 a total eclipse is in
+  progress, 1–2 partial, above 2 none), and the kind text matches Basel's
+  wheel — None, Sun/Moon not up, Partial/Annular/Total Solar, or
+  Partial/Total Lunar.
 </p>
 
 <h3>Precision and accuracy</h3>

@@ -10071,6 +10071,14 @@
     return 1.01 * moonParallax - sunAngularRadius + sunParallax;
   }
   function calculateEclipse(dateInterval, observerLatitude, observerLongitude, cache) {
+    if (cache && cache.isValid(168 /* eclipseSeparation */)) {
+      return {
+        abstractSeparation: cache.get(168 /* eclipseSeparation */),
+        angularSeparation: cache.get(167 /* eclipseAngularSeparation */),
+        shadowAngularSize: cache.get(169 /* eclipseShadowAngularSize */),
+        eclipseKind: cache.get(170 /* eclipseKind */)
+      };
+    }
     const gst = convertUTToGSTP03(dateInterval, cache);
     const lst = convertGSTtoLST(gst, observerLongitude);
     const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(dateInterval, cache);
@@ -10147,6 +10155,12 @@
     } else if (abstractSeparation > 3) {
       abstractSeparation = 3;
       eclipseKind = solarNotLunar ? 0 /* NoneSolar */ : 1 /* NoneLunar */;
+    }
+    if (cache) {
+      cache.set(168 /* eclipseSeparation */, abstractSeparation);
+      cache.set(167 /* eclipseAngularSeparation */, physicalSeparation);
+      cache.set(169 /* eclipseShadowAngularSize */, shadowAngularSize);
+      cache.set(170 /* eclipseKind */, eclipseKind);
     }
     return {
       abstractSeparation,
@@ -11496,6 +11510,10 @@
     }));
     functions.set("ELatitudeOfPlanet", (n) => liveAstro((cache, di) => planetEclipticLatitude(n, di, cache)));
     functions.set("distanceFromEarthOfPlanet", (n) => liveAstro((cache, di) => planetGeocentricDistance(n, di, cache)));
+    functions.set("distanceFromSunOfPlanet", (n) => liveAstro((cache, di) => {
+      const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, cache);
+      return WB_planetHeliocentricRadius(n, julianCenturiesSince2000Epoch / 100, cache);
+    }));
     functions.set("azimuthOfPlanet", (planetNumber) => liveAstro((cache, di) => {
       if (planetNumber === 0 /* Sun */) return sunAzimuth(di, OBSERVER_LAT, OBSERVER_LON, cache);
       if (planetNumber === 1 /* Moon */) return moonAzimuth(di, OBSERVER_LAT, OBSERVER_LON, cache);
@@ -11839,6 +11857,26 @@
       const di = dateToDateInterval(getNow2());
       return lunarAscendingNodeLongitude(di, null);
     });
+    const moonIsNearDescendingNode = (cache, di) => {
+      const asc = lunarAscendingNodeLongitude(di, cache);
+      const moonLon = planetEclipticLongitude(1 /* Moon */, di, cache);
+      let d = fmod(moonLon - asc, 2 * Math.PI);
+      if (d < 0) d += 2 * Math.PI;
+      return d > Math.PI / 2 && d < 3 * Math.PI / 2;
+    };
+    const nearestNodeLongitude = (cache, di) => {
+      const asc = lunarAscendingNodeLongitude(di, cache);
+      if (!moonIsNearDescendingNode(cache, di)) return asc;
+      const lon2 = asc + Math.PI;
+      return lon2 >= 2 * Math.PI ? lon2 - 2 * Math.PI : lon2;
+    };
+    functions.set("lunarNearestNodeLongitude", () => liveAstro((cache, di) => nearestNodeLongitude(cache, di)));
+    functions.set("lunarNearestNodeIsDescending", () => liveAstro((cache, di) => moonIsNearDescendingNode(cache, di) ? 1 : 0));
+    functions.set("lunarNearestNodeMinusSunLongitude", () => liveAstro((cache, di) => {
+      const delta = nearestNodeLongitude(cache, di) - planetEclipticLongitude(0 /* Sun */, di, cache);
+      const folded = fmod(delta, 2 * Math.PI);
+      return folded < 0 ? folded + 2 * Math.PI : folded;
+    }));
     const moonDeltaCompute = (n) => {
       const nowDate = liveDate();
       const targetMidnight = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() + n);
@@ -16919,10 +16957,10 @@
 
   // src/inspector/catalog.ts
   function tagIsAngular(tag) {
-    return tag === "A";
+    return tag === "A" || tag === "NGAP";
   }
   function tagIsDiscrete(tag) {
-    return tag === "Int" || tag === "BOOL" || tag === "WD" || tag === "MO" || tag === "DAY" || tag === "HM" || tag === "LT";
+    return tag === "Int" || tag === "BOOL" || tag === "WD" || tag === "MO" || tag === "DAY" || tag === "HM" || tag === "LT" || tag === "EK" || tag === "ND";
   }
   var FAST = 0.1;
   var NORMAL = 1;
@@ -17035,6 +17073,33 @@
       ] }
     ]
   };
+  var ECLIPSE_GROUP = {
+    name: "Eclipse",
+    rows: [
+      { rowLabel: "Separation", cells: [
+        { label: "\u0394 Lon (geo)", expr: "moonAgeAngle()", tag: "A", updateInterval: NORMAL },
+        { label: "Elongation", expr: "moonElongation()", tag: "A", updateInterval: NORMAL }
+      ] },
+      { rowLabel: "Moon ecl. lat (geo)", cells: [
+        { label: "", expr: "ELatitudeOfPlanet(1)", tag: "Ldeg", updateInterval: NORMAL }
+      ] },
+      {
+        rowLabel: "Nearest node",
+        // 'fields': the gap cell ("NN.NN° from full moon") is wider than a
+        // pairs value column; content-sized cells wrap instead of truncating.
+        layout: "fields",
+        cells: [
+          { label: "", expr: "lunarNearestNodeIsDescending()", tag: "ND", updateInterval: NORMAL },
+          { label: "Lon (geo)", expr: "lunarNearestNodeLongitude()", tag: "A", updateInterval: NORMAL },
+          { label: "", expr: "lunarNearestNodeMinusSunLongitude()", tag: "NGAP", updateInterval: NORMAL }
+        ]
+      },
+      { rowLabel: "Level", cells: [
+        { label: "", expr: "eclipseSeparation()", tag: "Num", updateInterval: NORMAL },
+        { label: "Kind", expr: "legacyEclipseKind()", tag: "EK", updateInterval: NORMAL }
+      ] }
+    ]
+  };
   var PLANETS = [
     { name: "Mercury", n: 2 },
     { name: "Venus", n: 3 },
@@ -17065,8 +17130,11 @@
           { label: "Lon", expr: `HLongitudeOfPlanet(${n})`, tag: "A", updateInterval: NORMAL },
           { label: "Lat", expr: `HLatitudeOfPlanet(${n})`, tag: "Ldeg", updateInterval: NORMAL }
         ] },
-        { rowLabel: "Distance", cells: [
+        { rowLabel: "Distance (geo)", cells: [
           { label: "", expr: `distanceFromEarthOfPlanet(${n})`, tag: "DIST", updateInterval: SLOW }
+        ] },
+        { rowLabel: "Distance (helio)", cells: [
+          { label: "", expr: `distanceFromSunOfPlanet(${n})`, tag: "DIST", updateInterval: SLOW }
         ] },
         { rowLabel: "Rise / Set / Transit", cells: [
           { label: "Rise", expr: `riseOfPlanetForDayTime(${n})`, tag: "LT", updateInterval: SLOW },
@@ -17080,6 +17148,7 @@
     TIME_GROUP,
     SUN_GROUP,
     MOON_GROUP,
+    ECLIPSE_GROUP,
     ...PLANETS.map((p) => planetGroup(p.name, p.n))
   ];
 
@@ -17512,6 +17581,14 @@
     const deg = v * 180 / Math.PI;
     return `${deg < 0 ? MINUS : ""}${Math.abs(deg).toFixed(2)}\xB0`;
   }
+  function fmtNodeGap(v) {
+    if (!isFinite(v)) return "\u2014";
+    let deg = v * 180 / Math.PI;
+    deg = (deg % 360 + 360) % 360;
+    const fromNew = Math.min(deg, 360 - deg);
+    const fromFull = Math.abs(deg - 180);
+    return fromNew <= fromFull ? `${fromNew.toFixed(2)}\xB0 from new moon` : `${fromFull.toFixed(2)}\xB0 from full moon`;
+  }
   function fmtInt(v) {
     if (!isFinite(v)) return "\u2014";
     return Math.round(v).toString();
@@ -17530,6 +17607,24 @@
   function fmtBool(v) {
     if (!isFinite(v)) return "\u2014";
     return Math.round(v) !== 0 ? "yes" : "no";
+  }
+  var ECLIPSE_KIND_NAMES = [
+    "None",
+    "Sun not up",
+    "Partial Solar",
+    "Annular Solar",
+    "Total Solar",
+    "Moon not up",
+    "Partial Lunar",
+    "Total Lunar"
+  ];
+  function fmtEclipseKind(v) {
+    if (!isFinite(v)) return "\u2014";
+    return ECLIPSE_KIND_NAMES[Math.round(v)] ?? "\u2014";
+  }
+  function fmtNodeKind(v) {
+    if (!isFinite(v)) return "\u2014";
+    return Math.round(v) !== 0 ? "Descending" : "Ascending";
   }
   function fmtWeekday(v) {
     if (!isFinite(v)) return "\u2014";
@@ -17594,6 +17689,8 @@
     switch (tag) {
       case "A":
         return fmtAngle(v);
+      case "NGAP":
+        return fmtNodeGap(v);
       case "Ldeg":
         return fmtDeg(v);
       case "Num":
@@ -17620,6 +17717,10 @@
         return formatDateIntervalTime(v);
       case "DIST":
         return fmtDist(v);
+      case "EK":
+        return fmtEclipseKind(v);
+      case "ND":
+        return fmtNodeKind(v);
     }
   }
   function renderCatalog() {

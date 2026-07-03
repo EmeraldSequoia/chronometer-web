@@ -376,11 +376,11 @@
 
       /* "Fields" rows (Date/Clock): compact content-sized cells on a line,
          wrapping if needed — avoids the big inter-field gaps and weekday clipping
-         that equal-width columns produce. */
+         that equal-width columns produce. Keeps the base .cat-row column-gap so
+         the first field aligns with the grid rows' first value column. */
       .cat-row-fields {
           display: flex;
           flex-wrap: wrap;
-          column-gap: 20px;
       }
       .cat-row-fields .cat-cell {
           flex: 0 0 auto;
@@ -433,9 +433,6 @@
               flex-wrap: wrap;
               column-gap: 14px;
               align-items: baseline;
-          }
-          .cat-row-fields .cat-cells {
-              column-gap: 20px;   /* match the fields rows' wide-layout gap */
           }
           .cat-row .cat-cell {
               flex: 0 0 auto;

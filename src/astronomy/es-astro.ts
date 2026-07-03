@@ -704,6 +704,17 @@ export function calculateEclipse(
     observerLongitude: number,
     cache: AstroCache | null,
 ): EclipseResult {
+    // Memoized in the location-dependent eclipse slots (like CacheSlot.lst,
+    // valid because a cache is only ever reused with one observer).
+    if (cache && cache.isValid(CacheSlot.eclipseSeparation)) {
+        return {
+            abstractSeparation: cache.get(CacheSlot.eclipseSeparation),
+            angularSeparation: cache.get(CacheSlot.eclipseAngularSeparation),
+            shadowAngularSize: cache.get(CacheSlot.eclipseShadowAngularSize),
+            eclipseKind: cache.get(CacheSlot.eclipseKind) as EclipseKind,
+        };
+    }
+
     const gst = convertUTToGSTP03(dateInterval, cache);
     const lst = convertGSTtoLST(gst, observerLongitude);
     const { julianCenturiesSince2000Epoch } =
@@ -808,6 +819,13 @@ export function calculateEclipse(
     } else if (abstractSeparation > 3) {
         abstractSeparation = 3;
         eclipseKind = solarNotLunar ? EclipseKind.NoneSolar : EclipseKind.NoneLunar;
+    }
+
+    if (cache) {
+        cache.set(CacheSlot.eclipseSeparation, abstractSeparation);
+        cache.set(CacheSlot.eclipseAngularSeparation, physicalSeparation);
+        cache.set(CacheSlot.eclipseShadowAngularSize, shadowAngularSize);
+        cache.set(CacheSlot.eclipseKind, eclipseKind);
     }
 
     return {

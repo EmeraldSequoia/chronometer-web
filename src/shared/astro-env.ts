@@ -827,6 +827,13 @@ export function registerAstroFunctions(
     // distanceFromEarthOfPlanet(n): geocentric distance in AU
     functions.set('distanceFromEarthOfPlanet', (n: number) =>
         liveAstro((cache, di) => planetGeocentricDistance(n as ECPlanetNumber, di, cache)));
+    // distanceFromSunOfPlanet(n): heliocentric distance (orbital radius) in AU.
+    // Companion to distanceFromEarthOfPlanet; same WB series as HLongitude/HLatitude.
+    functions.set('distanceFromSunOfPlanet', (n: number) =>
+        liveAstro((cache, di) => {
+            const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, cache);
+            return WB_planetHeliocentricRadius(n as ECPlanetNumber, julianCenturiesSince2000Epoch / 100, cache);
+        }));
 
     // --- Planet azimuth / altitude / RA (Venezia) ---
     // azimuthOfPlanet(body): topocentric azimuth (radians)
@@ -1222,6 +1229,44 @@ export function registerAstroFunctions(
         const di = dateToDateInterval(getNow());
         return computeLunarAscendingNode(di, null);
     });
+
+    // --- Nearest lunar node (the node the Moon is currently closest to) ---
+    // The Moon is always within 90° of exactly one node; that node is where it
+    // last crossed or will next cross the ecliptic, so it's the one that
+    // matters for eclipses.
+    const moonIsNearDescendingNode = (cache: AstroCache, di: number): boolean => {
+        const asc = computeLunarAscendingNode(di, cache);
+        const moonLon = planetEclipticLongitude(ECPlanetNumber.Moon, di, cache);
+        let d = fmod(moonLon - asc, 2 * Math.PI);
+        if (d < 0) d += 2 * Math.PI;
+        return d > Math.PI / 2 && d < 3 * Math.PI / 2;
+    };
+    const nearestNodeLongitude = (cache: AstroCache, di: number): number => {
+        const asc = computeLunarAscendingNode(di, cache);
+        if (!moonIsNearDescendingNode(cache, di)) return asc;
+        const lon = asc + Math.PI;
+        return lon >= 2 * Math.PI ? lon - 2 * Math.PI : lon;
+    };
+    // lunarNearestNodeLongitude(): geocentric ecliptic longitude of that node.
+    functions.set('lunarNearestNodeLongitude', () =>
+        liveAstro((cache, di) => nearestNodeLongitude(cache, di)));
+    // lunarNearestNodeIsDescending(): 0 = ascending node, 1 = descending.
+    functions.set('lunarNearestNodeIsDescending', () =>
+        liveAstro((cache, di) => moonIsNearDescendingNode(cache, di) ? 1 : 0));
+    // lunarNearestNodeMinusSunLongitude(): that node minus the Sun's geocentric
+    // apparent ecliptic longitude, in [0, 2π). New moons occur at the Sun's
+    // longitude and full moons opposite it, so 0 means new moons fall on this
+    // node and π means full moons do — either way an eclipse season. The
+    // inspector's node-gap cell folds this to a distance from the nearer of
+    // the two, which for the Moon-nearest node is the syzygy the Moon is
+    // actually approaching.
+    functions.set('lunarNearestNodeMinusSunLongitude', () =>
+        liveAstro((cache, di) => {
+            const delta = nearestNodeLongitude(cache, di)
+                - planetEclipticLongitude(ECPlanetNumber.Sun, di, cache);
+            const folded = fmod(delta, 2 * Math.PI);
+            return folded < 0 ? folded + 2 * Math.PI : folded;
+        }));
 
     // --- Moon delta ecliptic longitude at delta day ---
     // Computes moonAge (= moonEclipticLong - sunEclipticLong) at local midnight ± n days.

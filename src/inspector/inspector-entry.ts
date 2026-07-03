@@ -574,6 +574,20 @@ function fmtDeg(v: number): string {
     return `${deg < 0 ? MINUS : ''}${Math.abs(deg).toFixed(2)}°`;
 }
 
+/** Node–syzygy gap: node-minus-Sun longitude → distance from the nearest
+ *  point where new moons (Δ=0) or full moons (Δ=180°) occur. Fed the
+ *  Moon-nearest node, the nearer syzygy is the one the Moon is approaching. */
+function fmtNodeGap(v: number): string {
+    if (!isFinite(v)) return '—';
+    let deg = v * 180 / Math.PI;
+    deg = ((deg % 360) + 360) % 360;
+    const fromNew = Math.min(deg, 360 - deg);
+    const fromFull = Math.abs(deg - 180);
+    return fromNew <= fromFull
+        ? `${fromNew.toFixed(2)}° from new moon`
+        : `${fromFull.toFixed(2)}° from full moon`;
+}
+
 function fmtInt(v: number): string {
     if (!isFinite(v)) return '—';
     return Math.round(v).toString();
@@ -597,6 +611,24 @@ function fmtSec(v: number): string {
 function fmtBool(v: number): string {
     if (!isFinite(v)) return '—';
     return Math.round(v) !== 0 ? 'yes' : 'no';
+}
+
+/** Basel's eclipse-kind wheel text, indexed by the collapsed legacyEclipseKind()
+ *  value (the wheel's blank "no eclipse" slot shown as "None"). */
+const ECLIPSE_KIND_NAMES = [
+    'None', 'Sun not up', 'Partial Solar', 'Annular Solar',
+    'Total Solar', 'Moon not up', 'Partial Lunar', 'Total Lunar',
+];
+
+function fmtEclipseKind(v: number): string {
+    if (!isFinite(v)) return '—';
+    return ECLIPSE_KIND_NAMES[Math.round(v)] ?? '—';
+}
+
+/** Which lunar node the Moon is currently closest to (0/1). */
+function fmtNodeKind(v: number): string {
+    if (!isFinite(v)) return '—';
+    return Math.round(v) !== 0 ? 'Descending' : 'Ascending';
 }
 
 function fmtWeekday(v: number): string {
@@ -673,6 +705,7 @@ function tagIsHtml(tag: Tag): boolean { return tag === 'DIST'; }
 function formatCell(tag: Tag, v: number): string {
     switch (tag) {
         case 'A': return fmtAngle(v);
+        case 'NGAP': return fmtNodeGap(v);
         case 'Ldeg': return fmtDeg(v);
         case 'Num': return fmtNum(v);
         case 'SEC': return fmtSec(v);
@@ -686,6 +719,8 @@ function formatCell(tag: Tag, v: number): string {
         case 'MS': return fmtMS(v);
         case 'LT': return formatDateIntervalTime(v);
         case 'DIST': return fmtDist(v);
+        case 'EK': return fmtEclipseKind(v);
+        case 'ND': return fmtNodeKind(v);
     }
 }
 
