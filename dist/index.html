@@ -133,9 +133,10 @@
       }
 
       /* Cross-app links (Observatory / Inspector) — fixed top-right row left
-         of the ℹ button; hrefs wired by shared/app-nav.ts. Observatory shows
-         its colored app icon — deliberately breaking the monochrome style,
-         since these switch apps (discoverability). */
+         of the ℹ button; hrefs wired by shared/app-nav.ts. Both show their
+         colored app-icon look — deliberately breaking the monochrome style,
+         since these switch apps (discoverability). Inspector's colors match
+         its card in the "Other apps" grid below. */
       #inspector-link {
           position: fixed;
           top: 16px;
@@ -146,11 +147,11 @@
           width: 36px;
           height: 36px;
           border-radius: 50%;
-          background: rgba(255,255,255,0.08);
-          color: #889;
+          background: linear-gradient(145deg, #2a2a48 0%, #1e1e36 100%);
+          color: #5ca0d3;
           text-decoration: none;
           z-index: 10;
-          transition: background 0.2s, color 0.2s;
+          transition: filter 0.2s;
       }
 
       #inspector-link svg {
@@ -160,8 +161,7 @@
       }
 
       #inspector-link:hover {
-          background: rgba(255,255,255,0.15);
-          color: #bbd;
+          filter: brightness(1.35);
       }
 
       #observatory-link {
@@ -1089,7 +1089,7 @@
               <summary>General Help Topics</summary>
               <iframe id="general-help-iframe"></iframe>
             </details>
-            <div id="version-label" style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.9</div>
+            <div id="version-label" style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.10</div>
           </div>
 
           <div id="info-sub-view">

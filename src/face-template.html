@@ -127,8 +127,7 @@
       #selected-faces-link,
       #info-btn,
       #share-btn,
-      #fullscreen-btn,
-      #inspector-link {
+      #fullscreen-btn {
           position: absolute;
           top: 16px;
           display: flex;
@@ -208,8 +207,9 @@
 
       /* Cross-app links (Observatory / Inspector) continue the right-edge
          stack below fullscreen; hrefs are wired by shared/app-nav.ts.
-         Observatory shows its colored app icon — deliberately breaking the
-         monochrome style, since these switch apps (discoverability). */
+         Both show their colored app-icon look — deliberately breaking the
+         monochrome style, since these switch apps (discoverability).
+         Inspector's colors match its card on the index page. */
       #observatory-link {
           position: absolute;
           right: 16px;
@@ -234,8 +234,24 @@
       }
 
       #inspector-link {
+          position: absolute;
           right: 16px;
           top: 192px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          background: linear-gradient(145deg, #2a2a48 0%, #1e1e36 100%);
+          color: #5ca0d3;
+          text-decoration: none;
+          z-index: 10;
+          transition: filter 0.2s;
+      }
+
+      #inspector-link:hover {
+          filter: brightness(1.35);
       }
 
       #inspector-link svg {
@@ -272,8 +288,7 @@
       #selected-faces-link:hover,
       #info-btn:hover,
       #share-btn:hover,
-      #fullscreen-btn:hover,
-      #inspector-link:hover {
+      #fullscreen-btn:hover {
           background: rgba(255, 255, 255, 0.15);
           color: #bbd;
       }

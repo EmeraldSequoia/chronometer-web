@@ -244,8 +244,7 @@
          free-floating top-right circles). */
       #info-btn,
       #share-btn,
-      #fullscreen-btn,
-      #inspector-link {
+      #fullscreen-btn {
           display: flex;
           align-items: center;
           justify-content: center;
@@ -270,16 +269,16 @@
 
       #info-btn:hover,
       #share-btn:hover,
-      #fullscreen-btn:hover,
-      #inspector-link:hover {
+      #fullscreen-btn:hover {
           background: rgba(255, 255, 255, 0.15);
           color: #bbd;
       }
 
       /* Cross-app links (Chronometer / Inspector) — hrefs wired by
-         shared/app-nav.ts. Chronometer shows its colored app icon —
+         shared/app-nav.ts. Both show their colored app-icon look —
          deliberately breaking the monochrome style, since these switch
-         apps (discoverability). */
+         apps (discoverability). Inspector's colors match its card on the
+         index page. */
       #chronometer-link {
           display: block;
           width: 26px;
@@ -296,6 +295,23 @@
       }
 
       #chronometer-link:hover {
+          filter: brightness(1.35);
+      }
+
+      #inspector-link {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 26px;
+          height: 26px;
+          border-radius: 50%;
+          background: linear-gradient(145deg, #2a2a48 0%, #1e1e36 100%);
+          color: #5ca0d3;
+          text-decoration: none;
+          transition: filter 0.2s;
+      }
+
+      #inspector-link:hover {
           filter: brightness(1.35);
       }
 
