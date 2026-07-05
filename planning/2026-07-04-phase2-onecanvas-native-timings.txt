@@ -1,0 +1,143 @@
+&ablate=onecanvas, Chrome
+[scrub-perf] Scrub session ended:
+  - Total expected ticks: 45
+  - Processed ticks: 45
+  - Lost/skipped ticks: 0 (0.0%)
+  - Avg animation FPS: 27.5 (min: 13.4, max: 32.6 over 44 intervals)
+  - Intervals with zero animation frames: 1
+  - Pure Animation Frame Stats (N = 104):
+    - CPU execution: avg 31.75ms (min: 27.00ms, max: 44.10ms)
+    - Flush probe (getImageData on 1 of 16 canvases; incl. readback stall) [DISABLED via ?noprobe]: avg 0.00ms (min: 0.00ms, max: 0.10ms)
+    - Inter-frame interval: avg 32.37ms (min: 28.40ms, max: 45.80ms) -> equivalent to 30.9 FPS
+  - Frame CPU split (all 149 scrub frames): tick(update+astro+animate) avg 5.88ms, render(draw issuance) avg 27.03ms
+  - Ticked: 1563 obsValues across 16 faces (98/face) · canvas 535px
+  - Master rise/set search: 4300 computes / 142912 calls (28.9 computes/frame, 97% cache hit), 0.015ms/search, 0.43ms/frame, 65ms total
+  - Day/night leaf calc: 143266 calls (962/frame), 0.8µs/call, 0.76ms/frame (= the share of tick eval spent in day/night wedge astronomy)
+  - Tick attribution (avg/frame): update 5.86ms [eval 3.88 · boundary 1.07 · interp 0.18 · rest 0.73], animate(2nd interp) 0.02ms · 2.2µs/eval (261707 evals)
+  - Environment: Chrome 149 · dpr 2 (backing 2) · 16 canvases @ 535px CSS / 1070px phys · window 3359×1739 · display quantum ~4.2ms median / 3.7ms min (~238Hz est) · shared canvas 6718×3307px phys · flags onecanvas,noprobe
+  - Frame classes (flush probe excluded): tick N=45 · body CPU avg 39.13ms (max 73.4) [update 9.68 · render 26.03] || anim N=104 · body CPU avg 32.03ms (max 44.4) [update 4.24 · render 27.46]
+  - Faces animating (of 16): at tick frames avg 16.0 (min 16, max 16) · between ticks avg 16.0 (min 16, max 16) (= faces Phase-1B idle-face skipping would still render)
+  - Post-callback slack (rAF gap minus our JS): after tick avg 1.40ms (min 0.6, max 6.9) · after anim avg 1.09ms (min 0.6, max 6.0) (after-anim slack follows the flush probe)
+  - Intervals by preceding frame class: after tick avg 40.65ms (min 30.4, max 74.7) · after anim avg 33.12ms (min 28.1, max 45.8)
+  - Interval histogram (ms:count, 2ms buckets): after-tick 30:1 32:5 34:10 36:10 38:7 40:2 42:1 44:1 46:1 62:1 70:1 72:1 74:3 | after-anim 28:9 30:24 32:36 34:11 36:7 38:5 40:6 42:3 44:2 46:1
+  - Per-face avg ms/frame (render+update), ranked by render: Milano I 7.47+0.02 · Chandra I 6.99+0.10 · Terra I 5.20+0.76 · Basel I 3.38+0.20 · Selene I 0.61+1.26 · Babylon I 0.54+0.16 · Gaia I 0.41+0.53 · Venezia I 0.38+0.33 · Geneva I 0.36+0.37 · Mauna Kea I 0.32+0.19 · Vienna I 0.31+0.13 · Kyoto 0.28+0.90 · Miami I 0.23+0.23 · Firenze I 0.20+0.05 · Hana I 0.20+0.62 · Haleakala I 0.15+0.03
+
+&ablate=onecanvas, Chrome
+[scrub-perf] Scrub session ended:
+  - Total expected ticks: 53
+  - Processed ticks: 53
+  - Lost/skipped ticks: 0 (0.0%)
+  - Avg animation FPS: 26.7 (min: 12.5, max: 33.3 over 53 intervals)
+  - Intervals with zero animation frames: 0
+  - Pure Animation Frame Stats (N = 117):
+    - CPU execution: avg 33.35ms (min: 26.20ms, max: 53.80ms)
+    - Flush probe (getImageData on 1 of 16 canvases; incl. readback stall) [DISABLED via ?noprobe]: avg 0.00ms (min: 0.00ms, max: 0.10ms)
+    - Inter-frame interval: avg 33.58ms (min: 27.20ms, max: 49.20ms) -> equivalent to 29.8 FPS
+  - Frame CPU split (all 170 scrub frames): tick(update+astro+animate) avg 6.23ms, render(draw issuance) avg 28.15ms
+  - Ticked: 1563 obsValues across 16 faces (98/face) · canvas 535px
+  - Master rise/set search: 5027 computes / 163865 calls (29.6 computes/frame, 97% cache hit), 0.016ms/search, 0.46ms/frame, 79ms total
+  - Day/night leaf calc: 164275 calls (966/frame), 0.8µs/call, 0.79ms/frame (= the share of tick eval spent in day/night wedge astronomy)
+  - Tick attribution (avg/frame): update 6.21ms [eval 4.10 · boundary 1.12 · interp 0.25 · rest 0.75], animate(2nd interp) 0.02ms · 2.3µs/eval (299280 evals)
+  - Environment: Chrome 149 · dpr 2 (backing 2) · 16 canvases @ 535px CSS / 1070px phys · window 3359×1739 · display quantum ~4.2ms median / 3.7ms min (~238Hz est) · shared canvas 6718×3307px phys · flags onecanvas,noprobe
+  - Frame classes (flush probe excluded): tick N=53 · body CPU avg 40.18ms (max 78.9) [update 10.08 · render 26.67] || anim N=117 · body CPU avg 33.64ms (max 54.1) [update 4.49 · render 28.83]
+  - Faces animating (of 16): at tick frames avg 16.0 (min 16, max 16) · between ticks avg 16.0 (min 16, max 16) (= faces Phase-1B idle-face skipping would still render)
+  - Post-callback slack (rAF gap minus our JS): after tick avg 1.37ms (min 0.6, max 6.1) · after anim avg 1.11ms (min 0.6, max 6.3) (after-anim slack follows the flush probe)
+  - Intervals by preceding frame class: after tick avg 41.55ms (min 28.7, max 79.8) · after anim avg 34.57ms (min 27.2, max 49.2)
+  - Interval histogram (ms:count, 2ms buckets): after-tick 28:1 30:1 32:9 34:8 36:10 38:6 40:6 42:1 46:1 48:1 54:1 62:2 68:1 72:2 74:1 76:1 80:1 | after-anim 28:1 30:20 32:31 34:19 36:14 38:16 40:8 42:1 44:1 46:1 48:2 50:2
+  - Per-face avg ms/frame (render+update), ranked by render: Milano I 7.54+0.02 · Chandra I 7.30+0.
+
+&ablate=onecanvas, Chrome
+[scrub-perf] Scrub session ended:
+  - Total expected ticks: 57
+  - Processed ticks: 57
+  - Lost/skipped ticks: 0 (0.0%)
+  - Avg animation FPS: 25.8 (min: 12.9, max: 30.5 over 56 intervals)
+  - Intervals with zero animation frames: 1
+  - Pure Animation Frame Stats (N = 113):
+    - CPU execution: avg 35.13ms (min: 30.00ms, max: 52.00ms)
+    - Flush probe (getImageData on 1 of 16 canvases; incl. readback stall) [DISABLED via ?noprobe]: avg 0.00ms (min: 0.00ms, max: 0.10ms)
+    - Inter-frame interval: avg 36.52ms (min: 31.00ms, max: 51.60ms) -> equivalent to 27.4 FPS
+  - Frame CPU split (all 170 scrub frames): tick(update+astro+animate) avg 6.52ms, render(draw issuance) avg 29.64ms
+  - Ticked: 1563 obsValues across 16 faces (98/face) · canvas 535px
+  - Master rise/set search: 5382 computes / 168011 calls (31.7 computes/frame, 97% cache hit), 0.016ms/search, 0.49ms/frame, 84ms total
+  - Day/night leaf calc: 168449 calls (991/frame), 0.9µs/call, 0.88ms/frame (= the share of tick eval spent in day/night wedge astronomy)
+  - Tick attribution (avg/frame): update 6.49ms [eval 4.29 · boundary 1.23 · interp 0.23 · rest 0.75], animate(2nd interp) 0.02ms · 2.4µs/eval (302939 evals)
+  - Environment: Chrome 149 · dpr 2 (backing 2) · 16 canvases @ 535px CSS / 1070px phys · window 3359×1739 · display quantum ~4.2ms median / 3.6ms min (~238Hz est) · shared canvas 6718×3307px phys · flags onecanvas,noprobe
+  - Frame classes (flush probe excluded): tick N=57 · body CPU avg 41.02ms (max 99.6) [update 10.33 · render 27.95] || anim N=113 · body CPU avg 35.44ms (max 52.2) [update 4.60 · render 30.50]
+  - Faces animating (of 16): at tick frames avg 16.0 (min 16, max 16) · between ticks avg 16.0 (min 16, max 16) (= faces Phase-1B idle-face skipping would still render)
+  - Post-callback slack (rAF gap minus our JS): after tick avg 1.49ms (min 0.7, max 6.1) · after anim avg 1.06ms (min 0.6, max 6.2) (after-anim slack follows the flush probe)
+  - Intervals by preceding frame class: after tick avg 42.51ms (min 33.1, max 101.4) · after anim avg 36.48ms (min 31.0, max 53.1)
+  - Interval histogram (ms:count, 2ms buckets): after-tick 34:3 36:8 38:13 40:15 42:6 44:3 46:3 50:1 54:1 68:1 70:1 78:1 102:1 | after-anim 32:21 34:31 36:21 38:20 40:7 42:2 44:2 46:1 48:4 52:2 54:1
+  - Per-face avg ms/frame (render+update), ranked by render: Milano I 7.87+0.01 · Chandra I 7.65+0.12 · Terra I 6.09+0.81 · Basel I 3.74+0.27 · Selene I 0.64+1.37 · Babylon I 0.56+0.17 · Gaia I 0.45+0.59 · Venezia I 0.41+0.38 · Geneva I 0.38+0.44 · Vienna I 0.33+0.15 · Mauna Kea I 0.33+0.20 · Kyoto 0.31+0.99 · Miami I 0.29+0.27 · Firenze I 0.23+0.06 · Hana I 0.21+0.66 · Haleakala I 0.14+0.04
+
+&ablate=onecanvas, Safari
+[scrub-perf] Scrub session ended:
+  - Total expected ticks: 48
+  - Processed ticks: 48
+  - Lost/skipped ticks: 0 (0.0%)
+  - Avg animation FPS: 40.7 (min: 31.6, max: 44.4 over 48 intervals)
+  - Intervals with zero animation frames: 0
+  - Pure Animation Frame Stats (N = 178):
+    - CPU execution: avg 12.64ms (min: 10.00ms, max: 18.00ms)
+    - Flush probe (getImageData on 1 of 16 canvases; incl. readback stall) [DISABLED via ?noprobe]: avg 0.01ms (min: 0.00ms, max: 1.00ms)
+    - Inter-frame interval: avg 23.47ms (min: 21.00ms, max: 32.00ms) -> equivalent to 42.6 FPS
+  - Frame CPU split (all 226 scrub frames): tick(update+astro+animate) avg 3.73ms, render(draw issuance) avg 9.58ms
+  - Ticked: 1563 obsValues across 16 faces (98/face) · canvas 536px
+  - Master rise/set search: 4577 computes / 193818 calls (20.3 computes/frame, 98% cache hit), 0.009ms/search, 0.17ms/frame, 39ms total
+  - Day/night leaf calc: 194201 calls (859/frame), 0.4µs/call, 0.34ms/frame (= the share of tick eval spent in day/night wedge astronomy)
+  - Tick attribution (avg/frame): update 3.70ms [eval 2.92 · boundary 0.54 · interp 0.05 · rest 0.19], animate(2nd interp) 0.01ms · 1.7µs/eval (379532 evals)
+  - Environment: Safari 26.5 · dpr 2 (backing 2) · 16 canvases @ 536px CSS / 1072px phys · window 3360×1745 · display quantum ~19.0ms median / 1.0ms min (~53Hz est) · shared canvas 6720×3316px phys · flags onecanvas,noprobe
+  - Frame classes (flush probe excluded): tick N=48 · body CPU avg 18.90ms (max 30.0) [update 6.21 · render 9.63] || anim N=178 · body CPU avg 13.01ms (max 19.0) [update 3.06 · render 9.56]
+  - Faces animating (of 16): at tick frames avg 16.0 (min 16, max 16) · between ticks avg 16.0 (min 16, max 16) (= faces Phase-1B idle-face skipping would still render)
+  - Post-callback slack (rAF gap minus our JS): after tick avg 8.48ms (min 6.0, max 17.0) · after anim avg 10.71ms (min 7.0, max 21.0) (after-anim slack follows the flush probe)
+  - Intervals by preceding frame class: after tick avg 27.38ms (min 23.0, max 45.0) · after anim avg 23.73ms (min 21.0, max 33.0)
+  - Interval histogram (ms:count, 2ms buckets): after-tick 24:10 26:26 28:5 30:2 34:1 42:2 44:1 46:1 | after-anim 20:2 22:51 24:90 26:12 28:13 30:5 32:3 34:1
+  - Per-face avg ms/frame (render+update), ranked by render: Selene I 1.20+0.73 · Babylon I 1.20+0.17 · Gaia I 1.00+0.35 · Venezia I 0.90+0.23 · Terra I 0.73+0.65 · Chandra I 0.63+0.06 · Mauna Kea I 0.57+0.12 · Vienna I 0.54+0.07 · Kyoto 0.52+0.49 · Geneva I 0.52+0.21 · Basel I 0.45+0.11 · Hana I 0.39+0.38 · Firenze I 0.32+0.03 · Haleakala I 0.28+0.01 · Miami I 0.26+0.13 · Milano I 0.06+0.01
+
+&ablate=onecanvas, Safari
+[scrub-perf] Scrub session ended:
+  - Total expected ticks: 52
+  - Processed ticks: 51
+  - Lost/skipped ticks: 1 (1.9%)
+  - Avg animation FPS: 28.6 (min: 12.2, max: 34.9 over 44 intervals)
+  - Intervals with zero animation frames: 7
+  - Pure Animation Frame Stats (N = 114):
+    - CPU execution: avg 23.96ms (min: 20.00ms, max: 56.00ms)
+    - Flush probe (getImageData on 1 of 16 canvases; incl. readback stall) [DISABLED via ?noprobe]: avg 0.00ms (min: 0.00ms, max: 0.00ms)
+    - Inter-frame interval: avg 28.54ms (min: 24.00ms, max: 67.00ms) -> equivalent to 35.0 FPS
+  - Frame CPU split (all 165 scrub frames): tick(update+astro+animate) avg 14.95ms, render(draw issuance) avg 18.12ms
+  - Ticked: 1563 obsValues across 16 faces (98/face) · canvas 536px
+  - Master rise/set search: 4842 computes / 157188 calls (29.3 computes/frame, 97% cache hit), 0.070ms/search, 2.05ms/frame, 339ms total
+  - Day/night leaf calc: 157574 calls (955/frame), 3.3µs/call, 3.19ms/frame (= the share of tick eval spent in day/night wedge astronomy)
+  - Tick attribution (avg/frame): update 14.87ms [eval 10.57 · boundary 3.08 · interp 0.21 · rest 1.01], animate(2nd interp) 0.08ms · 6.0µs/eval (289705 evals)
+  - Environment: Safari 26.5 · dpr 2 (backing 2) · 16 canvases @ 536px CSS / 1072px phys · window 3360×1745 · display quantum ~4.0ms median / 2.0ms min (~250Hz est) · shared canvas 6720×3316px phys · flags onecanvas,noprobe
+  - Frame classes (flush probe excluded): tick N=51 · body CPU avg 58.00ms (max 217.0) [update 33.92 · render 19.61] || anim N=114 · body CPU avg 24.58ms (max 56.0) [update 6.46 · render 17.45]
+  - Faces animating (of 16): at tick frames avg 16.0 (min 16, max 16) · between ticks avg 16.0 (min 16, max 16) (= faces Phase-1B idle-face skipping would still render)
+  - Post-callback slack (rAF gap minus our JS): after tick avg 3.98ms (min 3.0, max 19.0) · after anim avg 4.06ms (min 3.0, max 19.0) (after-anim slack follows the flush probe)
+  - Intervals by preceding frame class: after tick avg 58.80ms (min 34.0, max 206.0) · after anim avg 28.64ms (min 24.0, max 67.0)
+  - Interval histogram (ms:count, 2ms buckets): after-tick 34:1 36:6 38:14 40:4 42:1 44:2 46:3 48:1 52:2 56:2 58:2 62:2 66:1 68:1 70:1 82:1 108:1 120:1 142:1 182:1 196:1 206:1 | after-anim 24:4 26:44 28:36 30:8 32:8 34:6 36:3 44:1 46:2 48:1 68:1
+  - Per-face avg ms/frame (render+update), ranked by render: Babylon I 3.02+0.34 · Selene I 2.15+2.64 · Gaia I 1.70+1.68 · Venezia I 1.65+0.95 · Terra I 1.27+1.00 · Mauna Kea I 1.15+0.51 · Vienna I 1.14+0.44 · Chandra I 0.94+0.23 · Kyoto 0.94+2.93 · Geneva I 0.87+1.15 · Hana I 0.87+1.48 · Firenze I 0.79+0.09 · Basel I 0.73+0.72 · Miami I 0.43+0.68 · Haleakala I 0.39+0.08 · Milano I 0.08+0.02
+
+&ablate=onecanvas, Safari
+[scrub-perf] Scrub session ended:
+  - Total expected ticks: 66
+  - Processed ticks: 66
+  - Lost/skipped ticks: 0 (0.0%)
+  - Avg animation FPS: 38.4 (min: 21.3, max: 44.0 over 65 intervals)
+  - Intervals with zero animation frames: 1
+  - Pure Animation Frame Stats (N = 224):
+    - CPU execution: avg 17.01ms (min: 15.00ms, max: 35.00ms)
+    - Flush probe (getImageData on 1 of 16 canvases; incl. readback stall) [DISABLED via ?noprobe]: avg 0.00ms (min: 0.00ms, max: 0.00ms)
+    - Inter-frame interval: avg 22.37ms (min: 19.00ms, max: 42.00ms) -> equivalent to 44.7 FPS
+  - Frame CPU split (all 290 scrub frames): tick(update+astro+animate) avg 7.92ms, render(draw issuance) avg 11.25ms
+  - Ticked: 1563 obsValues across 16 faces (98/face) · canvas 536px
+  - Master rise/set search: 6223 computes / 249805 calls (21.5 computes/frame, 98% cache hit), 0.023ms/search, 0.50ms/frame, 145ms total
+  - Day/night leaf calc: 250311 calls (863/frame), 1.2µs/call, 1.02ms/frame (= the share of tick eval spent in day/night wedge astronomy)
+  - Tick attribution (avg/frame): update 7.84ms [eval 5.68 · boundary 1.35 · interp 0.23 · rest 0.57], animate(2nd interp) 0.07ms · 3.4µs/eval (489159 evals)
+  - Environment: Safari 26.5 · dpr 2 (backing 2) · 16 canvases @ 536px CSS / 1072px phys · window 3360×1745 · display quantum ~4.0ms median / 2.0ms min (~250Hz est) · shared canvas 6720×3316px phys · flags onecanvas,noprobe
+  - Frame classes (flush probe excluded): tick N=66 · body CPU avg 30.62ms (max 49.0) [update 15.23 · render 11.39] || anim N=224 · body CPU avg 17.46ms (max 36.0) [update 5.77 · render 11.21]
+  - Faces animating (of 16): at tick frames avg 16.0 (min 16, max 16) · between ticks avg 16.0 (min 16, max 16) (= faces Phase-1B idle-face skipping would still render)
+  - Post-callback slack (rAF gap minus our JS): after tick avg 4.49ms (min 3.0, max 41.0) · after anim avg 5.00ms (min 3.0, max 13.0) (after-anim slack follows the flush probe)
+  - Intervals by preceding frame class: after tick avg 35.08ms (min 30.0, max 71.0) · after anim avg 22.46ms (min 19.0, max 42.0)
+  - Interval histogram (ms:count, 2ms buckets): after-tick 30:6 32:26 34:16 36:5 38:4 40:1 48:3 50:1 52:1 54:1 72:1 | after-anim 20:31 22:122 24:40 26:17 28:6 30:5 32:2 42:1
+  - Per-face avg ms/frame (render+update), ranked by render: Selene I 1.43+1.63 · Babylon I 1.42+0.29 · Gaia I 1.09+0.69 · Venezia I 1.06+0.47 · Terra I 0.89+0.88 · Geneva I 0.70+0.56 · Mauna Kea I 0.69+0.28 · Kyoto 0.63+1.32 · Chandra I 0.62+0.19 · Vienna I 0.58+0.18 · Hana I 0.52+0.85 · Basel I 0.47+0.20 · Firenze I 0.43+0.05 · Miami I 0.38+0.25 · Haleakala I 0.25+0.06 · Milano I 0.09+0.02
