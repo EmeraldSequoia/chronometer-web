@@ -2,7 +2,7 @@
 
 Web ports of [Emerald Chronometer](https://github.com/EmeraldSequoia/Chronometer) and [Emerald Observatory](https://github.com/EmeraldSequoia/Observatory), the astronomical watch-face and astronomical clock apps originally built for iPhone and iPad in Objective-C, C++, and C. This project re-implements both apps entirely in TypeScript, rendering animated watch faces and an astronomical clock to HTML Canvas. Like the original iOS apps, it requires **no backend server** — everything runs completely in the browser using only the device's clock and location (while the location is being set a map will be displayed using OpenStreetMap if the internet is available, but it is not required for any functionality).
 
-The original iOS apps were developed by Steve Pucci and Bill Arnett of [Emerald Sequoia LLC](https://emeraldsequoia.com); Emerald Chronometer was one of the first 500 apps in the App Store in 2008. The iOS apps have **a new owner** and can be found [here](https://www.scapaflowllc.com/new-page-1).
+The original iOS apps were developed by Steve Pucci and Bill Arnett of [Emerald Sequoia LLC](https://emeraldsequoia.com). Emerald Chronometer was one of the first 500 apps in the App Store in 2008, and Observatory was one of the first apps for the iPad. The iOS apps have **new owners** and the owner for Emerald Chronometer can be found [here](https://www.scapaflowllc.com/new-page-1).
 
 This project (the web version here) is under very active development as of May 2026.
 
@@ -19,7 +19,8 @@ Every page links to the other apps via the icons in the top-right corner, and yo
 ## How to Run
 
 ### Option 1: Run from a server that serves the static files needed:
-* https://spucci.us/ecweb/
+* https://spucci.us/ecweb (Chronometer)
+* https://spucci.us/ecweb/observatory.html (Observatory)
 * Add your server here! We're looking for volunteers to host mirror sites to host the static files. All we need is a directory on your server to host the files in dist/ and serve them over https. (See option 3 for details on how to do this).
 
 ### Option 2: Download and open locally
@@ -48,7 +49,7 @@ The build requires **Node.js ≥ 22** (pinned in `package.json` `engines` and `.
 
 This produces the `dist/` directory containing all HTML, JS, and image assets.
 
-### URL parameters
+### Session storage
 
 Settings normally live in the browser's local storage — shared by Chronometer, Observatory, and the Inspector — and the address bar stays clean. The **Share** button builds a URL that encodes the current view for sending to another person or device; opening such a link lets you use the settings just for that visit or save them as your defaults. You can also pass these parameters by hand to control the observer location:
 
@@ -59,8 +60,6 @@ Settings normally live in the browser's local storage — shared by Chronometer,
 | `city` | Display label for the location (URL-encoded) |
 | `bloc` | Set to `1` to always request the browser's location on startup |
 
-If `lat` and `lon` are present, they are used directly. If only `bloc=1` is set, the app asks the browser for its location (which may trigger a permission prompt). If none of these are set, the app opens the location settings panel.
-
 For example:
 
 ```
@@ -70,6 +69,8 @@ file:///path/to/dist/index.html?bloc=1
 ```
 
 Share links may carry additional app-specific parameters (time state, face selection, Observatory's noon-on-top, and so on); those are best produced with the Share button rather than by hand.
+
+If no location is set in local storage or via the URL, the app opens the location settings panel at startup.
 
 ### Keyboard shortcuts
 
@@ -129,7 +130,7 @@ The project is a pure client-side monorepo — three apps over one shared engine
 
 ## Credits
 
-**Emerald Chronometer** (the iOS app) was created by **Steve Pucci** and **Bill Arnett** of [Emerald Sequoia LLC](https://emeraldsequoia.com). **Emerald Observatory** (the iPad app) was created by **Bill Arnett** and **Steve Pucci** of the same. This web version was ported to TypeScript from the [iOS app source](https://github.com/EmeraldSequoia/Chronometer) by [Steve Pucci](https://github.com/slpucci) with AI assistance, mostly from Claude, and much invaluable advice from Bill Arnett.
+**Emerald Chronometer** (the iOS app) was created by **Steve Pucci** and **Bill Arnett** of [Emerald Sequoia LLC](https://emeraldsequoia.com). **Emerald Observatory** (the iPad app) was created by **Bill Arnett** and **Steve Pucci** of the same. This web version was ported to TypeScript from the iOS app source ([Chronometer](https://github.com/EmeraldSequoia/Chronometer), [Observatory](https://github.com/EmeraldSequoia/Observatory)) by [Steve Pucci](https://github.com/slpucci) with AI assistance, mostly from Claude, and much invaluable advice from Bill Arnett.
 
 ### Astronomical algorithms
 
