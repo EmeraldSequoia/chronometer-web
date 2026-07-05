@@ -340,7 +340,13 @@ export function buildAnalemmaValues(
         expr: 'analemmaPathParameter()',
         updateInterval: state.updateIntervalSec,
         period: PATH_SAMPLE_COUNT,
-        animSpeed: ANGLE_BASE_SPEED,
+        // animSpeed is in value-units/sec and ANGLE_BASE_SPEED is calibrated
+        // for radian-period (~2π) values; pathParam's period is
+        // PATH_SAMPLE_COUNT, so scale to the same *angular* rate. Un-scaled,
+        // the speed-based snap after a step crawled at ~6 units/s — a month
+        // step (~82 units) kept the value `animating` for ~13 s, blocking
+        // beat sweeps and freezing the Sun through entire month-scrubs.
+        animSpeed: ANGLE_BASE_SPEED * (PATH_SAMPLE_COUNT / (2 * Math.PI)),
         onBeat: ON_BEAT,
     }, env, perfNow));
     state._obsRotation = updater.add(createObsValue({

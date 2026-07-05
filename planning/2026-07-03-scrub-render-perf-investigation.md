@@ -1,15 +1,13 @@
 # Scrub render performance: investigation plan (all-faces page)
 
-*2026-07-03, updated 2026-07-04* · **Status: investigation complete through the
-Phase 3 ceiling. Native verdict: Chrome onecanvas+facebuffers = 92–97 fps (gate
-cleared, ~60% headroom); Safari = 57 fps in its fast CPU state with tick-frame
-eval now the binder. Content mix measured: Wheel 45% / Terminator 23% /
-QHand(vector) 12% of issuance — `drawWheel` is uncached (per-frame measureText
-+ fillText per digit) and is the top production target. Production order:
-wheel-bitmap cache (✅ implemented 2026-07-04, on by default, kill-switch
-`?ablate=nowheelcache`) → sandwich buffers → tick-stagger → terminator. See
-[2026-07-04-phase3-face-buffer-caching.md](2026-07-04-phase3-face-buffer-caching.md)
-"Ceiling results".**
+*2026-07-03, updated 2026-07-05* · **Status: CHROME TARGET ACHIEVED — ~72 fps
+at no-flag baseline (was 29), delivered by the wheel glyph-atlas cache (worth
+~47 fps: per-frame glyph *rasterization*, not issuance, was the dominant cost)
+plus the probe fix (probe was a live user-facing bug: sticky quarter-rate
+Chrome throttle; now opt-in `?probe`). Safari remains 20–33 fps — next:
+Terminator/vector-hand appearance caches → production onecanvas → sandwich →
+tick-stagger (see "Re-baseline"). Memory ledger validated native==VM;
+269 MB baseline / 355 MB with onecanvas at 4K.**
 
 Follow-on to the scrub CPU work (eval/boundary/rise-set caching), which brought
 scrub-by-day on all.html to ~27 fps. This plan covers the *rendering* side:
@@ -609,6 +607,45 @@ geometry IS):**
 - Phase 3 doc open question 4 is answered: buffers are affordable at 4K only
   with the above offsets; **scrub-session-scoped allocation** (alloc on scrub
   start, free on end) is the recommended shape.
+
+## Re-baseline (2026-07-05, post-atlas post-probe-fix): Chrome target ACHIEVED at baseline
+
+Raw data: [2026-07-05-rebaseline-native-timings.txt](2026-07-05-rebaseline-native-timings.txt)
+(no-flag baseline / `nowheelcache` / `onecanvas`; Safari ×3+2+2, Chrome ×2+2+2).
+
+| config | Chrome fps | Safari fps |
+|---|---|---|
+| baseline (atlas wheels, probe off) | **73.6 / 70.9** | 33.4 / 25.4 / 20.2 |
+| nowheelcache | 25.2 / 24.9 | 20.0 / 22.3 |
+| onecanvas | 70.7 / 68.5 | 26.5 / 30.2 |
+
+**Chrome: 29 → ~72 fps at baseline — the 60 fps goal is met with no flags and no
+structural change.** The decomposition: anim frames 12.3–12.6 ms intervals
+(~80 fps), slack collapsed 25.8 → **4.5 ms**, and the wheel A/B shows the cause:
+`nowheelcache` restores 25 fps with 22–28 ms slack. **The wheel cache alone was
+worth ~47 fps in Chrome — and almost none of it was issuance.** Refined model:
+Chrome's "content-proportional raster-prep" was dominated by **per-frame glyph
+rasterization** (cheap to issue, brutal to raster) — which is why nobezel
+(gradients) did nothing while wheels (text) were everything, and why issuance
+metrics under-weighted them all along. onecanvas confirmed neutral in Chrome.
+
+**Safari: still the laggard (20–33 fps, CPU-state-dependent).** Atlas saves
+~3 ms issuance (Wheel 5.1 → 1.6–2.3); slack improved to ~14–16; onecanvas adds
+~+5 fps. Remaining Safari binders: per-layer commits (onecanvas needed),
+issuance (Terminator now the top part type at 2.5–3.0 ms, QHand(vector)
+1.4–1.8), tick-frame eval (~18 ms, stagger), and its bimodal CPU state (not
+ours to fix). Phones run WebKit, so this work doubles as the phone-tier path.
+
+**Memory ledger validated cross-machine:** native baseline 269–270 MB ==
+VM 4K-profile prediction (269.3); onecanvas +84.9 shared canvas = 354.9;
+wheel cache 5.4 native ✓.
+
+**Revised roadmap:** Chrome — done at desktop; headroom available via tick
+frames if ever needed. Safari/phones — (1) extend the appearance-cache pattern
+to Terminator leaves and vector hands (same recipe as wheels; their raster
+cost likely exceeds their issuance, per the text-raster lesson), (2)
+production onecanvas, (3) sandwich buffers, (4) tick-stagger. Re-measure after
+(1) — if the raster-side wins repeat, the sandwich's scope may shrink further.
 
 ## Phase 2 — Primitive attribution (only where Phase 1 leaves questions)
 
