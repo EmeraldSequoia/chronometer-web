@@ -14939,17 +14939,30 @@ return {${names2.join(",")}};`;
         drawBackground(ctx, state);
       }
     }
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(0, 0, radius, 0, Math.PI * 2);
-    ctx.clip();
-    ctx.rotate(currentRotation);
+    const m = ctx.getTransform();
+    const devScale = Math.hypot(m.a, m.b) || 1;
+    const pxSize = Math.max(2, Math.ceil(radius * 2 * devScale));
+    let scratch = state._scratchCanvas;
+    if (!scratch || scratch.width !== pxSize || scratch.height !== pxSize) {
+      scratch = new OffscreenCanvas(pxSize, pxSize);
+      state._scratchCanvas = scratch;
+    }
+    const sctx = scratch.getContext("2d");
+    sctx.resetTransform();
+    sctx.clearRect(0, 0, pxSize, pxSize);
+    sctx.save();
+    sctx.translate(pxSize / 2, pxSize / 2);
+    sctx.scale(devScale, devScale);
+    sctx.beginPath();
+    sctx.arc(0, 0, radius, 0, Math.PI * 2);
+    sctx.clip();
+    sctx.rotate(currentRotation);
     if (state.channelBitmap) {
-      ctx.drawImage(state.channelBitmap, -radius, -radius, radius * 2, radius * 2);
+      sctx.drawImage(state.channelBitmap, -radius, -radius, radius * 2, radius * 2);
     }
     if (state.sunBitmap) {
       const [sunX, sunY] = pathParamToXY(state.pathScaled, pathParameter);
-      ctx.drawImage(
+      sctx.drawImage(
         state.sunBitmap,
         sunX - state.sunBitmapAnchorX,
         -sunY - state.sunBitmapAnchorY,
@@ -14957,7 +14970,8 @@ return {${names2.join(",")}};`;
         state.sunBitmapH
       );
     }
-    ctx.restore();
+    sctx.restore();
+    ctx.drawImage(scratch, -radius, -radius, radius * 2, radius * 2);
     ctx.restore();
   }
   function drawBackground(ctx, state) {
@@ -15983,16 +15997,43 @@ return {${names2.join(",")}};`;
     part._shadowBitmapW = bboxW;
     part._shadowBitmapH = bboxH;
   }
-  function renderFrame(ctx, watch, env, scale, images, terminatorLeaves, analemmaState) {
-    const w = ctx.canvas.width;
-    const h = ctx.canvas.height;
-    ctx.clearRect(0, 0, w, h);
+  var _faceOriginX = 0;
+  var _faceOriginY = 0;
+  function renderFrame(ctx, watch, env, scale, images, terminatorLeaves, analemmaState, opts) {
+    const w = opts?.w ?? ctx.canvas.width;
+    const h = opts?.h ?? ctx.canvas.height;
+    const x = opts?.x ?? 0;
+    const y = opts?.y ?? 0;
+    _faceOriginX = x;
+    _faceOriginY = y;
     ctx.save();
-    ctx.translate(w / 2, h / 2);
+    if (opts?.clipToCircle) {
+      ctx.beginPath();
+      ctx.arc(x + w / 2, y + h / 2, Math.min(w, h) / 2, 0, Math.PI * 2);
+      ctx.clip();
+    }
+    ctx.clearRect(x, y, w, h);
+    ctx.translate(x + w / 2, y + h / 2);
     ctx.scale(scale, scale);
     renderPartsDocumentOrder(ctx, watch.parts, env, w, h, scale, images, terminatorLeaves, analemmaState);
-    drawBezel(ctx, watch);
+    if (!opts?.noBezel) drawBezel(ctx, watch);
     ctx.restore();
+    _faceOriginX = 0;
+    _faceOriginY = 0;
+  }
+  var _partProfEnabled = false;
+  var _partProfMs = /* @__PURE__ */ new Map();
+  function setPartProfiling(v) {
+    _partProfEnabled = v;
+  }
+  function resetPartProfile() {
+    _partProfMs.clear();
+  }
+  function getPartProfile() {
+    return _partProfMs;
+  }
+  function _ppAdd(key, t0) {
+    _partProfMs.set(key, (_partProfMs.get(key) ?? 0) + (performance.now() - t0));
   }
   function renderPartsDocumentOrder(ctx, parts, env, canvasWidth, canvasHeight, scale, images, terminatorLeaves, analemmaState) {
     const pendingWindows = [];
@@ -16004,13 +16045,15 @@ return {${names2.join(",")}};`;
       if (part.type === "Button") continue;
       if (part.type === "Static") {
         pendingWindows.length = 0;
+        const _t02 = _partProfEnabled ? performance.now() : 0;
         if (part.cachedCanvas) {
           ctx.save();
-          ctx.resetTransform();
+          ctx.setTransform(1, 0, 0, 1, _faceOriginX, _faceOriginY);
           ctx.drawImage(part.cachedCanvas, 0, 0);
           ctx.restore();
         }
         drawQHandsInParts(ctx, part.children, env, images);
+        if (_partProfEnabled) _ppAdd("Static(blit)", _t02);
         continue;
       }
       if (part.type === "QHand") {
@@ -16018,27 +16061,36 @@ return {${names2.join(",")}};`;
           drawWindowBorder(ctx, win, env);
         }
         pendingWindows.length = 0;
+        const _t02 = _partProfEnabled ? performance.now() : 0;
         if (part.special === "specialWorldtime") {
           drawTerraRingWithKnockouts(ctx, part, env, images);
           drawTerraChannelLines(ctx, part, env);
+          if (_partProfEnabled) _ppAdd("QHand(terra)", _t02);
         } else if (part.special === "specialSubdial") {
           drawGaiaSubdial(ctx, part, env, images);
+          if (_partProfEnabled) _ppAdd("QHand(subdial)", _t02);
         } else if (part.src && images) {
           drawImageHand(ctx, part, env, images);
+          if (_partProfEnabled) _ppAdd("QHand(image)", _t02);
         } else {
           drawQHand(ctx, part, env);
+          if (_partProfEnabled) _ppAdd("QHand(vector)", _t02);
         }
         continue;
       }
       if (part.type === "Terminator") {
         if (terminatorLeaves && terminatorLeaves.length > 0) {
+          const _t02 = _partProfEnabled ? performance.now() : 0;
           drawTerminator(ctx, terminatorLeaves);
+          if (_partProfEnabled) _ppAdd("Terminator", _t02);
         }
         continue;
       }
       if (part.type === "Analemma") {
         if (analemmaState) {
+          const _t02 = _partProfEnabled ? performance.now() : 0;
           drawAnalemma(ctx, analemmaState);
+          if (_partProfEnabled) _ppAdd("Analemma", _t02);
         }
         continue;
       }
@@ -16047,9 +16099,12 @@ return {${names2.join(",")}};`;
           drawWindowBorder(ctx, win, env);
         }
         pendingWindows.length = 0;
+        const _t02 = _partProfEnabled ? performance.now() : 0;
         drawQDayNightRing(ctx, part, env, scale);
+        if (_partProfEnabled) _ppAdd("QDayNightRing", _t02);
         continue;
       }
+      const _t0 = _partProfEnabled ? performance.now() : 0;
       if (pendingWindows.length > 0) {
         renderWithWindowCutouts(ctx, part, pendingWindows, env, canvasWidth, canvasHeight, scale, images);
         pendingWindows.length = 0;
@@ -16059,6 +16114,7 @@ return {${names2.join(",")}};`;
       if (part.special === "specialDotsMap") {
         drawTerraCityDots(ctx, env);
       }
+      if (_partProfEnabled) _ppAdd(part.type, _t0);
     }
     for (const win of pendingWindows) {
       drawWindowBorder(ctx, win, env);
@@ -16288,7 +16344,7 @@ return {${names2.join(",")}};`;
       drawWindowInnerShadow(tctx, win, env);
     }
     ctx.save();
-    ctx.resetTransform();
+    ctx.setTransform(1, 0, 0, 1, _faceOriginX, _faceOriginY);
     ctx.drawImage(temp, 0, 0);
     ctx.restore();
   }
@@ -16911,6 +16967,12 @@ return {${names2.join(",")}};`;
       ctx.stroke();
     }
   }
+  var _wheelBitmapCache = /* @__PURE__ */ new Map();
+  var WHEEL_CACHE_CAP = 64;
+  var _wheelCacheDisabled = false;
+  function setWheelCacheDisabled(v) {
+    _wheelCacheDisabled = v;
+  }
   function drawWheel(ctx, part, env) {
     if (part.calendar) {
       drawCalendarWheel(ctx, part, env);
@@ -16929,169 +16991,196 @@ return {${names2.join(",")}};`;
     const strokeColor = part.strokeColor ? evalColor(part.strokeColor, env) : "rgba(0,0,0,1)";
     const bgColor = evalColor(part.bgColor, env);
     const orientation = part.orientation || "twelve";
+    const isPartialArc = !!part.angle1 || !!part.angle2;
+    const renderBody = (c, bodyAngle) => {
+      c.font = `${fontSize}px "${fontName}"`;
+      c.textAlign = "center";
+      c.textBaseline = "alphabetic";
+      let maxW = 0;
+      const metrics = c.measureText("Xg");
+      const measuredH = metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent;
+      const maxH = measuredH;
+      for (const lab of labels) {
+        const m = c.measureText(lab.trim());
+        maxW = Math.max(maxW, m.width);
+      }
+      const angle1 = part.angle1 ? evalAttr(part.angle1, env) : 0;
+      const angle2 = part.angle2 ? evalAttr(part.angle2, env) : 2 * Math.PI;
+      const arcSpan = angle2 - angle1;
+      const step = arcSpan / n;
+      const tradius = part.tradius ? evalAttr(part.tradius, env) : radius;
+      if (part.wheelVariant === "QWheel" && bgColor !== "rgba(0,0,0,0)") {
+        c.fillStyle = bgColor;
+        c.beginPath();
+        c.arc(0, 0, radius, 0, 2 * Math.PI);
+        c.fill();
+      }
+      const halfAndHalf = part.halfAndHalf ? evalAttr(part.halfAndHalf, env) : 0;
+      const bgColor2 = part.bgColor2 ? evalColor(part.bgColor2, env) : bgColor;
+      const innerR = radius - fontSize - 2;
+      if (part.wheelVariant === "TWheel" && halfAndHalf) {
+        c.save();
+        c.rotate(bodyAngle);
+        c.fillStyle = bgColor;
+        c.beginPath();
+        c.arc(0, 0, radius, Math.PI, 2 * Math.PI);
+        c.arc(0, 0, innerR, 2 * Math.PI, Math.PI, true);
+        c.closePath();
+        c.fill();
+        c.fillStyle = bgColor2;
+        c.beginPath();
+        c.arc(0, 0, radius, 0, Math.PI);
+        c.arc(0, 0, innerR, Math.PI, 0, true);
+        c.closePath();
+        c.fill();
+        c.restore();
+      } else if (part.wheelVariant === "TWheel" && bgColor !== "rgba(0,0,0,0)") {
+        c.fillStyle = bgColor;
+        c.beginPath();
+        c.arc(0, 0, radius, 0, 2 * Math.PI);
+        c.arc(0, 0, innerR, 0, 2 * Math.PI, true);
+        c.fill("evenodd");
+      }
+      if (part.wheelVariant === "TWheel" && part.ticks) {
+        const ticksPerLabel = Math.round(evalAttr(part.ticks, env) || 0);
+        const nTotalTicks = ticksPerLabel * n;
+        const tw = part.tickWidth ? evalAttr(part.tickWidth, env) : 0.5;
+        if (nTotalTicks > 0) {
+          c.save();
+          c.rotate(bodyAngle);
+          const tickLen = 2;
+          for (let ti = 0; ti < nTotalTicks; ti++) {
+            const theta = ti / nTotalTicks * 2 * Math.PI;
+            const cosT = Math.cos(theta);
+            const sinT = Math.sin(theta);
+            if (ti % ticksPerLabel === 0) {
+              const norm = (theta % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+              const onNightHalf = norm >= Math.PI;
+              c.fillStyle = onNightHalf ? strokeColor : evalColor(part.bgColor, env);
+              c.beginPath();
+              c.arc(cosT * (radius - 1.5), sinT * (radius - 1.5), 1.2, 0, 2 * Math.PI);
+              c.fill();
+            } else {
+              const norm = (theta % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+              const onNightHalf = norm >= Math.PI;
+              c.strokeStyle = halfAndHalf ? onNightHalf ? strokeColor : evalColor(part.bgColor, env) : strokeColor;
+              c.lineWidth = tw;
+              c.beginPath();
+              c.moveTo(cosT * radius, sinT * radius);
+              c.lineTo(cosT * (radius - tickLen), sinT * (radius - tickLen));
+              c.stroke();
+            }
+          }
+          c.restore();
+        }
+      }
+      c.save();
+      if (isPartialArc) {
+        c.rotate(-bodyAngle + angle1);
+      } else {
+        c.rotate(bodyAngle + angle1);
+      }
+      for (let i = 0; i < n; i++) {
+        const label = labels[i].trim();
+        if (label) {
+          if (halfAndHalf) {
+            c.fillStyle = "white";
+            c.globalCompositeOperation = "difference";
+          } else {
+            c.fillStyle = strokeColor;
+          }
+          c.save();
+          switch (orientation.toLowerCase()) {
+            case "three":
+              c.translate(tradius - maxW / 2, 0);
+              break;
+            case "six":
+              c.translate(0, tradius - maxH / 2);
+              break;
+            case "twelve":
+              c.translate(0, -(tradius - maxH / 2));
+              break;
+            case "nine":
+              c.translate(-(tradius - maxW / 2), 0);
+              break;
+          }
+          c.fillText(label, 0, textVisualCenterY(c, label));
+          c.restore();
+        }
+        c.rotate(isPartialArc ? step : -step);
+      }
+      c.restore();
+      if (part.tick && part.wheelVariant === "QWheel") {
+        const tickMatch = part.tick.match(/tick(\d+)/);
+        if (tickMatch) {
+          const nTicks = parseInt(tickMatch[1], 10);
+          const tickOuter = radius;
+          const tickGap = radius - tradius;
+          const tickLenLarge = tickGap - 2;
+          const tickLenMedium = tickGap * 0.55;
+          const tickLenSmall = tickGap * 0.3;
+          const ticksPerHour = nTicks / 24;
+          const ticksPer30Min = ticksPerHour / 2;
+          c.save();
+          c.rotate(bodyAngle);
+          c.strokeStyle = strokeColor;
+          for (let i = 0; i < nTicks; i++) {
+            const th = i / nTicks * 2 * Math.PI - Math.PI / 2;
+            const cosT = Math.cos(th);
+            const sinT = Math.sin(th);
+            let tickLen;
+            let lw;
+            if (i % ticksPerHour === 0) {
+              tickLen = tickLenLarge;
+              lw = 0.7;
+            } else if (i % ticksPer30Min === 0) {
+              tickLen = tickLenMedium;
+              lw = 0.5;
+            } else {
+              tickLen = tickLenSmall;
+              lw = 0.3;
+            }
+            c.beginPath();
+            c.moveTo(cosT * tickOuter, sinT * tickOuter);
+            c.lineTo(cosT * (tickOuter - tickLen), sinT * (tickOuter - tickLen));
+            c.lineWidth = lw;
+            c.stroke();
+          }
+          c.restore();
+        }
+      }
+    };
+    const partialWithExtras = isPartialArc && (!!part.tick || !!part.ticks || !!(part.halfAndHalf && evalAttr(part.halfAndHalf, env)));
+    if (!_wheelCacheDisabled && !partialWithExtras) {
+      const m = ctx.getTransform();
+      const devScale = Math.hypot(m.a, m.b) || 1;
+      const tradiusKey = part.tradius ? evalAttr(part.tradius, env) : radius;
+      const a1Key = part.angle1 ? evalAttr(part.angle1, env) : 0;
+      const a2Key = part.angle2 ? evalAttr(part.angle2, env) : 2 * Math.PI;
+      const key = `${devScale.toFixed(2)}|${part.wheelVariant}|${radius}|${tradiusKey}|${fontSize}|${fontName}|${orientation}|${strokeColor}|${bgColor}|${part.bgColor2 ? evalColor(part.bgColor2, env) : ""}|${part.halfAndHalf ? evalAttr(part.halfAndHalf, env) : 0}|${part.ticks ? evalAttr(part.ticks, env) : 0}|${part.tickWidth ? evalAttr(part.tickWidth, env) : 0.5}|${part.tick ?? ""}|${part.text ?? ""}|${a1Key}|${a2Key}`;
+      let wb = _wheelBitmapCache.get(key);
+      if (!wb) {
+        if (_wheelBitmapCache.size >= WHEEL_CACHE_CAP) _wheelBitmapCache.clear();
+        const extent = Math.max(radius, tradiusKey) + fontSize + 2;
+        const px = Math.max(2, Math.ceil(extent * 2 * devScale));
+        const cnv = new OffscreenCanvas(px, px);
+        const bctx = cnv.getContext("2d");
+        bctx.translate(px / 2, px / 2);
+        bctx.scale(devScale, devScale);
+        renderBody(bctx, 0);
+        wb = { canvas: cnv, extent };
+        _wheelBitmapCache.set(key, wb);
+      }
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(isPartialArc ? -angle : angle);
+      ctx.drawImage(wb.canvas, -wb.extent, -wb.extent, wb.extent * 2, wb.extent * 2);
+      ctx.restore();
+      return;
+    }
     ctx.save();
     ctx.translate(x, y);
-    ctx.font = `${fontSize}px "${fontName}"`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "alphabetic";
-    let maxW = 0;
-    const metrics = ctx.measureText("Xg");
-    const measuredH = metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent;
-    const maxH = measuredH;
-    for (const lab of labels) {
-      const m = ctx.measureText(lab.trim());
-      maxW = Math.max(maxW, m.width);
-    }
-    const angle1 = part.angle1 ? evalAttr(part.angle1, env) : 0;
-    const angle2 = part.angle2 ? evalAttr(part.angle2, env) : 2 * Math.PI;
-    const arcSpan = angle2 - angle1;
-    const step = arcSpan / n;
-    const tradius = part.tradius ? evalAttr(part.tradius, env) : radius;
-    if (part.wheelVariant === "QWheel" && bgColor !== "rgba(0,0,0,0)") {
-      ctx.fillStyle = bgColor;
-      ctx.beginPath();
-      ctx.arc(0, 0, radius, 0, 2 * Math.PI);
-      ctx.fill();
-    }
-    const halfAndHalf = part.halfAndHalf ? evalAttr(part.halfAndHalf, env) : 0;
-    const bgColor2 = part.bgColor2 ? evalColor(part.bgColor2, env) : bgColor;
-    const innerR = radius - fontSize - 2;
-    if (part.wheelVariant === "TWheel" && halfAndHalf) {
-      ctx.save();
-      ctx.rotate(angle);
-      ctx.fillStyle = bgColor;
-      ctx.beginPath();
-      ctx.arc(0, 0, radius, Math.PI, 2 * Math.PI);
-      ctx.arc(0, 0, innerR, 2 * Math.PI, Math.PI, true);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = bgColor2;
-      ctx.beginPath();
-      ctx.arc(0, 0, radius, 0, Math.PI);
-      ctx.arc(0, 0, innerR, Math.PI, 0, true);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-    } else if (part.wheelVariant === "TWheel" && bgColor !== "rgba(0,0,0,0)") {
-      ctx.fillStyle = bgColor;
-      ctx.beginPath();
-      ctx.arc(0, 0, radius, 0, 2 * Math.PI);
-      ctx.arc(0, 0, innerR, 0, 2 * Math.PI, true);
-      ctx.fill("evenodd");
-    }
-    if (part.wheelVariant === "TWheel" && part.ticks) {
-      const ticksPerLabel = Math.round(evalAttr(part.ticks, env) || 0);
-      const nTotalTicks = ticksPerLabel * n;
-      const tw = part.tickWidth ? evalAttr(part.tickWidth, env) : 0.5;
-      if (nTotalTicks > 0) {
-        ctx.save();
-        ctx.rotate(angle);
-        const tickLen = 2;
-        for (let ti = 0; ti < nTotalTicks; ti++) {
-          const theta = ti / nTotalTicks * 2 * Math.PI;
-          const cosT = Math.cos(theta);
-          const sinT = Math.sin(theta);
-          if (ti % ticksPerLabel === 0) {
-            const norm = (theta % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
-            const onNightHalf = norm >= Math.PI;
-            ctx.fillStyle = onNightHalf ? strokeColor : evalColor(part.bgColor, env);
-            ctx.beginPath();
-            ctx.arc(cosT * (radius - 1.5), sinT * (radius - 1.5), 1.2, 0, 2 * Math.PI);
-            ctx.fill();
-          } else {
-            const norm = (theta % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
-            const onNightHalf = norm >= Math.PI;
-            ctx.strokeStyle = halfAndHalf ? onNightHalf ? strokeColor : evalColor(part.bgColor, env) : strokeColor;
-            ctx.lineWidth = tw;
-            ctx.beginPath();
-            ctx.moveTo(cosT * radius, sinT * radius);
-            ctx.lineTo(cosT * (radius - tickLen), sinT * (radius - tickLen));
-            ctx.stroke();
-          }
-        }
-        ctx.restore();
-      }
-    }
-    const isPartialArc = !!part.angle1 || !!part.angle2;
-    ctx.save();
-    if (isPartialArc) {
-      ctx.rotate(-angle + angle1);
-    } else {
-      ctx.rotate(angle + angle1);
-    }
-    for (let i = 0; i < n; i++) {
-      const label = labels[i].trim();
-      if (label) {
-        if (halfAndHalf) {
-          ctx.fillStyle = "white";
-          ctx.globalCompositeOperation = "difference";
-        } else {
-          ctx.fillStyle = strokeColor;
-        }
-        ctx.save();
-        const currentRotation = isPartialArc ? -angle + angle1 + i * step : 0;
-        switch (orientation.toLowerCase()) {
-          case "three":
-            ctx.translate(tradius - maxW / 2, 0);
-            break;
-          case "six":
-            ctx.translate(0, tradius - maxH / 2);
-            break;
-          case "twelve":
-            ctx.translate(0, -(tradius - maxH / 2));
-            break;
-          case "nine":
-            ctx.translate(-(tradius - maxW / 2), 0);
-            break;
-        }
-        if (isPartialArc) {
-          ctx.rotate(-currentRotation);
-        }
-        ctx.fillText(label, 0, textVisualCenterY(ctx, label));
-        ctx.restore();
-      }
-      ctx.rotate(isPartialArc ? step : -step);
-    }
-    ctx.restore();
-    if (part.tick && part.wheelVariant === "QWheel") {
-      const tickMatch = part.tick.match(/tick(\d+)/);
-      if (tickMatch) {
-        const nTicks = parseInt(tickMatch[1], 10);
-        const tickOuter = radius;
-        const tickGap = radius - tradius;
-        const tickLenLarge = tickGap - 2;
-        const tickLenMedium = tickGap * 0.55;
-        const tickLenSmall = tickGap * 0.3;
-        const ticksPerHour = nTicks / 24;
-        const ticksPer30Min = ticksPerHour / 2;
-        ctx.save();
-        ctx.rotate(angle);
-        ctx.strokeStyle = strokeColor;
-        for (let i = 0; i < nTicks; i++) {
-          const th = i / nTicks * 2 * Math.PI - Math.PI / 2;
-          const cosT = Math.cos(th);
-          const sinT = Math.sin(th);
-          let tickLen;
-          let lw;
-          if (i % ticksPerHour === 0) {
-            tickLen = tickLenLarge;
-            lw = 0.7;
-          } else if (i % ticksPer30Min === 0) {
-            tickLen = tickLenMedium;
-            lw = 0.5;
-          } else {
-            tickLen = tickLenSmall;
-            lw = 0.3;
-          }
-          ctx.beginPath();
-          ctx.moveTo(cosT * tickOuter, sinT * tickOuter);
-          ctx.lineTo(cosT * (tickOuter - tickLen), sinT * (tickOuter - tickLen));
-          ctx.lineWidth = lw;
-          ctx.stroke();
-        }
-        ctx.restore();
-      }
-    }
+    renderBody(ctx, angle);
     ctx.restore();
   }
   function drawQText(ctx, part, env) {
@@ -21298,6 +21387,50 @@ return {${names2.join(",")}};`;
   var _tickProfile = typeof location !== "undefined" && new URLSearchParams(location.search).has("tickprofile");
   setTickProfiling(_tickProfile);
   setAstroProfiling(_tickProfile);
+  setPartProfiling(_tickProfile);
+  var _noProbe = typeof location !== "undefined" && new URLSearchParams(location.search).has("noprobe");
+  var _ablate = new Set(
+    (typeof location !== "undefined" ? new URLSearchParams(location.search).get("ablate") ?? "" : "").split(",").filter(Boolean)
+  );
+  for (const f of _ablate) {
+    if (!["render", "staggerrender", "staggertick", "dpr1", "onecanvas", "nobezel", "facebuffers", "nowheelcache"].includes(f)) {
+      console.warn(`[scrub-perf] Unknown ?ablate flag "${f}" \u2014 ignored.`);
+    }
+  }
+  if (_ablate.has("nowheelcache")) setWheelCacheDisabled(true);
+  var _ablateRender = _ablate.has("render");
+  var _ablateStaggerRender = _ablate.has("staggerrender");
+  var _ablateStaggerTick = _ablate.has("staggertick");
+  var _ablateDpr1 = _ablate.has("dpr1");
+  var _ablateOneCanvas = _ablate.has("onecanvas");
+  var _ablateNoBezel = _ablate.has("nobezel");
+  var _ablateFaceBuffers = _ablate.has("facebuffers");
+  var _facesLimit = (() => {
+    const n = parseInt((typeof location !== "undefined" ? new URLSearchParams(location.search).get("faces") : null) ?? "", 10);
+    return Number.isFinite(n) && n > 0 ? n : Infinity;
+  })();
+  function effectiveDpr() {
+    return _ablateDpr1 ? 1 : window.devicePixelRatio || 1;
+  }
+  var _refreshMinDeltaMs = null;
+  var _refreshMedianDeltaMs = null;
+  if (typeof requestAnimationFrame !== "undefined" && typeof document !== "undefined") {
+    const deltas = [];
+    let last = null;
+    let remaining = 60;
+    const sample = (ts) => {
+      if (last !== null) deltas.push(ts - last);
+      last = ts;
+      if (--remaining > 0) {
+        requestAnimationFrame(sample);
+        return;
+      }
+      deltas.sort((a, b) => a - b);
+      _refreshMinDeltaMs = deltas[0] ?? null;
+      _refreshMedianDeltaMs = deltas[deltas.length >> 1] ?? null;
+    };
+    setTimeout(() => requestAnimationFrame(sample), 1e3);
+  }
   function faceNameToSlug(name) {
     return name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, "-");
   }
@@ -21792,8 +21925,45 @@ return {${names2.join(",")}};`;
         });
       }
     }
+    let _sharedCanvas = null;
+    let _sharedCtx = null;
+    let _sharedOffsets = [];
+    let _sharedFacePx = 0;
+    if (_ablateOneCanvas) {
+      grid.style.position = "relative";
+      _sharedCanvas = document.createElement("canvas");
+      _sharedCanvas.style.position = "absolute";
+      _sharedCanvas.style.inset = "0";
+      _sharedCanvas.style.pointerEvents = "none";
+      grid.appendChild(_sharedCanvas);
+      _sharedCtx = _sharedCanvas.getContext("2d");
+      for (const face of faces) face.canvas.style.visibility = "hidden";
+    }
+    let _sharedPosKey = "";
+    function syncSharedLayout() {
+      if (!_sharedCanvas || !_sharedCtx) return;
+      const dpr = effectiveDpr();
+      const rect = grid.getBoundingClientRect();
+      const w = Math.round(rect.width * dpr);
+      const h = Math.round(rect.height * dpr);
+      const facePx = faces[0]?.canvas.width ?? 0;
+      const r0 = faces[0]?.canvas.getBoundingClientRect();
+      const rN = faces[faces.length - 1]?.canvas.getBoundingClientRect();
+      const posKey = r0 && rN ? `${(r0.left - rect.left).toFixed(1)},${(r0.top - rect.top).toFixed(1)},${(rN.left - rect.left).toFixed(1)},${(rN.top - rect.top).toFixed(1)}` : "";
+      if (_sharedCanvas.width === w && _sharedCanvas.height === h && _sharedOffsets.length === faces.length && _sharedFacePx === facePx && _sharedPosKey === posKey) return;
+      _sharedPosKey = posKey;
+      _sharedCanvas.width = w;
+      _sharedCanvas.height = h;
+      _sharedCanvas.style.width = `${rect.width}px`;
+      _sharedCanvas.style.height = `${rect.height}px`;
+      _sharedFacePx = facePx;
+      _sharedOffsets = faces.map((f) => {
+        const r = f.canvas.getBoundingClientRect();
+        return { x: Math.round((r.left - rect.left) * dpr), y: Math.round((r.top - rect.top) * dpr) };
+      });
+    }
     function applySize(face, size) {
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = effectiveDpr();
       const physPx = Math.round(size * dpr);
       face.canvas.width = physPx;
       face.canvas.height = physPx;
@@ -21913,8 +22083,52 @@ return {${names2.join(",")}};`;
     let _scrubTickMsTotal = 0;
     let _scrubRenderMsTotal = 0;
     let _scrubBodyFrameCount = 0;
+    function _newClassStats() {
+      return {
+        n: 0,
+        cpuMs: 0,
+        cpuMax: -Infinity,
+        tickMs: 0,
+        renderMs: 0,
+        animFaces: 0,
+        animFacesMin: Infinity,
+        animFacesMax: -Infinity,
+        slackMs: 0,
+        slackMin: Infinity,
+        slackMax: -Infinity,
+        slackN: 0,
+        intervalMs: 0,
+        intervalMin: Infinity,
+        intervalMax: -Infinity,
+        intervalN: 0,
+        hist: /* @__PURE__ */ new Map()
+        // 2ms interval buckets → count
+      };
+    }
+    let _classTick = _newClassStats();
+    let _classAnim = _newClassStats();
+    let _prevScrubFrameWasTick = false;
+    let _prevScrubFrameStart = null;
+    let _prevScrubFrameEnd = null;
+    let _faceTickMs = [];
+    let _faceRenderMs = [];
+    let _frameCounter = 0;
+    let _framesSinceTick = 999;
+    let _fbTickEpoch = 0;
+    let _fbCursor = 0;
+    const FB_REBUILDS_PER_FRAME = 4;
+    function _browserShort() {
+      const ua = navigator.userAgent;
+      let m;
+      if (m = /Edg\/(\d+)/.exec(ua)) return `Edge ${m[1]}`;
+      if (m = /Chrome\/(\d+)/.exec(ua)) return `Chrome ${m[1]}`;
+      if (m = /Version\/(\d+(?:\.\d+)?).*Safari/.exec(ua)) return `Safari ${m[1]}`;
+      if (m = /Firefox\/(\d+)/.exec(ua)) return `Firefox ${m[1]}`;
+      return ua.slice(0, 40);
+    }
     function frame() {
       rafId = null;
+      _frameCounter++;
       const now = performance.now();
       const frameStart = now;
       let stillAnimating = false;
@@ -21946,12 +22160,43 @@ return {${names2.join(",")}};`;
           _scrubTickMsTotal = 0;
           _scrubRenderMsTotal = 0;
           _scrubBodyFrameCount = 0;
+          _classTick = _newClassStats();
+          _classAnim = _newClassStats();
+          _prevScrubFrameWasTick = false;
+          _prevScrubFrameStart = null;
+          _prevScrubFrameEnd = null;
+          _faceTickMs = faces.map(() => 0);
+          _faceRenderMs = faces.map(() => 0);
+          _framesSinceTick = 999;
+          _fbTickEpoch = 0;
+          _fbCursor = 0;
+          for (const f of faces) f.fbEpoch = -1;
           resetTickProfile();
           resetAstroProfile();
+          resetPartProfile();
           console.log("[scrub-perf] Scrubbing session started.");
         }
         const elapsed = now - timeController.lastTickRealMs;
         willTick = elapsed >= TICK_INTERVAL_MS;
+        _framesSinceTick = willTick ? 0 : _framesSinceTick + 1;
+        if (willTick) _fbTickEpoch++;
+        if (_prevScrubFrameStart !== null) {
+          const cls = _prevScrubFrameWasTick ? _classTick : _classAnim;
+          const interval = now - _prevScrubFrameStart;
+          cls.intervalN++;
+          cls.intervalMs += interval;
+          if (interval < cls.intervalMin) cls.intervalMin = interval;
+          if (interval > cls.intervalMax) cls.intervalMax = interval;
+          const bucket = Math.round(interval / 2) * 2;
+          cls.hist.set(bucket, (cls.hist.get(bucket) ?? 0) + 1);
+          if (_prevScrubFrameEnd !== null) {
+            const slack = now - _prevScrubFrameEnd;
+            cls.slackN++;
+            cls.slackMs += slack;
+            if (slack < cls.slackMin) cls.slackMin = slack;
+            if (slack > cls.slackMax) cls.slackMax = slack;
+          }
+        }
         if (willTick) {
           const expectedTicks = Math.floor(elapsed / TICK_INTERVAL_MS);
           const lostTicks = expectedTicks - 1;
@@ -22011,7 +22256,7 @@ return {${names2.join(",")}};`;
   - Intervals with zero animation frames: ${_scrubIntervalZeroFrameCount}
   - Pure Animation Frame Stats (N = ${_pureAnimCount}):
     - CPU execution: avg ${avgCpu}ms (min: ${minCpu}ms, max: ${maxCpu}ms)
-    - GPU flush/render: avg ${avgGpu}ms (min: ${minGpu}ms, max: ${maxGpu}ms)
+    - Flush probe (getImageData on 1 of ${faces.length} canvases; incl. readback stall)${_noProbe ? " [DISABLED via ?noprobe]" : ""}: avg ${avgGpu}ms (min: ${minGpu}ms, max: ${maxGpu}ms)
     - Inter-frame interval: avg ${avgDelta}ms (min: ${minDelta}ms, max: ${maxDelta}ms) -> equivalent to ${avgAnimFps} FPS
   - Frame CPU split (all ${_scrubBodyFrameCount} scrub frames): tick(update+astro+animate) avg ${(_scrubBodyFrameCount ? _scrubTickMsTotal / _scrubBodyFrameCount : 0).toFixed(2)}ms, render(draw issuance) avg ${(_scrubBodyFrameCount ? _scrubRenderMsTotal / _scrubBodyFrameCount : 0).toFixed(2)}ms
 ` + (() => {
@@ -22033,7 +22278,42 @@ return {${names2.join(",")}};`;
             const rest = p.updateMs - p.evalMs - p.boundaryMs - p.interpMs;
             const perEvalUs = p.evalCalls ? p.evalMs * 1e3 / p.evalCalls : 0;
             return `  - Tick attribution (avg/frame): update ${(p.updateMs / n).toFixed(2)}ms [eval ${(p.evalMs / n).toFixed(2)} \xB7 boundary ${(p.boundaryMs / n).toFixed(2)} \xB7 interp ${(p.interpMs / n).toFixed(2)} \xB7 rest ${(rest / n).toFixed(2)}], animate(2nd interp) ${(p.animateMs / n).toFixed(2)}ms \xB7 ${perEvalUs.toFixed(1)}\xB5s/eval (${p.evalCalls} evals)`;
-          })() : "")
+          })() : "") + "\n" + (() => {
+            const f1 = (x) => x.toFixed(1);
+            const f2 = (x) => x.toFixed(2);
+            const built = faces.filter((f) => f.enabled && f.cachesBuilt);
+            const nAll = _scrubBodyFrameCount || 1;
+            const quantum = _refreshMinDeltaMs !== null && _refreshMedianDeltaMs !== null ? `~${f1(_refreshMedianDeltaMs)}ms median / ${f1(_refreshMinDeltaMs)}ms min (~${Math.round(1e3 / _refreshMedianDeltaMs)}Hz est)` : "n/a (sampler did not complete)";
+            const clsLine = (s) => s.n ? `N=${s.n} \xB7 body CPU avg ${f2(s.cpuMs / s.n)}ms (max ${f1(s.cpuMax)}) [update ${f2(s.tickMs / s.n)} \xB7 render ${f2(s.renderMs / s.n)}]` : "N=0";
+            const slackLine = (s) => s.slackN ? `avg ${f2(s.slackMs / s.slackN)}ms (min ${f1(s.slackMin)}, max ${f1(s.slackMax)})` : "n/a";
+            const intervalLine = (s) => s.intervalN ? `avg ${f2(s.intervalMs / s.intervalN)}ms (min ${f1(s.intervalMin)}, max ${f1(s.intervalMax)})` : "n/a";
+            const histStr = (s) => [...s.hist.entries()].sort((a, b) => a[0] - b[0]).map(([bucket, count]) => `${bucket}:${count}`).join(" ") || "n/a";
+            const animFacesStr = (s) => s.n ? `avg ${f1(s.animFaces / s.n)} (min ${s.animFacesMin}, max ${s.animFacesMax})` : "n/a";
+            const perFace = faces.map((f, i) => ({ f, i })).filter(({ f }) => f.enabled && f.cachesBuilt).map(({ f, i }) => ({
+              name: f.watch?.name ?? "?",
+              render: (_faceRenderMs[i] ?? 0) / nAll,
+              update: (_faceTickMs[i] ?? 0) / nAll
+            })).sort((a, b) => b.render - a.render);
+            const perFaceStr = perFace.map((p) => `${p.name} ${f2(p.render)}+${f2(p.update)}`).join(" \xB7 ");
+            const flagsStr = [
+              ..._ablate,
+              _facesLimit !== Infinity ? `faces=${_facesLimit}` : "",
+              _noProbe ? "noprobe" : ""
+            ].filter(Boolean).join(",") || "none";
+            return `  - Environment: ${_browserShort()} \xB7 dpr ${window.devicePixelRatio} (backing ${effectiveDpr()}) \xB7 ${built.length} canvases @ ${built[0]?.sizePx ?? 0}px CSS / ${built[0]?.canvas.width ?? 0}px phys \xB7 window ${window.innerWidth}\xD7${window.innerHeight} \xB7 display quantum ${quantum}` + (_sharedCanvas ? ` \xB7 shared canvas ${_sharedCanvas.width}\xD7${_sharedCanvas.height}px phys` : "") + ` \xB7 flags ${flagsStr}
+  - Frame classes (flush probe excluded): tick ${clsLine(_classTick)} || anim ${clsLine(_classAnim)}
+  - Faces animating (of ${built.length}): at tick frames ${animFacesStr(_classTick)} \xB7 between ticks ${animFacesStr(_classAnim)} (= faces Phase-1B idle-face skipping would still render)
+  - Post-callback slack (rAF gap minus our JS): after tick ${slackLine(_classTick)} \xB7 after anim ${slackLine(_classAnim)} (after-anim slack follows the flush probe)
+  - Intervals by preceding frame class: after tick ${intervalLine(_classTick)} \xB7 after anim ${intervalLine(_classAnim)}
+  - Interval histogram (ms:count, 2ms buckets): after-tick ${histStr(_classTick)} | after-anim ${histStr(_classAnim)}
+  - Per-face avg ms/frame (render+update), ranked by render: ${perFaceStr}` + (_tickProfile ? (() => {
+              const entries = [...getPartProfile().entries()].sort((a, b) => b[1] - a[1]);
+              if (entries.length === 0) return "";
+              const total = entries.reduce((s, [, v]) => s + v, 0);
+              return `
+  - Render ms/frame by part type (\u03A3 ${f2(total / nAll)}): ` + entries.map(([k, v]) => `${k} ${f2(v / nAll)}`).join(" \xB7 ");
+            })() : "");
+          })()
         );
       }
       timeController.checkTick(now);
@@ -22053,15 +22333,94 @@ return {${names2.join(",")}};`;
       const isPureAnimFrame = isScrubbing && !willTick;
       const animStart = isPureAnimFrame ? performance.now() : 0;
       const timingCtx = timingContextForFrame(timeController);
-      for (const face of faces) {
+      if (_ablateOneCanvas) syncSharedLayout();
+      let _fbRebuildSet = null;
+      if (_ablateFaceBuffers && isScrubbing) {
+        _fbRebuildSet = /* @__PURE__ */ new Set();
+        let lastPicked = -1;
+        for (let scanned = 0; scanned < faces.length && _fbRebuildSet.size < FB_REBUILDS_PER_FRAME; scanned++) {
+          const idx = (_fbCursor + scanned) % faces.length;
+          const f = faces[idx];
+          if (f.enabled && f.cachesBuilt && (f.fbEpoch ?? -1) !== _fbTickEpoch) {
+            _fbRebuildSet.add(idx);
+            lastPicked = idx;
+          }
+        }
+        if (lastPicked >= 0) _fbCursor = (lastPicked + 1) % faces.length;
+      }
+      for (let fi = 0; fi < faces.length; fi++) {
+        const face = faces[fi];
         if (!face.enabled || !face.cachesBuilt) continue;
         try {
+          const doTick = !isScrubbing || !_ablateStaggerTick || _framesSinceTick >= fi % 2;
+          const doRender = !isScrubbing || doTick && !_ablateRender && fi < _facesLimit && (!_ablateStaggerRender || (_frameCounter + fi) % 2 === 0);
           const tickStart = performance.now();
-          face.updater.tick(face.env, now, face.getNow, face.withDisplayTime, timingCtx);
-          tickCpuMs += performance.now() - tickStart;
-          const renderStart = performance.now();
-          renderFrame(face.ctx, face.watch, face.env, face.scale, face.images, face.terminatorLeaves, face.analemmaState);
-          renderMs += performance.now() - renderStart;
+          if (doTick) {
+            face.updater.tick(face.env, now, face.getNow, face.withDisplayTime, timingCtx);
+          }
+          const tickEnd = performance.now();
+          tickCpuMs += tickEnd - tickStart;
+          if (doRender) {
+            const fbW = face.canvas.width;
+            const fbH = face.canvas.height;
+            if (_fbRebuildSet && _fbRebuildSet.has(fi)) {
+              if (!face.fbCanvas || face.fbCanvas.width !== fbW || face.fbCanvas.height !== fbH) {
+                face.fbCanvas = document.createElement("canvas");
+                face.fbCanvas.width = fbW;
+                face.fbCanvas.height = fbH;
+                face.fbCtx = face.fbCanvas.getContext("2d");
+              }
+              renderFrame(
+                face.fbCtx,
+                face.watch,
+                face.env,
+                face.scale,
+                face.images,
+                face.terminatorLeaves,
+                face.analemmaState,
+                { clipToCircle: true, noBezel: _ablateNoBezel }
+              );
+              face.fbEpoch = _fbTickEpoch;
+            }
+            if (_fbRebuildSet && face.fbCanvas) {
+              if (_ablateOneCanvas && _sharedCtx && _sharedOffsets[fi]) {
+                const o = _sharedOffsets[fi];
+                _sharedCtx.clearRect(o.x, o.y, fbW, fbH);
+                _sharedCtx.drawImage(face.fbCanvas, o.x, o.y);
+              } else {
+                face.ctx.clearRect(0, 0, fbW, fbH);
+                face.ctx.drawImage(face.fbCanvas, 0, 0);
+              }
+            } else if (_ablateOneCanvas && _sharedCtx && _sharedOffsets[fi]) {
+              renderFrame(
+                _sharedCtx,
+                face.watch,
+                face.env,
+                face.scale,
+                face.images,
+                face.terminatorLeaves,
+                face.analemmaState,
+                { x: _sharedOffsets[fi].x, y: _sharedOffsets[fi].y, w: fbW, h: fbH, noBezel: _ablateNoBezel, clipToCircle: true }
+              );
+            } else {
+              renderFrame(
+                face.ctx,
+                face.watch,
+                face.env,
+                face.scale,
+                face.images,
+                face.terminatorLeaves,
+                face.analemmaState,
+                _ablateNoBezel ? { noBezel: true } : void 0
+              );
+            }
+          }
+          const renderEnd = performance.now();
+          renderMs += renderEnd - tickEnd;
+          if (isScrubbing) {
+            _faceTickMs[fi] += tickEnd - tickStart;
+            _faceRenderMs[fi] += renderEnd - tickEnd;
+          }
           const faceAnimating = face.updater.anyAnimating();
           if (faceAnimating) {
             stillAnimating = true;
@@ -22076,15 +22435,17 @@ return {${names2.join(",")}};`;
         _scrubRenderMsTotal += renderMs;
         _scrubBodyFrameCount++;
       }
+      let gpuProbeMs = 0;
       if (isPureAnimFrame) {
         const animJsEnd = performance.now();
         const testFace = faces.find((f) => f.enabled && f.cachesBuilt);
-        if (testFace) {
+        if (testFace && !_noProbe) {
           testFace.ctx.getImageData(0, 0, 1, 1);
         }
         const animGpuEnd = performance.now();
         const cpuTime = animJsEnd - animStart;
         const gpuTime = animGpuEnd - animJsEnd;
+        gpuProbeMs = gpuTime;
         _pureAnimCount++;
         _pureAnimCpuTimeTotal += cpuTime;
         if (cpuTime < _pureAnimCpuMin) _pureAnimCpuMin = cpuTime;
@@ -22105,6 +22466,25 @@ return {${names2.join(",")}};`;
       }
       timeUI?.updateTimeUI();
       timeController.endFrame();
+      if (isScrubbing) {
+        const bodyEnd = performance.now();
+        const cls = willTick ? _classTick : _classAnim;
+        const cpu = bodyEnd - frameStart - gpuProbeMs;
+        cls.n++;
+        cls.cpuMs += cpu;
+        if (cpu > cls.cpuMax) cls.cpuMax = cpu;
+        cls.tickMs += tickCpuMs;
+        cls.renderMs += renderMs;
+        cls.animFaces += animatingFaceCount;
+        if (animatingFaceCount < cls.animFacesMin) cls.animFacesMin = animatingFaceCount;
+        if (animatingFaceCount > cls.animFacesMax) cls.animFacesMax = animatingFaceCount;
+        _prevScrubFrameWasTick = willTick;
+        _prevScrubFrameStart = frameStart;
+        _prevScrubFrameEnd = bodyEnd;
+      } else {
+        _prevScrubFrameStart = null;
+        _prevScrubFrameEnd = null;
+      }
       const willContinue = timeController.needsContinuousRender || stillAnimating;
       _fps?.recordFrame(willContinue, performance.now() - frameStart);
       if (willContinue) {
@@ -22411,7 +22791,7 @@ return {${names2.join(",")}};`;
           gridShiftY = vLo;
         }
       }
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = effectiveDpr();
       const newPhys = Math.round(size * dpr);
       const isAstroTab = (timeUI?.isPopoverOpen() ?? false) && !document.getElementById("tp-tab-astro")?.classList.contains("tp-pane-hidden");
       const positionChanged = useTopLeftAlign !== wasShifted || isAstroTab !== wasAstroTab;

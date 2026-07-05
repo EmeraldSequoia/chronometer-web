@@ -562,6 +562,36 @@ function buildImageHandShadow(
 }
 
 /**
+ * Face origin within the target canvas, in physical px. (0,0) for the normal
+ * per-face-canvas path. The shared-canvas prototype (engine `?ablate=onecanvas`)
+ * renders every face into one canvas at its grid-cell offset; the two blit
+ * sites that historically did `resetTransform(); drawImage(cache, 0, 0)`
+ * assumed face-local canvas coords, so they reset to this origin instead.
+ * Set by renderFrame() on entry and cleared on exit (rendering is synchronous,
+ * so cache building outside renderFrame always sees (0,0)).
+ */
+let _faceOriginX = 0;
+let _faceOriginY = 0;
+
+/** Optional viewport/ablation options for renderFrame (render-perf prototypes). */
+export interface RenderFrameOpts {
+    /** Face origin + size in physical px within the target canvas. Defaults to the whole canvas. */
+    x?: number;
+    y?: number;
+    w?: number;
+    h?: number;
+    /** Skip drawBezel (per-frame gradient construction) — `?ablate=nobezel`. */
+    noBezel?: boolean;
+    /**
+     * Clip drawing to the viewport's inscribed circle. Per-face canvases get
+     * this crop for free from CSS (`border-radius: 50%` on `.face-cell canvas`);
+     * the shared-canvas prototype must clip, or face overdraw (e.g. Selene)
+     * spills into neighboring cells.
+     */
+    clipToCircle?: boolean;
+}
+
+/**
  * Render a single frame in document order.
  *
  * All parts are drawn in XML order: <static> blocks blit pre-cached images,
@@ -575,19 +605,31 @@ export function renderFrame(
     images?: Map<string, LoadedImage>,
     terminatorLeaves?: TerminatorLeafState[],
     analemmaState?: AnalemmaState | null,
+    opts?: RenderFrameOpts,
 ): void {
-    const w = ctx.canvas.width;
-    const h = ctx.canvas.height;
+    const w = opts?.w ?? ctx.canvas.width;
+    const h = opts?.h ?? ctx.canvas.height;
+    const x = opts?.x ?? 0;
+    const y = opts?.y ?? 0;
+    _faceOriginX = x;
+    _faceOriginY = y;
 
-    ctx.clearRect(0, 0, w, h);
     ctx.save();
-    ctx.translate(w / 2, h / 2);
+    if (opts?.clipToCircle) {
+        ctx.beginPath();
+        ctx.arc(x + w / 2, y + h / 2, Math.min(w, h) / 2, 0, Math.PI * 2);
+        ctx.clip();
+    }
+    ctx.clearRect(x, y, w, h);
+    ctx.translate(x + w / 2, y + h / 2);
     ctx.scale(scale, scale);
 
     renderPartsDocumentOrder(ctx, watch.parts, env, w, h, scale, images, terminatorLeaves, analemmaState);
-    drawBezel(ctx, watch);
+    if (!opts?.noBezel) drawBezel(ctx, watch);
 
     ctx.restore();
+    _faceOriginX = 0;
+    _faceOriginY = 0;
 }
 
 /**
@@ -614,6 +656,20 @@ export function renderWatch(
 // ============================================================================
 // Document-order frame rendering
 // ============================================================================
+
+// --- Per-part-type render attribution (render-perf Phase 3 instrumentation) ---
+// Accumulates draw-issuance ms by part type across a scrub session; enabled
+// alongside ?tickprofile (adds ~2 performance.now() calls per drawn part).
+// Sizes the face-buffer "live middle" and the hand-bitmap-cache candidates
+// (see planning/2026-07-04-phase3-face-buffer-caching.md).
+let _partProfEnabled = false;
+const _partProfMs = new Map<string, number>();
+export function setPartProfiling(v: boolean): void { _partProfEnabled = v; }
+export function resetPartProfile(): void { _partProfMs.clear(); }
+export function getPartProfile(): ReadonlyMap<string, number> { return _partProfMs; }
+function _ppAdd(key: string, t0: number): void {
+    _partProfMs.set(key, (_partProfMs.get(key) ?? 0) + (performance.now() - t0));
+}
 
 /**
  * Iterate parts in document order, drawing each appropriately.
@@ -645,15 +701,18 @@ function renderPartsDocumentOrder(
             // The static cache already has preceding window cutouts baked in
             pendingWindows.length = 0;
 
+            const _t0 = _partProfEnabled ? performance.now() : 0;
             if (part.cachedCanvas) {
                 ctx.save();
-                ctx.resetTransform();
+                // Face-local blit: identity normally, cell offset under ?ablate=onecanvas.
+                ctx.setTransform(1, 0, 0, 1, _faceOriginX, _faceOriginY);
                 ctx.drawImage(part.cachedCanvas, 0, 0);
                 ctx.restore();
             }
 
             // Draw any QHands inside the static block (they're dynamic)
             drawQHandsInParts(ctx, part.children, env, images);
+            if (_partProfEnabled) _ppAdd('Static(blit)', _t0);
 
             // Preceding window borders are already baked into the static cache
             // (drawn before holes were cut, so only outer half is visible).
@@ -667,16 +726,21 @@ function renderPartsDocumentOrder(
             }
             pendingWindows.length = 0;
 
+            const _t0 = _partProfEnabled ? performance.now() : 0;
             // Terra: draw ring image with city-name knockouts + channel lines
             if (part.special === 'specialWorldtime') {
                 drawTerraRingWithKnockouts(ctx, part, env, images);
                 drawTerraChannelLines(ctx, part, env);
+                if (_partProfEnabled) _ppAdd('QHand(terra)', _t0);
             } else if (part.special === 'specialSubdial') {
                 drawGaiaSubdial(ctx, part, env, images);
+                if (_partProfEnabled) _ppAdd('QHand(subdial)', _t0);
             } else if (part.src && images) {
                 drawImageHand(ctx, part, env, images);
+                if (_partProfEnabled) _ppAdd('QHand(image)', _t0);
             } else {
                 drawQHand(ctx, part, env);
+                if (_partProfEnabled) _ppAdd('QHand(vector)', _t0);
             }
 
             continue;
@@ -685,14 +749,18 @@ function renderPartsDocumentOrder(
 
         if (part.type === 'Terminator') {
             if (terminatorLeaves && terminatorLeaves.length > 0) {
+                const _t0 = _partProfEnabled ? performance.now() : 0;
                 drawTerminator(ctx, terminatorLeaves);
+                if (_partProfEnabled) _ppAdd('Terminator', _t0);
             }
             continue;
         }
 
         if (part.type === 'Analemma') {
             if (analemmaState) {
+                const _t0 = _partProfEnabled ? performance.now() : 0;
                 drawAnalemma(ctx, analemmaState);
+                if (_partProfEnabled) _ppAdd('Analemma', _t0);
             }
             continue;
         }
@@ -703,11 +771,14 @@ function renderPartsDocumentOrder(
                 drawWindowBorder(ctx, win, env);
             }
             pendingWindows.length = 0;
+            const _t0 = _partProfEnabled ? performance.now() : 0;
             drawQDayNightRing(ctx, part, env, scale);
+            if (_partProfEnabled) _ppAdd('QDayNightRing', _t0);
             continue;
         }
 
         // Regular drawable part — apply pending window cutouts if any
+        const _t0 = _partProfEnabled ? performance.now() : 0;
         if (pendingWindows.length > 0) {
             renderWithWindowCutouts(ctx, part, pendingWindows, env, canvasWidth, canvasHeight, scale, images);
             pendingWindows.length = 0;
@@ -719,6 +790,7 @@ function renderPartsDocumentOrder(
         if (part.special === 'specialDotsMap') {
             drawTerraCityDots(ctx, env);
         }
+        if (_partProfEnabled) _ppAdd(part.type, _t0);
     }
 
     // Leftover windows — draw borders only
@@ -1057,9 +1129,10 @@ function renderWithWindowCutouts(
         drawWindowInnerShadow(tctx, win, env);
     }
 
-    // Composite temp canvas onto main context (reset transform first)
+    // Composite temp canvas onto main context (face-local origin: identity
+    // normally, cell offset under ?ablate=onecanvas)
     ctx.save();
-    ctx.resetTransform();
+    ctx.setTransform(1, 0, 0, 1, _faceOriginX, _faceOriginY);
     ctx.drawImage(temp, 0, 0);
     ctx.restore();
 }
@@ -2025,6 +2098,20 @@ function drawHandShape(
 // Wheel — rotating text wheel (SWheel / QWheel)
 // ============================================================================
 
+// --- Wheel bitmap cache (appearance-keyed, like the wedge cache) ---
+// Full-circle wheels rotate rigidly — background, ticks, and labels all turn
+// with `angle` — so one bitmap per appearance serves every rotation (and every
+// face at the same scale; refName-style sharing falls out of the key). Partial-
+// arc wheels counter-rotate their labels to stay upright, are not rotation-
+// invariant, and keep the live path. ?ablate=nowheelcache is the A/B
+// kill-switch. Cost basis: drawWheel was 45% of Safari draw issuance
+// (planning/2026-07-04-phase3-face-buffer-caching.md, "Ceiling results").
+interface WheelBitmap { canvas: OffscreenCanvas; extent: number; }
+const _wheelBitmapCache = new Map<string, WheelBitmap>();
+const WHEEL_CACHE_CAP = 64;
+let _wheelCacheDisabled = false;
+export function setWheelCacheDisabled(v: boolean): void { _wheelCacheDisabled = v; }
+
 function drawWheel(
     ctx: RenderContext,
     part: WheelPart,
@@ -2055,240 +2142,289 @@ function drawWheel(
     const bgColor = evalColor(part.bgColor, env);
     const orientation = part.orientation || 'twelve';
 
+    const isPartialArc = !!part.angle1 || !!part.angle2;
+
+    // Wheel-band renderer: draws everything centered at the current origin of
+    // `c`, rotated by `bodyAngle`. Extracted so the full-circle cache path can
+    // render the band once at bodyAngle=0 into a bitmap and blit it rotated.
+    const renderBody = (c: RenderContext, bodyAngle: number): void => {
+        c.font = `${fontSize}px "${fontName}"`;
+        c.textAlign = 'center';
+        c.textBaseline = 'alphabetic';
+
+        // Compute max label dimensions for consistent positioning
+        let maxW = 0;
+        const metrics = c.measureText('Xg');  // measure with descender
+        // Use actual measured height for vertical positioning
+        const measuredH = metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent;
+        const maxH = measuredH;
+        for (const lab of labels) {
+            const m = c.measureText(lab.trim());
+            maxW = Math.max(maxW, m.width);
+        }
+
+        // angle1/angle2 define the arc range (default: full circle)
+        const angle1 = part.angle1 ? evalAttr(part.angle1, env) : 0;
+        const angle2 = part.angle2 ? evalAttr(part.angle2, env) : 2 * Math.PI;
+        const arcSpan = angle2 - angle1;
+        const step = arcSpan / n;
+
+        // tradius = text radius (separate from tick/line radius, for QWheel)
+        const tradius = part.tradius ? evalAttr(part.tradius, env) : radius;
+
+        // QWheels draw their own circular background; SWheels rely on
+        // the QRect behind the window for their background.
+        if (part.wheelVariant === 'QWheel' && bgColor !== 'rgba(0,0,0,0)') {
+            c.fillStyle = bgColor;
+            c.beginPath();
+            c.arc(0, 0, radius, 0, 2 * Math.PI);
+            c.fill();
+        }
+
+        // TWheel halfAndHalf: split-color ring background (e.g. 24-hour dial)
+        // On the 24-hour worldtime dial, with labels 0,23,22,...,1:
+        //   - Midnight (0)  is at the top (12 o'clock)
+        //   - 6PM (18)      is at 3 o'clock (index 6, going CW)
+        //   - Noon (12)     is at the bottom (6 o'clock)
+        //   - 6AM (6)       is at 9 o'clock
+        // Night (bgColor=black) should cover the TOP half (6PM through midnight to 6AM)
+        // Day (bgColor2=white) should cover the BOTTOM half (6AM through noon to 6PM)
+        const halfAndHalf = part.halfAndHalf ? evalAttr(part.halfAndHalf, env) : 0;
+        const bgColor2 = part.bgColor2 ? evalColor(part.bgColor2, env) : bgColor;
+        // Inner radius of the ring: approximate from font size
+        const innerR = radius - fontSize - 2;
+        if (part.wheelVariant === 'TWheel' && halfAndHalf) {
+            c.save();
+            c.rotate(bodyAngle);
+            // Night half (top): arc from left (π) CW through top to right (2π/0)
+            c.fillStyle = bgColor;
+            c.beginPath();
+            c.arc(0, 0, radius, Math.PI, 2 * Math.PI);
+            c.arc(0, 0, innerR, 2 * Math.PI, Math.PI, true); // inner arc, reverse
+            c.closePath();
+            c.fill();
+            // Day half (bottom): arc from right (0) CW through bottom to left (π)
+            c.fillStyle = bgColor2;
+            c.beginPath();
+            c.arc(0, 0, radius, 0, Math.PI);
+            c.arc(0, 0, innerR, Math.PI, 0, true); // inner arc, reverse
+            c.closePath();
+            c.fill();
+            c.restore();
+        } else if (part.wheelVariant === 'TWheel' && bgColor !== 'rgba(0,0,0,0)') {
+            c.fillStyle = bgColor;
+            c.beginPath();
+            c.arc(0, 0, radius, 0, 2 * Math.PI);
+            c.arc(0, 0, innerR, 0, 2 * Math.PI, true);
+            c.fill('evenodd');
+        }
+
+        // TWheel tick marks — short marks at the outer edge, with dots on hours
+        if (part.wheelVariant === 'TWheel' && part.ticks) {
+            const ticksPerLabel = Math.round(evalAttr(part.ticks, env) || 0);
+            const nTotalTicks = ticksPerLabel * n;
+            const tw = part.tickWidth ? evalAttr(part.tickWidth, env) : 0.5;
+            if (nTotalTicks > 0) {
+                c.save();
+                c.rotate(bodyAngle);
+                const tickLen = 2;
+                for (let ti = 0; ti < nTotalTicks; ti++) {
+                    const theta = (ti / nTotalTicks) * 2 * Math.PI;
+                    const cosT = Math.cos(theta);
+                    const sinT = Math.sin(theta);
+                    if (ti % ticksPerLabel === 0) {
+                        // Hour mark: small filled dot
+                        // Determine if this position is on night (black bg) or day (white bg)
+                        // to pick a contrasting color for the dot
+                        const norm = ((theta % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+                        const onNightHalf = norm >= Math.PI;
+                        c.fillStyle = onNightHalf ? strokeColor : evalColor(part.bgColor, env);
+                        c.beginPath();
+                        c.arc(cosT * (radius - 1.5), sinT * (radius - 1.5), 1.2, 0, 2 * Math.PI);
+                        c.fill();
+                    } else {
+                        // Regular tick mark — use contrast color for visibility
+                        const norm = ((theta % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+                        const onNightHalf = norm >= Math.PI;
+                        c.strokeStyle = halfAndHalf
+                            ? (onNightHalf ? strokeColor : evalColor(part.bgColor, env))
+                            : strokeColor;
+                        c.lineWidth = tw;
+                        c.beginPath();
+                        c.moveTo(cosT * radius, sinT * radius);
+                        c.lineTo(cosT * (radius - tickLen), sinT * (radius - tickLen));
+                        c.stroke();
+                    }
+                }
+                c.restore();
+            }
+        }
+
+        // Draw labels around the circle.
+        // Two modes depending on whether the wheel spans a full circle or partial arc:
+        // - Full circle (no angle1/angle2): text rotates with wheel, tops toward center
+        //   (iOS ECQHandSpoke rendering — e.g. Haleakala weekday/date wheels)
+        // - Partial arc (angle1/angle2 specified): a full wheel compressed into an
+        //   arc to save space (e.g. Chandra date digit wheels); rotation sign and
+        //   slot progression are reversed. Labels paint rigidly in their slot
+        //   frames in BOTH modes — rotating-disc emulation, matching iOS
+        //   ECQWheelView drawLabels (.chronometer-ref/Classes/ECQView.m), which
+        //   steps the CTM per label with no counter-rotation. (The web port
+        //   originally counter-rotated partial-arc labels to stay upright; that
+        //   deviated from iOS and blocked bitmap caching — removed 2026-07-04.)
+        c.save();
+        if (isPartialArc) {
+            c.rotate(-bodyAngle + angle1);
+        } else {
+            c.rotate(bodyAngle + angle1);
+        }
+
+        for (let i = 0; i < n; i++) {
+            const label = labels[i].trim();
+
+            if (label) {
+                // For halfAndHalf TWheels, determine which half this label is in
+                // and set the contrast color accordingly.
+                // Night (bgColor=black) is the TOP half, Day (bgColor2=white) is BOTTOM.
+                // Labels are placed starting from twelve orientation, rotating CW by -step each.
+                // Label i is at angular position -i * step in the rotated frame.
+                if (halfAndHalf) {
+                    // iOS uses kCGBlendModeDifference for text on halfAndHalf dials.
+                    // This automatically makes text contrast with the background:
+                    // white text with 'difference' blend → appears white on black, black on white.
+                    c.fillStyle = 'white';
+                    c.globalCompositeOperation = 'difference';
+                } else {
+                    c.fillStyle = strokeColor;
+                }
+                c.save();
+
+                // Position text based on orientation
+                switch (orientation.toLowerCase()) {
+                    case 'three':
+                        c.translate(tradius - maxW / 2, 0);
+                        break;
+                    case 'six':
+                        c.translate(0, tradius - maxH / 2);
+                        break;
+                    case 'twelve':
+                        c.translate(0, -(tradius - maxH / 2));
+                        break;
+                    case 'nine':
+                        c.translate(-(tradius - maxW / 2), 0);
+                        break;
+                }
+                c.fillText(label, 0, textVisualCenterY(c, label));
+                c.restore();
+            }
+
+            c.rotate(isPartialArc ? step : -step);
+        }
+
+        c.restore(); // closes c.save() for c.rotate(bodyAngle + angle1)
+
+        // Draw tick marks for QWheel (e.g. tick288, tick96)
+        if (part.tick && part.wheelVariant === 'QWheel') {
+            const tickMatch = part.tick.match(/tick(\d+)/);
+            if (tickMatch) {
+                const nTicks = parseInt(tickMatch[1], 10);
+                const tickOuter = radius; // outer edge of the dial
+                const tickGap = radius - tradius; // distance from outer edge to text
+                // Tick lengths from the outer edge inward
+                const tickLenLarge = tickGap - 2;  // hour marks: almost to the text
+                const tickLenMedium = tickGap * 0.55; // 30-min marks
+                const tickLenSmall = tickGap * 0.30;  // 5-min marks
+
+                const ticksPerHour = nTicks / 24;
+                const ticksPer30Min = ticksPerHour / 2;
+
+                c.save();
+                c.rotate(bodyAngle);
+                c.strokeStyle = strokeColor;
+
+                for (let i = 0; i < nTicks; i++) {
+                    const th = (i / nTicks) * 2 * Math.PI - Math.PI / 2;
+                    const cosT = Math.cos(th);
+                    const sinT = Math.sin(th);
+
+                    let tickLen: number;
+                    let lw: number;
+                    if (i % ticksPerHour === 0) {
+                        // Hour mark
+                        tickLen = tickLenLarge;
+                        lw = 0.7;
+                    } else if (i % ticksPer30Min === 0) {
+                        // 30-minute mark
+                        tickLen = tickLenMedium;
+                        lw = 0.5;
+                    } else {
+                        // 5-minute mark
+                        tickLen = tickLenSmall;
+                        lw = 0.3;
+                    }
+
+                    c.beginPath();
+                    c.moveTo(cosT * tickOuter, sinT * tickOuter);
+                    c.lineTo(cosT * (tickOuter - tickLen), sinT * (tickOuter - tickLen));
+                    c.lineWidth = lw;
+                    c.stroke();
+                }
+                c.restore();
+            }
+        }
+
+        // Note: iOS SWheels render text in rectangular panes — no circular border.
+        // The window + QRect system handles visual framing.
+
+    };
+
+    // With rigid-disc label painting (matching iOS), BOTH wheel modes are
+    // rotation-invariant; partial-arc wheels rotate by -angle (reversed slot
+    // progression). Ticks and halfAndHalf backgrounds rotate with +angle, so a
+    // (hypothetical) partial-arc wheel carrying them would mix rotation signs —
+    // keep those on the live path. No current face has such a part.
+    const partialWithExtras = isPartialArc && (!!part.tick || !!part.ticks
+        || !!(part.halfAndHalf && evalAttr(part.halfAndHalf, env)));
+    if (!_wheelCacheDisabled && !partialWithExtras) {
+        // Rotation-invariant: blit the cached band rotated into place.
+        const m = ctx.getTransform();
+        const devScale = Math.hypot(m.a, m.b) || 1;
+        const tradiusKey = part.tradius ? evalAttr(part.tradius, env) : radius;
+        const a1Key = part.angle1 ? evalAttr(part.angle1, env) : 0;
+        const a2Key = part.angle2 ? evalAttr(part.angle2, env) : 2 * Math.PI;
+        const key = `${devScale.toFixed(2)}|${part.wheelVariant}|${radius}|${tradiusKey}|` +
+            `${fontSize}|${fontName}|${orientation}|${strokeColor}|${bgColor}|` +
+            `${part.bgColor2 ? evalColor(part.bgColor2, env) : ''}|` +
+            `${part.halfAndHalf ? evalAttr(part.halfAndHalf, env) : 0}|` +
+            `${part.ticks ? evalAttr(part.ticks, env) : 0}|` +
+            `${part.tickWidth ? evalAttr(part.tickWidth, env) : 0.5}|` +
+            `${part.tick ?? ''}|${part.text ?? ''}|${a1Key}|${a2Key}`;
+        let wb = _wheelBitmapCache.get(key);
+        if (!wb) {
+            if (_wheelBitmapCache.size >= WHEEL_CACHE_CAP) _wheelBitmapCache.clear();
+            const extent = Math.max(radius, tradiusKey) + fontSize + 2;
+            const px = Math.max(2, Math.ceil(extent * 2 * devScale));
+            const cnv = new OffscreenCanvas(px, px);
+            const bctx = cnv.getContext('2d')!;
+            bctx.translate(px / 2, px / 2);
+            bctx.scale(devScale, devScale);
+            renderBody(bctx, 0);
+            wb = { canvas: cnv, extent };
+            _wheelBitmapCache.set(key, wb);
+        }
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(isPartialArc ? -angle : angle);
+        ctx.drawImage(wb.canvas, -wb.extent, -wb.extent, wb.extent * 2, wb.extent * 2);
+        ctx.restore();
+        return;
+    }
+
+    // Kill-switch path (and hypothetical partial-arc wheels with ticks) draw live.
     ctx.save();
     ctx.translate(x, y);
-
-    ctx.font = `${fontSize}px "${fontName}"`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'alphabetic';
-
-    // Compute max label dimensions for consistent positioning
-    let maxW = 0;
-    const metrics = ctx.measureText('Xg');  // measure with descender
-    // Use actual measured height for vertical positioning
-    const measuredH = metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent;
-    const maxH = measuredH;
-    for (const lab of labels) {
-        const m = ctx.measureText(lab.trim());
-        maxW = Math.max(maxW, m.width);
-    }
-
-    // angle1/angle2 define the arc range (default: full circle)
-    const angle1 = part.angle1 ? evalAttr(part.angle1, env) : 0;
-    const angle2 = part.angle2 ? evalAttr(part.angle2, env) : 2 * Math.PI;
-    const arcSpan = angle2 - angle1;
-    const step = arcSpan / n;
-
-    // tradius = text radius (separate from tick/line radius, for QWheel)
-    const tradius = part.tradius ? evalAttr(part.tradius, env) : radius;
-
-    // QWheels draw their own circular background; SWheels rely on
-    // the QRect behind the window for their background.
-    if (part.wheelVariant === 'QWheel' && bgColor !== 'rgba(0,0,0,0)') {
-        ctx.fillStyle = bgColor;
-        ctx.beginPath();
-        ctx.arc(0, 0, radius, 0, 2 * Math.PI);
-        ctx.fill();
-    }
-
-    // TWheel halfAndHalf: split-color ring background (e.g. 24-hour dial)
-    // On the 24-hour worldtime dial, with labels 0,23,22,...,1:
-    //   - Midnight (0)  is at the top (12 o'clock)
-    //   - 6PM (18)      is at 3 o'clock (index 6, going CW)
-    //   - Noon (12)     is at the bottom (6 o'clock)
-    //   - 6AM (6)       is at 9 o'clock
-    // Night (bgColor=black) should cover the TOP half (6PM through midnight to 6AM)
-    // Day (bgColor2=white) should cover the BOTTOM half (6AM through noon to 6PM)
-    const halfAndHalf = part.halfAndHalf ? evalAttr(part.halfAndHalf, env) : 0;
-    const bgColor2 = part.bgColor2 ? evalColor(part.bgColor2, env) : bgColor;
-    // Inner radius of the ring: approximate from font size
-    const innerR = radius - fontSize - 2;
-    if (part.wheelVariant === 'TWheel' && halfAndHalf) {
-        ctx.save();
-        ctx.rotate(angle);
-        // Night half (top): arc from left (π) CW through top to right (2π/0)
-        ctx.fillStyle = bgColor;
-        ctx.beginPath();
-        ctx.arc(0, 0, radius, Math.PI, 2 * Math.PI);
-        ctx.arc(0, 0, innerR, 2 * Math.PI, Math.PI, true); // inner arc, reverse
-        ctx.closePath();
-        ctx.fill();
-        // Day half (bottom): arc from right (0) CW through bottom to left (π)
-        ctx.fillStyle = bgColor2;
-        ctx.beginPath();
-        ctx.arc(0, 0, radius, 0, Math.PI);
-        ctx.arc(0, 0, innerR, Math.PI, 0, true); // inner arc, reverse
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
-    } else if (part.wheelVariant === 'TWheel' && bgColor !== 'rgba(0,0,0,0)') {
-        ctx.fillStyle = bgColor;
-        ctx.beginPath();
-        ctx.arc(0, 0, radius, 0, 2 * Math.PI);
-        ctx.arc(0, 0, innerR, 0, 2 * Math.PI, true);
-        ctx.fill('evenodd');
-    }
-
-    // TWheel tick marks — short marks at the outer edge, with dots on hours
-    if (part.wheelVariant === 'TWheel' && part.ticks) {
-        const ticksPerLabel = Math.round(evalAttr(part.ticks, env) || 0);
-        const nTotalTicks = ticksPerLabel * n;
-        const tw = part.tickWidth ? evalAttr(part.tickWidth, env) : 0.5;
-        if (nTotalTicks > 0) {
-            ctx.save();
-            ctx.rotate(angle);
-            const tickLen = 2;
-            for (let ti = 0; ti < nTotalTicks; ti++) {
-                const theta = (ti / nTotalTicks) * 2 * Math.PI;
-                const cosT = Math.cos(theta);
-                const sinT = Math.sin(theta);
-                if (ti % ticksPerLabel === 0) {
-                    // Hour mark: small filled dot
-                    // Determine if this position is on night (black bg) or day (white bg)
-                    // to pick a contrasting color for the dot
-                    const norm = ((theta % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-                    const onNightHalf = norm >= Math.PI;
-                    ctx.fillStyle = onNightHalf ? strokeColor : evalColor(part.bgColor, env);
-                    ctx.beginPath();
-                    ctx.arc(cosT * (radius - 1.5), sinT * (radius - 1.5), 1.2, 0, 2 * Math.PI);
-                    ctx.fill();
-                } else {
-                    // Regular tick mark — use contrast color for visibility
-                    const norm = ((theta % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-                    const onNightHalf = norm >= Math.PI;
-                    ctx.strokeStyle = halfAndHalf
-                        ? (onNightHalf ? strokeColor : evalColor(part.bgColor, env))
-                        : strokeColor;
-                    ctx.lineWidth = tw;
-                    ctx.beginPath();
-                    ctx.moveTo(cosT * radius, sinT * radius);
-                    ctx.lineTo(cosT * (radius - tickLen), sinT * (radius - tickLen));
-                    ctx.stroke();
-                }
-            }
-            ctx.restore();
-        }
-    }
-
-    // Draw labels around the circle.
-    // Two modes depending on whether the wheel spans a full circle or partial arc:
-    // - Full circle (no angle1/angle2): text rotates with wheel, tops toward center
-    //   (iOS ECQHandSpoke rendering — e.g. Haleakala weekday/date wheels)
-    // - Partial arc (angle1/angle2 specified): text stays horizontal/upright
-    //   through small windows (e.g. Chandra date digit wheels)
-    const isPartialArc = !!part.angle1 || !!part.angle2;
-    
-    ctx.save();
-    if (isPartialArc) {
-        ctx.rotate(-angle + angle1);
-    } else {
-        ctx.rotate(angle + angle1);
-    }
-
-    for (let i = 0; i < n; i++) {
-        const label = labels[i].trim();
-
-        if (label) {
-            // For halfAndHalf TWheels, determine which half this label is in
-            // and set the contrast color accordingly.
-            // Night (bgColor=black) is the TOP half, Day (bgColor2=white) is BOTTOM.
-            // Labels are placed starting from twelve orientation, rotating CW by -step each.
-            // Label i is at angular position -i * step in the rotated frame.
-            if (halfAndHalf) {
-                // iOS uses kCGBlendModeDifference for text on halfAndHalf dials.
-                // This automatically makes text contrast with the background:
-                // white text with 'difference' blend → appears white on black, black on white.
-                ctx.fillStyle = 'white';
-                ctx.globalCompositeOperation = 'difference';
-            } else {
-                ctx.fillStyle = strokeColor;
-            }
-            ctx.save();
-
-            // Position text based on orientation
-            const currentRotation = isPartialArc ? (-angle + angle1 + i * step) : 0;
-            switch (orientation.toLowerCase()) {
-                case 'three':
-                    ctx.translate(tradius - maxW / 2, 0);
-                    break;
-                case 'six':
-                    ctx.translate(0, tradius - maxH / 2);
-                    break;
-                case 'twelve':
-                    ctx.translate(0, -(tradius - maxH / 2));
-                    break;
-                case 'nine':
-                    ctx.translate(-(tradius - maxW / 2), 0);
-                    break;
-            }
-            // Counter-rotate only for partial-arc wheels to keep text horizontal
-            if (isPartialArc) {
-                ctx.rotate(-currentRotation);
-            }
-
-            ctx.fillText(label, 0, textVisualCenterY(ctx, label));
-            ctx.restore();
-        }
-
-        ctx.rotate(isPartialArc ? step : -step);
-    }
-
-    ctx.restore(); // closes ctx.save() for ctx.rotate(angle + angle1)
-
-    // Draw tick marks for QWheel (e.g. tick288, tick96)
-    if (part.tick && part.wheelVariant === 'QWheel') {
-        const tickMatch = part.tick.match(/tick(\d+)/);
-        if (tickMatch) {
-            const nTicks = parseInt(tickMatch[1], 10);
-            const tickOuter = radius; // outer edge of the dial
-            const tickGap = radius - tradius; // distance from outer edge to text
-            // Tick lengths from the outer edge inward
-            const tickLenLarge = tickGap - 2;  // hour marks: almost to the text
-            const tickLenMedium = tickGap * 0.55; // 30-min marks
-            const tickLenSmall = tickGap * 0.30;  // 5-min marks
-
-            const ticksPerHour = nTicks / 24;
-            const ticksPer30Min = ticksPerHour / 2;
-
-            ctx.save();
-            ctx.rotate(angle);
-            ctx.strokeStyle = strokeColor;
-
-            for (let i = 0; i < nTicks; i++) {
-                const th = (i / nTicks) * 2 * Math.PI - Math.PI / 2;
-                const cosT = Math.cos(th);
-                const sinT = Math.sin(th);
-
-                let tickLen: number;
-                let lw: number;
-                if (i % ticksPerHour === 0) {
-                    // Hour mark
-                    tickLen = tickLenLarge;
-                    lw = 0.7;
-                } else if (i % ticksPer30Min === 0) {
-                    // 30-minute mark
-                    tickLen = tickLenMedium;
-                    lw = 0.5;
-                } else {
-                    // 5-minute mark
-                    tickLen = tickLenSmall;
-                    lw = 0.3;
-                }
-
-                ctx.beginPath();
-                ctx.moveTo(cosT * tickOuter, sinT * tickOuter);
-                ctx.lineTo(cosT * (tickOuter - tickLen), sinT * (tickOuter - tickLen));
-                ctx.lineWidth = lw;
-                ctx.stroke();
-            }
-            ctx.restore();
-        }
-    }
-
-    // Note: iOS SWheels render text in rectangular panes — no circular border.
-    // The window + QRect system handles visual framing.
-
-    ctx.restore(); // closes outermost ctx.save() / ctx.translate(x, y)
+    renderBody(ctx, angle);
+    ctx.restore();
 }
 
 function orientationAngle(orientation: string): number {

@@ -29,7 +29,7 @@ import { createWatchEnvironment, computeTzDeltaMs, GAIA_SUBDIAL_DEFAULTS } from 
 import type { TerraSlot } from './watch/watch-env.js';
 import { TERRA_RING_DEFAULTS } from './watch/watch-env.js';
 import { validSlotsForTz, formatSlotOffset, getStandardOffsetMinutes, olsonIdToCityName } from './watch/terra-slots.js';
-import { buildStaticBlockCaches, renderFrame, buildHandShadowCaches, BEZEL_THICKNESS_XML } from './watch/renderer.js';
+import { buildStaticBlockCaches, renderFrame, buildHandShadowCaches, BEZEL_THICKNESS_XML, setPartProfiling, resetPartProfile, getPartProfile, setWheelCacheDisabled } from './watch/renderer.js';
 import type { LoadedImage } from './watch/image-loader.js';
 import { SCHEDULER_LOOKAHEAD_MS } from './shared/animation.js';
 import { Updater, makeOverridableGetNow, timingContextForFrame, tickProfile, resetTickProfile, setTickProfiling, type WithDisplayTime } from './shared/updater.js';
@@ -73,6 +73,89 @@ const _tickProfile = typeof location !== 'undefined'
     && new URLSearchParams(location.search).has('tickprofile');
 setTickProfiling(_tickProfile);
 setAstroProfiling(_tickProfile);
+setPartProfiling(_tickProfile);
+
+// ?noprobe disables the per-frame getImageData flush probe during scrub. The
+// probe adds a synchronous readback stall to every pure-anim frame (Chrome VM
+// measured avg ~10ms, max ~120ms), so probe-free A/B runs need it off.
+const _noProbe = typeof location !== 'undefined'
+    && new URLSearchParams(location.search).has('noprobe');
+
+// --- Phase 1 render-perf ablation flags ---
+// (planning/2026-07-03-scrub-render-perf-investigation.md — bounding ablations.)
+// All are measurement flags: they may produce visual artifacts during scrub and
+// only alter behavior while scrubbing (except dpr1, which sizes backing stores
+// for the whole session). Composable via ?ablate=a,b · &faces=N:
+//   render        — 1A: tick everything, issue no draw commands
+//   staggerrender — 1B: each face draws every 2nd frame (alternating halves)
+//   staggertick   — 1E: odd faces freeze on the tick frame, catch up next frame
+//                   (spreads the tick-boundary update spike across two frames)
+//   dpr1          — 1C: canvas backing stores at dpr 1 (quarter the pixels)
+//   faces=N       — 1D: draw only the first N faces (all 16 still tick)
+//   onecanvas     — Phase 2: all faces drawn into ONE shared canvas at their
+//                   cell offsets (per-face canvases hidden, never dirtied) —
+//                   tests the per-layer-commit-cost verdict. Whole session,
+//                   not scrub-only; click-to-navigate is dead under this flag.
+//   nobezel       — Phase 2: skip drawBezel (its conic/radial/linear gradients
+//                   are rebuilt every frame) — sizes the bezel's total cost.
+//   facebuffers   — Phase 3 ceiling prototype (measurement-only; per-face
+//                   ~tick-rate stepping during scrub violates the fidelity
+//                   rule): whole-face offscreen buffers rebuilt round-robin
+//                   (≤4/frame, once per tick each), blitted every frame.
+//                   Prices the blit substrate the sandwich design sits on.
+//                   Don't combine with staggerrender/staggertick/faces.
+const _ablate = new Set(
+    (typeof location !== 'undefined'
+        ? (new URLSearchParams(location.search).get('ablate') ?? '')
+        : '').split(',').filter(Boolean));
+for (const f of _ablate) {
+    if (!['render', 'staggerrender', 'staggertick', 'dpr1', 'onecanvas', 'nobezel', 'facebuffers', 'nowheelcache'].includes(f)) {
+        console.warn(`[scrub-perf] Unknown ?ablate flag "${f}" — ignored.`);
+    }
+}
+// nowheelcache: A/B kill-switch for the wheel bitmap cache (a production
+// optimization that is ON by default — see renderer.ts drawWheel).
+if (_ablate.has('nowheelcache')) setWheelCacheDisabled(true);
+const _ablateRender = _ablate.has('render');
+const _ablateStaggerRender = _ablate.has('staggerrender');
+const _ablateStaggerTick = _ablate.has('staggertick');
+const _ablateDpr1 = _ablate.has('dpr1');
+const _ablateOneCanvas = _ablate.has('onecanvas');
+const _ablateNoBezel = _ablate.has('nobezel');
+const _ablateFaceBuffers = _ablate.has('facebuffers');
+const _facesLimit = (() => {
+    const n = parseInt((typeof location !== 'undefined'
+        ? new URLSearchParams(location.search).get('faces')
+        : null) ?? '', 10);
+    return Number.isFinite(n) && n > 0 ? n : Infinity;
+})();
+/** Effective devicePixelRatio for canvas backing stores (1C ablation seam). */
+function effectiveDpr(): number {
+    return _ablateDpr1 ? 1 : (window.devicePixelRatio || 1);
+}
+
+// --- Display refresh estimate (render-perf Phase 0) ---
+// One-shot rAF cadence sampler started ~1s after load: consecutive rAF deltas
+// quantize to the display's frame slots, so their minimum estimates the vsync
+// quantum (the median adds context if the page is busy while sampling). The
+// dev VM caps rAF at 60Hz while the native test machine runs 240Hz — this is
+// what tells pasted scrub-perf results apart. Reported in the scrub summary.
+let _refreshMinDeltaMs: number | null = null;
+let _refreshMedianDeltaMs: number | null = null;
+if (typeof requestAnimationFrame !== 'undefined' && typeof document !== 'undefined') {
+    const deltas: number[] = [];
+    let last: number | null = null;
+    let remaining = 60;
+    const sample = (ts: number) => {
+        if (last !== null) deltas.push(ts - last);
+        last = ts;
+        if (--remaining > 0) { requestAnimationFrame(sample); return; }
+        deltas.sort((a, b) => a - b);
+        _refreshMinDeltaMs = deltas[0] ?? null;
+        _refreshMedianDeltaMs = deltas[deltas.length >> 1] ?? null;
+    };
+    setTimeout(() => requestAnimationFrame(sample), 1000);
+}
 
 /** Convert a face name like "Mauna Kea" or "Haleakalā" to a filename like "mauna-kea" */
 function faceNameToSlug(name: string): string {
@@ -212,6 +295,10 @@ interface FaceInstance {
     terraSlotOverrides?: Record<number, TerraSlot>;
     /** For worldTimeRing faces: which ring slot holds the global location (1–24). */
     globalLocationSlot?: number;
+    /** ?ablate=facebuffers: whole-face buffer + the tick epoch it was rendered at. */
+    fbCanvas?: HTMLCanvasElement;
+    fbCtx?: CanvasRenderingContext2D;
+    fbEpoch?: number;
 }
 
 // ============================================================================
@@ -786,9 +873,60 @@ async function main() {
         }
     }
 
+    // --- onecanvas ablation: one shared canvas replaces the 16 per-face layers ---
+    // Per-face canvases stay in the DOM (they define the grid layout and the
+    // static-cache sizes) but are hidden and never dirtied; all faces draw into
+    // this one canvas at their cell offsets, so the compositor commits a single
+    // layer per frame instead of 16.
+    let _sharedCanvas: HTMLCanvasElement | null = null;
+    let _sharedCtx: CanvasRenderingContext2D | null = null;
+    let _sharedOffsets: { x: number; y: number }[] = [];
+    let _sharedFacePx = 0;
+    if (_ablateOneCanvas) {
+        grid.style.position = 'relative';
+        _sharedCanvas = document.createElement('canvas');
+        _sharedCanvas.style.position = 'absolute';
+        _sharedCanvas.style.inset = '0';
+        _sharedCanvas.style.pointerEvents = 'none';
+        grid.appendChild(_sharedCanvas);
+        _sharedCtx = _sharedCanvas.getContext('2d')!;
+        for (const face of faces) face.canvas.style.visibility = 'hidden';
+    }
+    /** (Re)size the shared canvas + recompute face cell offsets when layout changed. */
+    let _sharedPosKey = '';
+    function syncSharedLayout(): void {
+        if (!_sharedCanvas || !_sharedCtx) return;
+        const dpr = effectiveDpr();
+        const rect = grid.getBoundingClientRect();
+        const w = Math.round(rect.width * dpr);
+        const h = Math.round(rect.height * dpr);
+        const facePx = faces[0]?.canvas.width ?? 0;
+        // Position-only relayouts (the controller-avoidance grid *shift*) change
+        // neither the grid rect nor face sizes — track first+last face positions
+        // so stale offsets get recomputed (found via the controller overlap bug).
+        const r0 = faces[0]?.canvas.getBoundingClientRect();
+        const rN = faces[faces.length - 1]?.canvas.getBoundingClientRect();
+        const posKey = r0 && rN
+            ? `${(r0.left - rect.left).toFixed(1)},${(r0.top - rect.top).toFixed(1)},${(rN.left - rect.left).toFixed(1)},${(rN.top - rect.top).toFixed(1)}`
+            : '';
+        if (_sharedCanvas.width === w && _sharedCanvas.height === h
+            && _sharedOffsets.length === faces.length && _sharedFacePx === facePx
+            && _sharedPosKey === posKey) return;
+        _sharedPosKey = posKey;
+        _sharedCanvas.width = w;
+        _sharedCanvas.height = h;
+        _sharedCanvas.style.width = `${rect.width}px`;
+        _sharedCanvas.style.height = `${rect.height}px`;
+        _sharedFacePx = facePx;
+        _sharedOffsets = faces.map(f => {
+            const r = f.canvas.getBoundingClientRect();
+            return { x: Math.round((r.left - rect.left) * dpr), y: Math.round((r.top - rect.top) * dpr) };
+        });
+    }
+
     // --- Size all canvases to match the grid container ---
     function applySize(face: FaceInstance, size: number) {
-        const dpr = window.devicePixelRatio || 1;
+        const dpr = effectiveDpr();
         const physPx = Math.round(size * dpr);
         face.canvas.width = physPx;
         face.canvas.height = physPx;
@@ -981,8 +1119,53 @@ async function main() {
     let _scrubRenderMsTotal = 0;
     let _scrubBodyFrameCount = 0;
 
+    // --- Render-perf Phase 0 (planning/2026-07-03-scrub-render-perf-investigation.md) ---
+    // Frame-class split: "tick" frames process a quantized tick boundary (updater
+    // update/eval work concentrates there); "anim" frames only advance animations.
+    // Inter-frame intervals and post-callback slack are attributed to the
+    // *preceding* frame's class, since that frame's issuance/raster is what gates
+    // the next rAF delivery.
+    function _newClassStats() {
+        return {
+            n: 0, cpuMs: 0, cpuMax: -Infinity,
+            tickMs: 0, renderMs: 0,
+            animFaces: 0, animFacesMin: Infinity, animFacesMax: -Infinity,
+            slackMs: 0, slackMin: Infinity, slackMax: -Infinity, slackN: 0,
+            intervalMs: 0, intervalMin: Infinity, intervalMax: -Infinity, intervalN: 0,
+            hist: new Map<number, number>(),   // 2ms interval buckets → count
+        };
+    }
+    type ClassStats = ReturnType<typeof _newClassStats>;
+    let _classTick = _newClassStats();
+    let _classAnim = _newClassStats();
+    let _prevScrubFrameWasTick = false;
+    let _prevScrubFrameStart: number | null = null;
+    let _prevScrubFrameEnd: number | null = null;
+    let _faceTickMs: number[] = [];
+    let _faceRenderMs: number[] = [];
+    // Phase 1 ablation state: global frame parity (staggerrender) and frames
+    // elapsed since the last scrub tick (staggertick deferral window).
+    let _frameCounter = 0;
+    let _framesSinceTick = 999;
+    // facebuffers state: tick epoch buffers are rebuilt against, and the
+    // round-robin cursor for fair rebuild scheduling (≤4 faces/frame).
+    let _fbTickEpoch = 0;
+    let _fbCursor = 0;
+    const FB_REBUILDS_PER_FRAME = 4;
+
+    function _browserShort(): string {
+        const ua = navigator.userAgent;
+        let m: RegExpExecArray | null;
+        if ((m = /Edg\/(\d+)/.exec(ua))) return `Edge ${m[1]}`;
+        if ((m = /Chrome\/(\d+)/.exec(ua))) return `Chrome ${m[1]}`;
+        if ((m = /Version\/(\d+(?:\.\d+)?).*Safari/.exec(ua))) return `Safari ${m[1]}`;
+        if ((m = /Firefox\/(\d+)/.exec(ua))) return `Firefox ${m[1]}`;
+        return ua.slice(0, 40);
+    }
+
     function frame() {
         rafId = null;
+        _frameCounter++;
         const now = performance.now();
         const frameStart = now;
         let stillAnimating = false;
@@ -1017,13 +1200,47 @@ async function main() {
                 _scrubTickMsTotal = 0;
                 _scrubRenderMsTotal = 0;
                 _scrubBodyFrameCount = 0;
+                _classTick = _newClassStats();
+                _classAnim = _newClassStats();
+                _prevScrubFrameWasTick = false;
+                _prevScrubFrameStart = null;
+                _prevScrubFrameEnd = null;
+                _faceTickMs = faces.map(() => 0);
+                _faceRenderMs = faces.map(() => 0);
+                _framesSinceTick = 999;
+                _fbTickEpoch = 0;
+                _fbCursor = 0;
+                for (const f of faces) f.fbEpoch = -1;
                 resetTickProfile();
                 resetAstroProfile();
+                resetPartProfile();
                 console.log('[scrub-perf] Scrubbing session started.');
             }
 
             const elapsed = now - timeController.lastTickRealMs;
             willTick = elapsed >= TICK_INTERVAL_MS;
+            _framesSinceTick = willTick ? 0 : _framesSinceTick + 1;
+            if (willTick) _fbTickEpoch++;
+
+            // Interval + post-callback slack, attributed to the preceding
+            // frame's class (its issuance/raster is what gated this rAF).
+            if (_prevScrubFrameStart !== null) {
+                const cls = _prevScrubFrameWasTick ? _classTick : _classAnim;
+                const interval = now - _prevScrubFrameStart;
+                cls.intervalN++;
+                cls.intervalMs += interval;
+                if (interval < cls.intervalMin) cls.intervalMin = interval;
+                if (interval > cls.intervalMax) cls.intervalMax = interval;
+                const bucket = Math.round(interval / 2) * 2;
+                cls.hist.set(bucket, (cls.hist.get(bucket) ?? 0) + 1);
+                if (_prevScrubFrameEnd !== null) {
+                    const slack = now - _prevScrubFrameEnd;
+                    cls.slackN++;
+                    cls.slackMs += slack;
+                    if (slack < cls.slackMin) cls.slackMin = slack;
+                    if (slack > cls.slackMax) cls.slackMax = slack;
+                }
+            }
 
             if (willTick) {
                 const expectedTicks = Math.floor(elapsed / TICK_INTERVAL_MS);
@@ -1106,7 +1323,7 @@ async function main() {
                 `  - Intervals with zero animation frames: ${_scrubIntervalZeroFrameCount}\n` +
                 `  - Pure Animation Frame Stats (N = ${_pureAnimCount}):\n` +
                 `    - CPU execution: avg ${avgCpu}ms (min: ${minCpu}ms, max: ${maxCpu}ms)\n` +
-                `    - GPU flush/render: avg ${avgGpu}ms (min: ${minGpu}ms, max: ${maxGpu}ms)\n` +
+                `    - Flush probe (getImageData on 1 of ${faces.length} canvases; incl. readback stall)${_noProbe ? ' [DISABLED via ?noprobe]' : ''}: avg ${avgGpu}ms (min: ${minGpu}ms, max: ${maxGpu}ms)\n` +
                 `    - Inter-frame interval: avg ${avgDelta}ms (min: ${minDelta}ms, max: ${maxDelta}ms) -> equivalent to ${avgAnimFps} FPS\n` +
                 `  - Frame CPU split (all ${_scrubBodyFrameCount} scrub frames): ` +
                 `tick(update+astro+animate) avg ${(_scrubBodyFrameCount ? _scrubTickMsTotal / _scrubBodyFrameCount : 0).toFixed(2)}ms, ` +
@@ -1140,7 +1357,66 @@ async function main() {
                         `interp ${(p.interpMs/n).toFixed(2)} · rest ${(rest/n).toFixed(2)}], ` +
                         `animate(2nd interp) ${(p.animateMs/n).toFixed(2)}ms · ` +
                         `${perEvalUs.toFixed(1)}µs/eval (${p.evalCalls} evals)`;
-                })() : '')
+                })() : '') +
+                '\n' + (() => {
+                    // --- Render-perf Phase 0 report ---
+                    const f1 = (x: number) => x.toFixed(1);
+                    const f2 = (x: number) => x.toFixed(2);
+                    const built = faces.filter(f => f.enabled && f.cachesBuilt);
+                    const nAll = _scrubBodyFrameCount || 1;
+                    const quantum = _refreshMinDeltaMs !== null && _refreshMedianDeltaMs !== null
+                        ? `~${f1(_refreshMedianDeltaMs)}ms median / ${f1(_refreshMinDeltaMs)}ms min (~${Math.round(1000 / _refreshMedianDeltaMs)}Hz est)`
+                        : 'n/a (sampler did not complete)';
+                    const clsLine = (s: ClassStats) => s.n
+                        ? `N=${s.n} · body CPU avg ${f2(s.cpuMs / s.n)}ms (max ${f1(s.cpuMax)}) ` +
+                          `[update ${f2(s.tickMs / s.n)} · render ${f2(s.renderMs / s.n)}]`
+                        : 'N=0';
+                    const slackLine = (s: ClassStats) => s.slackN
+                        ? `avg ${f2(s.slackMs / s.slackN)}ms (min ${f1(s.slackMin)}, max ${f1(s.slackMax)})`
+                        : 'n/a';
+                    const intervalLine = (s: ClassStats) => s.intervalN
+                        ? `avg ${f2(s.intervalMs / s.intervalN)}ms (min ${f1(s.intervalMin)}, max ${f1(s.intervalMax)})`
+                        : 'n/a';
+                    const histStr = (s: ClassStats) =>
+                        [...s.hist.entries()].sort((a, b) => a[0] - b[0])
+                            .map(([bucket, count]) => `${bucket}:${count}`).join(' ') || 'n/a';
+                    const animFacesStr = (s: ClassStats) => s.n
+                        ? `avg ${f1(s.animFaces / s.n)} (min ${s.animFacesMin}, max ${s.animFacesMax})`
+                        : 'n/a';
+                    const perFace = faces
+                        .map((f, i) => ({ f, i }))
+                        .filter(({ f }) => f.enabled && f.cachesBuilt)
+                        .map(({ f, i }) => ({
+                            name: f.watch?.name ?? '?',
+                            render: (_faceRenderMs[i] ?? 0) / nAll,
+                            update: (_faceTickMs[i] ?? 0) / nAll,
+                        }))
+                        .sort((a, b) => b.render - a.render);
+                    const perFaceStr = perFace.map(p => `${p.name} ${f2(p.render)}+${f2(p.update)}`).join(' · ');
+                    const flagsStr = [
+                        ..._ablate,
+                        _facesLimit !== Infinity ? `faces=${_facesLimit}` : '',
+                        _noProbe ? 'noprobe' : '',
+                    ].filter(Boolean).join(',') || 'none';
+                    return `  - Environment: ${_browserShort()} · dpr ${window.devicePixelRatio} (backing ${effectiveDpr()}) · ` +
+                        `${built.length} canvases @ ${built[0]?.sizePx ?? 0}px CSS / ${built[0]?.canvas.width ?? 0}px phys · ` +
+                        `window ${window.innerWidth}×${window.innerHeight} · display quantum ${quantum}` +
+                        (_sharedCanvas ? ` · shared canvas ${_sharedCanvas.width}×${_sharedCanvas.height}px phys` : '') +
+                        ` · flags ${flagsStr}\n` +
+                        `  - Frame classes (flush probe excluded): tick ${clsLine(_classTick)} || anim ${clsLine(_classAnim)}\n` +
+                        `  - Faces animating (of ${built.length}): at tick frames ${animFacesStr(_classTick)} · between ticks ${animFacesStr(_classAnim)} (= faces Phase-1B idle-face skipping would still render)\n` +
+                        `  - Post-callback slack (rAF gap minus our JS): after tick ${slackLine(_classTick)} · after anim ${slackLine(_classAnim)} (after-anim slack follows the flush probe)\n` +
+                        `  - Intervals by preceding frame class: after tick ${intervalLine(_classTick)} · after anim ${intervalLine(_classAnim)}\n` +
+                        `  - Interval histogram (ms:count, 2ms buckets): after-tick ${histStr(_classTick)} | after-anim ${histStr(_classAnim)}\n` +
+                        `  - Per-face avg ms/frame (render+update), ranked by render: ${perFaceStr}` +
+                        (_tickProfile ? (() => {
+                            const entries = [...getPartProfile().entries()].sort((a, b) => b[1] - a[1]);
+                            if (entries.length === 0) return '';
+                            const total = entries.reduce((s, [, v]) => s + v, 0);
+                            return `\n  - Render ms/frame by part type (Σ ${f2(total / nAll)}): ` +
+                                entries.map(([k, v]) => `${k} ${f2(v / nAll)}`).join(' · ');
+                        })() : '');
+                })()
             );
         }
 
@@ -1176,7 +1452,28 @@ async function main() {
         // direction is 0 when stopped so continuous values settle).
         const timingCtx = timingContextForFrame(timeController);
 
-        for (const face of faces) {
+        if (_ablateOneCanvas) syncSharedLayout();
+
+        // facebuffers: choose up to FB_REBUILDS_PER_FRAME stale faces to rebuild
+        // this frame, round-robin from _fbCursor so no face starves when
+        // frames-per-tick < faces/FB_REBUILDS_PER_FRAME.
+        let _fbRebuildSet: Set<number> | null = null;
+        if (_ablateFaceBuffers && isScrubbing) {
+            _fbRebuildSet = new Set();
+            let lastPicked = -1;
+            for (let scanned = 0; scanned < faces.length && _fbRebuildSet.size < FB_REBUILDS_PER_FRAME; scanned++) {
+                const idx = (_fbCursor + scanned) % faces.length;
+                const f = faces[idx];
+                if (f.enabled && f.cachesBuilt && (f.fbEpoch ?? -1) !== _fbTickEpoch) {
+                    _fbRebuildSet.add(idx);
+                    lastPicked = idx;
+                }
+            }
+            if (lastPicked >= 0) _fbCursor = (lastPicked + 1) % faces.length;
+        }
+
+        for (let fi = 0; fi < faces.length; fi++) {
+            const face = faces[fi];
             if (!face.enabled || !face.cachesBuilt) continue;
             // Per-face error boundary. The whole rAF loop is a single chain
             // (setTimeout → onIdleWakeup → rAF → frame → armIdle → …) with no
@@ -1190,14 +1487,66 @@ async function main() {
             try {
                 // Drive all ObsValues for this face — hands, wheels, dials, wedges,
                 // masterOffset, and the terminator leaves (all on the per-face Updater).
+                // Phase 1 ablation gates — active only while scrubbing.
+                // staggertick freezes odd faces on the tick frame (no tick, no
+                // render); they catch up next frame (the updater's guard loop
+                // chains ARRIVED→SITTING→SWEEPING for late processing).
+                const doTick = !isScrubbing
+                    || !_ablateStaggerTick || _framesSinceTick >= (fi % 2);
+                const doRender = !isScrubbing || (
+                    doTick
+                    && !_ablateRender
+                    && fi < _facesLimit
+                    && (!_ablateStaggerRender || (_frameCounter + fi) % 2 === 0));
+
                 const tickStart = performance.now();
-                face.updater.tick(face.env, now, face.getNow, face.withDisplayTime, timingCtx);
-                tickCpuMs += performance.now() - tickStart;
+                if (doTick) {
+                    face.updater.tick(face.env, now, face.getNow, face.withDisplayTime, timingCtx);
+                }
+                const tickEnd = performance.now();
+                tickCpuMs += tickEnd - tickStart;
 
-                const renderStart = performance.now();
-                renderFrame(face.ctx, face.watch, face.env, face.scale, face.images, face.terminatorLeaves, face.analemmaState);
+                if (doRender) {
+                    const fbW = face.canvas.width;
+                    const fbH = face.canvas.height;
+                    if (_fbRebuildSet && _fbRebuildSet.has(fi)) {
+                        // facebuffers: rebuild this face's buffer (full render,
+                        // circle-cropped like the CSS border-radius crop).
+                        if (!face.fbCanvas || face.fbCanvas.width !== fbW || face.fbCanvas.height !== fbH) {
+                            face.fbCanvas = document.createElement('canvas');
+                            face.fbCanvas.width = fbW;
+                            face.fbCanvas.height = fbH;
+                            face.fbCtx = face.fbCanvas.getContext('2d')!;
+                        }
+                        renderFrame(face.fbCtx!, face.watch, face.env, face.scale, face.images, face.terminatorLeaves, face.analemmaState,
+                            { clipToCircle: true, noBezel: _ablateNoBezel });
+                        face.fbEpoch = _fbTickEpoch;
+                    }
+                    if (_fbRebuildSet && face.fbCanvas) {
+                        // facebuffers: blit the (possibly one-tick-old) buffer.
+                        if (_ablateOneCanvas && _sharedCtx && _sharedOffsets[fi]) {
+                            const o = _sharedOffsets[fi];
+                            _sharedCtx.clearRect(o.x, o.y, fbW, fbH);
+                            _sharedCtx.drawImage(face.fbCanvas, o.x, o.y);
+                        } else {
+                            face.ctx.clearRect(0, 0, fbW, fbH);
+                            face.ctx.drawImage(face.fbCanvas, 0, 0);
+                        }
+                    } else if (_ablateOneCanvas && _sharedCtx && _sharedOffsets[fi]) {
+                        renderFrame(_sharedCtx, face.watch, face.env, face.scale, face.images, face.terminatorLeaves, face.analemmaState,
+                            { x: _sharedOffsets[fi].x, y: _sharedOffsets[fi].y, w: fbW, h: fbH, noBezel: _ablateNoBezel, clipToCircle: true });
+                    } else {
+                        renderFrame(face.ctx, face.watch, face.env, face.scale, face.images, face.terminatorLeaves, face.analemmaState,
+                            _ablateNoBezel ? { noBezel: true } : undefined);
+                    }
+                }
 
-                renderMs += performance.now() - renderStart;
+                const renderEnd = performance.now();
+                renderMs += renderEnd - tickEnd;
+                if (isScrubbing) {
+                    _faceTickMs[fi] += tickEnd - tickStart;
+                    _faceRenderMs[fi] += renderEnd - tickEnd;
+                }
 
                 const faceAnimating = face.updater.anyAnimating();
                 if (faceAnimating) {
@@ -1217,15 +1566,17 @@ async function main() {
             _scrubBodyFrameCount++;
         }
 
+        let gpuProbeMs = 0;
         if (isPureAnimFrame) {
             const animJsEnd = performance.now();
             const testFace = faces.find(f => f.enabled && f.cachesBuilt);
-            if (testFace) {
+            if (testFace && !_noProbe) {
                 testFace.ctx.getImageData(0, 0, 1, 1);
             }
             const animGpuEnd = performance.now();
             const cpuTime = animJsEnd - animStart;
             const gpuTime = animGpuEnd - animJsEnd;
+            gpuProbeMs = gpuTime;
 
             _pureAnimCount++;
             _pureAnimCpuTimeTotal += cpuTime;
@@ -1254,6 +1605,28 @@ async function main() {
 
         timeController.endFrame();
 
+        if (isScrubbing) {
+            // Per-class body CPU (frame start → here). Excludes the flush probe
+            // (reported separately; nonzero only on pure-anim frames) so the
+            // tick/anim class comparison isn't skewed by measurement cost.
+            const bodyEnd = performance.now();
+            const cls = willTick ? _classTick : _classAnim;
+            const cpu = bodyEnd - frameStart - gpuProbeMs;
+            cls.n++;
+            cls.cpuMs += cpu;
+            if (cpu > cls.cpuMax) cls.cpuMax = cpu;
+            cls.tickMs += tickCpuMs;
+            cls.renderMs += renderMs;
+            cls.animFaces += animatingFaceCount;
+            if (animatingFaceCount < cls.animFacesMin) cls.animFacesMin = animatingFaceCount;
+            if (animatingFaceCount > cls.animFacesMax) cls.animFacesMax = animatingFaceCount;
+            _prevScrubFrameWasTick = willTick;
+            _prevScrubFrameStart = frameStart;
+            _prevScrubFrameEnd = bodyEnd;
+        } else {
+            _prevScrubFrameStart = null;
+            _prevScrubFrameEnd = null;
+        }
 
         // Decide whether to keep the RAF loop running
         const willContinue = timeController.needsContinuousRender || stillAnimating;
@@ -1726,7 +2099,7 @@ async function main() {
             }
         }
 
-        const dpr = window.devicePixelRatio || 1;
+        const dpr = effectiveDpr();
         const newPhys = Math.round(size * dpr);
         // Skip if size hasn't changed AND layout position hasn't changed
         const isAstroTab = (timeUI?.isPopoverOpen() ?? false) &&

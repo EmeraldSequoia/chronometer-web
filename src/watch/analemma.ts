@@ -228,6 +228,9 @@ export interface AnalemmaState {
     sunBitmapAnchorY: number;
     sunBitmapW: number;        // bitmap dimensions in XML coords
     sunBitmapH: number;
+
+    // Per-frame scratch for the clipped channel+sun compose (see drawAnalemma)
+    _scratchCanvas?: OffscreenCanvas;
 }
 
 // ============================================================================
@@ -725,22 +728,39 @@ export function drawAnalemma(
         }
     }
 
-    // --- Clip to disc ---
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(0, 0, radius, 0, Math.PI * 2);
-    ctx.clip();
+    // --- Clipped channel + sun compose ---
+    // Composed in a small disc-sized scratch canvas and blitted once, instead
+    // of clip()ing the destination: keeps the destination's op stream short
+    // and makes the arc-clip cost independent of the destination canvas
+    // (relevant to the ?ablate=onecanvas shared-canvas prototype).
+    const m = ctx.getTransform();
+    const devScale = Math.hypot(m.a, m.b) || 1;
+    const pxSize = Math.max(2, Math.ceil(radius * 2 * devScale));
+    let scratch = state._scratchCanvas;
+    if (!scratch || scratch.width !== pxSize || scratch.height !== pxSize) {
+        scratch = new OffscreenCanvas(pxSize, pxSize);
+        state._scratchCanvas = scratch;
+    }
+    const sctx = scratch.getContext('2d')!;
+    sctx.resetTransform();
+    sctx.clearRect(0, 0, pxSize, pxSize);
+    sctx.save();
+    sctx.translate(pxSize / 2, pxSize / 2);
+    sctx.scale(devScale, devScale);
+    sctx.beginPath();
+    sctx.arc(0, 0, radius, 0, Math.PI * 2);
+    sctx.clip();
 
     // --- Pre-rendered channel + ticks + overlay (rotated) ---
-    ctx.rotate(currentRotation);
+    sctx.rotate(currentRotation);
     if (state.channelBitmap) {
-        ctx.drawImage(state.channelBitmap, -radius, -radius, radius * 2, radius * 2);
+        sctx.drawImage(state.channelBitmap, -radius, -radius, radius * 2, radius * 2);
     }
 
     // --- Sun marker (pre-rendered bitmap with shadow) ---
     if (state.sunBitmap) {
         const [sunX, sunY] = pathParamToXY(state.pathScaled, pathParameter);
-        ctx.drawImage(
+        sctx.drawImage(
             state.sunBitmap,
             sunX - state.sunBitmapAnchorX,
             -sunY - state.sunBitmapAnchorY,
@@ -748,8 +768,9 @@ export function drawAnalemma(
             state.sunBitmapH,
         );
     }
+    sctx.restore();
 
-    ctx.restore();  // unclip
+    ctx.drawImage(scratch, -radius, -radius, radius * 2, radius * 2);
 
     ctx.restore();  // undo translate
 }
