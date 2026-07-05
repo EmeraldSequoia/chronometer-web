@@ -288,8 +288,23 @@ Two consequences:
    second if still needed.
 
 **Revised production order:**
-1. **Wheel-bitmap cache** — ✅ implemented 2026-07-04 (`renderer.ts`
-   drawWheel; kill-switch `?ablate=nowheelcache`), covering **all** wheels.
+1. **Wheel caching** — ✅ implemented 2026-07-04, **redesigned 2026-07-05 as
+   iOS-style per-glyph atlases** after the memory ledger showed the original
+   whole-band bitmaps cost 48 MB at 4K (~88% transparent pixels). Final
+   design (`renderer.ts` drawWheel): labels bake once per appearance into a
+   packed atlas strip (glyphs canonical-upright, exact device scale; atlas
+   keys exclude wheel geometry so same-font digit wheels share across faces)
+   and blit one sub-rect per slot under the wheel rotation; backgrounds draw
+   live (1–2 arc fills); tick marks stroke cached Path2D groups (retained
+   vectors, zero bitmap memory — only one wheel in the app has ticks).
+   halfAndHalf `difference` text now blends against the real canvas at blit
+   time (more faithful than the band bake). Measured: wheel memory 48 →
+   **5.4 MB at the 4K profile**; frozen-time diff vs the live path *improved*
+   over the band cache (worst face 330 → 125 strong-diff px — backgrounds/
+   ticks are now pixel-exact); VM Wheel issuance 1.10 ms/frame (vs 0.63 band,
+   1.99 live) — the accepted trade, and buffered wheels won't pay it per
+   frame once the sandwich lands. `?ablate=nowheelcache` remains the A/B
+   kill-switch. History below kept for the record:
    Full-circle wheels rotate rigidly and cache directly. Partial-arc digit
    wheels (Chandra day / Vienna year etc.) originally counter-rotated their
    labels to stay upright — verified to be a **web-port deviation from iOS**:

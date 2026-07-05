@@ -29,7 +29,7 @@ import { createWatchEnvironment, computeTzDeltaMs, GAIA_SUBDIAL_DEFAULTS } from 
 import type { TerraSlot } from './watch/watch-env.js';
 import { TERRA_RING_DEFAULTS } from './watch/watch-env.js';
 import { validSlotsForTz, formatSlotOffset, getStandardOffsetMinutes, olsonIdToCityName } from './watch/terra-slots.js';
-import { buildStaticBlockCaches, renderFrame, buildHandShadowCaches, BEZEL_THICKNESS_XML, setPartProfiling, resetPartProfile, getPartProfile, setWheelCacheDisabled } from './watch/renderer.js';
+import { buildStaticBlockCaches, renderFrame, buildHandShadowCaches, BEZEL_THICKNESS_XML, setPartProfiling, resetPartProfile, getPartProfile, setWheelCacheDisabled, rendererCacheMemoryBytes } from './watch/renderer.js';
 import type { LoadedImage } from './watch/image-loader.js';
 import { SCHEDULER_LOOKAHEAD_MS } from './shared/animation.js';
 import { Updater, makeOverridableGetNow, timingContextForFrame, tickProfile, resetTickProfile, setTickProfiling, type WithDisplayTime } from './shared/updater.js';
@@ -75,11 +75,17 @@ setTickProfiling(_tickProfile);
 setAstroProfiling(_tickProfile);
 setPartProfiling(_tickProfile);
 
-// ?noprobe disables the per-frame getImageData flush probe during scrub. The
-// probe adds a synchronous readback stall to every pure-anim frame (Chrome VM
-// measured avg ~10ms, max ~120ms), so probe-free A/B runs need it off.
-const _noProbe = typeof location !== 'undefined'
-    && new URLSearchParams(location.search).has('noprobe');
+// The flush probe (getImageData once per pure-anim frame during scrub) is
+// OPT-IN via ?probe as of 2026-07-05 — previously on by default, disabled via
+// ?noprobe. Two strikes killed the default: it adds a readback stall and can
+// kick the probed canvas onto a slow path (Chrome, seen Phase 1), and with the
+// wheel glyph-atlas renderer the per-frame readback of a canvas composed from
+// many OffscreenCanvas textures trips Chrome into a page-wide *sticky*
+// quarter-rate rAF throttle (~15 fps persisting after scrub ends).
+// ?noprobe is still honored (wins over ?probe) so old run URLs stay valid.
+const _probeEnabled = typeof location !== 'undefined'
+    && new URLSearchParams(location.search).has('probe')
+    && !new URLSearchParams(location.search).has('noprobe');
 
 // --- Phase 1 render-perf ablation flags ---
 // (planning/2026-07-03-scrub-render-perf-investigation.md — bounding ablations.)
@@ -1153,6 +1159,52 @@ async function main() {
     let _fbCursor = 0;
     const FB_REBUILDS_PER_FRAME = 4;
 
+    // =========================================================================
+    // Canvas-memory ledger (`[mem]`) — accounting of every canvas/bitmap we
+    // allocate, estimated as w×h×4 bytes. Printed once after the initial cache
+    // build and appended to each scrub-perf summary. Device targets: see
+    // planning/2026-07-03-scrub-render-perf-investigation.md "Device targets".
+    // =========================================================================
+    let _memReported = false;
+    function canvasMemoryReport(): string {
+        const MB = (b: number) => (b / (1024 * 1024)).toFixed(1);
+        const seen = new Set<object>();
+        const sz = (c: { width: number; height: number } | null | undefined): number => {
+            if (!c || seen.has(c)) return 0;
+            seen.add(c);
+            return c.width * c.height * 4;
+        };
+        let facesB = 0, staticB = 0, shadowB = 0, imagesB = 0, analemmaB = 0, buffersB = 0, terraB = 0;
+        const walkParts = (parts: any[]): void => {
+            for (const p of parts) {
+                staticB += sz(p.cachedCanvas);
+                shadowB += sz(p._shadowBitmap);
+                if (p.children) walkParts(p.children);
+            }
+        };
+        for (const face of faces) {
+            facesB += sz(face.canvas);
+            buffersB += sz(face.fbCanvas);
+            walkParts(face.watch.parts);
+            for (const img of face.images.values()) imagesB += sz(img.bitmap);
+            const a = face.analemmaState as any;
+            if (a) analemmaB += sz(a.bgBitmap) + sz(a.channelBitmap) + sz(a.sunBitmap) + sz(a._scratchCanvas);
+            terraB += sz((face.env as any)._terraCityKnockout);
+        }
+        const sharedB = sz(_sharedCanvas);
+        const rc = rendererCacheMemoryBytes();
+        const total = facesB + staticB + shadowB + imagesB + analemmaB + buffersB + terraB
+            + sharedB + rc.wedgeCache + rc.wheelCache + rc.cutoutTemp;
+        const mem = (performance as any).memory;
+        const jsHeap = mem
+            ? ` · JS heap (Chrome-only): ${MB(mem.usedJSHeapSize)}/${MB(mem.totalJSHeapSize)}MB`
+            : '';
+        return `canvas/bitmap est TOTAL ${MB(total)}MB: faces ${MB(facesB)} · static caches ${MB(staticB)} · ` +
+            `images ${MB(imagesB)} · shadows ${MB(shadowB)} · wedge cache ${MB(rc.wedgeCache)} · ` +
+            `wheel cache ${MB(rc.wheelCache)} · analemma ${MB(analemmaB)} · terra ring ${MB(terraB)} · ` +
+            `cutout temp ${MB(rc.cutoutTemp)} · face buffers ${MB(buffersB)} · shared canvas ${MB(sharedB)}${jsHeap}`;
+    }
+
     function _browserShort(): string {
         const ua = navigator.userAgent;
         let m: RegExpExecArray | null;
@@ -1323,7 +1375,7 @@ async function main() {
                 `  - Intervals with zero animation frames: ${_scrubIntervalZeroFrameCount}\n` +
                 `  - Pure Animation Frame Stats (N = ${_pureAnimCount}):\n` +
                 `    - CPU execution: avg ${avgCpu}ms (min: ${minCpu}ms, max: ${maxCpu}ms)\n` +
-                `    - Flush probe (getImageData on 1 of ${faces.length} canvases; incl. readback stall)${_noProbe ? ' [DISABLED via ?noprobe]' : ''}: avg ${avgGpu}ms (min: ${minGpu}ms, max: ${maxGpu}ms)\n` +
+                `    - Flush probe (getImageData on 1 of ${faces.length} canvases; incl. readback stall)${_probeEnabled ? '' : ' [off; opt in with ?probe]'}: avg ${avgGpu}ms (min: ${minGpu}ms, max: ${maxGpu}ms)\n` +
                 `    - Inter-frame interval: avg ${avgDelta}ms (min: ${minDelta}ms, max: ${maxDelta}ms) -> equivalent to ${avgAnimFps} FPS\n` +
                 `  - Frame CPU split (all ${_scrubBodyFrameCount} scrub frames): ` +
                 `tick(update+astro+animate) avg ${(_scrubBodyFrameCount ? _scrubTickMsTotal / _scrubBodyFrameCount : 0).toFixed(2)}ms, ` +
@@ -1396,7 +1448,7 @@ async function main() {
                     const flagsStr = [
                         ..._ablate,
                         _facesLimit !== Infinity ? `faces=${_facesLimit}` : '',
-                        _noProbe ? 'noprobe' : '',
+                        _probeEnabled ? 'probe' : '',
                     ].filter(Boolean).join(',') || 'none';
                     return `  - Environment: ${_browserShort()} · dpr ${window.devicePixelRatio} (backing ${effectiveDpr()}) · ` +
                         `${built.length} canvases @ ${built[0]?.sizePx ?? 0}px CSS / ${built[0]?.canvas.width ?? 0}px phys · ` +
@@ -1415,7 +1467,8 @@ async function main() {
                             const total = entries.reduce((s, [, v]) => s + v, 0);
                             return `\n  - Render ms/frame by part type (Σ ${f2(total / nAll)}): ` +
                                 entries.map(([k, v]) => `${k} ${f2(v / nAll)}`).join(' · ');
-                        })() : '');
+                        })() : '') +
+                        `\n  - Memory: ${canvasMemoryReport()}`;
                 })()
             );
         }
@@ -1570,7 +1623,7 @@ async function main() {
         if (isPureAnimFrame) {
             const animJsEnd = performance.now();
             const testFace = faces.find(f => f.enabled && f.cachesBuilt);
-            if (testFace && !_noProbe) {
+            if (testFace && _probeEnabled) {
                 testFace.ctx.getImageData(0, 0, 1, 1);
             }
             const animGpuEnd = performance.now();
@@ -1626,6 +1679,12 @@ async function main() {
         } else {
             _prevScrubFrameStart = null;
             _prevScrubFrameEnd = null;
+        }
+
+        // One-shot memory ledger once every face's caches exist (initial footprint).
+        if (!_memReported && faces.every(f => !f.enabled || f.cachesBuilt)) {
+            _memReported = true;
+            console.log('[mem] ' + canvasMemoryReport());
         }
 
         // Decide whether to keep the RAF loop running

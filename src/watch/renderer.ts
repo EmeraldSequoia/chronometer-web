@@ -672,6 +672,24 @@ function _ppAdd(key: string, t0: number): void {
 }
 
 /**
+ * Estimated bytes (w×h×4) held by the renderer's module-level bitmap caches.
+ * Feeds the engine's `[mem]` canvas-memory ledger.
+ */
+export function rendererCacheMemoryBytes(): { wedgeCache: number; wheelCache: number; cutoutTemp: number } {
+    let wedgeCache = 0;
+    for (const wb of _wedgeBitmapCache.values()) {
+        if (wb.canvas) wedgeCache += wb.canvas.width * wb.canvas.height * 4;
+    }
+    let wheelCache = 0;
+    for (const ga of _wheelGlyphAtlasCache.values()) {
+        wheelCache += ga.atlas.width * ga.atlas.height * 4;
+    }
+    // Tick Path2Ds are retained vector geometry — negligible, not counted.
+    const cutoutTemp = _cutoutTempCanvas ? _cutoutTempCanvas.width * _cutoutTempCanvas.height * 4 : 0;
+    return { wedgeCache, wheelCache, cutoutTemp };
+}
+
+/**
  * Iterate parts in document order, drawing each appropriately.
  * Windows accumulate and are applied to the next drawable part
  * (unless consumed by a <static> block, whose cache already has them).
@@ -2098,19 +2116,192 @@ function drawHandShape(
 // Wheel — rotating text wheel (SWheel / QWheel)
 // ============================================================================
 
-// --- Wheel bitmap cache (appearance-keyed, like the wedge cache) ---
-// Full-circle wheels rotate rigidly — background, ticks, and labels all turn
-// with `angle` — so one bitmap per appearance serves every rotation (and every
-// face at the same scale; refName-style sharing falls out of the key). Partial-
-// arc wheels counter-rotate their labels to stay upright, are not rotation-
-// invariant, and keep the live path. ?ablate=nowheelcache is the A/B
-// kill-switch. Cost basis: drawWheel was 45% of Safari draw issuance
+// --- Wheel glyph atlases + tick Path2Ds (iOS-style per-digit textures) ---
+// Wheels bake their *labels* once per appearance into a packed atlas strip
+// (glyphs upright/canonical, exact device scale) and blit one sub-rect per
+// slot under the wheel rotation — the same mechanism as iOS's per-digit
+// texture-atlas regions rotated in place. Backgrounds draw live (1–2 arc
+// fills); tick marks stroke cached Path2D geometry (retained vectors: one
+// command per group, no bitmap, crisp at any scale). This replaced an earlier
+// whole-band bitmap cache that was ~88% transparent pixels and cost 48 MB at
+// 4K. Atlas keys deliberately exclude wheel geometry, so e.g. every 0-9 digit
+// wheel with the same font/color shares one atlas across all faces.
+// Cost basis: live drawWheel was 45% of Safari draw issuance
 // (planning/2026-07-04-phase3-face-buffer-caching.md, "Ceiling results").
-interface WheelBitmap { canvas: OffscreenCanvas; extent: number; }
-const _wheelBitmapCache = new Map<string, WheelBitmap>();
+// ?ablate=nowheelcache selects the fully live path for A/B.
+interface WheelGlyphAtlas {
+    atlas: OffscreenCanvas;
+    /** Per-label atlas cells (px); null for empty labels. */
+    cells: ({ sx: number; sw: number } | null)[];
+    cellH: number;      // px
+    dev: number;        // device px per XML unit at bake time
+    maxWu: number;      // max label width across the set, XML units
+    maxHu: number;      // max label height, XML units
+}
+const _wheelGlyphAtlasCache = new Map<string, WheelGlyphAtlas>();
+// Diagnostics: build churn detector (regression debugging; cheap, always on).
+let _wheelAtlasBuilds = 0;
+if (typeof globalThis !== 'undefined') {
+    (globalThis as any).__wheelAtlasStats = () => ({
+        builds: _wheelAtlasBuilds,
+        cacheSize: _wheelGlyphAtlasCache.size,
+        keys: [..._wheelGlyphAtlasCache.keys()].map(k => k.slice(0, 60)),
+    });
+}
+interface WheelTickPathGroup { path: Path2D; color: string; lineWidth: number; fill: boolean }
+const _wheelTickPathCache = new Map<string, WheelTickPathGroup[]>();
 const WHEEL_CACHE_CAP = 64;
 let _wheelCacheDisabled = false;
 export function setWheelCacheDisabled(v: boolean): void { _wheelCacheDisabled = v; }
+
+function getWheelGlyphAtlas(
+    dev: number,
+    fontSize: number,
+    fontName: string,
+    color: string,
+    labels: string[],
+): WheelGlyphAtlas {
+    const key = `${dev.toFixed(2)}|${fontSize}|${fontName}|${color}|${labels.join(',')}`;
+    let ga = _wheelGlyphAtlasCache.get(key);
+    if (ga) return ga;
+    _wheelAtlasBuilds++;
+    if (_wheelGlyphAtlasCache.size >= WHEEL_CACHE_CAP) _wheelGlyphAtlasCache.clear();
+
+    // Metrics are transform-independent: measure at unit scale.
+    const probe = new OffscreenCanvas(1, 1).getContext('2d')!;
+    probe.font = `${fontSize}px "${fontName}"`;
+    const m0 = probe.measureText('Xg');
+    const maxHu = m0.fontBoundingBoxAscent + m0.fontBoundingBoxDescent;
+    const trimmed = labels.map(l => l.trim());
+    let maxWu = 0;
+    for (const lab of trimmed) maxWu = Math.max(maxWu, probe.measureText(lab).width);
+
+    const PAD = 2; // px of AA-bleed margin per side
+    const cellH = Math.ceil(maxHu * dev) + 2 * PAD;
+    const cells: ({ sx: number; sw: number } | null)[] = [];
+    let xPx = 0;
+    for (const lab of trimmed) {
+        if (!lab) { cells.push(null); continue; }
+        const sw = Math.ceil(probe.measureText(lab).width * dev) + 2 * PAD;
+        cells.push({ sx: xPx, sw });
+        xPx += sw;
+    }
+    const atlas = new OffscreenCanvas(Math.max(1, xPx), cellH);
+    const actx = atlas.getContext('2d')!;
+    actx.font = `${fontSize}px "${fontName}"`;
+    actx.textAlign = 'center';
+    actx.textBaseline = 'alphabetic';
+    actx.fillStyle = color;
+    for (let i = 0; i < trimmed.length; i++) {
+        const cell = cells[i];
+        if (!cell) continue;
+        // Bake so the glyph's fillText anchor (center-aligned at the visual
+        // center) lands exactly on the cell center — the blit then maps cell
+        // center to the slot origin, reproducing today's placement.
+        actx.save();
+        actx.translate(cell.sx + cell.sw / 2, cellH / 2);
+        actx.scale(dev, dev);
+        actx.fillText(trimmed[i], 0, textVisualCenterY(actx, trimmed[i]));
+        actx.restore();
+    }
+    ga = { atlas, cells, cellH, dev, maxWu, maxHu };
+    _wheelGlyphAtlasCache.set(key, ga);
+    return ga;
+}
+
+/**
+ * Cached tick geometry for the wheel variants that carry tick marks, grouped
+ * by (color, width, fill-vs-stroke). Built in wheel-local unrotated coords;
+ * the caller strokes the groups under `rotate(angle)`. Ports the two tick
+ * sections of the live path (TWheel per-label ticks with hour dots; QWheel
+ * `tickN` 24-hour marks) exactly.
+ */
+function getWheelTickPaths(
+    variant: string,
+    radius: number,
+    tradius: number,
+    n: number,
+    ticksPerLabel: number,
+    tickWidth: number,
+    tickAttr: string | undefined,
+    halfAndHalf: number,
+    strokeColor: string,
+    bgColor: string,
+): WheelTickPathGroup[] {
+    const key = `${variant}|${radius}|${tradius}|${n}|${ticksPerLabel}|${tickWidth}|` +
+        `${tickAttr ?? ''}|${halfAndHalf}|${strokeColor}|${bgColor}`;
+    let groups = _wheelTickPathCache.get(key);
+    if (groups) return groups;
+    if (_wheelTickPathCache.size >= WHEEL_CACHE_CAP) _wheelTickPathCache.clear();
+    groups = [];
+
+    if (variant === 'TWheel' && ticksPerLabel > 0) {
+        const nTotalTicks = ticksPerLabel * n;
+        const tickLen = 2;
+        const dotA = new Path2D();      // dots on the night half → strokeColor fill
+        const dotB = new Path2D();      // dots on the day half → bgColor fill
+        const tickA = new Path2D();     // ticks colored strokeColor
+        const tickB = new Path2D();     // ticks colored bgColor (halfAndHalf contrast)
+        for (let ti = 0; ti < nTotalTicks; ti++) {
+            const theta = (ti / nTotalTicks) * 2 * Math.PI;
+            const cosT = Math.cos(theta);
+            const sinT = Math.sin(theta);
+            const norm = ((theta % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+            const onNightHalf = norm >= Math.PI;
+            if (ti % ticksPerLabel === 0) {
+                const p = onNightHalf ? dotA : dotB;
+                p.moveTo(cosT * (radius - 1.5) + 1.2, sinT * (radius - 1.5));
+                p.arc(cosT * (radius - 1.5), sinT * (radius - 1.5), 1.2, 0, 2 * Math.PI);
+            } else {
+                const p = (halfAndHalf && !onNightHalf) ? tickB : tickA;
+                p.moveTo(cosT * radius, sinT * radius);
+                p.lineTo(cosT * (radius - tickLen), sinT * (radius - tickLen));
+            }
+        }
+        groups.push(
+            { path: dotA, color: strokeColor, lineWidth: 0, fill: true },
+            { path: dotB, color: bgColor, lineWidth: 0, fill: true },
+            { path: tickA, color: strokeColor, lineWidth: tickWidth, fill: false },
+            { path: tickB, color: bgColor, lineWidth: tickWidth, fill: false },
+        );
+    }
+
+    if (variant === 'QWheel' && tickAttr) {
+        const tickMatch = tickAttr.match(/tick(\d+)/);
+        if (tickMatch) {
+            const nTicks = parseInt(tickMatch[1], 10);
+            const tickOuter = radius;
+            const tickGap = radius - tradius;
+            const tickLenLarge = tickGap - 2;
+            const tickLenMedium = tickGap * 0.55;
+            const tickLenSmall = tickGap * 0.30;
+            const ticksPerHour = nTicks / 24;
+            const ticksPer30Min = ticksPerHour / 2;
+            const large = new Path2D();
+            const medium = new Path2D();
+            const small = new Path2D();
+            for (let i = 0; i < nTicks; i++) {
+                const th = (i / nTicks) * 2 * Math.PI - Math.PI / 2;
+                const cosT = Math.cos(th);
+                const sinT = Math.sin(th);
+                let p: Path2D, tickLen: number;
+                if (i % ticksPerHour === 0) { p = large; tickLen = tickLenLarge; }
+                else if (i % ticksPer30Min === 0) { p = medium; tickLen = tickLenMedium; }
+                else { p = small; tickLen = tickLenSmall; }
+                p.moveTo(cosT * tickOuter, sinT * tickOuter);
+                p.lineTo(cosT * (tickOuter - tickLen), sinT * (tickOuter - tickLen));
+            }
+            groups.push(
+                { path: large, color: strokeColor, lineWidth: 0.7, fill: false },
+                { path: medium, color: strokeColor, lineWidth: 0.5, fill: false },
+                { path: small, color: strokeColor, lineWidth: 0.3, fill: false },
+            );
+        }
+    }
+
+    _wheelTickPathCache.set(key, groups);
+    return groups;
+}
 
 function drawWheel(
     ctx: RenderContext,
@@ -2378,45 +2569,122 @@ function drawWheel(
 
     };
 
-    // With rigid-disc label painting (matching iOS), BOTH wheel modes are
-    // rotation-invariant; partial-arc wheels rotate by -angle (reversed slot
+    // Cached path: live backgrounds (1–2 fills) + Path2D ticks + per-glyph
+    // atlas blits. Rigid-disc label painting (matching iOS) makes both wheel
+    // modes cacheable; partial-arc wheels rotate by -angle (reversed slot
     // progression). Ticks and halfAndHalf backgrounds rotate with +angle, so a
     // (hypothetical) partial-arc wheel carrying them would mix rotation signs —
     // keep those on the live path. No current face has such a part.
     const partialWithExtras = isPartialArc && (!!part.tick || !!part.ticks
         || !!(part.halfAndHalf && evalAttr(part.halfAndHalf, env)));
     if (!_wheelCacheDisabled && !partialWithExtras) {
-        // Rotation-invariant: blit the cached band rotated into place.
         const m = ctx.getTransform();
-        const devScale = Math.hypot(m.a, m.b) || 1;
-        const tradiusKey = part.tradius ? evalAttr(part.tradius, env) : radius;
-        const a1Key = part.angle1 ? evalAttr(part.angle1, env) : 0;
-        const a2Key = part.angle2 ? evalAttr(part.angle2, env) : 2 * Math.PI;
-        const key = `${devScale.toFixed(2)}|${part.wheelVariant}|${radius}|${tradiusKey}|` +
-            `${fontSize}|${fontName}|${orientation}|${strokeColor}|${bgColor}|` +
-            `${part.bgColor2 ? evalColor(part.bgColor2, env) : ''}|` +
-            `${part.halfAndHalf ? evalAttr(part.halfAndHalf, env) : 0}|` +
-            `${part.ticks ? evalAttr(part.ticks, env) : 0}|` +
-            `${part.tickWidth ? evalAttr(part.tickWidth, env) : 0.5}|` +
-            `${part.tick ?? ''}|${part.text ?? ''}|${a1Key}|${a2Key}`;
-        let wb = _wheelBitmapCache.get(key);
-        if (!wb) {
-            if (_wheelBitmapCache.size >= WHEEL_CACHE_CAP) _wheelBitmapCache.clear();
-            const extent = Math.max(radius, tradiusKey) + fontSize + 2;
-            const px = Math.max(2, Math.ceil(extent * 2 * devScale));
-            const cnv = new OffscreenCanvas(px, px);
-            const bctx = cnv.getContext('2d')!;
-            bctx.translate(px / 2, px / 2);
-            bctx.scale(devScale, devScale);
-            renderBody(bctx, 0);
-            wb = { canvas: cnv, extent };
-            _wheelBitmapCache.set(key, wb);
-        }
+        const dev = Math.hypot(m.a, m.b) || 1;
+        const angle1 = part.angle1 ? evalAttr(part.angle1, env) : 0;
+        const angle2 = part.angle2 ? evalAttr(part.angle2, env) : 2 * Math.PI;
+        const step = (angle2 - angle1) / n;
+        const tradius = part.tradius ? evalAttr(part.tradius, env) : radius;
+        const halfAndHalf = part.halfAndHalf ? evalAttr(part.halfAndHalf, env) : 0;
+        const bgColor2 = part.bgColor2 ? evalColor(part.bgColor2, env) : bgColor;
+        const innerR = radius - fontSize - 2;
+
         ctx.save();
         ctx.translate(x, y);
-        ctx.rotate(isPartialArc ? -angle : angle);
-        ctx.drawImage(wb.canvas, -wb.extent, -wb.extent, wb.extent * 2, wb.extent * 2);
+
+        // --- Backgrounds: live path fills (geometry identical to the live path) ---
+        if (part.wheelVariant === 'QWheel' && bgColor !== 'rgba(0,0,0,0)') {
+            ctx.fillStyle = bgColor;
+            ctx.beginPath();
+            ctx.arc(0, 0, radius, 0, 2 * Math.PI);
+            ctx.fill();
+        }
+        if (part.wheelVariant === 'TWheel' && halfAndHalf) {
+            ctx.save();
+            ctx.rotate(angle);
+            ctx.fillStyle = bgColor;
+            ctx.beginPath();
+            ctx.arc(0, 0, radius, Math.PI, 2 * Math.PI);
+            ctx.arc(0, 0, innerR, 2 * Math.PI, Math.PI, true);
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = bgColor2;
+            ctx.beginPath();
+            ctx.arc(0, 0, radius, 0, Math.PI);
+            ctx.arc(0, 0, innerR, Math.PI, 0, true);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+        } else if (part.wheelVariant === 'TWheel' && bgColor !== 'rgba(0,0,0,0)') {
+            ctx.fillStyle = bgColor;
+            ctx.beginPath();
+            ctx.arc(0, 0, radius, 0, 2 * Math.PI);
+            ctx.arc(0, 0, innerR, 0, 2 * Math.PI, true);
+            ctx.fill('evenodd');
+        }
+
+        // --- Tick marks: cached Path2D groups stroked under the wheel rotation ---
+        const ticksPerLabel = (part.wheelVariant === 'TWheel' && part.ticks)
+            ? Math.round(evalAttr(part.ticks, env) || 0) : 0;
+        if (ticksPerLabel > 0 || (part.wheelVariant === 'QWheel' && part.tick)) {
+            const tw = part.tickWidth ? evalAttr(part.tickWidth, env) : 0.5;
+            const tickGroups = getWheelTickPaths(part.wheelVariant, radius, tradius, n,
+                ticksPerLabel, tw, part.tick, halfAndHalf, strokeColor, evalColor(part.bgColor, env));
+            ctx.save();
+            ctx.rotate(angle);
+            for (const g of tickGroups) {
+                if (g.fill) {
+                    ctx.fillStyle = g.color;
+                    ctx.fill(g.path);
+                } else {
+                    ctx.strokeStyle = g.color;
+                    ctx.lineWidth = g.lineWidth;
+                    ctx.stroke(g.path);
+                }
+            }
+            ctx.restore();
+        }
+
+        // --- Labels: one atlas sub-rect blit per slot (iOS textured quads) ---
+        const ga = getWheelGlyphAtlas(dev, fontSize, fontName,
+            halfAndHalf ? 'white' : strokeColor, labels);
+        ctx.save();
+        if (halfAndHalf) {
+            // iOS uses the difference blend for halfAndHalf dial text; applying
+            // it at blit time composites against the real canvas (slightly more
+            // faithful than the old band bake, which could only difference
+            // against the baked ring).
+            ctx.globalCompositeOperation = 'difference';
+        }
+        ctx.rotate(isPartialArc ? -angle + angle1 : angle + angle1);
+        const dh = ga.cellH / dev;
+        for (let i = 0; i < n; i++) {
+            const cell = ga.cells[i];
+            if (cell) {
+                ctx.save();
+                switch (orientation.toLowerCase()) {
+                    case 'three':
+                        ctx.translate(tradius - ga.maxWu / 2, 0);
+                        break;
+                    case 'six':
+                        ctx.translate(0, tradius - ga.maxHu / 2);
+                        break;
+                    case 'twelve':
+                        ctx.translate(0, -(tradius - ga.maxHu / 2));
+                        break;
+                    case 'nine':
+                        ctx.translate(-(tradius - ga.maxWu / 2), 0);
+                        break;
+                }
+                const dw = cell.sw / dev;
+                ctx.drawImage(ga.atlas, cell.sx, 0, cell.sw, ga.cellH,
+                    -dw / 2, -dh / 2, dw, dh);
+                ctx.restore();
+            }
+            ctx.rotate(isPartialArc ? step : -step);
+        }
         ctx.restore();
+
+        ctx.restore(); // closes translate(x, y)
         return;
     }
 

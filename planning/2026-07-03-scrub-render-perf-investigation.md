@@ -564,6 +564,52 @@ measures the ceiling (whole face buffered, per-tick staggered rebuilds, 10 Hz
 per-face stepping during scrub); production uses a dynamic split point so
 animating parts keep full-rate sweeps with no visual compromise.
 
+## Device targets & memory ledger (added 2026-07-05)
+
+**Targets (fuzzy, per Steve):**
+
+1. **100 MB floor** (really 150 MB with GC headroom): has to run, ≥10 fps.
+2. **Modern low-end phone** (Samsung/Apple/Google — research exact limits):
+   should run 30 fps, slightly-under OK, ideally 60.
+3. **Modern desktop, 4K monitor**: same fps targets; memory tradeable for
+   speed up to ~500 MB.
+4. **Modern desktop, 5K monitor**: same, softer.
+
+**The `[mem]` ledger** (implemented 2026-07-05): accounting of every canvas/
+bitmap we allocate (w×h×4), printed once after initial cache build and in
+every scrub-perf summary, plus Chrome-only JS heap. Manual complement for
+Safari/old iPhones: append `[mem] Safari process RSS: NNN MB (Activity
+Monitor)` to pasted runs, occasionally.
+
+**First matrix (VM, all.html, no flags, wheel cache on — geometry-authentic
+per tier via viewport scaling at dpr 2; perf numbers NOT valid from VM, memory
+geometry IS):**
+
+| profile | face px | canvas total | faces | static | images | shadows | wheel$ | JS heap used |
+|---|---|---|---|---|---|---|---|---|
+| phone 375×667 | 160 | **94.7 MB** | 1.6 | 1.9 | 82.3 | 0.5 | 1.1 | 137 MB |
+| laptop 1512×900 | 476 | 133.8 | 13.8 | 16.4 | 82.3 | 4.1 | 9.5 | 144 |
+| 5K-default 2560×1395 | 824 | 221.7 | 41.4 | 49.2 | 82.3 | 12.0 | 28.5 | 148 |
+| 4K-scaled 3359×1739 | 1070 | **312.0** | 69.9 | 83.0 | 82.3 | 20.1 | **48.0** | 154 |
+
+**Implications:**
+
+- **The phone floor is NOT about render canvases** (~5 MB there). It's source
+  images (82.3 MB of decoded ImageBitmaps, resolution-independent) + JS heap
+  (~137 MB — likely including the retained base64 `dataUrl` strings in
+  `window.ChronometerFaces` after decode, and the cities DB). Fixes are
+  orthogonal to the scrub work: release dataUrls post-decode, decode bitmaps
+  at display size (`createImageBitmap` resize options), lazy cities.
+- **4K is already at the ~500 MB ceiling** (312 canvas + ~154 heap) *before*
+  the sandwich buffers (+~70) or shared canvas (+~89). Offsets: ~~wheel cache
+  byte budget~~ **resolved 2026-07-05** — per-glyph atlas redesign took the
+  wheel cache 48 → 5.4 MB at 4K with no quality trade (see Phase 3 doc,
+  production item 1); total now 269 MB. Remaining offsets: static caches
+  (83 MB) deserve an audit, image downscaling helps here too (−40ish).
+- Phase 3 doc open question 4 is answered: buffers are affordable at 4K only
+  with the above offsets; **scrub-session-scoped allocation** (alloc on scrub
+  start, free on end) is the recommended shape.
+
 ## Phase 2 — Primitive attribution (only where Phase 1 leaves questions)
 
 - **Toggles**, same protocol: no-op `drawBezel` (per-frame conic/radial
@@ -594,6 +640,18 @@ needed a redraw is a visible bug, and scrub-end must force a full redraw);
   same window setup (4K monitor, maximized), same 60-tick scrub-by-day
   gesture. `noprobe` is part of the standard protocol as of Phase 0
   (finding 2); probe-on runs are a labeled cross-check only.
+- **Update 2026-07-05: the probe is now OPT-IN (`?probe`) and off by
+  default** — `noprobe` is no longer needed (still honored). Third and fatal
+  strike against it: combined with the wheel glyph-atlas renderer, the
+  per-frame `getImageData` readback of a canvas composed from many
+  OffscreenCanvas textures trips Chrome into a **page-wide, sticky
+  quarter-rate rAF throttle** (~15 fps persisting after scrub ends; raw-rAF
+  probe measured 66.7 ms delivery with our JS at ~6% CPU). Reproduced in the
+  VM, matched Steve's native report (150 → 15 fps sticky), bisected via
+  `nowheelcache` (recovers) and confirmed via `noprobe` (no degradation at
+  all — flat 60 through and after scrub). Since the probe previously ran for
+  ordinary users during any scrub, this was a live user-facing bug, not just
+  a measurement artifact.
 - 3 runs per variant; report medians. Compare **avg and max** interval plus
   the histogram — 60 fps is a worst-case target, not an average target.
 - Fresh dist server port after every rebuild (cache gotcha).

@@ -16035,6 +16035,18 @@ return {${names2.join(",")}};`;
   function _ppAdd(key, t0) {
     _partProfMs.set(key, (_partProfMs.get(key) ?? 0) + (performance.now() - t0));
   }
+  function rendererCacheMemoryBytes() {
+    let wedgeCache = 0;
+    for (const wb of _wedgeBitmapCache.values()) {
+      if (wb.canvas) wedgeCache += wb.canvas.width * wb.canvas.height * 4;
+    }
+    let wheelCache = 0;
+    for (const ga of _wheelGlyphAtlasCache.values()) {
+      wheelCache += ga.atlas.width * ga.atlas.height * 4;
+    }
+    const cutoutTemp = _cutoutTempCanvas ? _cutoutTempCanvas.width * _cutoutTempCanvas.height * 4 : 0;
+    return { wedgeCache, wheelCache, cutoutTemp };
+  }
   function renderPartsDocumentOrder(ctx, parts, env, canvasWidth, canvasHeight, scale, images, terminatorLeaves, analemmaState) {
     const pendingWindows = [];
     for (const part of parts) {
@@ -16967,11 +16979,143 @@ return {${names2.join(",")}};`;
       ctx.stroke();
     }
   }
-  var _wheelBitmapCache = /* @__PURE__ */ new Map();
+  var _wheelGlyphAtlasCache = /* @__PURE__ */ new Map();
+  var _wheelAtlasBuilds = 0;
+  if (typeof globalThis !== "undefined") {
+    globalThis.__wheelAtlasStats = () => ({
+      builds: _wheelAtlasBuilds,
+      cacheSize: _wheelGlyphAtlasCache.size,
+      keys: [..._wheelGlyphAtlasCache.keys()].map((k) => k.slice(0, 60))
+    });
+  }
+  var _wheelTickPathCache = /* @__PURE__ */ new Map();
   var WHEEL_CACHE_CAP = 64;
   var _wheelCacheDisabled = false;
   function setWheelCacheDisabled(v) {
     _wheelCacheDisabled = v;
+  }
+  function getWheelGlyphAtlas(dev, fontSize, fontName, color, labels) {
+    const key = `${dev.toFixed(2)}|${fontSize}|${fontName}|${color}|${labels.join(",")}`;
+    let ga = _wheelGlyphAtlasCache.get(key);
+    if (ga) return ga;
+    _wheelAtlasBuilds++;
+    if (_wheelGlyphAtlasCache.size >= WHEEL_CACHE_CAP) _wheelGlyphAtlasCache.clear();
+    const probe = new OffscreenCanvas(1, 1).getContext("2d");
+    probe.font = `${fontSize}px "${fontName}"`;
+    const m0 = probe.measureText("Xg");
+    const maxHu = m0.fontBoundingBoxAscent + m0.fontBoundingBoxDescent;
+    const trimmed = labels.map((l) => l.trim());
+    let maxWu = 0;
+    for (const lab of trimmed) maxWu = Math.max(maxWu, probe.measureText(lab).width);
+    const PAD = 2;
+    const cellH = Math.ceil(maxHu * dev) + 2 * PAD;
+    const cells = [];
+    let xPx = 0;
+    for (const lab of trimmed) {
+      if (!lab) {
+        cells.push(null);
+        continue;
+      }
+      const sw = Math.ceil(probe.measureText(lab).width * dev) + 2 * PAD;
+      cells.push({ sx: xPx, sw });
+      xPx += sw;
+    }
+    const atlas = new OffscreenCanvas(Math.max(1, xPx), cellH);
+    const actx = atlas.getContext("2d");
+    actx.font = `${fontSize}px "${fontName}"`;
+    actx.textAlign = "center";
+    actx.textBaseline = "alphabetic";
+    actx.fillStyle = color;
+    for (let i = 0; i < trimmed.length; i++) {
+      const cell = cells[i];
+      if (!cell) continue;
+      actx.save();
+      actx.translate(cell.sx + cell.sw / 2, cellH / 2);
+      actx.scale(dev, dev);
+      actx.fillText(trimmed[i], 0, textVisualCenterY(actx, trimmed[i]));
+      actx.restore();
+    }
+    ga = { atlas, cells, cellH, dev, maxWu, maxHu };
+    _wheelGlyphAtlasCache.set(key, ga);
+    return ga;
+  }
+  function getWheelTickPaths(variant, radius, tradius, n, ticksPerLabel, tickWidth, tickAttr, halfAndHalf, strokeColor, bgColor) {
+    const key = `${variant}|${radius}|${tradius}|${n}|${ticksPerLabel}|${tickWidth}|${tickAttr ?? ""}|${halfAndHalf}|${strokeColor}|${bgColor}`;
+    let groups = _wheelTickPathCache.get(key);
+    if (groups) return groups;
+    if (_wheelTickPathCache.size >= WHEEL_CACHE_CAP) _wheelTickPathCache.clear();
+    groups = [];
+    if (variant === "TWheel" && ticksPerLabel > 0) {
+      const nTotalTicks = ticksPerLabel * n;
+      const tickLen = 2;
+      const dotA = new Path2D();
+      const dotB = new Path2D();
+      const tickA = new Path2D();
+      const tickB = new Path2D();
+      for (let ti = 0; ti < nTotalTicks; ti++) {
+        const theta = ti / nTotalTicks * 2 * Math.PI;
+        const cosT = Math.cos(theta);
+        const sinT = Math.sin(theta);
+        const norm = (theta % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+        const onNightHalf = norm >= Math.PI;
+        if (ti % ticksPerLabel === 0) {
+          const p = onNightHalf ? dotA : dotB;
+          p.moveTo(cosT * (radius - 1.5) + 1.2, sinT * (radius - 1.5));
+          p.arc(cosT * (radius - 1.5), sinT * (radius - 1.5), 1.2, 0, 2 * Math.PI);
+        } else {
+          const p = halfAndHalf && !onNightHalf ? tickB : tickA;
+          p.moveTo(cosT * radius, sinT * radius);
+          p.lineTo(cosT * (radius - tickLen), sinT * (radius - tickLen));
+        }
+      }
+      groups.push(
+        { path: dotA, color: strokeColor, lineWidth: 0, fill: true },
+        { path: dotB, color: bgColor, lineWidth: 0, fill: true },
+        { path: tickA, color: strokeColor, lineWidth: tickWidth, fill: false },
+        { path: tickB, color: bgColor, lineWidth: tickWidth, fill: false }
+      );
+    }
+    if (variant === "QWheel" && tickAttr) {
+      const tickMatch = tickAttr.match(/tick(\d+)/);
+      if (tickMatch) {
+        const nTicks = parseInt(tickMatch[1], 10);
+        const tickOuter = radius;
+        const tickGap = radius - tradius;
+        const tickLenLarge = tickGap - 2;
+        const tickLenMedium = tickGap * 0.55;
+        const tickLenSmall = tickGap * 0.3;
+        const ticksPerHour = nTicks / 24;
+        const ticksPer30Min = ticksPerHour / 2;
+        const large = new Path2D();
+        const medium = new Path2D();
+        const small = new Path2D();
+        for (let i = 0; i < nTicks; i++) {
+          const th = i / nTicks * 2 * Math.PI - Math.PI / 2;
+          const cosT = Math.cos(th);
+          const sinT = Math.sin(th);
+          let p, tickLen;
+          if (i % ticksPerHour === 0) {
+            p = large;
+            tickLen = tickLenLarge;
+          } else if (i % ticksPer30Min === 0) {
+            p = medium;
+            tickLen = tickLenMedium;
+          } else {
+            p = small;
+            tickLen = tickLenSmall;
+          }
+          p.moveTo(cosT * tickOuter, sinT * tickOuter);
+          p.lineTo(cosT * (tickOuter - tickLen), sinT * (tickOuter - tickLen));
+        }
+        groups.push(
+          { path: large, color: strokeColor, lineWidth: 0.7, fill: false },
+          { path: medium, color: strokeColor, lineWidth: 0.5, fill: false },
+          { path: small, color: strokeColor, lineWidth: 0.3, fill: false }
+        );
+      }
+    }
+    _wheelTickPathCache.set(key, groups);
+    return groups;
   }
   function drawWheel(ctx, part, env) {
     if (part.calendar) {
@@ -17153,28 +17297,122 @@ return {${names2.join(",")}};`;
     const partialWithExtras = isPartialArc && (!!part.tick || !!part.ticks || !!(part.halfAndHalf && evalAttr(part.halfAndHalf, env)));
     if (!_wheelCacheDisabled && !partialWithExtras) {
       const m = ctx.getTransform();
-      const devScale = Math.hypot(m.a, m.b) || 1;
-      const tradiusKey = part.tradius ? evalAttr(part.tradius, env) : radius;
-      const a1Key = part.angle1 ? evalAttr(part.angle1, env) : 0;
-      const a2Key = part.angle2 ? evalAttr(part.angle2, env) : 2 * Math.PI;
-      const key = `${devScale.toFixed(2)}|${part.wheelVariant}|${radius}|${tradiusKey}|${fontSize}|${fontName}|${orientation}|${strokeColor}|${bgColor}|${part.bgColor2 ? evalColor(part.bgColor2, env) : ""}|${part.halfAndHalf ? evalAttr(part.halfAndHalf, env) : 0}|${part.ticks ? evalAttr(part.ticks, env) : 0}|${part.tickWidth ? evalAttr(part.tickWidth, env) : 0.5}|${part.tick ?? ""}|${part.text ?? ""}|${a1Key}|${a2Key}`;
-      let wb = _wheelBitmapCache.get(key);
-      if (!wb) {
-        if (_wheelBitmapCache.size >= WHEEL_CACHE_CAP) _wheelBitmapCache.clear();
-        const extent = Math.max(radius, tradiusKey) + fontSize + 2;
-        const px = Math.max(2, Math.ceil(extent * 2 * devScale));
-        const cnv = new OffscreenCanvas(px, px);
-        const bctx = cnv.getContext("2d");
-        bctx.translate(px / 2, px / 2);
-        bctx.scale(devScale, devScale);
-        renderBody(bctx, 0);
-        wb = { canvas: cnv, extent };
-        _wheelBitmapCache.set(key, wb);
-      }
+      const dev = Math.hypot(m.a, m.b) || 1;
+      const angle1 = part.angle1 ? evalAttr(part.angle1, env) : 0;
+      const angle2 = part.angle2 ? evalAttr(part.angle2, env) : 2 * Math.PI;
+      const step = (angle2 - angle1) / n;
+      const tradius = part.tradius ? evalAttr(part.tradius, env) : radius;
+      const halfAndHalf = part.halfAndHalf ? evalAttr(part.halfAndHalf, env) : 0;
+      const bgColor2 = part.bgColor2 ? evalColor(part.bgColor2, env) : bgColor;
+      const innerR = radius - fontSize - 2;
       ctx.save();
       ctx.translate(x, y);
-      ctx.rotate(isPartialArc ? -angle : angle);
-      ctx.drawImage(wb.canvas, -wb.extent, -wb.extent, wb.extent * 2, wb.extent * 2);
+      if (part.wheelVariant === "QWheel" && bgColor !== "rgba(0,0,0,0)") {
+        ctx.fillStyle = bgColor;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+      if (part.wheelVariant === "TWheel" && halfAndHalf) {
+        ctx.save();
+        ctx.rotate(angle);
+        ctx.fillStyle = bgColor;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, Math.PI, 2 * Math.PI);
+        ctx.arc(0, 0, innerR, 2 * Math.PI, Math.PI, true);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = bgColor2;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, Math.PI);
+        ctx.arc(0, 0, innerR, Math.PI, 0, true);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      } else if (part.wheelVariant === "TWheel" && bgColor !== "rgba(0,0,0,0)") {
+        ctx.fillStyle = bgColor;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, 2 * Math.PI);
+        ctx.arc(0, 0, innerR, 0, 2 * Math.PI, true);
+        ctx.fill("evenodd");
+      }
+      const ticksPerLabel = part.wheelVariant === "TWheel" && part.ticks ? Math.round(evalAttr(part.ticks, env) || 0) : 0;
+      if (ticksPerLabel > 0 || part.wheelVariant === "QWheel" && part.tick) {
+        const tw = part.tickWidth ? evalAttr(part.tickWidth, env) : 0.5;
+        const tickGroups = getWheelTickPaths(
+          part.wheelVariant,
+          radius,
+          tradius,
+          n,
+          ticksPerLabel,
+          tw,
+          part.tick,
+          halfAndHalf,
+          strokeColor,
+          evalColor(part.bgColor, env)
+        );
+        ctx.save();
+        ctx.rotate(angle);
+        for (const g of tickGroups) {
+          if (g.fill) {
+            ctx.fillStyle = g.color;
+            ctx.fill(g.path);
+          } else {
+            ctx.strokeStyle = g.color;
+            ctx.lineWidth = g.lineWidth;
+            ctx.stroke(g.path);
+          }
+        }
+        ctx.restore();
+      }
+      const ga = getWheelGlyphAtlas(
+        dev,
+        fontSize,
+        fontName,
+        halfAndHalf ? "white" : strokeColor,
+        labels
+      );
+      ctx.save();
+      if (halfAndHalf) {
+        ctx.globalCompositeOperation = "difference";
+      }
+      ctx.rotate(isPartialArc ? -angle + angle1 : angle + angle1);
+      const dh = ga.cellH / dev;
+      for (let i = 0; i < n; i++) {
+        const cell = ga.cells[i];
+        if (cell) {
+          ctx.save();
+          switch (orientation.toLowerCase()) {
+            case "three":
+              ctx.translate(tradius - ga.maxWu / 2, 0);
+              break;
+            case "six":
+              ctx.translate(0, tradius - ga.maxHu / 2);
+              break;
+            case "twelve":
+              ctx.translate(0, -(tradius - ga.maxHu / 2));
+              break;
+            case "nine":
+              ctx.translate(-(tradius - ga.maxWu / 2), 0);
+              break;
+          }
+          const dw = cell.sw / dev;
+          ctx.drawImage(
+            ga.atlas,
+            cell.sx,
+            0,
+            cell.sw,
+            ga.cellH,
+            -dw / 2,
+            -dh / 2,
+            dw,
+            dh
+          );
+          ctx.restore();
+        }
+        ctx.rotate(isPartialArc ? step : -step);
+      }
+      ctx.restore();
       ctx.restore();
       return;
     }
@@ -21388,7 +21626,7 @@ return {${names2.join(",")}};`;
   setTickProfiling(_tickProfile);
   setAstroProfiling(_tickProfile);
   setPartProfiling(_tickProfile);
-  var _noProbe = typeof location !== "undefined" && new URLSearchParams(location.search).has("noprobe");
+  var _probeEnabled = typeof location !== "undefined" && new URLSearchParams(location.search).has("probe") && !new URLSearchParams(location.search).has("noprobe");
   var _ablate = new Set(
     (typeof location !== "undefined" ? new URLSearchParams(location.search).get("ablate") ?? "" : "").split(",").filter(Boolean)
   );
@@ -22117,6 +22355,39 @@ return {${names2.join(",")}};`;
     let _fbTickEpoch = 0;
     let _fbCursor = 0;
     const FB_REBUILDS_PER_FRAME = 4;
+    let _memReported = false;
+    function canvasMemoryReport() {
+      const MB = (b) => (b / (1024 * 1024)).toFixed(1);
+      const seen = /* @__PURE__ */ new Set();
+      const sz = (c) => {
+        if (!c || seen.has(c)) return 0;
+        seen.add(c);
+        return c.width * c.height * 4;
+      };
+      let facesB = 0, staticB = 0, shadowB = 0, imagesB = 0, analemmaB = 0, buffersB = 0, terraB = 0;
+      const walkParts = (parts) => {
+        for (const p of parts) {
+          staticB += sz(p.cachedCanvas);
+          shadowB += sz(p._shadowBitmap);
+          if (p.children) walkParts(p.children);
+        }
+      };
+      for (const face of faces) {
+        facesB += sz(face.canvas);
+        buffersB += sz(face.fbCanvas);
+        walkParts(face.watch.parts);
+        for (const img of face.images.values()) imagesB += sz(img.bitmap);
+        const a = face.analemmaState;
+        if (a) analemmaB += sz(a.bgBitmap) + sz(a.channelBitmap) + sz(a.sunBitmap) + sz(a._scratchCanvas);
+        terraB += sz(face.env._terraCityKnockout);
+      }
+      const sharedB = sz(_sharedCanvas);
+      const rc = rendererCacheMemoryBytes();
+      const total = facesB + staticB + shadowB + imagesB + analemmaB + buffersB + terraB + sharedB + rc.wedgeCache + rc.wheelCache + rc.cutoutTemp;
+      const mem = performance.memory;
+      const jsHeap = mem ? ` \xB7 JS heap (Chrome-only): ${MB(mem.usedJSHeapSize)}/${MB(mem.totalJSHeapSize)}MB` : "";
+      return `canvas/bitmap est TOTAL ${MB(total)}MB: faces ${MB(facesB)} \xB7 static caches ${MB(staticB)} \xB7 images ${MB(imagesB)} \xB7 shadows ${MB(shadowB)} \xB7 wedge cache ${MB(rc.wedgeCache)} \xB7 wheel cache ${MB(rc.wheelCache)} \xB7 analemma ${MB(analemmaB)} \xB7 terra ring ${MB(terraB)} \xB7 cutout temp ${MB(rc.cutoutTemp)} \xB7 face buffers ${MB(buffersB)} \xB7 shared canvas ${MB(sharedB)}${jsHeap}`;
+    }
     function _browserShort() {
       const ua = navigator.userAgent;
       let m;
@@ -22256,7 +22527,7 @@ return {${names2.join(",")}};`;
   - Intervals with zero animation frames: ${_scrubIntervalZeroFrameCount}
   - Pure Animation Frame Stats (N = ${_pureAnimCount}):
     - CPU execution: avg ${avgCpu}ms (min: ${minCpu}ms, max: ${maxCpu}ms)
-    - Flush probe (getImageData on 1 of ${faces.length} canvases; incl. readback stall)${_noProbe ? " [DISABLED via ?noprobe]" : ""}: avg ${avgGpu}ms (min: ${minGpu}ms, max: ${maxGpu}ms)
+    - Flush probe (getImageData on 1 of ${faces.length} canvases; incl. readback stall)${_probeEnabled ? "" : " [off; opt in with ?probe]"}: avg ${avgGpu}ms (min: ${minGpu}ms, max: ${maxGpu}ms)
     - Inter-frame interval: avg ${avgDelta}ms (min: ${minDelta}ms, max: ${maxDelta}ms) -> equivalent to ${avgAnimFps} FPS
   - Frame CPU split (all ${_scrubBodyFrameCount} scrub frames): tick(update+astro+animate) avg ${(_scrubBodyFrameCount ? _scrubTickMsTotal / _scrubBodyFrameCount : 0).toFixed(2)}ms, render(draw issuance) avg ${(_scrubBodyFrameCount ? _scrubRenderMsTotal / _scrubBodyFrameCount : 0).toFixed(2)}ms
 ` + (() => {
@@ -22298,7 +22569,7 @@ return {${names2.join(",")}};`;
             const flagsStr = [
               ..._ablate,
               _facesLimit !== Infinity ? `faces=${_facesLimit}` : "",
-              _noProbe ? "noprobe" : ""
+              _probeEnabled ? "probe" : ""
             ].filter(Boolean).join(",") || "none";
             return `  - Environment: ${_browserShort()} \xB7 dpr ${window.devicePixelRatio} (backing ${effectiveDpr()}) \xB7 ${built.length} canvases @ ${built[0]?.sizePx ?? 0}px CSS / ${built[0]?.canvas.width ?? 0}px phys \xB7 window ${window.innerWidth}\xD7${window.innerHeight} \xB7 display quantum ${quantum}` + (_sharedCanvas ? ` \xB7 shared canvas ${_sharedCanvas.width}\xD7${_sharedCanvas.height}px phys` : "") + ` \xB7 flags ${flagsStr}
   - Frame classes (flush probe excluded): tick ${clsLine(_classTick)} || anim ${clsLine(_classAnim)}
@@ -22312,7 +22583,8 @@ return {${names2.join(",")}};`;
               const total = entries.reduce((s, [, v]) => s + v, 0);
               return `
   - Render ms/frame by part type (\u03A3 ${f2(total / nAll)}): ` + entries.map(([k, v]) => `${k} ${f2(v / nAll)}`).join(" \xB7 ");
-            })() : "");
+            })() : "") + `
+  - Memory: ${canvasMemoryReport()}`;
           })()
         );
       }
@@ -22439,7 +22711,7 @@ return {${names2.join(",")}};`;
       if (isPureAnimFrame) {
         const animJsEnd = performance.now();
         const testFace = faces.find((f) => f.enabled && f.cachesBuilt);
-        if (testFace && !_noProbe) {
+        if (testFace && _probeEnabled) {
           testFace.ctx.getImageData(0, 0, 1, 1);
         }
         const animGpuEnd = performance.now();
@@ -22484,6 +22756,10 @@ return {${names2.join(",")}};`;
       } else {
         _prevScrubFrameStart = null;
         _prevScrubFrameEnd = null;
+      }
+      if (!_memReported && faces.every((f) => !f.enabled || f.cachesBuilt)) {
+        _memReported = true;
+        console.log("[mem] " + canvasMemoryReport());
       }
       const willContinue = timeController.needsContinuousRender || stillAnimating;
       _fps?.recordFrame(willContinue, performance.now() - frameStart);
