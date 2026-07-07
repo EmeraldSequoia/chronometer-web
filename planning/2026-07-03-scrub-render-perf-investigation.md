@@ -1,13 +1,22 @@
 # Scrub render performance: investigation plan (all-faces page)
 
-*2026-07-03, updated 2026-07-05* · **Status: CHROME TARGET ACHIEVED — ~72 fps
-at no-flag baseline (was 29), delivered by the wheel glyph-atlas cache (worth
-~47 fps: per-frame glyph *rasterization*, not issuance, was the dominant cost)
-plus the probe fix (probe was a live user-facing bug: sticky quarter-rate
-Chrome throttle; now opt-in `?probe`). Safari remains 20–33 fps — next:
-Terminator/vector-hand appearance caches → production onecanvas → sandwich →
-tick-stagger (see "Re-baseline"). Memory ledger validated native==VM;
-269 MB baseline / 355 MB with onecanvas at 4K.**
+**→ Continuing in a new session? Start with
+[2026-07-06-session-handoff.md](2026-07-06-session-handoff.md)** (scoreboard,
+tree state, next-step queue, measurement mechanics).
+
+*2026-07-03, updated 2026-07-06 (timings-11)* · **Status: CHROME TARGET
+ACHIEVED — 66–79 fps at no-flag baseline (was 29; wheel glyph-atlas cache +
+probe fix). Safari: hand unification validated (26–34 fps); hand+wheel caches
+worth ~14 fps (live shadow-blur hands = raster bomb). onecanvas REFUTED. Model
+now settled: Safari defers per-canvas raster to post-rAF slack, and
+**slack ∝ draw-operation count** (not canvas count — why onecanvas failed; not
+resolution — dpr1 rejected by Steve, full-res is a hard constraint).
+facebuffers ceiling (timings-11) proves it: reducing each face to one blit
+takes Safari 26 → 44 fps and cuts slack 17 → 11 ms. That 44 is the OPTIMISTIC
+ceiling (tick-rate stepping); a fidelity-preserving sandwich captures only the
+slow astronomical layer's share, ~+5–10 fps. Next: middle-share
+instrumentation to size the achievable fraction before building the sandwich.
+Memory: 258 MB canvas baseline / 328 MB facebuffers at 4K.**
 
 Follow-on to the scrub CPU work (eval/boundary/rise-set caching), which brought
 scrub-by-day on all.html to ~27 fps. This plan covers the *rendering* side:
@@ -646,6 +655,352 @@ to Terminator leaves and vector hands (same recipe as wheels; their raster
 cost likely exceeds their issuance, per the text-raster lesson), (2)
 production onecanvas, (3) sandwich buffers, (4) tick-stagger. Re-measure after
 (1) — if the raster-side wins repeat, the sandwich's scope may shrink further.
+
+**Step (1) implemented 2026-07-05** (same dist.zip series):
+- **Terminator leaves → retained Path2D** (`terminator.ts`): each leaf's ~60
+  trig-computed path commands per frame become two draw calls of a cached
+  path; pixel-identical by construction, no flag needed. VM Chrome:
+  Terminator part-type 0.53 → 0.19 ms/frame.
+- **Vector hands → appearance-keyed bitmaps** (`renderer.ts` getHandBitmap;
+  kill-switch `?ablate=nohandcache`): body + shadow baked once per appearance
+  (probe render + alpha-scan tight crop, so memory ∝ ink — 0.1 MB in VM,
+  ~1 MB at 4K), blitted rotated. This extends the treatment `_shadowBitmap`
+  hands already receive, so the one visual change — the baked shadow rotates
+  with the hand instead of staying screen-fixed — makes vector hands
+  *consistent* with the existing bitmap hands and with iOS's pre-rendered
+  shadows. Frozen-time diff: 12/16 faces pixel-identical; 4 faces show only
+  small localized shadow-direction deltas. Watch item for native runs: the
+  per-frame appearance-key evaluation (~19 evals/hand) showed as +0.1–0.2 ms
+  in VM Chrome (QHand(vector) 0.65 → 0.85 there — Chrome never had a hand
+  problem); if Safari's QHand(vector) doesn't drop from its 1.4–1.8 ms,
+  optimize the key path (pre-parsed static signature + per-frame color evals
+  only).
+
+**Hand cache reworked 2026-07-05 evening** (timings-7 archived as
+[2026-07-05-caches-step1-native-timings.txt](2026-07-05-caches-step1-native-timings.txt)
+confirmed both watch items: Terminator Path2D won decisively — Safari 2.5–3.0
+→ 0.85–1.1 ms, Chrome baseline 76.9 fps — but the welded hand cache was a
+wash on Safari issuance, key evals eating the blit savings):
+
+1. **Split shadow bitmaps, screen-fixed light** (per Steve: iOS drew separate
+   shadow quads offset down-right in screen space). Each shadowed appearance
+   now bakes a body layer + a shadow-only silhouette (offscreen-displacement
+   trick — same shadow rasterizer as the live path, so blur/opacity/stacking
+   match exactly); per frame the shadow blits with the screen-space offset
+   applied *before* the hand rotation, then the body. Restores the live
+   path's fixed-light look at every angle — the earlier "shadow rotates"
+   trade is gone. The frozen-time residual diffs on 4 faces proved to be
+   body-resample AA (identical counts welded vs split), the same class as
+   every bitmap cache. Follow-up candidate: convert the legacy
+   `_shadowBitmap` image hands (which still bake-and-rotate) to the same
+   two-blit scheme for cross-hand consistency.
+2. **Per-part appearance memo**: per frame only color attrs are evaluated;
+   geometry re-keys only on env rebuild / resize. VM Chrome QHand(vector)
+   0.85 → 0.75 ms (live-path parity, now including the shadow blit); Safari
+   should recover more since its evals are pricier.
+
+**Hand unification completed 2026-07-05 (later):** investigating the legacy
+`_shadowBitmap` machinery revealed `buildHandShadowCaches` had been
+pre-building welded (rotating-light) bitmaps for **all** z>0 hands — vector
+AND image — since April, meaning shadowed vector hands never reached either
+the live path or the new cache, and the kill-switch never disabled the
+prebuilds. The whole build-time machinery is now deleted (~200 net lines
+removed: buildHandShadowCaches, buildSingleHandShadow, buildImageHandShadow,
+the bake-only body helpers, the `_shadowBitmap*` part fields, and both
+welded fast paths); every hand — vector and image, including
+offsetRadius/Moon-orbit hands that the old bitmaps skipped — now uses the
+runtime split-shadow caches with screen-fixed light. Consequences: the
+`[mem]` "shadows" category (20.1 MB at 4K) drops to 0, replaced by a few MB
+of tight-cropped split layers; `?ablate=nohandcache` is now a true
+fully-live A/B for the first time; and all hands are light-consistent.
+Frozen-time diff vs live: small resample-class residuals (≤0.2% of pixels
+per face) across shadowed-hand faces, as expected for any bitmap cache.
+
+**Memo simplified to zero-eval (2026-07-05, on Steve's challenge):** the
+per-frame color evaluations were defending dynamic hand colors — a case the
+April prebuild system never supported either ("hand appearance is fixed at
+init time") and no face uses. The memo now keys on (env identity, dev) only;
+colors evaluate solely on memo miss (init / resize / env rebuild). Steady
+state per hand: two reference compares + blits — zero expression evals. VM
+Chrome QHand(vector) 1.01 → 0.80 ms; the residual vs the old prebuilt fast
+path is the second (shadow) blit, i.e. the price of screen-fixed light.
+
+## timings-8 post-mortem (2026-07-06): Safari ran a stale bundle; Chrome validates the hand unification
+
+Raw data: [2026-07-06-hand-caches-native-timings.txt](2026-07-06-hand-caches-native-timings.txt)
+(Safari ×3 baseline + 1 `nohandcache,nowheelcache`, Chrome ×1 baseline).
+
+**The four Safari runs did not execute the new build.** Their `[mem]` ledger
+reads `shadows 20.1 · hand cache 0.6` — byte-identical to timings-7 — but the
+shipped bundle deleted every `_shadowBitmap` write and can only print
+`shadows 0.0` (confirmed against both the source and the actual
+`dist/chronometer-engine.js` of 2026-07-05 20:26, where the only occurrence is
+the ledger *read*). Cause (per Steve): the Safari runs were made in an **old
+tab left over from the timings-7 session**, still running that build — not
+HTTP caching. The Chrome run is from the correct bundle
+(`shadows 0.0 · hand cache 8.1`) and is valid.
+
+**Mitigation (shipped, v2.0.33):** `build.sh` now injects the auto-incremented
+version into the engine (`esbuild --define:__BUILD_VERSION__`), and both the
+startup `[mem]` line and the `[scrub-perf]` Environment line print
+`build N.N.N`. Every future pasted block self-identifies its build; check it
+FIRST when reading native results. The stamp catches every stale-bundle
+mechanism the same way — old tabs (both native incidents), HTTP caching (the
+VM-preview gotcha), or running the wrong zip. (Native protocol: if the stamp
+is stale or missing, close/reload the tab onto the new build and re-run.)
+
+What the runs still tell us:
+
+- **Chrome (valid): 78.7 fps baseline** (was 76.9 in timings-7) —
+  the split-shadow caches + zero-eval memo + prebuilt-machinery deletion hold
+  Chrome above target. QHand(vector) 0.71 ms (0.73 t7). Ledger: hand cache
+  8.1 MB now carries *all* hands (vector + image) as tight-cropped split
+  layers, replacing 20.1 MB of prebuilds + 0.6 MB memo → canvas TOTAL
+  257.3 MB (was 269.9), −12.6 MB at 4K.
+- **Safari (replication of timings-7 only):** fast-CPU state 33.3 fps;
+  slow-state 24.8 / 26.1; ablation 24.1. Replicates the welded-cache-is-a-wash
+  result (cached QHand(vector) 1.12 fast / 1.62–1.72 slow vs 1.34 fully-live
+  in the ablation run) and the wheel cache's worth (Wheel 4.70 live vs
+  1.99–2.03 cached, slow state). **The split-shadow/zero-eval hand work is
+  still unmeasured on Safari**, and the true `nohandcache` A/B (possible for
+  the first time since the prebuild deletion) hasn't happened yet.
+- **The Safari slack wall, now very well replicated:** post-callback slack is
+  17.4–19.5 ms on every Safari run — fast or slow CPU state, cached or
+  ablated, tick or anim frames. Anim interval ≈ body CPU + ~18 ms slack
+  (fast: 9.1 + 19.5 → 28.6 ms ≈ 35 fps; slow: ~15.3 + ~18 → ~33.8 ms ≈
+  29.6 fps). Two consequences for the roadmap:
+  1. Issuance micro-optimization is exhausted as a Safari lever: total render
+     issuance is 4.9 ms (fast state) of a 28.6 ms interval; halving it buys
+     ~2–3 fps. Remaining CPU-side lever is tick-frame eval (update 16.3–16.9
+     ms on slow-state tick frames → tick-stagger).
+  2. The ~18 ms slack is the wall between Safari and 60 fps: even at zero JS
+     it caps near ~55 fps. Its composition (per-layer commit ≈ 1 ms × 16
+     layers, per the onecanvas evidence, vs content raster) decides which
+     structural fix pays: onecanvas attacks layer count, sandwich buffers
+     attack per-frame painted content. This is the question the next
+     experiments must answer — measure, don't guess.
+
+**Verdict on the hand-cache line of work:** Chrome-validated, Safari-pending.
+Re-capture on Safari with the stamped build (baseline ×3 + `nohandcache` ×1,
+matching CPU states via the µs/eval line) before starting sandwich-buffer
+implementation; it doubles as the first true hand A/B and the last cheap
+datapoint on whether issuance-side caching moves Safari at all.
+
+## timings-9 (2026-07-06): Safari validated, and the first TRUE hand-cache A/B rewrites the Safari model
+
+Raw data: [2026-07-06-true-handcache-ab-native-timings.txt](2026-07-06-true-handcache-ab-native-timings.txt)
+(Safari ×3 baseline + ×2 `nohandcache,nowheelcache`, Chrome ×1; per-run
+validity annotations in the file header). All five Safari runs read
+`build 2.0.33` ✓. The Chrome run has *no* stamp — the Chrome tab was still on
+the pre-stamp 07-05 bundle (same failure mode as timings-8: a leftover tab,
+caught immediately by the missing stamp; that bundle carries the same hand
+code, so its 79.7 fps is valid — reload every tab onto the new build before
+capturing).
+
+**1. Hand unification validated on Safari — no regression, big cleanup
+banked.** Baseline 34.0 fps fast-state / 26.1–26.8 slow (timings-8's stale
+replication of the welded prebuilds: 33.3 / 24.8–26.1). QHand(vector)
+issuance 1.25 fast / 1.66–1.76 slow (welded: 1.12 / 1.62–1.72) — the extra
+~0.1 ms is the second (shadow) blit, the price of screen-fixed light.
+Terminator holds 0.82–1.19. Ledger: `shadows 0.0 · hand cache 8.2` ✓,
+TOTAL 258.0 MB.
+
+**2. The true A/B (the headline): without the hand+wheel caches Safari
+collapses to 12.7 fps — the caches are load-bearing via RASTER, not
+issuance.** Run 5 (`nohandcache,nowheelcache`, near-matched CPU state:
+4.6 µs/eval vs baseline's 3.8–3.9) vs runs 2–3:
+
+| | cached (runs 2–3) | fully live (run 5) |
+|---|---|---|
+| fps | 26.1 / 26.8 | **12.7** |
+| post-callback slack | ~17 ms | **48–53 ms** |
+| render issuance Σ | 6.9–7.5 ms | 9.6 ms |
+| anim interval | 31–32 ms | 71 ms (89 ms cadence-locked) |
+
+Issuance moves ~2.5 ms; slack moves **~33 ms**. Attribution: in timings-7/8's
+*broken* A/B (old bundle), `nowheelcache` was already truly live — Wheel 4.7–4.9
+ms issuance — and slack stayed ~17 ms. So live *glyphs* don't blow Safari's
+raster (unlike Chrome, where they were the whole story). The new ingredient in
+run 5 is truly-live *hands*: per-frame `shadowBlur` shadows (the live path
+sets `ctx.shadowBlur` per hand). **Live shadow-blur is Safari's raster bomb;
+the split-shadow cache converts it to two cheap blits.** The earlier
+"hand cache is a wash on Safari" verdict is formally retracted — it compared
+cache-vs-prebuilds (both cached where it mattered), never cache-vs-live.
+(Run 4, the other ablation, hit a thermal state 3× worse than baseline
+(12.5 µs/eval, 10 lost ticks) — excluded from comparisons.)
+
+**3. Revised Safari model.** With all caches on, per-frame painted content is
+almost entirely bitmap blits, and the remaining ~17–18 ms slack is *not*
+content raster — the strongest remaining suspect is **per-layer commit
+overhead** (~1 ms × 16 canvases, per the re-baseline onecanvas evidence).
+Consequences for the roadmap:
+
+- **onecanvas deserves a re-measure before sandwich work begins.** The
+  re-baseline's modest +5 fps was measured when content raster was still
+  heavy (pre terminator/hand caches), which diluted the commit savings. Now
+  that content is cheap, collapsing 16 commits → 1 attacks the dominant
+  remaining term directly. Prediction to test: fast-state anim interval
+  28 ms ≈ 9.4 CPU + 18.6 slack; if slack is commit-dominated, onecanvas on
+  v2.0.33 should cut it toward the Observatory single-canvas calibration
+  (~10 ms/frame all-in at similar area) → Safari ≳40 fps. It's already a
+  flag: `?ablate=onecanvas`, Safari ×2–3, states matched via µs/eval.
+- **Sandwich buffers' value proposition shrinks to CPU**: with content raster
+  cached and commits unaffected by it, the sandwich mainly saves issuance
+  (5–7.5 ms) + some update work — worth having, but it no longer looks like
+  the structural Safari fix. Gate the design work on the onecanvas result.
+- **Tick-stagger unchanged**: slow-state tick frames still cost 26–29 ms body
+  CPU (update 13.8–16.3), producing the 43–47 ms after-tick intervals.
+
+## timings-10 (2026-07-06): onecanvas REFUTED — the all.html/Observatory gap is content, not layer count
+
+Raw data: [2026-07-06-onecanvas-remeasure-native-timings.txt](2026-07-06-onecanvas-remeasure-native-timings.txt)
+(Safari ×3 `onecanvas` + Chrome ×1 baseline; all `build 2.0.33` ✓). This is
+the queue-1 experiment timings-9 promoted, and it **falsifies the prediction.**
+
+**onecanvas does not help Safari — it's slightly worse, and the slack did not
+collapse.** State-matched picture (µs/eval in parens):
+
+| | baseline (t9 runs 2–3) | onecanvas (t10 runs 1–3) |
+|---|---|---|
+| µs/eval | 3.8–3.9 | 4.4–4.8 |
+| fps | 26.1 / 26.8 | 24.7 / 24.7 / 24.0 |
+| anim interval | 31–32 ms | 37–38 ms |
+| after-anim slack | ~17 ms | 18–21 ms |
+| after-tick slack | ~17 ms | 11–13 ms |
+| memory (4K) | 258 MB | **342.9 MB** (+84.9 shared canvas) |
+
+The onecanvas runs sit at a slightly warmer CPU state (4.4–4.8 vs 3.8–3.9
+µs/eval), so some of the fps gap is state, not the flag — but even granting
+that, onecanvas lands ≤25 fps where the prediction was **≥40**, and the
+after-anim slack (the dominant frame class during scrub) went *up*, not down.
+Prediction falsified.
+
+**What it means.** Collapsing 16 layer commits → 1 was supposed to cut the
+slack if per-layer commit count dominated it. It didn't. There's a *real but
+small* per-layer effect visible on the heaviest (tick) frames — their slack
+dropped 17 → 11–13 ms — but it's cancelled on anim frames by the cost of
+presenting one **larger** surface every frame: the shared canvas is
+6714×3316 = 22.3 M px vs 16×1072² = 18.4 M px of per-face backing (+21%, from
+the inter-face gaps), an 84.9 MB allocation. Net: neutral-to-worse.
+
+The deeper read: the Observatory calibration (one full-screen canvas at
+~100 fps while scrubbing) does **not** transfer to all.html by removing
+layers, so **the gap between them is the *content*, not the layer count** —
+16 detailed faces' worth of paths/blits is simply expensive to composite,
+however many canvases hold it. Safari's ~17 ms slack is therefore most likely
+**physical-pixel / composited-area driven**, not commit-count driven.
+[**Superseded by timings-11:** "content, not layer count" holds, but the
+slack is not composited-*area* — it's deferred *raster of the draw ops*, and
+it IS reducible by cutting op count (facebuffers did; onecanvas couldn't
+because it kept every op). The dpr1-probe recommendation below is moot — Steve
+rejected dpr1, and timings-11 answered the question without it.]
+
+**Roadmap consequences:**
+
+- **onecanvas is dead as a Safari fix** (and it costs +85 MB prototype /
+  ~+15 MB production for nothing). Drop it from the queue.
+- **Next probe is `?ablate=dpr1`** — the clean test of the area hypothesis.
+  Safari runs at dpr 2 / backing 2 (1072 px phys per face); dpr1 quarters the
+  physical pixels for the whole session. If the ~17 ms slack is area-driven it
+  should fall sharply under dpr1 (and that's a shippable product lever —
+  reduced backing DPR on Safari/phones, a sharpness-for-fps trade); if slack
+  barely moves, it's fixed per-frame overhead and Safari is near its floor.
+  Capture: Safari `?ablate=dpr1` ×2–3, states matched via µs/eval.
+- **Sandwich buffers** still attack the *body-CPU* half of the interval
+  (issuance 5–7.5 ms + update), independent of the slack question:
+  baseline slow interval ≈ 14.5 CPU + 17 slack = 31 ms; halving body CPU →
+  ~9 + 17 = 26 ms ≈ 38 fps *if slack holds*. So the sandwich is worth ~+10 fps
+  on Safari at best — real, but it cannot break the slack floor. Gate its
+  (large) implementation cost on the dpr1 result: if dpr1 shows the slack is
+  reducible, prioritize that first.
+- **Chrome (stamped baseline, run 4): 66.3 fps.** Lower than the 78.7 seen
+  cold, but this run was *last*, after three heavy 85 MB-shared-canvas Safari
+  runs warmed the machine (2.0 µs/eval + higher per-frame CPU); the only
+  2.0.33 code change is the once-per-summary build stamp, which cannot touch
+  frame cost. Not a regression — still passes the 60 fps-avg target. Worth a
+  clean cold re-confirm when convenient.
+
+## timings-11 (2026-07-06): facebuffers ceiling — Safari's slack IS reducible; it's deferred per-canvas raster
+
+Raw data: [2026-07-06-facebuffers-ceiling-native-timings.txt](2026-07-06-facebuffers-ceiling-native-timings.txt)
+(Safari ×3 `facebuffers` + Chrome ×1; all `build 2.0.33` ✓; matched against
+timings-9's slow-state baseline at 3.8–3.9 µs/eval — these ran at 3.4–3.7).
+
+**Headline: whole-face buffering takes Safari 26–27 → 40–44 fps at matched
+CPU (+~68%), and — the surprise — it cuts the *slack*, not just issuance.**
+
+| (Safari, slow state, matched µs/eval) | baseline (t9) | facebuffers (t11) | Δ |
+|---|---|---|---|
+| fps | 26.1 | 44.2 | **+69%** |
+| anim interval | 31.0 ms | 18.6 ms | −12.4 |
+| render issuance (body) | 7.4 ms | 1.4 ms | −6.0 |
+| **post-callback slack** | **17.0 ms** | **10.9 ms** | **−6.1** |
+| update (body) | 6.5 ms | 5.8 ms | ~0 |
+| memory (4K) | 258 MB | 328 MB | +70 (buffers) |
+
+The interval win splits almost evenly between issuance and slack. **The slack
+drop is the new physics.** Prediction going in was that slack would *hold*
+(facebuffers still presents 16 same-size canvases). It fell by 6 ms — so a
+large part of Safari's slack was never fixed composite/present cost; it was
+**deferred rasterization of the draw operations issued into each canvas.**
+When a face becomes a single `drawImage(buffer)` instead of ~50–100
+path/blit ops, the browser's post-callback raster collapses.
+
+**This unifies every Safari result to date into one coherent model:**
+Safari defers per-canvas raster of issued draw ops to the post-rAF slack, and
+**slack ∝ draw-operation count** (roughly), not canvas count and not
+issuance-CPU:
+- onecanvas (timings-10) kept all ~1600 ops, just redirected them to one
+  canvas → same total raster → **slack unchanged** (why it failed). ✔
+- facebuffers (here) *reduces* ops to ~1/face → **slack collapses.** ✔
+- The original hard-won lesson ("costs hide in post-rAF slack, and the
+  expensive thing is RASTERIZATION not issuance") was right all along; the
+  timings-9 gloss that "content is now cheap blits, slack = composite-area"
+  was **wrong** and is retracted — even cached hand/wheel *blits* are draw
+  ops the browser must raster into the destination, and there are ~100/face.
+
+Chrome (run 4) confirms the mechanism cross-engine: 66–79 → 180 fps, slack
+4 → 1 ms. (Not decision-relevant — Chrome already clears 60 — but it's the
+same effect.)
+
+**The catch — this is the *optimistic ceiling*, not the achievable number.**
+facebuffers hits 44 fps by letting all 16 faces step at tick-rate (the
+round-robin rebuilds ≤4 faces/frame; everything else blits a stale buffer).
+That's the fidelity violation the flag exists to measure past. A shippable
+sandwich must keep the *fast movers* live every frame, and during a
+**day-scrub** the expensive movers — date wheels (~12°/tick), and the
+sweeping hands — move visibly and cannot be buffered without perceptible
+stepping. The genuinely slow, bufferable parts during a day-scrub are the
+astronomical layer (terminator, day-night ring, rise/set wedges, analemma —
+all drift on a ~1-day cadence) plus the already-cached static base. So the
+fidelity-preserving sandwich captures **only the slow layer's** share of the
+6 ms issuance + 6 ms slack, not the whole 12 ms.
+
+**How much of the 44-fps ceiling survives fidelity is the one open number**,
+and it's exactly what the Phase 3 middle-share instrumentation was specified
+to measure: per-part pixel-movement-per-tick during a real day-scrub →
+fraction of render cost in parts moving < ~0.5 px/tick (bufferable). Rough
+priors from the render breakdown (Terminator 1.0 + QWedge 0.5 + QDayNightRing
+0.5 + dial/static, all bufferable; Wheel 1.7 + hands live) suggest the slow
+layer is a real but minority share — plausibly worth **+5–10 fps**
+fidelity-preserving (Safari ~32–37), well short of the 44 ceiling and of 60,
+but a meaningful phone-tier win.
+
+**Verdict (revised 2026-07-06 after Steve's design constraint): sandwich is
+DEAD.** timings-11 proved the *mechanism* (buffering cuts both halves; slack
+is op-count-reducible, not a fixed floor) — but the mechanism needs a
+quiescent/slow layer to buffer, and this app has none during scrub *by
+design*. Steve: every astro part (terminator, day/night, wedges, analemma)
+moves a visibly different amount per simulated day; scrub-by-**month** is an
+equally-important benchmark where they move even more; and the desired
+direction on 4K/5K is *more* frequent astro updates, not fewer. facebuffers
+reached 44 fps only by letting faces step at tick rate — exactly the fidelity
+loss the product can't take. So the bufferable share is ~0, the middle-share
+instrumentation would only confirm that, and it is **not worth building**.
+See [[no-quiescent-layer-during-scrub]]. The one remaining full-fidelity lever
+is **tick-stagger** (spread the per-tick update spike, op-count-neutral, ~+5–6
+fps in earlier probes); beyond that, Safari's ~26–34 fps is the characterized
+cost of full-res continuous celestial motion on WebKit.
 
 ## Phase 2 — Primitive attribution (only where Phase 1 leaves questions)
 

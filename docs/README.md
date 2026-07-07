@@ -39,5 +39,7 @@ Permanent reference documentation for the Chronometer Web codebase, organized by
 - [**Face Porting Guide**](face-porting-guide.md) — Step-by-step procedure for porting a new watch face
 - [**Build System**](build-system.md) — Build pipeline, face registration, deployment
 - [**Testing**](testing.md) — Test framework: unit tests, regression snapshots, astronomical boundary tests
+- [**Performance**](performance.md) — Scrub-perf levers found, ideas rejected, guardrails when changing render/astro code, and hard fidelity constraints
+- [**Perf Regression**](perf-regression.md) — Reported (not gated) per-face CPU tick-time check for "still correct, but slower" regressions
 - [**iOS Reference**](ios-reference.md) — Guide to the iOS/Android reference repositories
 - [**Development Rules**](development-rules.md) — Rules to follow when making changes to this project
