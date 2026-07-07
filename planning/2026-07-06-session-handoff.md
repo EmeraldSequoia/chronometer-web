@@ -123,10 +123,12 @@ answers it (~0). Sandwich + facebuffers-style buffering are off the table.
    — fewer ops while actively scrubbing, full detail when stopped; a
    detail-during-motion trade distinct from dpr1's static-image softening.
    Probably also unwelcome given the "more updates, not fewer" direction.)
-4. **Phone-floor track** (orthogonal): source images 82 MB decoded
-   (resolution-independent — decode at display size), release face-data
-   base64 `dataUrl`s after decode, port Observatory's cities lazy-load
-   (chronometer still eager-parses 167k cities). See "Device targets".
+4. **Phone-floor / memory track** (orthogonal) — see the standalone plan
+   [2026-07-06-memory-phone-floor-plan.md](2026-07-06-memory-phone-floor-plan.md).
+   CORRECTION (verified 2026-07-06): dataUrl release AND Observatory-style lazy
+   city load/parse are **already implemented** — the earlier "chronometer still
+   eager-parses 167k cities" was stale. The one real remaining lever is
+   decoding source images at display size (the 82 MB `createImageBitmap`).
 5. Parked: dirty-rect alternative, `_hbMemo` dynamic-color support (fixed
    appearance is the contract), image-hand `_imageHandShadowCache` memo.
 

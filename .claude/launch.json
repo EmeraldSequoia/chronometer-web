@@ -38,6 +38,18 @@
       "port": 8791
     },
     {
+      "name": "dist-fresh20",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8793",
+        "--directory",
+        "dist"
+      ],
+      "port": 8793
+    },
+    {
       "name": "dev",
       "runtimeExecutable": "npm",
       "runtimeArgs": [

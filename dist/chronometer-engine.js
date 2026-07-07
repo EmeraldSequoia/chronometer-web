@@ -18334,6 +18334,55 @@ return {${names2.join(",")}};`;
     ctx.restore();
   }
 
+  // src/watch/image-loader.ts
+  var sharedPlaceholder = null;
+  async function getPlaceholderBitmap() {
+    if (!sharedPlaceholder) sharedPlaceholder = await createImageBitmap(new ImageData(1, 1));
+    return sharedPlaceholder;
+  }
+  async function getPngDimensions(blob) {
+    if (blob.size < 24) return null;
+    const buf = new Uint8Array(await blob.slice(0, 24).arrayBuffer());
+    if (buf[0] !== 137 || buf[1] !== 80 || buf[2] !== 78 || buf[3] !== 71) return null;
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    return { w: dv.getUint32(16), h: dv.getUint32(20) };
+  }
+  async function makeReDecodableImage(blob, baseScale) {
+    const dims = await getPngDimensions(blob);
+    if (!dims) {
+      const full = await createImageBitmap(blob);
+      return {
+        bitmap: full,
+        scale: baseScale,
+        source: { blob, srcW: full.width, srcH: full.height, baseScale }
+      };
+    }
+    return {
+      bitmap: await getPlaceholderBitmap(),
+      scale: baseScale,
+      source: { blob, srcW: dims.w, srcH: dims.h, baseScale }
+    };
+  }
+  async function decodeLoadedImageForScale(loaded2, faceScale) {
+    const src = loaded2.source;
+    if (!src) return;
+    const ratio = Math.min(1, src.baseScale * faceScale);
+    const targetW = Math.max(1, Math.round(src.srcW * ratio));
+    const targetH = Math.max(1, Math.round(src.srcH * ratio));
+    if (loaded2.bitmap !== sharedPlaceholder && loaded2.bitmap.width === targetW && loaded2.bitmap.height === targetH) {
+      return;
+    }
+    const bitmap = await createImageBitmap(src.blob, {
+      resizeWidth: targetW,
+      resizeHeight: targetH,
+      resizeQuality: "high"
+    });
+    const old = loaded2.bitmap;
+    loaded2.bitmap = bitmap;
+    loaded2.scale = src.srcW * src.baseScale / bitmap.width;
+    if (old && old !== sharedPlaceholder) old.close();
+  }
+
   // src/shared/time-controller.ts
   var RATE_OPTIONS = [
     { label: "10\xD7", unit: "second" },
@@ -21600,8 +21649,7 @@ return {${names2.join(",")}};`;
       try {
         const response = await fetch(dataUrl);
         const blob = await response.blob();
-        const bitmap = await createImageBitmap(blob);
-        result.set(src, { bitmap, scale });
+        result.set(src, await makeReDecodableImage(blob, scale));
       } catch (e) {
         console.warn(`Failed to load image: ${src}`, e);
       }
@@ -22118,6 +22166,16 @@ return {${names2.join(",")}};`;
       buildTerminatorValues(face.updater, watch.name, face.terminatorLeaves, env, performance.now());
       if (face.analemmaState) buildAnalemmaValues(face.updater, watch.name, face.analemmaState, env, performance.now());
     }
+    async function decodeFaceImages(face) {
+      if (!face.enabled || face.sizePx === 0) return;
+      let anyRedecoded = false;
+      await Promise.all([...face.images.values()].map(async (loaded2) => {
+        const before = loaded2.bitmap;
+        await decodeLoadedImageForScale(loaded2, face.scale);
+        if (loaded2.bitmap !== before) anyRedecoded = true;
+      }));
+      if (anyRedecoded) face.env._terraCityKnockout = null;
+    }
     function buildAllCachesSequentially(facesToBuild, onDone) {
       let idx = 0;
       function buildNext() {
@@ -22126,12 +22184,18 @@ return {${names2.join(",")}};`;
           return;
         }
         const face = facesToBuild[idx++];
-        try {
-          buildCache(face);
-        } catch (err) {
-          console.error(`[buildCache] face "${face.watch?.name ?? "?"}" threw; leaving it unbuilt:`, err);
-        }
-        setTimeout(buildNext, 0);
+        const buildThenContinue = () => {
+          try {
+            buildCache(face);
+          } catch (err) {
+            console.error(`[buildCache] face "${face.watch?.name ?? "?"}" threw; leaving it unbuilt:`, err);
+          }
+          setTimeout(buildNext, 0);
+        };
+        decodeFaceImages(face).then(buildThenContinue, (err) => {
+          console.error(`[decodeFaceImages] face "${face.watch?.name ?? "?"}" threw:`, err);
+          buildThenContinue();
+        });
       }
       buildNext();
     }
@@ -22244,7 +22308,7 @@ return {${names2.join(",")}};`;
         seen.add(c);
         return c.width * c.height * 4;
       };
-      let facesB = 0, staticB = 0, shadowB = 0, imagesB = 0, analemmaB = 0, buffersB = 0, terraB = 0;
+      let facesB = 0, staticB = 0, shadowB = 0, imagesB = 0, srcBlobB = 0, analemmaB = 0, buffersB = 0, terraB = 0;
       const walkParts = (parts) => {
         for (const p of parts) {
           staticB += sz(p.cachedCanvas);
@@ -22256,20 +22320,23 @@ return {${names2.join(",")}};`;
         facesB += sz(face.canvas);
         buffersB += sz(face.fbCanvas);
         walkParts(face.watch.parts);
-        for (const img of face.images.values()) imagesB += sz(img.bitmap);
+        for (const img of face.images.values()) {
+          imagesB += sz(img.bitmap);
+          if (img.source) srcBlobB += img.source.blob.size;
+        }
         const a = face.analemmaState;
         if (a) analemmaB += sz(a.bgBitmap) + sz(a.channelBitmap) + sz(a.sunBitmap) + sz(a._scratchCanvas);
         terraB += sz(face.env._terraCityKnockout);
       }
       const sharedB = sz(_sharedCanvas);
       const rc = rendererCacheMemoryBytes();
-      const total = facesB + staticB + shadowB + imagesB + analemmaB + buffersB + terraB + sharedB + rc.wedgeCache + rc.wheelCache + rc.handCache + rc.cutoutTemp;
+      const total = facesB + staticB + shadowB + imagesB + srcBlobB + analemmaB + buffersB + terraB + sharedB + rc.wedgeCache + rc.wheelCache + rc.handCache + rc.cutoutTemp;
       const mem = performance.memory;
       const jsHeap = mem ? ` \xB7 JS heap (Chrome-only): ${MB(mem.usedJSHeapSize)}/${MB(mem.totalJSHeapSize)}MB` : "";
-      return `canvas/bitmap est TOTAL ${MB(total)}MB: faces ${MB(facesB)} \xB7 static caches ${MB(staticB)} \xB7 images ${MB(imagesB)} \xB7 shadows ${MB(shadowB)} \xB7 wedge cache ${MB(rc.wedgeCache)} \xB7 wheel cache ${MB(rc.wheelCache)} \xB7 hand cache ${MB(rc.handCache)} \xB7 analemma ${MB(analemmaB)} \xB7 terra ring ${MB(terraB)} \xB7 cutout temp ${MB(rc.cutoutTemp)} \xB7 face buffers ${MB(buffersB)} \xB7 shared canvas ${MB(sharedB)}${jsHeap}`;
+      return `canvas/bitmap est TOTAL ${MB(total)}MB: faces ${MB(facesB)} \xB7 static caches ${MB(staticB)} \xB7 images ${MB(imagesB)} \xB7 src blobs ${MB(srcBlobB)} \xB7 shadows ${MB(shadowB)} \xB7 wedge cache ${MB(rc.wedgeCache)} \xB7 wheel cache ${MB(rc.wheelCache)} \xB7 hand cache ${MB(rc.handCache)} \xB7 analemma ${MB(analemmaB)} \xB7 terra ring ${MB(terraB)} \xB7 cutout temp ${MB(rc.cutoutTemp)} \xB7 face buffers ${MB(buffersB)} \xB7 shared canvas ${MB(sharedB)}${jsHeap}`;
     }
     function _buildStamp() {
-      return true ? "2.0.29" : "dev";
+      return true ? "2.0.30" : "dev";
     }
     function _browserShort() {
       const ua = navigator.userAgent;

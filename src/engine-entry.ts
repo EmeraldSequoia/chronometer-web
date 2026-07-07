@@ -35,6 +35,7 @@ import { TERRA_RING_DEFAULTS } from './watch/watch-env.js';
 import { validSlotsForTz, formatSlotOffset, getStandardOffsetMinutes, olsonIdToCityName } from './watch/terra-slots.js';
 import { buildStaticBlockCaches, renderFrame, BEZEL_THICKNESS_XML, setPartProfiling, resetPartProfile, getPartProfile, setWheelCacheDisabled, setHandCacheDisabled, rendererCacheMemoryBytes } from './watch/renderer.js';
 import type { LoadedImage } from './watch/image-loader.js';
+import { makeReDecodableImage, decodeLoadedImageForScale } from './watch/image-loader.js';
 import { SCHEDULER_LOOKAHEAD_MS } from './shared/animation.js';
 import { Updater, makeOverridableGetNow, timingContextForFrame, tickProfile, resetTickProfile, setTickProfiling, type WithDisplayTime } from './shared/updater.js';
 import { astroProfile, resetAstroProfile, setAstroProfiling, envTzStateStale } from './shared/astro-env.js';
@@ -268,8 +269,11 @@ async function loadImagesFromFaceData(
         try {
             const response = await fetch(dataUrl);
             const blob = await response.blob();
-            const bitmap = await createImageBitmap(blob);
-            result.set(src, { bitmap, scale });
+            // Retain the compressed blob + intrinsics; defer the real decode to the
+            // resize path (decodeFaceImages), which sizes each bitmap to the face's
+            // actual on-screen px. Avoids decoding these -4x assets at full source
+            // resolution — the dominant, resolution-independent memory cost.
+            result.set(src, await makeReDecodableImage(blob, scale));
         } catch (e) {
             console.warn(`Failed to load image: ${src}`, e);
         }
@@ -980,21 +984,56 @@ async function main() {
         if (face.analemmaState) buildAnalemmaValues(face.updater, watch.name, face.analemmaState, env, performance.now());
     }
 
+    /**
+     * Re-decode a face's images to the pixels they occupy on screen at the face's
+     * current scale (1:1). This is the memory/phone-floor lever: the -4x face
+     * artwork is decoded at display size instead of full source resolution. It runs
+     * in the resize path only — the sole place face.scale changes — and is a no-op
+     * for images already at the right size (repeat resize at an unchanged scale) and
+     * for images without a retained source (e.g. the built-in loadWatchImages path).
+     *
+     * Triggers are initial load and relayout (window resize / browser magnification),
+     * never scrub or normal interaction, so the added decode latency is paid rarely.
+     */
+    async function decodeFaceImages(face: FaceInstance): Promise<void> {
+        if (!face.enabled || face.sizePx === 0) return;
+        let anyRedecoded = false;
+        await Promise.all([...face.images.values()].map(async (loaded) => {
+            const before = loaded.bitmap;
+            await decodeLoadedImageForScale(loaded, face.scale);
+            if (loaded.bitmap !== before) anyRedecoded = true;
+        }));
+        // The Terra city-name knockout is built at the ring bitmap's native
+        // resolution and cached on the env (deliberately preserved across env
+        // rebuilds). A resized ring bitmap makes that cache the wrong size, so drop
+        // it after a re-decode — it rebuilds lazily on the next draw.
+        if (anyRedecoded) (face.env as any)._terraCityKnockout = null;
+    }
+
     function buildAllCachesSequentially(facesToBuild: FaceInstance[], onDone: () => void) {
         let idx = 0;
         function buildNext() {
             if (idx >= facesToBuild.length) { onDone(); return; }
             const face = facesToBuild[idx++];
-            try {
-                buildCache(face);
-            } catch (err) {
-                // A single face's cache build must never strand the batch: onDone()
-                // re-kicks the render loop, so skipping it would leave the grid dark.
-                // Log and carry on — the face stays cachesBuilt=false (skipped by the
-                // frame loop) and is retried on the next rebuild (resize / location).
-                console.error(`[buildCache] face "${face.watch?.name ?? '?'}" threw; leaving it unbuilt:`, err);
-            }
-            setTimeout(buildNext, 0);
+            const buildThenContinue = () => {
+                try {
+                    buildCache(face);
+                } catch (err) {
+                    // A single face's cache build must never strand the batch: onDone()
+                    // re-kicks the render loop, so skipping it would leave the grid dark.
+                    // Log and carry on — the face stays cachesBuilt=false (skipped by the
+                    // frame loop) and is retried on the next rebuild (resize / location).
+                    console.error(`[buildCache] face "${face.watch?.name ?? '?'}" threw; leaving it unbuilt:`, err);
+                }
+                setTimeout(buildNext, 0);
+            };
+            // Re-decode images to display size before building this face's caches
+            // (buildStaticBlockCaches consumes the bitmaps). Sequential per-face so
+            // the transient decode cost stays bounded to one face at a time.
+            decodeFaceImages(face).then(buildThenContinue, (err) => {
+                console.error(`[decodeFaceImages] face "${face.watch?.name ?? '?'}" threw:`, err);
+                buildThenContinue();
+            });
         }
         buildNext();
     }
@@ -1181,7 +1220,7 @@ async function main() {
             seen.add(c);
             return c.width * c.height * 4;
         };
-        let facesB = 0, staticB = 0, shadowB = 0, imagesB = 0, analemmaB = 0, buffersB = 0, terraB = 0;
+        let facesB = 0, staticB = 0, shadowB = 0, imagesB = 0, srcBlobB = 0, analemmaB = 0, buffersB = 0, terraB = 0;
         const walkParts = (parts: any[]): void => {
             for (const p of parts) {
                 staticB += sz(p.cachedCanvas);
@@ -1193,21 +1232,25 @@ async function main() {
             facesB += sz(face.canvas);
             buffersB += sz(face.fbCanvas);
             walkParts(face.watch.parts);
-            for (const img of face.images.values()) imagesB += sz(img.bitmap);
+            for (const img of face.images.values()) {
+                imagesB += sz(img.bitmap);
+                // Compressed source retained for display-size re-decode on resize.
+                if (img.source) srcBlobB += img.source.blob.size;
+            }
             const a = face.analemmaState as any;
             if (a) analemmaB += sz(a.bgBitmap) + sz(a.channelBitmap) + sz(a.sunBitmap) + sz(a._scratchCanvas);
             terraB += sz((face.env as any)._terraCityKnockout);
         }
         const sharedB = sz(_sharedCanvas);
         const rc = rendererCacheMemoryBytes();
-        const total = facesB + staticB + shadowB + imagesB + analemmaB + buffersB + terraB
+        const total = facesB + staticB + shadowB + imagesB + srcBlobB + analemmaB + buffersB + terraB
             + sharedB + rc.wedgeCache + rc.wheelCache + rc.handCache + rc.cutoutTemp;
         const mem = (performance as any).memory;
         const jsHeap = mem
             ? ` · JS heap (Chrome-only): ${MB(mem.usedJSHeapSize)}/${MB(mem.totalJSHeapSize)}MB`
             : '';
         return `canvas/bitmap est TOTAL ${MB(total)}MB: faces ${MB(facesB)} · static caches ${MB(staticB)} · ` +
-            `images ${MB(imagesB)} · shadows ${MB(shadowB)} · wedge cache ${MB(rc.wedgeCache)} · ` +
+            `images ${MB(imagesB)} · src blobs ${MB(srcBlobB)} · shadows ${MB(shadowB)} · wedge cache ${MB(rc.wedgeCache)} · ` +
             `wheel cache ${MB(rc.wheelCache)} · hand cache ${MB(rc.handCache)} · analemma ${MB(analemmaB)} · ` +
             `terra ring ${MB(terraB)} · cutout temp ${MB(rc.cutoutTemp)} · face buffers ${MB(buffersB)} · ` +
             `shared canvas ${MB(sharedB)}${jsHeap}`;
