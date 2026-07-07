@@ -135,433 +135,6 @@ export function buildStaticBlockCaches(
 }
 
 /**
- * Pre-render all shadow-casting QHand parts into cached bitmaps.
- *
- * Each hand with z > 0 gets its shape + shadow drawn once onto a small
- * OffscreenCanvas. At frame time, drawQHand blits this cached bitmap
- * instead of re-computing the Gaussian blur shadow every frame.
- *
- * This matches the iOS makeOneShadow.pl approach: hand appearance
- * (colors, geometry) is fixed at init time, so the shadow only needs
- * to be rendered once per scale change.
- *
- * Call at init and on resize (when scale changes).
- */
-export function buildHandShadowCaches(
-    watch: Watch,
-    env: Environment,
-    scale: number,
-    images?: Map<string, LoadedImage>,
-): void {
-    function processPartList(parts: WatchPart[]): void {
-        for (const part of parts) {
-            if (part.type === 'QHand') {
-                buildSingleHandShadow(part, env, scale, images);
-            } else if (part.type === 'Static') {
-                processPartList(part.children);
-            }
-        }
-    }
-    processPartList(watch.parts);
-}
-
-/**
- * Build a pre-rendered shadow bitmap for a single QHand part.
- */
-function buildSingleHandShadow(
-    part: QHandPart,
-    env: Environment,
-    scale: number,
-    images?: Map<string, LoadedImage>,
-): void {
-    const z = evalAttr(part.z, env);
-    if (!z || z === 0) {
-        part._shadowBitmap = undefined;
-        return;
-    }
-
-    const handType = part.handType || 'tri';
-    // Spoke hands are upright text labels — no shadow caching
-    if (handType === 'spoke') return;
-
-    // Image-based hands: cache the image + shadow
-    if (part.src && images) {
-        buildImageHandShadow(part, env, scale, images);
-        return;
-    }
-
-    const length = evalAttr(part.length, env);
-    if (length <= 0) return;
-
-    const width = evalAttr(part.width, env);
-    const tail = evalAttr(part.tail, env);
-    const lineWidth = evalAttr(part.lineWidth, env) || 0.5;
-    const oLength = evalAttr(part.oLength, env);
-    const oWidth = evalAttr(part.oWidth, env) || width;
-    const oRadius = evalAttr(part.oRadius, env);
-    const oCenter = evalAttr(part.oCenter, env);
-    const oTail = evalAttr(part.oTail, env);
-    const length2 = evalAttr(part.length2, env);
-    const thick = evalAttr(part.thick, env) || 3;
-
-    // --- Shadow parameters in XML coordinate space ---
-    let sigma = (z + 2) / 2;
-    let percentOpacity = 40;
-    if (thick < 3.0) {
-        sigma *= 1.25;
-        percentOpacity *= thick / 3.0;
-    }
-    const shadowPad = sigma * 3;  // 3σ captures >99% of Gaussian
-    const shadowDx = z / 4.3;
-    const shadowDy = z / 2.15;
-
-    // --- Bounding box in hand-local XML coords ---
-    let halfW: number;
-    let tipExtent: number;  // distance from pivot to tip (positive)
-    let tailExtent: number; // distance from pivot to tail (positive)
-
-    if (handType === 'sun') {
-        const rayRad = (length - length2) / 2;
-        const raysRad = (length - length2) / 3;
-        const cen = length2 + rayRad;
-        const sunCenter = oCenter > 0 ? oCenter : raysRad / 2;
-        halfW = Math.max(rayRad, sunCenter) + lineWidth;
-        tipExtent = cen + rayRad + lineWidth;
-        tailExtent = lineWidth;
-    } else if (handType === 'breguet') {
-        const widthScaler = width / (length * 0.16);
-        const lengthScaler = (length - 81) / 10;
-        const breOuterRadius = length * 0.075 * widthScaler;
-        const centerRadius = length * 0.08 * widthScaler;
-        const tipWidth = length * 0.045 * widthScaler;
-        halfW = Math.max(breOuterRadius, centerRadius, tipWidth / 2, width / 2) + lineWidth;
-        tipExtent = length + oLength + lineWidth;
-        tailExtent = Math.max(tail, 0) + lineWidth;
-    } else {
-        // rect, tri, wire, quad
-        halfW = Math.max(width / 2, oWidth / 2) + lineWidth;
-        tipExtent = length + (oLength > 0 ? oLength + lineWidth * 3 : 0) + lineWidth;
-        tailExtent = Math.max(tail, 0) + lineWidth;
-    }
-
-    // Account for ornament, center dot, tail circle
-    halfW = Math.max(halfW, oCenter || 0, oRadius || 0);
-    if (oRadius > 0) {
-        tailExtent = Math.max(tailExtent, Math.max(tail, 0) + 2 * oRadius + lineWidth);
-    }
-
-    // Expand for shadow
-    const xMin = -halfW - shadowPad;
-    const xMax = halfW + shadowPad + shadowDx;
-    const yMin = -tipExtent - shadowPad;
-    const yMax = tailExtent + shadowPad + shadowDy;
-    const bboxW = xMax - xMin;
-    const bboxH = yMax - yMin;
-    const anchorX = -xMin;  // pivot X offset from left edge
-    const anchorY = -yMin;  // pivot Y offset from top edge
-
-    // Create bitmap at pixel resolution
-    const pxW = Math.ceil(bboxW * scale) + 2;
-    const pxH = Math.ceil(bboxH * scale) + 2;
-    if (pxW <= 0 || pxH <= 0) return;
-
-    const bitmap = new OffscreenCanvas(pxW, pxH);
-    const bctx = bitmap.getContext('2d')!;
-
-    // Set up coordinate system: translate to anchor, apply scale
-    bctx.translate(anchorX * scale + 1, anchorY * scale + 1);
-    bctx.scale(scale, scale);
-
-    // Set up shadow
-    bctx.shadowColor = `rgba(0,0,0,${percentOpacity / 100})`;
-    bctx.shadowBlur = sigma * scale;
-    bctx.shadowOffsetX = shadowDx * scale;
-    bctx.shadowOffsetY = shadowDy * scale;
-
-    // --- Draw the hand shape (same logic as drawQHand body) ---
-    const strokeColor = part.strokeColor ? evalColor(part.strokeColor, env) : 'rgba(0,0,0,1)';
-    const fillColor = part.fillColor ? evalColor(part.fillColor, env) : 'rgba(0,0,0,1)';
-
-    if (handType === 'quad') {
-        drawQuadHandBody(bctx, part, env, length, strokeColor, fillColor, lineWidth);
-    } else if (handType === 'sun') {
-        drawSunHandBody(bctx, part, env, length, length2, oCenter, strokeColor, fillColor, lineWidth);
-    } else if (handType === 'breguet') {
-        drawBreguetHandBody(bctx, length, width, tail, oLength, strokeColor, fillColor, lineWidth);
-    } else {
-        drawHandShape(bctx, handType, length, width, tail, strokeColor, fillColor, lineWidth, oTail, length2);
-    }
-
-    // Ornament diamond (for non-quad/sun/breguet)
-    if (handType !== 'quad' && handType !== 'sun' && handType !== 'breguet' && oLength > 0) {
-        const oLineWidth = evalAttr(part.oLineWidth, env) || lineWidth;
-        const oStrokeColor = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
-        const oFillColor = part.oFillColor ? evalColor(part.oFillColor, env) : fillColor;
-        drawHandOrnament(bctx, length, oLength, oWidth, oTail, oLineWidth, oStrokeColor, oFillColor);
-    }
-
-    // Tail circle
-    if (oRadius > 0) {
-        const tLW = evalAttr(part.tLineWidth, env) || evalAttr(part.oLineWidth, env) || lineWidth;
-        const tSC = part.tStrokeColor ? evalColor(part.tStrokeColor, env)
-                  : (part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor);
-        const tFC = part.tFillColor ? evalColor(part.tFillColor, env)
-                  : (part.oFillColor ? evalColor(part.oFillColor, env) : fillColor);
-        drawTailCircle(bctx, tail, oRadius, tLW, tSC, tFC);
-    }
-
-    // Center dot
-    if (oCenter > 0 && handType !== 'sun') {
-        const osc = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
-        drawCenterDot(bctx, oCenter, osc);
-    }
-
-    // Store on part
-    part._shadowBitmap = bitmap;
-    part._shadowAnchorX = anchorX;
-    part._shadowAnchorY = anchorY;
-    part._shadowBitmapW = bboxW;
-    part._shadowBitmapH = bboxH;
-}
-
-/**
- * Draw the body of a 'quad' (bezier) hand type into a context.
- * Extracted from drawQHand to share with shadow cache builder.
- */
-function drawQuadHandBody(
-    ctx: RenderContext,
-    part: QHandPart,
-    env: Environment,
-    length: number,
-    strokeColor: string,
-    fillColor: string,
-    lineWidth: number,
-): void {
-    const oLength = evalAttr(part.oLength, env);
-    const oWidth = evalAttr(part.oWidth, env);
-    const oCenter2 = evalAttr(part.oCenter, env);
-
-    ctx.lineWidth = lineWidth;
-    ctx.strokeStyle = strokeColor;
-    ctx.fillStyle = fillColor;
-
-    ctx.beginPath();
-    ctx.moveTo(-oWidth / 12, -oCenter2);
-    ctx.quadraticCurveTo(-oWidth * 0.45, -oLength / 2, -oWidth / 4, -oLength);
-    ctx.moveTo(oWidth / 4, -oLength);
-    ctx.quadraticCurveTo(oWidth * 0.45, -oLength / 2, oWidth / 12, -oCenter2);
-    if (fillColor !== 'rgba(0,0,0,0)') ctx.fill();
-    if (strokeColor !== 'rgba(0,0,0,0)') ctx.stroke();
-
-    const oStrokeColor = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
-    ctx.fillStyle = oStrokeColor;
-    ctx.lineWidth = 0;
-    ctx.beginPath();
-    ctx.moveTo(oWidth / 4 + lineWidth / 2, -oLength);
-    ctx.lineTo(0, -length);
-    ctx.lineTo(-oWidth / 4 - lineWidth / 2, -oLength);
-    ctx.lineTo(-oWidth / 4 + lineWidth / 2, -oLength);
-    ctx.lineTo(0, -oLength * 1.2);
-    ctx.lineTo(oWidth / 4 - lineWidth / 2, -oLength);
-    ctx.closePath();
-    ctx.fill();
-
-    if (oCenter2 > 0) {
-        const osc = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
-        drawCenterDot(ctx, oCenter2, osc);
-    }
-}
-
-/**
- * Draw the body of a 'sun' hand type into a context.
- * Extracted from drawQHand to share with shadow cache builder.
- */
-function drawSunHandBody(
-    ctx: RenderContext,
-    part: QHandPart,
-    env: Environment,
-    length: number,
-    length2: number,
-    oCenter: number,
-    strokeColor: string,
-    fillColor: string,
-    lineWidth: number,
-): void {
-    const nRays = evalAttr(part.nRays, env) || 8;
-    let rayRad = (length - length2) / 2;
-    const raysRad = (length - length2) / 3;
-    const cen = length2 + rayRad;
-    const sunCenter = oCenter > 0 ? oCenter : raysRad / 2;
-
-    ctx.lineWidth = lineWidth;
-    ctx.strokeStyle = strokeColor;
-    ctx.fillStyle = fillColor;
-
-    ctx.beginPath();
-    for (let i = 0; i < nRays; i++) {
-        const theta = Math.PI / 2 + 2 * Math.PI * i / nRays;
-        const farX = rayRad * Math.cos(theta);
-        const farYIOS = cen + rayRad * Math.sin(theta);
-        const cwX = sunCenter * Math.cos(theta + Math.PI / nRays);
-        const cwYIOS = cen + sunCenter * Math.sin(theta + Math.PI / nRays);
-        const ccwX = sunCenter * Math.cos(theta - Math.PI / nRays);
-        const ccwYIOS = cen + sunCenter * Math.sin(theta - Math.PI / nRays);
-
-        ctx.moveTo(farX, -farYIOS);
-        ctx.lineTo(cwX, -cwYIOS);
-        ctx.lineTo(ccwX, -ccwYIOS);
-        ctx.lineTo(farX, -farYIOS);
-        rayRad = raysRad;
-    }
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = fillColor;
-    ctx.strokeStyle = fillColor;
-    ctx.beginPath();
-    ctx.arc(0, -cen, sunCenter, 0, 2 * Math.PI);
-    ctx.fill();
-    ctx.stroke();
-}
-
-/**
- * Draw the body of a 'breguet' hand type into a context.
- * Extracted from drawQHand to share with shadow cache builder.
- */
-function drawBreguetHandBody(
-    ctx: RenderContext,
-    length: number,
-    width: number,
-    tail: number,
-    oLength: number,
-    strokeColor: string,
-    fillColor: string,
-    lineWidth: number,
-): void {
-    const widthScaler     = width / (length * 0.16);
-    const lengthScaler    = (length - 81) / 10;
-    const armWidth        = length * 0.04  * widthScaler;
-    const centerRadius    = length * 0.08  * widthScaler;
-    const breOuterCenter  = length * 0.71  + lengthScaler;
-    const breInnerCenter  = length * 0.725 + lengthScaler * 0.8;
-    const breOuterRadius  = length * 0.075 * widthScaler;
-    const breInnerRadius  = length * 0.05  * widthScaler;
-    const breBase         = breOuterCenter - breOuterRadius;
-    const tipBase         = breOuterCenter + breOuterRadius;
-    const tipWidth        = length * 0.045 * widthScaler;
-
-    ctx.lineWidth = lineWidth;
-    ctx.strokeStyle = strokeColor;
-    ctx.fillStyle = fillColor;
-
-    // Hub circle
-    ctx.beginPath();
-    ctx.arc(0, 0, centerRadius, 0, 2 * Math.PI);
-    if (fillColor !== 'rgba(0,0,0,0)') ctx.fill();
-    if (strokeColor !== 'rgba(0,0,0,0)') ctx.stroke();
-
-    // Inner arm trapezoid
-    ctx.beginPath();
-    ctx.moveTo(-armWidth / 2,  -centerRadius);
-    ctx.lineTo(-armWidth / 10, -breBase);
-    ctx.lineTo( armWidth / 10, -breBase);
-    ctx.lineTo( armWidth / 2,  -centerRadius);
-    ctx.closePath();
-    if (fillColor !== 'rgba(0,0,0,0)') ctx.fill();
-    if (strokeColor !== 'rgba(0,0,0,0)') ctx.stroke();
-
-    // Breguet pomme (crescent)
-    ctx.beginPath();
-    ctx.arc(0, -breOuterCenter, breOuterRadius, 0, 2 * Math.PI);
-    ctx.moveTo(breInnerRadius, -breInnerCenter);
-    ctx.arc(0, -breInnerCenter, breInnerRadius, 0, 2 * Math.PI, true);
-    if (fillColor !== 'rgba(0,0,0,0)') ctx.fill('evenodd');
-    if (strokeColor !== 'rgba(0,0,0,0)') ctx.stroke();
-
-    // Triangular tip
-    ctx.beginPath();
-    ctx.moveTo(-tipWidth / 2, -tipBase);
-    ctx.lineTo(0, -length);
-    ctx.lineTo( tipWidth / 2, -tipBase);
-    ctx.closePath();
-    if (fillColor !== 'rgba(0,0,0,0)') ctx.fill();
-    if (strokeColor !== 'rgba(0,0,0,0)') ctx.stroke();
-}
-
-/**
- * Build a pre-rendered shadow bitmap for an image-based hand.
- */
-function buildImageHandShadow(
-    part: QHandPart,
-    env: Environment,
-    scale: number,
-    images: Map<string, LoadedImage>,
-): void {
-    const z = evalAttr(part.z, env);
-    if (!z || z === 0) return;
-
-    const loaded = part.src ? images.get(part.src) : undefined;
-    if (!loaded) return;
-
-    const { bitmap: srcBitmap, scale: imgScale } = loaded;
-    const drawW = srcBitmap.width * imgScale;
-    const drawH = srcBitmap.height * imgScale;
-
-    const thick = evalAttr(part.thick, env) || 3;
-    let sigma = (z + 2) / 2;
-    let percentOpacity = 40;
-    // Image hands skip the thin-hand adjustment (single drawImage call)
-
-    const shadowPad = sigma * 3;
-    const shadowDx = z / 4.3;
-    const shadowDy = z / 2.15;
-
-    // Image is drawn centered or at anchor offset
-    const xAnchor = part.xAnchor ? evalAttr(part.xAnchor, env) : drawW / 2;
-    const yAnchor = part.yAnchor ? -evalAttr(part.yAnchor, env) : -drawH / 2;
-
-    // Bounding box around the image in hand-local coords
-    const imgLeft = -xAnchor;
-    const imgTop = -yAnchor - drawH;
-    const imgRight = imgLeft + drawW;
-    const imgBottom = imgTop + drawH;
-
-    const xMin = imgLeft - shadowPad;
-    const xMax = imgRight + shadowPad + shadowDx;
-    const yMin = imgTop - shadowPad;
-    const yMax = imgBottom + shadowPad + shadowDy;
-    const bboxW = xMax - xMin;
-    const bboxH = yMax - yMin;
-    const anchorX = -xMin;
-    const anchorY = -yMin;
-
-    const pxW = Math.ceil(bboxW * scale) + 2;
-    const pxH = Math.ceil(bboxH * scale) + 2;
-    if (pxW <= 0 || pxH <= 0) return;
-
-    const bmp = new OffscreenCanvas(pxW, pxH);
-    const bctx = bmp.getContext('2d')!;
-
-    bctx.translate(anchorX * scale + 1, anchorY * scale + 1);
-    bctx.scale(scale, scale);
-
-    // Shadow setup
-    bctx.shadowColor = `rgba(0,0,0,${percentOpacity / 100})`;
-    bctx.shadowBlur = sigma * scale;
-    bctx.shadowOffsetX = shadowDx * scale;
-    bctx.shadowOffsetY = shadowDy * scale;
-
-    // Draw the source image
-    bctx.drawImage(srcBitmap, imgLeft, imgTop, drawW, drawH);
-
-    part._shadowBitmap = bmp;
-    part._shadowAnchorX = anchorX;
-    part._shadowAnchorY = anchorY;
-    part._shadowBitmapW = bboxW;
-    part._shadowBitmapH = bboxH;
-}
-
-/**
  * Face origin within the target canvas, in physical px. (0,0) for the normal
  * per-face-canvas path. The shared-canvas prototype (engine `?ablate=onecanvas`)
  * renders every face into one canvas at its grid-cell offset; the two blit
@@ -675,7 +248,7 @@ function _ppAdd(key: string, t0: number): void {
  * Estimated bytes (w×h×4) held by the renderer's module-level bitmap caches.
  * Feeds the engine's `[mem]` canvas-memory ledger.
  */
-export function rendererCacheMemoryBytes(): { wedgeCache: number; wheelCache: number; cutoutTemp: number } {
+export function rendererCacheMemoryBytes(): { wedgeCache: number; wheelCache: number; handCache: number; cutoutTemp: number } {
     let wedgeCache = 0;
     for (const wb of _wedgeBitmapCache.values()) {
         if (wb.canvas) wedgeCache += wb.canvas.width * wb.canvas.height * 4;
@@ -684,9 +257,17 @@ export function rendererCacheMemoryBytes(): { wedgeCache: number; wheelCache: nu
     for (const ga of _wheelGlyphAtlasCache.values()) {
         wheelCache += ga.atlas.width * ga.atlas.height * 4;
     }
-    // Tick Path2Ds are retained vector geometry — negligible, not counted.
+    let handCache = 0;
+    for (const hb of _handBitmapCache.values()) {
+        handCache += hb.body.canvas.width * hb.body.canvas.height * 4;
+        if (hb.shadow) handCache += hb.shadow.canvas.width * hb.shadow.canvas.height * 4;
+    }
+    for (const layer of _imageHandShadowCache.values()) {
+        handCache += layer.canvas.width * layer.canvas.height * 4;
+    }
+    // Tick/terminator Path2Ds are retained vector geometry — negligible, not counted.
     const cutoutTemp = _cutoutTempCanvas ? _cutoutTempCanvas.width * _cutoutTempCanvas.height * 4 : 0;
-    return { wedgeCache, wheelCache, cutoutTemp };
+    return { wedgeCache, wheelCache, handCache, cutoutTemp };
 }
 
 /**
@@ -1672,6 +1253,308 @@ function clearHandShadow(ctx: RenderContext): void {
     ctx.shadowOffsetY = 0;
 }
 
+// --- Vector-hand bitmap cache (appearance-keyed, split body/shadow) ---
+// Bakes each hand appearance into two bitmaps: the body, and (for z > 0) a
+// shadow-only silhouette. Per frame the shadow blits first, displaced by the
+// screen-space light offset BEFORE the hand rotation — so the silhouette
+// rotates with the hand while the light direction stays fixed, matching both
+// the live fallback's look and iOS's separate offset shadow quads. A per-part
+// memo skips the appearance-key evaluation unless env/dev/colors changed
+// (geometry attrs are treated as env-constant; ?ablate=nohandcache covers any
+// pathological face and reverts to fully live rendering for A/B). Bitmaps are
+// alpha-scanned to tight bounding boxes, so memory stays proportional to ink.
+interface HandLayer { canvas: OffscreenCanvas; anchorX: number; anchorY: number; w: number; h: number; }
+interface HandBitmaps { body: HandLayer; shadow: HandLayer | null; shadowOffX: number; shadowOffY: number; }
+interface HandMemo { env: Environment; dev: number; hb: HandBitmaps; }
+const _handBitmapCache = new Map<string, HandBitmaps>();
+const HAND_CACHE_CAP = 192;
+let _handCacheDisabled = false;
+export function setHandCacheDisabled(v: boolean): void { _handCacheDisabled = v; }
+
+/**
+ * Render `draw` into a probe canvas, alpha-scan for the inked bounding box,
+ * and return a tight-cropped layer with its rotation-pivot anchor (XML units).
+ * The build-time getImageData readback of an offscreen probe is safe — it is
+ * not the per-frame readback pattern that trips Chrome's throttle.
+ */
+function bakeCroppedLayer(
+    pw: number,
+    ph: number,
+    anchorPxX: number,
+    anchorPxY: number,
+    dev: number,
+    draw: (c: OffscreenCanvasRenderingContext2D) => void,
+): HandLayer {
+    const probeCnv = new OffscreenCanvas(pw, ph);
+    const pctx = probeCnv.getContext('2d')!;
+    draw(pctx);
+    const img = pctx.getImageData(0, 0, pw, ph).data;
+    let minX = pw, minY = ph, maxX = -1, maxY = -1;
+    for (let yy = 0; yy < ph; yy += 2) {
+        const row = yy * pw;
+        for (let xx = 0; xx < pw; xx += 2) {
+            if (img[(row + xx) * 4 + 3] !== 0) {
+                if (xx < minX) minX = xx;
+                if (xx > maxX) maxX = xx;
+                if (yy < minY) minY = yy;
+                if (yy > maxY) maxY = yy;
+            }
+        }
+    }
+    if (maxX < 0) { minX = 0; minY = 0; maxX = 1; maxY = 1; }
+    const PAD = 3;
+    minX = Math.max(0, minX - PAD);
+    minY = Math.max(0, minY - PAD);
+    maxX = Math.min(pw - 1, maxX + PAD);
+    maxY = Math.min(ph - 1, maxY + PAD);
+    const cw = maxX - minX + 1;
+    const ch = maxY - minY + 1;
+    const cnv = new OffscreenCanvas(cw, ch);
+    cnv.getContext('2d')!.drawImage(probeCnv, minX, minY, cw, ch, 0, 0, cw, ch);
+    return {
+        canvas: cnv,
+        anchorX: (anchorPxX - minX) / dev,
+        anchorY: (anchorPxY - minY) / dev,
+        w: cw / dev,
+        h: ch / dev,
+    };
+}
+
+function getHandBitmaps(
+    part: QHandPart,
+    env: Environment,
+    dev: number,
+    handType: string,
+    length: number,
+    width: number,
+    tail: number,
+): HandBitmaps {
+    const strokeColor = part.strokeColor ? evalColor(part.strokeColor, env) : 'rgba(0,0,0,1)';
+    const fillColor = part.fillColor ? evalColor(part.fillColor, env) : 'rgba(0,0,0,1)';
+    const lineWidth = evalAttr(part.lineWidth, env) || 0.5;
+    const colorsKey = `${strokeColor}|${fillColor}|` +
+        `${part.oStrokeColor ? evalColor(part.oStrokeColor, env) : ''}|` +
+        `${part.oFillColor ? evalColor(part.oFillColor, env) : ''}|` +
+        `${part.tStrokeColor ? evalColor(part.tStrokeColor, env) : ''}|` +
+        `${part.tFillColor ? evalColor(part.tFillColor, env) : ''}`;
+    const length2 = evalAttr(part.length2, env) || 0;
+    const oLength = evalAttr(part.oLength, env) || 0;
+    const oWidth = evalAttr(part.oWidth, env) || 0;
+    const oCenter = evalAttr(part.oCenter, env) || 0;
+    const oRadius = evalAttr(part.oRadius, env) || 0;
+    const z = evalAttr(part.z, env) || 0;
+    const thick = evalAttr(part.thick, env) || 3;
+    const key = `${dev.toFixed(2)}|${handType}|${length}|${width}|${tail}|${length2}|` +
+        `${evalAttr(part.oTail, env) || 0}|${oLength}|${oWidth}|${oCenter}|${oRadius}|` +
+        `${evalAttr(part.oLineWidth, env) || 0}|${evalAttr(part.tLineWidth, env) || 0}|` +
+        `${evalAttr(part.nRays, env) || 0}|${z}|${thick}|${lineWidth}|${colorsKey}`;
+    let hb = _handBitmapCache.get(key);
+    if (hb) return hb;
+    if (_handBitmapCache.size >= HAND_CACHE_CAP) _handBitmapCache.clear();
+
+    // Shadow parameters — mirror setupHandShadow. The offset is NOT baked into
+    // the bitmap; it is applied at blit time in the unrotated (screen) frame.
+    let sigma = 0, offX = 0, offY = 0, opacity = 0;
+    if (z > 0) {
+        sigma = (z + 2) / 2;
+        opacity = 40;
+        if (thick < 3.0) { sigma *= 1.25; opacity *= thick / 3.0; }
+        offX = z / 4.3;
+        offY = z / 2.15;
+    }
+    const blurPad = z > 0 ? sigma * 3 : 0;
+
+    // Generous probe box (XML units); tip toward -Y, tail toward +Y.
+    const upReach = length + oLength + lineWidth * 4 + blurPad + 4;
+    const downReach = Math.max(tail + oRadius, oCenter, 2) + lineWidth * 4 + blurPad + 4;
+    const halfW = Math.max(width, oWidth, oCenter, oRadius,
+        handType === 'sun' ? (length - length2) / 2 + 4 : 0, 3)
+        + lineWidth * 4 + blurPad + 4;
+
+    const pw = Math.max(2, Math.ceil(halfW * 2 * dev));
+    const ph = Math.max(2, Math.ceil((upReach + downReach) * dev));
+    const anchorPxX = halfW * dev;
+    const anchorPxY = upReach * dev;
+
+    const body = bakeCroppedLayer(pw, ph, anchorPxX, anchorPxY, dev, (c) => {
+        c.translate(anchorPxX, anchorPxY);
+        c.scale(dev, dev);
+        renderHandBody(c, part, env, handType, length, width, tail, strokeColor, fillColor, lineWidth);
+    });
+
+    let shadow: HandLayer | null = null;
+    if (z > 0) {
+        // Shadow-only bake: draw the body displaced far off-bitmap with an
+        // equal-and-opposite shadowOffset, so the body clips away and only the
+        // blur lands — same shadow rasterizer as the live path, so blur,
+        // opacity, and per-primitive stacking match it exactly.
+        const BIG_PX = pw + 256;
+        shadow = bakeCroppedLayer(pw, ph, anchorPxX, anchorPxY, dev, (c) => {
+            c.shadowColor = `rgba(0,0,0,${opacity / 100})`;
+            c.shadowBlur = sigma * dev;
+            c.shadowOffsetX = BIG_PX;
+            c.shadowOffsetY = 0;
+            c.translate(anchorPxX - BIG_PX, anchorPxY);
+            c.scale(dev, dev);
+            renderHandBody(c, part, env, handType, length, width, tail, strokeColor, fillColor, lineWidth);
+        });
+    }
+
+    hb = { body, shadow, shadowOffX: offX, shadowOffY: offY };
+    _handBitmapCache.set(key, hb);
+    return hb;
+}
+
+/**
+ * Draw a vector hand's body (shape + ornaments + tail circle + center dot) in
+ * hand-local rotated coordinates: pivot at the origin, tip toward -Y.
+ * Extracted from drawQHand so the hand-bitmap cache can bake the same body
+ * (plus shadow) once per appearance and blit it rotated per frame.
+ */
+function renderHandBody(
+    c: RenderContext,
+    part: QHandPart,
+    env: Environment,
+    handType: string,
+    length: number,
+    width: number,
+    tail: number,
+    strokeColor: string,
+    fillColor: string,
+    lineWidth: number,
+): void {
+    // Main hand body (rect stops short by oTail so ornament overlaps cleanly)
+    const oTail = evalAttr(part.oTail, env);
+    const length2 = evalAttr(part.length2, env);
+
+    if (handType === 'quad') {
+        // iOS ECQHandQuad: bezier curves + filled triangle tip
+        // Uses oWidth, oLength, oCenter (not width for the shape)
+        const oLength = evalAttr(part.oLength, env);
+        const oWidth = evalAttr(part.oWidth, env);
+        const oCenter2 = evalAttr(part.oCenter, env);
+
+        // Two quadratic bezier curves forming the bulging body
+        // iOS Y-up → Canvas Y-down: negate Y values
+        c.lineWidth = lineWidth;
+        c.strokeStyle = strokeColor;
+        c.fillStyle = fillColor;
+
+        // Left curve: from -oWidth/12 at oCenter up to -oWidth/4 at oLength
+        c.beginPath();
+        c.moveTo(-oWidth / 12, -oCenter2);
+        c.quadraticCurveTo(-oWidth * 0.45, -oLength / 2, -oWidth / 4, -oLength);
+        // Right curve: from oWidth/4 at oLength down to oWidth/12 at oCenter
+        c.moveTo(oWidth / 4, -oLength);
+        c.quadraticCurveTo(oWidth * 0.45, -oLength / 2, oWidth / 12, -oCenter2);
+        if (fillColor !== 'rgba(0,0,0,0)') c.fill();
+        if (strokeColor !== 'rgba(0,0,0,0)') c.stroke();
+
+        // Filled triangle tip from oLength to length
+        const oStrokeColor = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
+        c.fillStyle = oStrokeColor;
+        c.lineWidth = 0;
+        c.beginPath();
+        c.moveTo(oWidth / 4 + lineWidth / 2, -oLength);
+        c.lineTo(0, -length);
+        c.lineTo(-oWidth / 4 - lineWidth / 2, -oLength);
+        c.lineTo(-oWidth / 4 + lineWidth / 2, -oLength);
+        c.lineTo(0, -oLength * 1.2);
+        c.lineTo(oWidth / 4 - lineWidth / 2, -oLength);
+        c.closePath();
+        c.fill();
+
+        // Center dot
+        const oCenter3 = evalAttr(part.oCenter, env);
+        if (oCenter3 > 0) {
+            const osc = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
+            drawCenterDot(c, oCenter3, osc);
+        }
+    } else if (handType === 'sun') {
+        // iOS ECQHandSun: sun symbol with rays
+        // length2 = distance from axis to nearest visible sun point
+        // length = distance from axis to furthest visible sun point
+        // nRays = number of rays
+        const nRays = evalAttr(part.nRays, env) || 8;
+        const oCenter2 = evalAttr(part.oCenter, env);
+
+        c.lineWidth = lineWidth;
+        c.strokeStyle = strokeColor;
+        c.fillStyle = fillColor;
+
+        // iOS: rayRad = (length-length2)/2, raysRad = (length-length2)/3
+        // cen = length2 + raysRad (center of the sun disc in the hand's coord system)
+        let rayRad = (length - length2) / 2;
+        const raysRad = (length - length2) / 3;
+        const cen = length2 + raysRad;  // Positive in iOS (Y grows upward)
+        const sunCenter = oCenter2 > 0 ? oCenter2 : raysRad / 2;
+
+        // Draw rays: triangular teeth from the sun disc
+        c.beginPath();
+        for (let i = 0; i < nRays; i++) {
+            const theta = Math.PI / 2 + 2 * Math.PI * i / nRays;
+            
+            // iOS math (Y is upward, so larger Y is further outward)
+            const farX = rayRad * Math.cos(theta);
+            const farYIOS = cen + rayRad * Math.sin(theta);
+            const cwX = sunCenter * Math.cos(theta + Math.PI / nRays);
+            const cwYIOS = cen + sunCenter * Math.sin(theta + Math.PI / nRays);
+            const ccwX = sunCenter * Math.cos(theta - Math.PI / nRays);
+            const ccwYIOS = cen + sunCenter * Math.sin(theta - Math.PI / nRays);
+
+            // Canvas math: flip Y because Canvas negative Y is "outward"
+            c.moveTo(farX, -farYIOS);
+            c.lineTo(cwX, -cwYIOS);
+            c.lineTo(ccwX, -ccwYIOS);
+            c.lineTo(farX, -farYIOS);
+
+            rayRad = raysRad;  // first ray is longer, rest are shorter (matching iOS)
+        }
+        c.fill();
+        c.stroke();
+
+        // Draw central disc
+        c.fillStyle = fillColor;
+        c.strokeStyle = fillColor;
+        c.beginPath();
+        // Negative cen to place the arc center in the outward direction
+        c.arc(0, -cen, sunCenter, 0, 2 * Math.PI);
+        c.fill();
+        c.stroke();
+    } else {
+        drawHandShape(c, handType, length, width, tail, strokeColor, fillColor, lineWidth, oTail, length2);
+
+        // Ornament diamond (for non-quad hands)
+        const oLength = evalAttr(part.oLength, env);
+        if (oLength > 0) {
+            const oWidth = evalAttr(part.oWidth, env) || width;
+            const oLineWidth = evalAttr(part.oLineWidth, env) || lineWidth;
+            const oStrokeColor = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
+            const oFillColor = part.oFillColor ? evalColor(part.oFillColor, env) : fillColor;
+            drawHandOrnament(c, length, oLength, oWidth, oTail, oLineWidth, oStrokeColor, oFillColor);
+        }
+
+        // Tail circle
+        const oRadius = evalAttr(part.oRadius, env);
+        if (oRadius > 0) {
+            const tLW = evalAttr(part.tLineWidth, env) || evalAttr(part.oLineWidth, env) || lineWidth;
+            const tSC = part.tStrokeColor ? evalColor(part.tStrokeColor, env)
+                      : (part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor);
+            const tFC = part.tFillColor ? evalColor(part.tFillColor, env)
+                      : (part.oFillColor ? evalColor(part.oFillColor, env) : fillColor);
+            drawTailCircle(c, tail, oRadius, tLW, tSC, tFC);
+        }
+
+        // Center dot
+        const oCenter2 = evalAttr(part.oCenter, env);
+        if (oCenter2 > 0) {
+            const osc = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
+            drawCenterDot(c, oCenter2, osc);
+        }
+    }
+
+}
+
 function drawQHand(
     ctx: CanvasRenderingContext2D,
     part: QHandPart,
@@ -1730,32 +1613,46 @@ function drawQHand(
 
     if (length <= 0) return;
 
-    // --- Shadow bitmap fast path ---
-    // If we have a pre-rendered shadow bitmap, just blit it (no per-frame shadow computation)
-    if (part._shadowBitmap) {
+    // --- Appearance-cached bitmap path: shadow blit + body blit ---
+    if (!_handCacheDisabled) {
+        const m0 = ctx.getTransform();
+        const dev = Math.hypot(m0.a, m0.b) || 1;
+        // Hand appearance is fixed until an env rebuild or resize — the same
+        // contract the April-era prebuilt shadow bitmaps relied on ("hand
+        // appearance is fixed at init time"); no current face has dynamic
+        // hand colors. Steady state is therefore zero expression evals here:
+        // two reference compares, then blits. ?ablate=nohandcache covers any
+        // future dynamic-appearance face until that gets real support.
+        let memo = part._hbMemo as HandMemo | undefined;
+        if (!memo || memo.env !== env || memo.dev !== dev) {
+            memo = { env, dev, hb: getHandBitmaps(part, env, dev, handType, length, width, tail) };
+            part._hbMemo = memo;
+        }
+        const hb = memo.hb;
         ctx.save();
         ctx.translate(x, y);
-
-        // Apply xMotion/yMotion linear translation (calendar day-indicator wires)
         if (part._obsXMotion || part._obsYMotion) {
             const xm = part._obsXMotion?.currentValue ?? 0;
             const ym = part._obsYMotion?.currentValue ?? 0;
-            if (xm !== 0 || ym !== 0) {
-                ctx.translate(xm, -ym);
-            }
+            if (xm !== 0 || ym !== 0) ctx.translate(xm, -ym);
         }
-
+        if (hb.shadow) {
+            // Screen-fixed light: offset applied before the rotation (the face
+            // frame is unrotated), so the silhouette rotates with the hand but
+            // the light direction does not — matching the live path and iOS.
+            ctx.save();
+            ctx.translate(hb.shadowOffX, hb.shadowOffY);
+            ctx.rotate(angle);
+            ctx.drawImage(hb.shadow.canvas, -hb.shadow.anchorX, -hb.shadow.anchorY, hb.shadow.w, hb.shadow.h);
+            ctx.restore();
+        }
         ctx.rotate(angle);
-        ctx.drawImage(
-            part._shadowBitmap,
-            -part._shadowAnchorX!, -part._shadowAnchorY!,
-            part._shadowBitmapW!, part._shadowBitmapH!,
-        );
+        ctx.drawImage(hb.body.canvas, -hb.body.anchorX, -hb.body.anchorY, hb.body.w, hb.body.h);
         ctx.restore();
         return;
     }
 
-    // --- Fallback: live shadow rendering (for parts without cached bitmap) ---
+    // --- Fallback: live rendering with screen-fixed canvas shadow (?ablate=nohandcache) ---
     const strokeColor = part.strokeColor ? evalColor(part.strokeColor, env) : 'rgba(0,0,0,1)';
     const fillColor = part.fillColor ? evalColor(part.fillColor, env) : 'rgba(0,0,0,1)';
     const lineWidth = evalAttr(part.lineWidth, env) || 0.5;
@@ -1775,136 +1672,7 @@ function drawQHand(
 
     ctx.rotate(angle);
 
-    // Main hand body (rect stops short by oTail so ornament overlaps cleanly)
-    const oTail = evalAttr(part.oTail, env);
-    const length2 = evalAttr(part.length2, env);
-
-    if (handType === 'quad') {
-        // iOS ECQHandQuad: bezier curves + filled triangle tip
-        // Uses oWidth, oLength, oCenter (not width for the shape)
-        const oLength = evalAttr(part.oLength, env);
-        const oWidth = evalAttr(part.oWidth, env);
-        const oCenter2 = evalAttr(part.oCenter, env);
-
-        // Two quadratic bezier curves forming the bulging body
-        // iOS Y-up → Canvas Y-down: negate Y values
-        ctx.lineWidth = lineWidth;
-        ctx.strokeStyle = strokeColor;
-        ctx.fillStyle = fillColor;
-
-        // Left curve: from -oWidth/12 at oCenter up to -oWidth/4 at oLength
-        ctx.beginPath();
-        ctx.moveTo(-oWidth / 12, -oCenter2);
-        ctx.quadraticCurveTo(-oWidth * 0.45, -oLength / 2, -oWidth / 4, -oLength);
-        // Right curve: from oWidth/4 at oLength down to oWidth/12 at oCenter
-        ctx.moveTo(oWidth / 4, -oLength);
-        ctx.quadraticCurveTo(oWidth * 0.45, -oLength / 2, oWidth / 12, -oCenter2);
-        if (fillColor !== 'rgba(0,0,0,0)') ctx.fill();
-        if (strokeColor !== 'rgba(0,0,0,0)') ctx.stroke();
-
-        // Filled triangle tip from oLength to length
-        const oStrokeColor = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
-        ctx.fillStyle = oStrokeColor;
-        ctx.lineWidth = 0;
-        ctx.beginPath();
-        ctx.moveTo(oWidth / 4 + lineWidth / 2, -oLength);
-        ctx.lineTo(0, -length);
-        ctx.lineTo(-oWidth / 4 - lineWidth / 2, -oLength);
-        ctx.lineTo(-oWidth / 4 + lineWidth / 2, -oLength);
-        ctx.lineTo(0, -oLength * 1.2);
-        ctx.lineTo(oWidth / 4 - lineWidth / 2, -oLength);
-        ctx.closePath();
-        ctx.fill();
-
-        // Center dot
-        const oCenter3 = evalAttr(part.oCenter, env);
-        if (oCenter3 > 0) {
-            const osc = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
-            drawCenterDot(ctx, oCenter3, osc);
-        }
-    } else if (handType === 'sun') {
-        // iOS ECQHandSun: sun symbol with rays
-        // length2 = distance from axis to nearest visible sun point
-        // length = distance from axis to furthest visible sun point
-        // nRays = number of rays
-        const nRays = evalAttr(part.nRays, env) || 8;
-        const oCenter2 = evalAttr(part.oCenter, env);
-
-        ctx.lineWidth = lineWidth;
-        ctx.strokeStyle = strokeColor;
-        ctx.fillStyle = fillColor;
-
-        // iOS: rayRad = (length-length2)/2, raysRad = (length-length2)/3
-        // cen = length2 + raysRad (center of the sun disc in the hand's coord system)
-        let rayRad = (length - length2) / 2;
-        const raysRad = (length - length2) / 3;
-        const cen = length2 + raysRad;  // Positive in iOS (Y grows upward)
-        const sunCenter = oCenter2 > 0 ? oCenter2 : raysRad / 2;
-
-        // Draw rays: triangular teeth from the sun disc
-        ctx.beginPath();
-        for (let i = 0; i < nRays; i++) {
-            const theta = Math.PI / 2 + 2 * Math.PI * i / nRays;
-            
-            // iOS math (Y is upward, so larger Y is further outward)
-            const farX = rayRad * Math.cos(theta);
-            const farYIOS = cen + rayRad * Math.sin(theta);
-            const cwX = sunCenter * Math.cos(theta + Math.PI / nRays);
-            const cwYIOS = cen + sunCenter * Math.sin(theta + Math.PI / nRays);
-            const ccwX = sunCenter * Math.cos(theta - Math.PI / nRays);
-            const ccwYIOS = cen + sunCenter * Math.sin(theta - Math.PI / nRays);
-
-            // Canvas math: flip Y because Canvas negative Y is "outward"
-            ctx.moveTo(farX, -farYIOS);
-            ctx.lineTo(cwX, -cwYIOS);
-            ctx.lineTo(ccwX, -ccwYIOS);
-            ctx.lineTo(farX, -farYIOS);
-
-            rayRad = raysRad;  // first ray is longer, rest are shorter (matching iOS)
-        }
-        ctx.fill();
-        ctx.stroke();
-
-        // Draw central disc
-        ctx.fillStyle = fillColor;
-        ctx.strokeStyle = fillColor;
-        ctx.beginPath();
-        // Negative cen to place the arc center in the outward direction
-        ctx.arc(0, -cen, sunCenter, 0, 2 * Math.PI);
-        ctx.fill();
-        ctx.stroke();
-    } else {
-        drawHandShape(ctx, handType, length, width, tail, strokeColor, fillColor, lineWidth, oTail, length2);
-
-        // Ornament diamond (for non-quad hands)
-        const oLength = evalAttr(part.oLength, env);
-        if (oLength > 0) {
-            const oWidth = evalAttr(part.oWidth, env) || width;
-            const oLineWidth = evalAttr(part.oLineWidth, env) || lineWidth;
-            const oStrokeColor = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
-            const oFillColor = part.oFillColor ? evalColor(part.oFillColor, env) : fillColor;
-            drawHandOrnament(ctx, length, oLength, oWidth, oTail, oLineWidth, oStrokeColor, oFillColor);
-        }
-
-        // Tail circle
-        const oRadius = evalAttr(part.oRadius, env);
-        if (oRadius > 0) {
-            const tLW = evalAttr(part.tLineWidth, env) || evalAttr(part.oLineWidth, env) || lineWidth;
-            const tSC = part.tStrokeColor ? evalColor(part.tStrokeColor, env)
-                      : (part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor);
-            const tFC = part.tFillColor ? evalColor(part.tFillColor, env)
-                      : (part.oFillColor ? evalColor(part.oFillColor, env) : fillColor);
-            drawTailCircle(ctx, tail, oRadius, tLW, tSC, tFC);
-        }
-
-        // Center dot
-        const oCenter2 = evalAttr(part.oCenter, env);
-        if (oCenter2 > 0) {
-            const osc = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
-            drawCenterDot(ctx, oCenter2, osc);
-        }
-    }
-
+    renderHandBody(ctx, part, env, handType, length, width, tail, strokeColor, fillColor, lineWidth);
     ctx.restore();
 }
 
@@ -2863,63 +2631,100 @@ function drawImageHand(
     const drawW = bitmap.width * imgScale;
     const drawH = bitmap.height * imgScale;
 
-    // --- Shadow bitmap fast path ---
-    if (part._shadowBitmap && offsetRadius <= 0) {
-        ctx.save();
-        ctx.translate(x, y);
-        if (angle) ctx.rotate(angle);
-        ctx.drawImage(
-            part._shadowBitmap,
-            -part._shadowAnchorX!, -part._shadowAnchorY!,
-            part._shadowBitmapW!, part._shadowBitmapH!,
-        );
-        ctx.restore();
-        return;
-    }
+    // Image placement in the hand-local (post-rotation) frame. One formula
+    // covers all three placement modes (the defaults reduce the centered case
+    // to (-drawW/2, -drawH/2)). iOS CG has Y-up (anchor from bottom), Canvas
+    // has Y-down: negate and subtract drawH.
+    const xAnchor = part.xAnchor ? evalAttr(part.xAnchor, env) : drawW / 2;
+    const yAnchor = part.yAnchor ? -evalAttr(part.yAnchor, env) : -drawH / 2;
+    const rectX = -xAnchor;
+    const rectY = -yAnchor - drawH;
+
+    // Transform chain from the (translated) pivot to the image's local frame.
+    // For offsetRadius > 0 (iOS ECGLPart.m): position on the orbit circle at
+    // (offsetRadius, offsetAngle), then rotate by `angle` around the anchor —
+    // an off-center anchor (e.g. the Moon's) creates the orbital displacement.
+    const applyChain = () => {
+        if (offsetRadius > 0) {
+            ctx.rotate(offsetAngle);
+            ctx.translate(0, -offsetRadius);
+            ctx.rotate(angle);
+        } else if (angle) {
+            ctx.rotate(angle);
+        }
+    };
+
+    const z = evalAttr(part.z, env) || 0;
 
     ctx.save();
     if (alpha < 1) ctx.globalAlpha = alpha;
-    setupHandShadow(ctx, part, env, /* isImageHand */ true);
-    ctx.translate(x, y);
 
-    if (offsetRadius > 0) {
-        // iOS ECGLPart.m behavior:
-        // 1. Position is at (offsetRadius, offsetAngle) — polar coordinates
-        // 2. The image is rotated by (offsetAngle + angle) around its anchor point
-        //    For most hands, anchor is at image center so rotation is purely visual.
-        //    For the Moon (yAnchor=23 vs 10), the off-center anchor creates an
-        //    orbital displacement when rotated, making it orbit around Earth.
-        const xAnchor = part.xAnchor ? evalAttr(part.xAnchor, env) : drawW / 2;
-        // iOS CG has Y-up (anchor from bottom), Canvas has Y-down.
-        // Match the non-offset branch convention: negate and subtract drawH.
-        const yAnchor = part.yAnchor ? -evalAttr(part.yAnchor, env) : -drawH / 2;
-
-        // Translate to the offset position on the orbit circle
-        ctx.rotate(offsetAngle);
-        ctx.translate(0, -offsetRadius);
-
-        // Rotate the image around its anchor point.
-        // The coordinate system is already rotated by offsetAngle from above,
-        // so apply only `angle` here to get the iOS total of (offsetAngle + angle).
-        ctx.rotate(angle);
-        ctx.drawImage(bitmap, -xAnchor, -yAnchor - drawH, drawW, drawH);
-    } else if (part.xAnchor || part.yAnchor) {
-        // Standard anchored image hand (rotating around pivot)
-        if (angle) {
-            ctx.rotate(angle);
-        }
-        const xAnchor = part.xAnchor ? evalAttr(part.xAnchor, env) : drawW / 2;
-        const yAnchor = part.yAnchor ? -evalAttr(part.yAnchor, env) : -drawH / 2;  // Negate Y
-        ctx.drawImage(bitmap, -xAnchor, -yAnchor - drawH, drawW, drawH);
+    if (z > 0 && !_handCacheDisabled) {
+        // Split shadow: cached silhouette blitted with the screen-space light
+        // offset applied before any rotation (fixed light, like vector hands),
+        // then the source image itself — which needs no body bake.
+        const m0 = ctx.getTransform();
+        const dev = Math.hypot(m0.a, m0.b) || 1;
+        const sh = getImageHandShadowLayer(part.src, bitmap, dev, drawW, drawH, rectX, rectY, z);
+        ctx.save();
+        ctx.translate(x + z / 4.3, y + z / 2.15);
+        applyChain();
+        ctx.drawImage(sh.canvas, -sh.anchorX, -sh.anchorY, sh.w, sh.h);
+        ctx.restore();
+        ctx.translate(x, y);
+        applyChain();
+        ctx.drawImage(bitmap, rectX, rectY, drawW, drawH);
     } else {
-        // Simple centered image (no anchor, no offset)
-        if (angle) {
-            ctx.rotate(angle);
-        }
-        ctx.drawImage(bitmap, -drawW / 2, -drawH / 2, drawW, drawH);
+        // Kill-switch (?ablate=nohandcache) / shadowless path: live rendering.
+        if (z > 0) setupHandShadow(ctx, part, env, /* isImageHand */ true);
+        ctx.translate(x, y);
+        applyChain();
+        ctx.drawImage(bitmap, rectX, rectY, drawW, drawH);
     }
 
     ctx.restore();
+}
+
+/**
+ * Cached shadow-only silhouette for an image hand: the source image's alpha,
+ * blurred with the live path's shadow parameters (no thin-hand adjustment for
+ * image hands), anchored at the hand pivot. Offset is applied at blit time.
+ */
+const _imageHandShadowCache = new Map<string, HandLayer>();
+function getImageHandShadowLayer(
+    src: string,
+    bitmap: ImageBitmap,
+    dev: number,
+    drawW: number,
+    drawH: number,
+    rectX: number,
+    rectY: number,
+    z: number,
+): HandLayer {
+    const key = `${src}|${dev.toFixed(2)}|${drawW}|${drawH}|${rectX}|${rectY}|${z}`;
+    let layer = _imageHandShadowCache.get(key);
+    if (layer) return layer;
+    if (_imageHandShadowCache.size >= HAND_CACHE_CAP) _imageHandShadowCache.clear();
+
+    const sigma = (z + 2) / 2;
+    const opacity = 40;
+    const blurPad = sigma * 3 + 2;
+    const pw = Math.max(2, Math.ceil((drawW + 2 * blurPad) * dev));
+    const ph = Math.max(2, Math.ceil((drawH + 2 * blurPad) * dev));
+    const anchorPxX = (blurPad - rectX) * dev;
+    const anchorPxY = (blurPad - rectY) * dev;
+    const BIG_PX = pw + 256;
+    layer = bakeCroppedLayer(pw, ph, anchorPxX, anchorPxY, dev, (c) => {
+        c.shadowColor = `rgba(0,0,0,${opacity / 100})`;
+        c.shadowBlur = sigma * dev;
+        c.shadowOffsetX = BIG_PX;
+        c.shadowOffsetY = 0;
+        c.translate(anchorPxX - BIG_PX, anchorPxY);
+        c.scale(dev, dev);
+        c.drawImage(bitmap, rectX, rectY, drawW, drawH);
+    });
+    _imageHandShadowCache.set(key, layer);
+    return layer;
 }
 
 // ============================================================================

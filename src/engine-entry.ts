@@ -24,12 +24,16 @@ declare global {
     }
 }
 
+// Build version injected by build.sh (esbuild --define). Undefined in scratch
+// builds; always access via the typeof-guarded _buildStamp().
+declare const __BUILD_VERSION__: string | undefined;
+
 import { parseWatchXML } from './watch/xml-parser.js';
 import { createWatchEnvironment, computeTzDeltaMs, GAIA_SUBDIAL_DEFAULTS } from './watch/watch-env.js';
 import type { TerraSlot } from './watch/watch-env.js';
 import { TERRA_RING_DEFAULTS } from './watch/watch-env.js';
 import { validSlotsForTz, formatSlotOffset, getStandardOffsetMinutes, olsonIdToCityName } from './watch/terra-slots.js';
-import { buildStaticBlockCaches, renderFrame, buildHandShadowCaches, BEZEL_THICKNESS_XML, setPartProfiling, resetPartProfile, getPartProfile, setWheelCacheDisabled, rendererCacheMemoryBytes } from './watch/renderer.js';
+import { buildStaticBlockCaches, renderFrame, BEZEL_THICKNESS_XML, setPartProfiling, resetPartProfile, getPartProfile, setWheelCacheDisabled, setHandCacheDisabled, rendererCacheMemoryBytes } from './watch/renderer.js';
 import type { LoadedImage } from './watch/image-loader.js';
 import { SCHEDULER_LOOKAHEAD_MS } from './shared/animation.js';
 import { Updater, makeOverridableGetNow, timingContextForFrame, tickProfile, resetTickProfile, setTickProfiling, type WithDisplayTime } from './shared/updater.js';
@@ -115,13 +119,14 @@ const _ablate = new Set(
         ? (new URLSearchParams(location.search).get('ablate') ?? '')
         : '').split(',').filter(Boolean));
 for (const f of _ablate) {
-    if (!['render', 'staggerrender', 'staggertick', 'dpr1', 'onecanvas', 'nobezel', 'facebuffers', 'nowheelcache'].includes(f)) {
+    if (!['render', 'staggerrender', 'staggertick', 'dpr1', 'onecanvas', 'nobezel', 'facebuffers', 'nowheelcache', 'nohandcache'].includes(f)) {
         console.warn(`[scrub-perf] Unknown ?ablate flag "${f}" — ignored.`);
     }
 }
-// nowheelcache: A/B kill-switch for the wheel bitmap cache (a production
-// optimization that is ON by default — see renderer.ts drawWheel).
+// nowheelcache / nohandcache: A/B kill-switches for the wheel glyph-atlas and
+// vector-hand bitmap caches (production optimizations, ON by default).
 if (_ablate.has('nowheelcache')) setWheelCacheDisabled(true);
+if (_ablate.has('nohandcache')) setHandCacheDisabled(true);
 const _ablateRender = _ablate.has('render');
 const _ablateStaggerRender = _ablate.has('staggerrender');
 const _ablateStaggerTick = _ablate.has('staggertick');
@@ -958,7 +963,9 @@ async function main() {
             updateLeafAngles(face.terminatorLeaves, face.env);
         }
         buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-        buildHandShadowCaches(watch, env, scale, images);
+        // (Hand shadows are no longer pre-built here: all hands — vector and
+        // image — use the renderer's runtime appearance caches, which bake
+        // split body/shadow layers on first draw.)
         face.cachesBuilt = true;
         // Expand analemma parts
         face.analemmaState = null;
@@ -1194,15 +1201,25 @@ async function main() {
         const sharedB = sz(_sharedCanvas);
         const rc = rendererCacheMemoryBytes();
         const total = facesB + staticB + shadowB + imagesB + analemmaB + buffersB + terraB
-            + sharedB + rc.wedgeCache + rc.wheelCache + rc.cutoutTemp;
+            + sharedB + rc.wedgeCache + rc.wheelCache + rc.handCache + rc.cutoutTemp;
         const mem = (performance as any).memory;
         const jsHeap = mem
             ? ` · JS heap (Chrome-only): ${MB(mem.usedJSHeapSize)}/${MB(mem.totalJSHeapSize)}MB`
             : '';
         return `canvas/bitmap est TOTAL ${MB(total)}MB: faces ${MB(facesB)} · static caches ${MB(staticB)} · ` +
             `images ${MB(imagesB)} · shadows ${MB(shadowB)} · wedge cache ${MB(rc.wedgeCache)} · ` +
-            `wheel cache ${MB(rc.wheelCache)} · analemma ${MB(analemmaB)} · terra ring ${MB(terraB)} · ` +
-            `cutout temp ${MB(rc.cutoutTemp)} · face buffers ${MB(buffersB)} · shared canvas ${MB(sharedB)}${jsHeap}`;
+            `wheel cache ${MB(rc.wheelCache)} · hand cache ${MB(rc.handCache)} · analemma ${MB(analemmaB)} · ` +
+            `terra ring ${MB(terraB)} · cutout temp ${MB(rc.cutoutTemp)} · face buffers ${MB(buffersB)} · ` +
+            `shared canvas ${MB(sharedB)}${jsHeap}`;
+    }
+
+    function _buildStamp(): string {
+        // Injected by build.sh via esbuild --define; scratch/esbuild-only builds
+        // (no define) report 'dev'. Present in every pasted [scrub-perf] block so
+        // a stale cached bundle is detectable from the log alone (a Safari run on
+        // 2026-07-05 silently measured the previous build; see the timings-8
+        // post-mortem in the investigation doc).
+        return typeof __BUILD_VERSION__ === 'string' ? __BUILD_VERSION__ : 'dev';
     }
 
     function _browserShort(): string {
@@ -1450,7 +1467,7 @@ async function main() {
                         _facesLimit !== Infinity ? `faces=${_facesLimit}` : '',
                         _probeEnabled ? 'probe' : '',
                     ].filter(Boolean).join(',') || 'none';
-                    return `  - Environment: ${_browserShort()} · dpr ${window.devicePixelRatio} (backing ${effectiveDpr()}) · ` +
+                    return `  - Environment: build ${_buildStamp()} · ${_browserShort()} · dpr ${window.devicePixelRatio} (backing ${effectiveDpr()}) · ` +
                         `${built.length} canvases @ ${built[0]?.sizePx ?? 0}px CSS / ${built[0]?.canvas.width ?? 0}px phys · ` +
                         `window ${window.innerWidth}×${window.innerHeight} · display quantum ${quantum}` +
                         (_sharedCanvas ? ` · shared canvas ${_sharedCanvas.width}×${_sharedCanvas.height}px phys` : '') +
@@ -1684,7 +1701,7 @@ async function main() {
         // One-shot memory ledger once every face's caches exist (initial footprint).
         if (!_memReported && faces.every(f => !f.enabled || f.cachesBuilt)) {
             _memReported = true;
-            console.log('[mem] ' + canvasMemoryReport());
+            console.log(`[mem] build ${_buildStamp()} · ` + canvasMemoryReport());
         }
 
         // Decide whether to keep the RAF loop running

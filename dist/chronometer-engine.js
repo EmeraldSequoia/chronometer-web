@@ -12713,11 +12713,9 @@ return {${names2.join(",")}};`;
     const y = ycenter + ysign * Math.sin(th) * radius;
     return [x, y];
   }
-  function drawTerminatorLeaf(ctx, leaf) {
+  function buildTerminatorLeafPath(leaf) {
     const { quadrant, indexWithinQuadrant, leavesPerQuadrant, radius } = leaf;
-    ctx.fillStyle = leaf.leafFillColor;
-    ctx.strokeStyle = leaf.leafBorderColor;
-    ctx.lineWidth = 0.5;
+    const path = new Path2D();
     let xsign;
     let ysign;
     const xcenter = 0;
@@ -12753,12 +12751,11 @@ return {${names2.join(",")}};`;
     const paOuter = fmod3(phaseAngleForOuterEdge(false, quadrant, indexWithinQuadrant, leavesPerQuadrant), 2 * Math.PI);
     const n = 30;
     const overlap = leaf.incremental ? 1 : 0;
-    ctx.beginPath();
-    ctx.moveTo(xcenter, ycenter + ysign * radius);
+    path.moveTo(xcenter, ycenter + ysign * radius);
     let x, y;
     for (let i = n - 1; i >= -overlap; i--) {
       [x, y] = terminatorArcPoint(i, n, xsign, ysign, xcenter, ycenter, radius, paInner);
-      ctx.lineTo(x, y);
+      path.lineTo(x, y);
     }
     let [nextX, nextY] = terminatorArcPoint(-overlap, n, xsign, ysign, xcenter, ycenter, radius, paOuter);
     const midX = (x + nextX) / 2;
@@ -12768,14 +12765,13 @@ return {${names2.join(",")}};`;
     const endRadius = Math.sqrt(deltaX * deltaX + deltaY * deltaY) / 2;
     const startAngle = Math.atan2(y - midY, x - midX);
     const endAngle = Math.atan2(nextY - midY, nextX - midX);
-    ctx.arc(midX, midY, endRadius, startAngle, endAngle, clockwiseEndArc);
+    path.arc(midX, midY, endRadius, startAngle, endAngle, clockwiseEndArc);
     for (let i = -overlap; i <= n; i++) {
       [x, y] = terminatorArcPoint(i, n, xsign, ysign, xcenter, ycenter, radius, paOuter);
-      ctx.lineTo(x, y);
+      path.lineTo(x, y);
     }
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
+    path.closePath();
+    return path;
   }
   function drawTerminator(ctx, leaves, scale = 1) {
     if (leaves.length === 0) return;
@@ -12791,7 +12787,12 @@ return {${names2.join(",")}};`;
       const angleValue = offsetAngle + leafAngle;
       ctx.rotate(angleValue);
       ctx.scale(scale, -scale);
-      drawTerminatorLeaf(ctx, leaf);
+      if (!leaf._cachedPath) leaf._cachedPath = buildTerminatorLeafPath(leaf);
+      ctx.fillStyle = leaf.leafFillColor;
+      ctx.strokeStyle = leaf.leafBorderColor;
+      ctx.lineWidth = 0.5;
+      ctx.fill(leaf._cachedPath);
+      ctx.stroke(leaf._cachedPath);
       ctx.restore();
     }
   }
@@ -15720,283 +15721,6 @@ return {${names2.join(",")}};`;
       }
     }
   }
-  function buildHandShadowCaches(watch, env, scale, images) {
-    function processPartList(parts) {
-      for (const part of parts) {
-        if (part.type === "QHand") {
-          buildSingleHandShadow(part, env, scale, images);
-        } else if (part.type === "Static") {
-          processPartList(part.children);
-        }
-      }
-    }
-    processPartList(watch.parts);
-  }
-  function buildSingleHandShadow(part, env, scale, images) {
-    const z = evalAttr(part.z, env);
-    if (!z || z === 0) {
-      part._shadowBitmap = void 0;
-      return;
-    }
-    const handType = part.handType || "tri";
-    if (handType === "spoke") return;
-    if (part.src && images) {
-      buildImageHandShadow(part, env, scale, images);
-      return;
-    }
-    const length = evalAttr(part.length, env);
-    if (length <= 0) return;
-    const width = evalAttr(part.width, env);
-    const tail = evalAttr(part.tail, env);
-    const lineWidth = evalAttr(part.lineWidth, env) || 0.5;
-    const oLength = evalAttr(part.oLength, env);
-    const oWidth = evalAttr(part.oWidth, env) || width;
-    const oRadius = evalAttr(part.oRadius, env);
-    const oCenter = evalAttr(part.oCenter, env);
-    const oTail = evalAttr(part.oTail, env);
-    const length2 = evalAttr(part.length2, env);
-    const thick = evalAttr(part.thick, env) || 3;
-    let sigma = (z + 2) / 2;
-    let percentOpacity = 40;
-    if (thick < 3) {
-      sigma *= 1.25;
-      percentOpacity *= thick / 3;
-    }
-    const shadowPad = sigma * 3;
-    const shadowDx = z / 4.3;
-    const shadowDy = z / 2.15;
-    let halfW;
-    let tipExtent;
-    let tailExtent;
-    if (handType === "sun") {
-      const rayRad = (length - length2) / 2;
-      const raysRad = (length - length2) / 3;
-      const cen = length2 + rayRad;
-      const sunCenter = oCenter > 0 ? oCenter : raysRad / 2;
-      halfW = Math.max(rayRad, sunCenter) + lineWidth;
-      tipExtent = cen + rayRad + lineWidth;
-      tailExtent = lineWidth;
-    } else if (handType === "breguet") {
-      const widthScaler = width / (length * 0.16);
-      const lengthScaler = (length - 81) / 10;
-      const breOuterRadius = length * 0.075 * widthScaler;
-      const centerRadius = length * 0.08 * widthScaler;
-      const tipWidth = length * 0.045 * widthScaler;
-      halfW = Math.max(breOuterRadius, centerRadius, tipWidth / 2, width / 2) + lineWidth;
-      tipExtent = length + oLength + lineWidth;
-      tailExtent = Math.max(tail, 0) + lineWidth;
-    } else {
-      halfW = Math.max(width / 2, oWidth / 2) + lineWidth;
-      tipExtent = length + (oLength > 0 ? oLength + lineWidth * 3 : 0) + lineWidth;
-      tailExtent = Math.max(tail, 0) + lineWidth;
-    }
-    halfW = Math.max(halfW, oCenter || 0, oRadius || 0);
-    if (oRadius > 0) {
-      tailExtent = Math.max(tailExtent, Math.max(tail, 0) + 2 * oRadius + lineWidth);
-    }
-    const xMin = -halfW - shadowPad;
-    const xMax = halfW + shadowPad + shadowDx;
-    const yMin = -tipExtent - shadowPad;
-    const yMax = tailExtent + shadowPad + shadowDy;
-    const bboxW = xMax - xMin;
-    const bboxH = yMax - yMin;
-    const anchorX = -xMin;
-    const anchorY = -yMin;
-    const pxW = Math.ceil(bboxW * scale) + 2;
-    const pxH = Math.ceil(bboxH * scale) + 2;
-    if (pxW <= 0 || pxH <= 0) return;
-    const bitmap = new OffscreenCanvas(pxW, pxH);
-    const bctx = bitmap.getContext("2d");
-    bctx.translate(anchorX * scale + 1, anchorY * scale + 1);
-    bctx.scale(scale, scale);
-    bctx.shadowColor = `rgba(0,0,0,${percentOpacity / 100})`;
-    bctx.shadowBlur = sigma * scale;
-    bctx.shadowOffsetX = shadowDx * scale;
-    bctx.shadowOffsetY = shadowDy * scale;
-    const strokeColor = part.strokeColor ? evalColor(part.strokeColor, env) : "rgba(0,0,0,1)";
-    const fillColor = part.fillColor ? evalColor(part.fillColor, env) : "rgba(0,0,0,1)";
-    if (handType === "quad") {
-      drawQuadHandBody(bctx, part, env, length, strokeColor, fillColor, lineWidth);
-    } else if (handType === "sun") {
-      drawSunHandBody(bctx, part, env, length, length2, oCenter, strokeColor, fillColor, lineWidth);
-    } else if (handType === "breguet") {
-      drawBreguetHandBody(bctx, length, width, tail, oLength, strokeColor, fillColor, lineWidth);
-    } else {
-      drawHandShape(bctx, handType, length, width, tail, strokeColor, fillColor, lineWidth, oTail, length2);
-    }
-    if (handType !== "quad" && handType !== "sun" && handType !== "breguet" && oLength > 0) {
-      const oLineWidth = evalAttr(part.oLineWidth, env) || lineWidth;
-      const oStrokeColor = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
-      const oFillColor = part.oFillColor ? evalColor(part.oFillColor, env) : fillColor;
-      drawHandOrnament(bctx, length, oLength, oWidth, oTail, oLineWidth, oStrokeColor, oFillColor);
-    }
-    if (oRadius > 0) {
-      const tLW = evalAttr(part.tLineWidth, env) || evalAttr(part.oLineWidth, env) || lineWidth;
-      const tSC = part.tStrokeColor ? evalColor(part.tStrokeColor, env) : part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
-      const tFC = part.tFillColor ? evalColor(part.tFillColor, env) : part.oFillColor ? evalColor(part.oFillColor, env) : fillColor;
-      drawTailCircle(bctx, tail, oRadius, tLW, tSC, tFC);
-    }
-    if (oCenter > 0 && handType !== "sun") {
-      const osc = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
-      drawCenterDot(bctx, oCenter, osc);
-    }
-    part._shadowBitmap = bitmap;
-    part._shadowAnchorX = anchorX;
-    part._shadowAnchorY = anchorY;
-    part._shadowBitmapW = bboxW;
-    part._shadowBitmapH = bboxH;
-  }
-  function drawQuadHandBody(ctx, part, env, length, strokeColor, fillColor, lineWidth) {
-    const oLength = evalAttr(part.oLength, env);
-    const oWidth = evalAttr(part.oWidth, env);
-    const oCenter2 = evalAttr(part.oCenter, env);
-    ctx.lineWidth = lineWidth;
-    ctx.strokeStyle = strokeColor;
-    ctx.fillStyle = fillColor;
-    ctx.beginPath();
-    ctx.moveTo(-oWidth / 12, -oCenter2);
-    ctx.quadraticCurveTo(-oWidth * 0.45, -oLength / 2, -oWidth / 4, -oLength);
-    ctx.moveTo(oWidth / 4, -oLength);
-    ctx.quadraticCurveTo(oWidth * 0.45, -oLength / 2, oWidth / 12, -oCenter2);
-    if (fillColor !== "rgba(0,0,0,0)") ctx.fill();
-    if (strokeColor !== "rgba(0,0,0,0)") ctx.stroke();
-    const oStrokeColor = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
-    ctx.fillStyle = oStrokeColor;
-    ctx.lineWidth = 0;
-    ctx.beginPath();
-    ctx.moveTo(oWidth / 4 + lineWidth / 2, -oLength);
-    ctx.lineTo(0, -length);
-    ctx.lineTo(-oWidth / 4 - lineWidth / 2, -oLength);
-    ctx.lineTo(-oWidth / 4 + lineWidth / 2, -oLength);
-    ctx.lineTo(0, -oLength * 1.2);
-    ctx.lineTo(oWidth / 4 - lineWidth / 2, -oLength);
-    ctx.closePath();
-    ctx.fill();
-    if (oCenter2 > 0) {
-      const osc = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
-      drawCenterDot(ctx, oCenter2, osc);
-    }
-  }
-  function drawSunHandBody(ctx, part, env, length, length2, oCenter, strokeColor, fillColor, lineWidth) {
-    const nRays = evalAttr(part.nRays, env) || 8;
-    let rayRad = (length - length2) / 2;
-    const raysRad = (length - length2) / 3;
-    const cen = length2 + rayRad;
-    const sunCenter = oCenter > 0 ? oCenter : raysRad / 2;
-    ctx.lineWidth = lineWidth;
-    ctx.strokeStyle = strokeColor;
-    ctx.fillStyle = fillColor;
-    ctx.beginPath();
-    for (let i = 0; i < nRays; i++) {
-      const theta = Math.PI / 2 + 2 * Math.PI * i / nRays;
-      const farX = rayRad * Math.cos(theta);
-      const farYIOS = cen + rayRad * Math.sin(theta);
-      const cwX = sunCenter * Math.cos(theta + Math.PI / nRays);
-      const cwYIOS = cen + sunCenter * Math.sin(theta + Math.PI / nRays);
-      const ccwX = sunCenter * Math.cos(theta - Math.PI / nRays);
-      const ccwYIOS = cen + sunCenter * Math.sin(theta - Math.PI / nRays);
-      ctx.moveTo(farX, -farYIOS);
-      ctx.lineTo(cwX, -cwYIOS);
-      ctx.lineTo(ccwX, -ccwYIOS);
-      ctx.lineTo(farX, -farYIOS);
-      rayRad = raysRad;
-    }
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = fillColor;
-    ctx.strokeStyle = fillColor;
-    ctx.beginPath();
-    ctx.arc(0, -cen, sunCenter, 0, 2 * Math.PI);
-    ctx.fill();
-    ctx.stroke();
-  }
-  function drawBreguetHandBody(ctx, length, width, tail, oLength, strokeColor, fillColor, lineWidth) {
-    const widthScaler = width / (length * 0.16);
-    const lengthScaler = (length - 81) / 10;
-    const armWidth = length * 0.04 * widthScaler;
-    const centerRadius = length * 0.08 * widthScaler;
-    const breOuterCenter = length * 0.71 + lengthScaler;
-    const breInnerCenter = length * 0.725 + lengthScaler * 0.8;
-    const breOuterRadius = length * 0.075 * widthScaler;
-    const breInnerRadius = length * 0.05 * widthScaler;
-    const breBase = breOuterCenter - breOuterRadius;
-    const tipBase = breOuterCenter + breOuterRadius;
-    const tipWidth = length * 0.045 * widthScaler;
-    ctx.lineWidth = lineWidth;
-    ctx.strokeStyle = strokeColor;
-    ctx.fillStyle = fillColor;
-    ctx.beginPath();
-    ctx.arc(0, 0, centerRadius, 0, 2 * Math.PI);
-    if (fillColor !== "rgba(0,0,0,0)") ctx.fill();
-    if (strokeColor !== "rgba(0,0,0,0)") ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(-armWidth / 2, -centerRadius);
-    ctx.lineTo(-armWidth / 10, -breBase);
-    ctx.lineTo(armWidth / 10, -breBase);
-    ctx.lineTo(armWidth / 2, -centerRadius);
-    ctx.closePath();
-    if (fillColor !== "rgba(0,0,0,0)") ctx.fill();
-    if (strokeColor !== "rgba(0,0,0,0)") ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(0, -breOuterCenter, breOuterRadius, 0, 2 * Math.PI);
-    ctx.moveTo(breInnerRadius, -breInnerCenter);
-    ctx.arc(0, -breInnerCenter, breInnerRadius, 0, 2 * Math.PI, true);
-    if (fillColor !== "rgba(0,0,0,0)") ctx.fill("evenodd");
-    if (strokeColor !== "rgba(0,0,0,0)") ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(-tipWidth / 2, -tipBase);
-    ctx.lineTo(0, -length);
-    ctx.lineTo(tipWidth / 2, -tipBase);
-    ctx.closePath();
-    if (fillColor !== "rgba(0,0,0,0)") ctx.fill();
-    if (strokeColor !== "rgba(0,0,0,0)") ctx.stroke();
-  }
-  function buildImageHandShadow(part, env, scale, images) {
-    const z = evalAttr(part.z, env);
-    if (!z || z === 0) return;
-    const loaded2 = part.src ? images.get(part.src) : void 0;
-    if (!loaded2) return;
-    const { bitmap: srcBitmap, scale: imgScale } = loaded2;
-    const drawW = srcBitmap.width * imgScale;
-    const drawH = srcBitmap.height * imgScale;
-    const thick = evalAttr(part.thick, env) || 3;
-    let sigma = (z + 2) / 2;
-    let percentOpacity = 40;
-    const shadowPad = sigma * 3;
-    const shadowDx = z / 4.3;
-    const shadowDy = z / 2.15;
-    const xAnchor = part.xAnchor ? evalAttr(part.xAnchor, env) : drawW / 2;
-    const yAnchor = part.yAnchor ? -evalAttr(part.yAnchor, env) : -drawH / 2;
-    const imgLeft = -xAnchor;
-    const imgTop = -yAnchor - drawH;
-    const imgRight = imgLeft + drawW;
-    const imgBottom = imgTop + drawH;
-    const xMin = imgLeft - shadowPad;
-    const xMax = imgRight + shadowPad + shadowDx;
-    const yMin = imgTop - shadowPad;
-    const yMax = imgBottom + shadowPad + shadowDy;
-    const bboxW = xMax - xMin;
-    const bboxH = yMax - yMin;
-    const anchorX = -xMin;
-    const anchorY = -yMin;
-    const pxW = Math.ceil(bboxW * scale) + 2;
-    const pxH = Math.ceil(bboxH * scale) + 2;
-    if (pxW <= 0 || pxH <= 0) return;
-    const bmp = new OffscreenCanvas(pxW, pxH);
-    const bctx = bmp.getContext("2d");
-    bctx.translate(anchorX * scale + 1, anchorY * scale + 1);
-    bctx.scale(scale, scale);
-    bctx.shadowColor = `rgba(0,0,0,${percentOpacity / 100})`;
-    bctx.shadowBlur = sigma * scale;
-    bctx.shadowOffsetX = shadowDx * scale;
-    bctx.shadowOffsetY = shadowDy * scale;
-    bctx.drawImage(srcBitmap, imgLeft, imgTop, drawW, drawH);
-    part._shadowBitmap = bmp;
-    part._shadowAnchorX = anchorX;
-    part._shadowAnchorY = anchorY;
-    part._shadowBitmapW = bboxW;
-    part._shadowBitmapH = bboxH;
-  }
   var _faceOriginX = 0;
   var _faceOriginY = 0;
   function renderFrame(ctx, watch, env, scale, images, terminatorLeaves, analemmaState, opts) {
@@ -16044,8 +15768,16 @@ return {${names2.join(",")}};`;
     for (const ga of _wheelGlyphAtlasCache.values()) {
       wheelCache += ga.atlas.width * ga.atlas.height * 4;
     }
+    let handCache = 0;
+    for (const hb of _handBitmapCache.values()) {
+      handCache += hb.body.canvas.width * hb.body.canvas.height * 4;
+      if (hb.shadow) handCache += hb.shadow.canvas.width * hb.shadow.canvas.height * 4;
+    }
+    for (const layer of _imageHandShadowCache.values()) {
+      handCache += layer.canvas.width * layer.canvas.height * 4;
+    }
     const cutoutTemp = _cutoutTempCanvas ? _cutoutTempCanvas.width * _cutoutTempCanvas.height * 4 : 0;
-    return { wedgeCache, wheelCache, cutoutTemp };
+    return { wedgeCache, wheelCache, handCache, cutoutTemp };
   }
   function renderPartsDocumentOrder(ctx, parts, env, canvasWidth, canvasHeight, scale, images, terminatorLeaves, analemmaState) {
     const pendingWindows = [];
@@ -16686,6 +16418,207 @@ return {${names2.join(",")}};`;
     ctx.shadowOffsetY = z / 2.15 * scale;
     return true;
   }
+  var _handBitmapCache = /* @__PURE__ */ new Map();
+  var HAND_CACHE_CAP = 192;
+  var _handCacheDisabled = false;
+  function setHandCacheDisabled(v) {
+    _handCacheDisabled = v;
+  }
+  function bakeCroppedLayer(pw, ph, anchorPxX, anchorPxY, dev, draw) {
+    const probeCnv = new OffscreenCanvas(pw, ph);
+    const pctx = probeCnv.getContext("2d");
+    draw(pctx);
+    const img = pctx.getImageData(0, 0, pw, ph).data;
+    let minX = pw, minY = ph, maxX = -1, maxY = -1;
+    for (let yy = 0; yy < ph; yy += 2) {
+      const row = yy * pw;
+      for (let xx = 0; xx < pw; xx += 2) {
+        if (img[(row + xx) * 4 + 3] !== 0) {
+          if (xx < minX) minX = xx;
+          if (xx > maxX) maxX = xx;
+          if (yy < minY) minY = yy;
+          if (yy > maxY) maxY = yy;
+        }
+      }
+    }
+    if (maxX < 0) {
+      minX = 0;
+      minY = 0;
+      maxX = 1;
+      maxY = 1;
+    }
+    const PAD = 3;
+    minX = Math.max(0, minX - PAD);
+    minY = Math.max(0, minY - PAD);
+    maxX = Math.min(pw - 1, maxX + PAD);
+    maxY = Math.min(ph - 1, maxY + PAD);
+    const cw = maxX - minX + 1;
+    const ch = maxY - minY + 1;
+    const cnv = new OffscreenCanvas(cw, ch);
+    cnv.getContext("2d").drawImage(probeCnv, minX, minY, cw, ch, 0, 0, cw, ch);
+    return {
+      canvas: cnv,
+      anchorX: (anchorPxX - minX) / dev,
+      anchorY: (anchorPxY - minY) / dev,
+      w: cw / dev,
+      h: ch / dev
+    };
+  }
+  function getHandBitmaps(part, env, dev, handType, length, width, tail) {
+    const strokeColor = part.strokeColor ? evalColor(part.strokeColor, env) : "rgba(0,0,0,1)";
+    const fillColor = part.fillColor ? evalColor(part.fillColor, env) : "rgba(0,0,0,1)";
+    const lineWidth = evalAttr(part.lineWidth, env) || 0.5;
+    const colorsKey = `${strokeColor}|${fillColor}|${part.oStrokeColor ? evalColor(part.oStrokeColor, env) : ""}|${part.oFillColor ? evalColor(part.oFillColor, env) : ""}|${part.tStrokeColor ? evalColor(part.tStrokeColor, env) : ""}|${part.tFillColor ? evalColor(part.tFillColor, env) : ""}`;
+    const length2 = evalAttr(part.length2, env) || 0;
+    const oLength = evalAttr(part.oLength, env) || 0;
+    const oWidth = evalAttr(part.oWidth, env) || 0;
+    const oCenter = evalAttr(part.oCenter, env) || 0;
+    const oRadius = evalAttr(part.oRadius, env) || 0;
+    const z = evalAttr(part.z, env) || 0;
+    const thick = evalAttr(part.thick, env) || 3;
+    const key = `${dev.toFixed(2)}|${handType}|${length}|${width}|${tail}|${length2}|${evalAttr(part.oTail, env) || 0}|${oLength}|${oWidth}|${oCenter}|${oRadius}|${evalAttr(part.oLineWidth, env) || 0}|${evalAttr(part.tLineWidth, env) || 0}|${evalAttr(part.nRays, env) || 0}|${z}|${thick}|${lineWidth}|${colorsKey}`;
+    let hb = _handBitmapCache.get(key);
+    if (hb) return hb;
+    if (_handBitmapCache.size >= HAND_CACHE_CAP) _handBitmapCache.clear();
+    let sigma = 0, offX = 0, offY = 0, opacity = 0;
+    if (z > 0) {
+      sigma = (z + 2) / 2;
+      opacity = 40;
+      if (thick < 3) {
+        sigma *= 1.25;
+        opacity *= thick / 3;
+      }
+      offX = z / 4.3;
+      offY = z / 2.15;
+    }
+    const blurPad = z > 0 ? sigma * 3 : 0;
+    const upReach = length + oLength + lineWidth * 4 + blurPad + 4;
+    const downReach = Math.max(tail + oRadius, oCenter, 2) + lineWidth * 4 + blurPad + 4;
+    const halfW = Math.max(
+      width,
+      oWidth,
+      oCenter,
+      oRadius,
+      handType === "sun" ? (length - length2) / 2 + 4 : 0,
+      3
+    ) + lineWidth * 4 + blurPad + 4;
+    const pw = Math.max(2, Math.ceil(halfW * 2 * dev));
+    const ph = Math.max(2, Math.ceil((upReach + downReach) * dev));
+    const anchorPxX = halfW * dev;
+    const anchorPxY = upReach * dev;
+    const body = bakeCroppedLayer(pw, ph, anchorPxX, anchorPxY, dev, (c) => {
+      c.translate(anchorPxX, anchorPxY);
+      c.scale(dev, dev);
+      renderHandBody(c, part, env, handType, length, width, tail, strokeColor, fillColor, lineWidth);
+    });
+    let shadow = null;
+    if (z > 0) {
+      const BIG_PX = pw + 256;
+      shadow = bakeCroppedLayer(pw, ph, anchorPxX, anchorPxY, dev, (c) => {
+        c.shadowColor = `rgba(0,0,0,${opacity / 100})`;
+        c.shadowBlur = sigma * dev;
+        c.shadowOffsetX = BIG_PX;
+        c.shadowOffsetY = 0;
+        c.translate(anchorPxX - BIG_PX, anchorPxY);
+        c.scale(dev, dev);
+        renderHandBody(c, part, env, handType, length, width, tail, strokeColor, fillColor, lineWidth);
+      });
+    }
+    hb = { body, shadow, shadowOffX: offX, shadowOffY: offY };
+    _handBitmapCache.set(key, hb);
+    return hb;
+  }
+  function renderHandBody(c, part, env, handType, length, width, tail, strokeColor, fillColor, lineWidth) {
+    const oTail = evalAttr(part.oTail, env);
+    const length2 = evalAttr(part.length2, env);
+    if (handType === "quad") {
+      const oLength = evalAttr(part.oLength, env);
+      const oWidth = evalAttr(part.oWidth, env);
+      const oCenter2 = evalAttr(part.oCenter, env);
+      c.lineWidth = lineWidth;
+      c.strokeStyle = strokeColor;
+      c.fillStyle = fillColor;
+      c.beginPath();
+      c.moveTo(-oWidth / 12, -oCenter2);
+      c.quadraticCurveTo(-oWidth * 0.45, -oLength / 2, -oWidth / 4, -oLength);
+      c.moveTo(oWidth / 4, -oLength);
+      c.quadraticCurveTo(oWidth * 0.45, -oLength / 2, oWidth / 12, -oCenter2);
+      if (fillColor !== "rgba(0,0,0,0)") c.fill();
+      if (strokeColor !== "rgba(0,0,0,0)") c.stroke();
+      const oStrokeColor = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
+      c.fillStyle = oStrokeColor;
+      c.lineWidth = 0;
+      c.beginPath();
+      c.moveTo(oWidth / 4 + lineWidth / 2, -oLength);
+      c.lineTo(0, -length);
+      c.lineTo(-oWidth / 4 - lineWidth / 2, -oLength);
+      c.lineTo(-oWidth / 4 + lineWidth / 2, -oLength);
+      c.lineTo(0, -oLength * 1.2);
+      c.lineTo(oWidth / 4 - lineWidth / 2, -oLength);
+      c.closePath();
+      c.fill();
+      const oCenter3 = evalAttr(part.oCenter, env);
+      if (oCenter3 > 0) {
+        const osc = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
+        drawCenterDot(c, oCenter3, osc);
+      }
+    } else if (handType === "sun") {
+      const nRays = evalAttr(part.nRays, env) || 8;
+      const oCenter2 = evalAttr(part.oCenter, env);
+      c.lineWidth = lineWidth;
+      c.strokeStyle = strokeColor;
+      c.fillStyle = fillColor;
+      let rayRad = (length - length2) / 2;
+      const raysRad = (length - length2) / 3;
+      const cen = length2 + raysRad;
+      const sunCenter = oCenter2 > 0 ? oCenter2 : raysRad / 2;
+      c.beginPath();
+      for (let i = 0; i < nRays; i++) {
+        const theta = Math.PI / 2 + 2 * Math.PI * i / nRays;
+        const farX = rayRad * Math.cos(theta);
+        const farYIOS = cen + rayRad * Math.sin(theta);
+        const cwX = sunCenter * Math.cos(theta + Math.PI / nRays);
+        const cwYIOS = cen + sunCenter * Math.sin(theta + Math.PI / nRays);
+        const ccwX = sunCenter * Math.cos(theta - Math.PI / nRays);
+        const ccwYIOS = cen + sunCenter * Math.sin(theta - Math.PI / nRays);
+        c.moveTo(farX, -farYIOS);
+        c.lineTo(cwX, -cwYIOS);
+        c.lineTo(ccwX, -ccwYIOS);
+        c.lineTo(farX, -farYIOS);
+        rayRad = raysRad;
+      }
+      c.fill();
+      c.stroke();
+      c.fillStyle = fillColor;
+      c.strokeStyle = fillColor;
+      c.beginPath();
+      c.arc(0, -cen, sunCenter, 0, 2 * Math.PI);
+      c.fill();
+      c.stroke();
+    } else {
+      drawHandShape(c, handType, length, width, tail, strokeColor, fillColor, lineWidth, oTail, length2);
+      const oLength = evalAttr(part.oLength, env);
+      if (oLength > 0) {
+        const oWidth = evalAttr(part.oWidth, env) || width;
+        const oLineWidth = evalAttr(part.oLineWidth, env) || lineWidth;
+        const oStrokeColor = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
+        const oFillColor = part.oFillColor ? evalColor(part.oFillColor, env) : fillColor;
+        drawHandOrnament(c, length, oLength, oWidth, oTail, oLineWidth, oStrokeColor, oFillColor);
+      }
+      const oRadius = evalAttr(part.oRadius, env);
+      if (oRadius > 0) {
+        const tLW = evalAttr(part.tLineWidth, env) || evalAttr(part.oLineWidth, env) || lineWidth;
+        const tSC = part.tStrokeColor ? evalColor(part.tStrokeColor, env) : part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
+        const tFC = part.tFillColor ? evalColor(part.tFillColor, env) : part.oFillColor ? evalColor(part.oFillColor, env) : fillColor;
+        drawTailCircle(c, tail, oRadius, tLW, tSC, tFC);
+      }
+      const oCenter2 = evalAttr(part.oCenter, env);
+      if (oCenter2 > 0) {
+        const osc = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
+        drawCenterDot(c, oCenter2, osc);
+      }
+    }
+  }
   function drawQHand(ctx, part, env) {
     const x = evalAttr(part.x, env);
     const y = -evalAttr(part.y, env);
@@ -16722,24 +16655,31 @@ return {${names2.join(",")}};`;
       return;
     }
     if (length <= 0) return;
-    if (part._shadowBitmap) {
+    if (!_handCacheDisabled) {
+      const m0 = ctx.getTransform();
+      const dev = Math.hypot(m0.a, m0.b) || 1;
+      let memo = part._hbMemo;
+      if (!memo || memo.env !== env || memo.dev !== dev) {
+        memo = { env, dev, hb: getHandBitmaps(part, env, dev, handType, length, width, tail) };
+        part._hbMemo = memo;
+      }
+      const hb = memo.hb;
       ctx.save();
       ctx.translate(x, y);
       if (part._obsXMotion || part._obsYMotion) {
         const xm = part._obsXMotion?.currentValue ?? 0;
         const ym = part._obsYMotion?.currentValue ?? 0;
-        if (xm !== 0 || ym !== 0) {
-          ctx.translate(xm, -ym);
-        }
+        if (xm !== 0 || ym !== 0) ctx.translate(xm, -ym);
+      }
+      if (hb.shadow) {
+        ctx.save();
+        ctx.translate(hb.shadowOffX, hb.shadowOffY);
+        ctx.rotate(angle);
+        ctx.drawImage(hb.shadow.canvas, -hb.shadow.anchorX, -hb.shadow.anchorY, hb.shadow.w, hb.shadow.h);
+        ctx.restore();
       }
       ctx.rotate(angle);
-      ctx.drawImage(
-        part._shadowBitmap,
-        -part._shadowAnchorX,
-        -part._shadowAnchorY,
-        part._shadowBitmapW,
-        part._shadowBitmapH
-      );
+      ctx.drawImage(hb.body.canvas, -hb.body.anchorX, -hb.body.anchorY, hb.body.w, hb.body.h);
       ctx.restore();
       return;
     }
@@ -16757,95 +16697,7 @@ return {${names2.join(",")}};`;
       }
     }
     ctx.rotate(angle);
-    const oTail = evalAttr(part.oTail, env);
-    const length2 = evalAttr(part.length2, env);
-    if (handType === "quad") {
-      const oLength = evalAttr(part.oLength, env);
-      const oWidth = evalAttr(part.oWidth, env);
-      const oCenter2 = evalAttr(part.oCenter, env);
-      ctx.lineWidth = lineWidth;
-      ctx.strokeStyle = strokeColor;
-      ctx.fillStyle = fillColor;
-      ctx.beginPath();
-      ctx.moveTo(-oWidth / 12, -oCenter2);
-      ctx.quadraticCurveTo(-oWidth * 0.45, -oLength / 2, -oWidth / 4, -oLength);
-      ctx.moveTo(oWidth / 4, -oLength);
-      ctx.quadraticCurveTo(oWidth * 0.45, -oLength / 2, oWidth / 12, -oCenter2);
-      if (fillColor !== "rgba(0,0,0,0)") ctx.fill();
-      if (strokeColor !== "rgba(0,0,0,0)") ctx.stroke();
-      const oStrokeColor = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
-      ctx.fillStyle = oStrokeColor;
-      ctx.lineWidth = 0;
-      ctx.beginPath();
-      ctx.moveTo(oWidth / 4 + lineWidth / 2, -oLength);
-      ctx.lineTo(0, -length);
-      ctx.lineTo(-oWidth / 4 - lineWidth / 2, -oLength);
-      ctx.lineTo(-oWidth / 4 + lineWidth / 2, -oLength);
-      ctx.lineTo(0, -oLength * 1.2);
-      ctx.lineTo(oWidth / 4 - lineWidth / 2, -oLength);
-      ctx.closePath();
-      ctx.fill();
-      const oCenter3 = evalAttr(part.oCenter, env);
-      if (oCenter3 > 0) {
-        const osc = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
-        drawCenterDot(ctx, oCenter3, osc);
-      }
-    } else if (handType === "sun") {
-      const nRays = evalAttr(part.nRays, env) || 8;
-      const oCenter2 = evalAttr(part.oCenter, env);
-      ctx.lineWidth = lineWidth;
-      ctx.strokeStyle = strokeColor;
-      ctx.fillStyle = fillColor;
-      let rayRad = (length - length2) / 2;
-      const raysRad = (length - length2) / 3;
-      const cen = length2 + raysRad;
-      const sunCenter = oCenter2 > 0 ? oCenter2 : raysRad / 2;
-      ctx.beginPath();
-      for (let i = 0; i < nRays; i++) {
-        const theta = Math.PI / 2 + 2 * Math.PI * i / nRays;
-        const farX = rayRad * Math.cos(theta);
-        const farYIOS = cen + rayRad * Math.sin(theta);
-        const cwX = sunCenter * Math.cos(theta + Math.PI / nRays);
-        const cwYIOS = cen + sunCenter * Math.sin(theta + Math.PI / nRays);
-        const ccwX = sunCenter * Math.cos(theta - Math.PI / nRays);
-        const ccwYIOS = cen + sunCenter * Math.sin(theta - Math.PI / nRays);
-        ctx.moveTo(farX, -farYIOS);
-        ctx.lineTo(cwX, -cwYIOS);
-        ctx.lineTo(ccwX, -ccwYIOS);
-        ctx.lineTo(farX, -farYIOS);
-        rayRad = raysRad;
-      }
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = fillColor;
-      ctx.strokeStyle = fillColor;
-      ctx.beginPath();
-      ctx.arc(0, -cen, sunCenter, 0, 2 * Math.PI);
-      ctx.fill();
-      ctx.stroke();
-    } else {
-      drawHandShape(ctx, handType, length, width, tail, strokeColor, fillColor, lineWidth, oTail, length2);
-      const oLength = evalAttr(part.oLength, env);
-      if (oLength > 0) {
-        const oWidth = evalAttr(part.oWidth, env) || width;
-        const oLineWidth = evalAttr(part.oLineWidth, env) || lineWidth;
-        const oStrokeColor = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
-        const oFillColor = part.oFillColor ? evalColor(part.oFillColor, env) : fillColor;
-        drawHandOrnament(ctx, length, oLength, oWidth, oTail, oLineWidth, oStrokeColor, oFillColor);
-      }
-      const oRadius = evalAttr(part.oRadius, env);
-      if (oRadius > 0) {
-        const tLW = evalAttr(part.tLineWidth, env) || evalAttr(part.oLineWidth, env) || lineWidth;
-        const tSC = part.tStrokeColor ? evalColor(part.tStrokeColor, env) : part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
-        const tFC = part.tFillColor ? evalColor(part.tFillColor, env) : part.oFillColor ? evalColor(part.oFillColor, env) : fillColor;
-        drawTailCircle(ctx, tail, oRadius, tLW, tSC, tFC);
-      }
-      const oCenter2 = evalAttr(part.oCenter, env);
-      if (oCenter2 > 0) {
-        const osc = part.oStrokeColor ? evalColor(part.oStrokeColor, env) : strokeColor;
-        drawCenterDot(ctx, oCenter2, osc);
-      }
-    }
+    renderHandBody(ctx, part, env, handType, length, width, tail, strokeColor, fillColor, lineWidth);
     ctx.restore();
   }
   function drawHandOrnament(ctx, length, oLength, oWidth, oTail, oLineWidth, oStrokeColor, oFillColor) {
@@ -17506,51 +17358,73 @@ return {${names2.join(",")}};`;
     const { bitmap, scale: imgScale } = loaded2;
     const drawW = bitmap.width * imgScale;
     const drawH = bitmap.height * imgScale;
-    if (part._shadowBitmap && offsetRadius <= 0) {
-      ctx.save();
-      ctx.translate(x, y);
-      if (angle) ctx.rotate(angle);
-      ctx.drawImage(
-        part._shadowBitmap,
-        -part._shadowAnchorX,
-        -part._shadowAnchorY,
-        part._shadowBitmapW,
-        part._shadowBitmapH
-      );
-      ctx.restore();
-      return;
-    }
+    const xAnchor = part.xAnchor ? evalAttr(part.xAnchor, env) : drawW / 2;
+    const yAnchor = part.yAnchor ? -evalAttr(part.yAnchor, env) : -drawH / 2;
+    const rectX = -xAnchor;
+    const rectY = -yAnchor - drawH;
+    const applyChain = () => {
+      if (offsetRadius > 0) {
+        ctx.rotate(offsetAngle);
+        ctx.translate(0, -offsetRadius);
+        ctx.rotate(angle);
+      } else if (angle) {
+        ctx.rotate(angle);
+      }
+    };
+    const z = evalAttr(part.z, env) || 0;
     ctx.save();
     if (alpha < 1) ctx.globalAlpha = alpha;
-    setupHandShadow(
-      ctx,
-      part,
-      env,
-      /* isImageHand */
-      true
-    );
-    ctx.translate(x, y);
-    if (offsetRadius > 0) {
-      const xAnchor = part.xAnchor ? evalAttr(part.xAnchor, env) : drawW / 2;
-      const yAnchor = part.yAnchor ? -evalAttr(part.yAnchor, env) : -drawH / 2;
-      ctx.rotate(offsetAngle);
-      ctx.translate(0, -offsetRadius);
-      ctx.rotate(angle);
-      ctx.drawImage(bitmap, -xAnchor, -yAnchor - drawH, drawW, drawH);
-    } else if (part.xAnchor || part.yAnchor) {
-      if (angle) {
-        ctx.rotate(angle);
-      }
-      const xAnchor = part.xAnchor ? evalAttr(part.xAnchor, env) : drawW / 2;
-      const yAnchor = part.yAnchor ? -evalAttr(part.yAnchor, env) : -drawH / 2;
-      ctx.drawImage(bitmap, -xAnchor, -yAnchor - drawH, drawW, drawH);
+    if (z > 0 && !_handCacheDisabled) {
+      const m0 = ctx.getTransform();
+      const dev = Math.hypot(m0.a, m0.b) || 1;
+      const sh = getImageHandShadowLayer(part.src, bitmap, dev, drawW, drawH, rectX, rectY, z);
+      ctx.save();
+      ctx.translate(x + z / 4.3, y + z / 2.15);
+      applyChain();
+      ctx.drawImage(sh.canvas, -sh.anchorX, -sh.anchorY, sh.w, sh.h);
+      ctx.restore();
+      ctx.translate(x, y);
+      applyChain();
+      ctx.drawImage(bitmap, rectX, rectY, drawW, drawH);
     } else {
-      if (angle) {
-        ctx.rotate(angle);
-      }
-      ctx.drawImage(bitmap, -drawW / 2, -drawH / 2, drawW, drawH);
+      if (z > 0) setupHandShadow(
+        ctx,
+        part,
+        env,
+        /* isImageHand */
+        true
+      );
+      ctx.translate(x, y);
+      applyChain();
+      ctx.drawImage(bitmap, rectX, rectY, drawW, drawH);
     }
     ctx.restore();
+  }
+  var _imageHandShadowCache = /* @__PURE__ */ new Map();
+  function getImageHandShadowLayer(src, bitmap, dev, drawW, drawH, rectX, rectY, z) {
+    const key = `${src}|${dev.toFixed(2)}|${drawW}|${drawH}|${rectX}|${rectY}|${z}`;
+    let layer = _imageHandShadowCache.get(key);
+    if (layer) return layer;
+    if (_imageHandShadowCache.size >= HAND_CACHE_CAP) _imageHandShadowCache.clear();
+    const sigma = (z + 2) / 2;
+    const opacity = 40;
+    const blurPad = sigma * 3 + 2;
+    const pw = Math.max(2, Math.ceil((drawW + 2 * blurPad) * dev));
+    const ph = Math.max(2, Math.ceil((drawH + 2 * blurPad) * dev));
+    const anchorPxX = (blurPad - rectX) * dev;
+    const anchorPxY = (blurPad - rectY) * dev;
+    const BIG_PX = pw + 256;
+    layer = bakeCroppedLayer(pw, ph, anchorPxX, anchorPxY, dev, (c) => {
+      c.shadowColor = `rgba(0,0,0,${opacity / 100})`;
+      c.shadowBlur = sigma * dev;
+      c.shadowOffsetX = BIG_PX;
+      c.shadowOffsetY = 0;
+      c.translate(anchorPxX - BIG_PX, anchorPxY);
+      c.scale(dev, dev);
+      c.drawImage(bitmap, rectX, rectY, drawW, drawH);
+    });
+    _imageHandShadowCache.set(key, layer);
+    return layer;
   }
   function drawQRect(ctx, part, env) {
     const xCorner = evalAttr(part.x, env);
@@ -21637,11 +21511,12 @@ return {${names2.join(",")}};`;
     (typeof location !== "undefined" ? new URLSearchParams(location.search).get("ablate") ?? "" : "").split(",").filter(Boolean)
   );
   for (const f of _ablate) {
-    if (!["render", "staggerrender", "staggertick", "dpr1", "onecanvas", "nobezel", "facebuffers", "nowheelcache"].includes(f)) {
+    if (!["render", "staggerrender", "staggertick", "dpr1", "onecanvas", "nobezel", "facebuffers", "nowheelcache", "nohandcache"].includes(f)) {
       console.warn(`[scrub-perf] Unknown ?ablate flag "${f}" \u2014 ignored.`);
     }
   }
   if (_ablate.has("nowheelcache")) setWheelCacheDisabled(true);
+  if (_ablate.has("nohandcache")) setHandCacheDisabled(true);
   var _ablateRender = _ablate.has("render");
   var _ablateStaggerRender = _ablate.has("staggerrender");
   var _ablateStaggerTick = _ablate.has("staggertick");
@@ -22231,7 +22106,6 @@ return {${names2.join(",")}};`;
         updateLeafAngles(face.terminatorLeaves, face.env);
       }
       buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-      buildHandShadowCaches(watch, env, scale, images);
       face.cachesBuilt = true;
       face.analemmaState = null;
       for (const part of watch.parts) {
@@ -22389,10 +22263,13 @@ return {${names2.join(",")}};`;
       }
       const sharedB = sz(_sharedCanvas);
       const rc = rendererCacheMemoryBytes();
-      const total = facesB + staticB + shadowB + imagesB + analemmaB + buffersB + terraB + sharedB + rc.wedgeCache + rc.wheelCache + rc.cutoutTemp;
+      const total = facesB + staticB + shadowB + imagesB + analemmaB + buffersB + terraB + sharedB + rc.wedgeCache + rc.wheelCache + rc.handCache + rc.cutoutTemp;
       const mem = performance.memory;
       const jsHeap = mem ? ` \xB7 JS heap (Chrome-only): ${MB(mem.usedJSHeapSize)}/${MB(mem.totalJSHeapSize)}MB` : "";
-      return `canvas/bitmap est TOTAL ${MB(total)}MB: faces ${MB(facesB)} \xB7 static caches ${MB(staticB)} \xB7 images ${MB(imagesB)} \xB7 shadows ${MB(shadowB)} \xB7 wedge cache ${MB(rc.wedgeCache)} \xB7 wheel cache ${MB(rc.wheelCache)} \xB7 analemma ${MB(analemmaB)} \xB7 terra ring ${MB(terraB)} \xB7 cutout temp ${MB(rc.cutoutTemp)} \xB7 face buffers ${MB(buffersB)} \xB7 shared canvas ${MB(sharedB)}${jsHeap}`;
+      return `canvas/bitmap est TOTAL ${MB(total)}MB: faces ${MB(facesB)} \xB7 static caches ${MB(staticB)} \xB7 images ${MB(imagesB)} \xB7 shadows ${MB(shadowB)} \xB7 wedge cache ${MB(rc.wedgeCache)} \xB7 wheel cache ${MB(rc.wheelCache)} \xB7 hand cache ${MB(rc.handCache)} \xB7 analemma ${MB(analemmaB)} \xB7 terra ring ${MB(terraB)} \xB7 cutout temp ${MB(rc.cutoutTemp)} \xB7 face buffers ${MB(buffersB)} \xB7 shared canvas ${MB(sharedB)}${jsHeap}`;
+    }
+    function _buildStamp() {
+      return true ? "2.0.29" : "dev";
     }
     function _browserShort() {
       const ua = navigator.userAgent;
@@ -22577,7 +22454,7 @@ return {${names2.join(",")}};`;
               _facesLimit !== Infinity ? `faces=${_facesLimit}` : "",
               _probeEnabled ? "probe" : ""
             ].filter(Boolean).join(",") || "none";
-            return `  - Environment: ${_browserShort()} \xB7 dpr ${window.devicePixelRatio} (backing ${effectiveDpr()}) \xB7 ${built.length} canvases @ ${built[0]?.sizePx ?? 0}px CSS / ${built[0]?.canvas.width ?? 0}px phys \xB7 window ${window.innerWidth}\xD7${window.innerHeight} \xB7 display quantum ${quantum}` + (_sharedCanvas ? ` \xB7 shared canvas ${_sharedCanvas.width}\xD7${_sharedCanvas.height}px phys` : "") + ` \xB7 flags ${flagsStr}
+            return `  - Environment: build ${_buildStamp()} \xB7 ${_browserShort()} \xB7 dpr ${window.devicePixelRatio} (backing ${effectiveDpr()}) \xB7 ${built.length} canvases @ ${built[0]?.sizePx ?? 0}px CSS / ${built[0]?.canvas.width ?? 0}px phys \xB7 window ${window.innerWidth}\xD7${window.innerHeight} \xB7 display quantum ${quantum}` + (_sharedCanvas ? ` \xB7 shared canvas ${_sharedCanvas.width}\xD7${_sharedCanvas.height}px phys` : "") + ` \xB7 flags ${flagsStr}
   - Frame classes (flush probe excluded): tick ${clsLine(_classTick)} || anim ${clsLine(_classAnim)}
   - Faces animating (of ${built.length}): at tick frames ${animFacesStr(_classTick)} \xB7 between ticks ${animFacesStr(_classAnim)} (= faces Phase-1B idle-face skipping would still render)
   - Post-callback slack (rAF gap minus our JS): after tick ${slackLine(_classTick)} \xB7 after anim ${slackLine(_classAnim)} (after-anim slack follows the flush probe)
@@ -22765,7 +22642,7 @@ return {${names2.join(",")}};`;
       }
       if (!_memReported && faces.every((f) => !f.enabled || f.cachesBuilt)) {
         _memReported = true;
-        console.log("[mem] " + canvasMemoryReport());
+        console.log(`[mem] build ${_buildStamp()} \xB7 ` + canvasMemoryReport());
       }
       const willContinue = timeController.needsContinuousRender || stillAnimating;
       _fps?.recordFrame(willContinue, performance.now() - frameStart);

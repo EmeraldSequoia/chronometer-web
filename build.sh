@@ -71,6 +71,7 @@ echo "  ✓ No type errors"
 
 echo "=== Building engine ==="
 $ESBUILD "$SRC/engine-entry.ts" --bundle $LOADER_FLAGS $COMMON_FLAGS \
+  --define:__BUILD_VERSION__="\"$NEW_VERSION\"" \
   --outfile="$DIST/chronometer-engine.js"
 
 echo "=== Building face data modules ==="

@@ -214,6 +214,8 @@ export interface TerminatorLeafState {
     leavesPerQuadrant: number;
     radius: number;
     incremental: boolean;
+    /** Retained leaf outline (leaf-local coords); built lazily on first draw. */
+    _cachedPath?: Path2D;
     anchorEdgeRadius: number;
     leafFillColor: string;
     leafBorderColor: string;
@@ -372,11 +374,22 @@ export function drawTerminatorLeaf(
     ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
     leaf: TerminatorLeafState,
 ): void {
-    const { quadrant, indexWithinQuadrant, leavesPerQuadrant, radius } = leaf;
-
     ctx.fillStyle = leaf.leafFillColor;
     ctx.strokeStyle = leaf.leafBorderColor;
     ctx.lineWidth = 0.5;
+    const p = leaf._cachedPath ?? (leaf._cachedPath = buildTerminatorLeafPath(leaf));
+    ctx.fill(p);
+    ctx.stroke(p);
+}
+
+/**
+ * Build a leaf's outline as a retained Path2D (leaf-local CG Y-up coords).
+ * The geometry depends only on per-leaf constants, so it's built once and
+ * reused every frame; rotation/offset are applied by the caller's transform.
+ */
+export function buildTerminatorLeafPath(leaf: TerminatorLeafState): Path2D {
+    const { quadrant, indexWithinQuadrant, leavesPerQuadrant, radius } = leaf;
+    const path = new Path2D();
 
     let xsign: number;
     let ysign: number;
@@ -405,18 +418,17 @@ export function drawTerminatorLeaf(
     const n = 30;
     const overlap = leaf.incremental ? 1 : 0;
 
-    ctx.beginPath();
     // Start at anchor point
-    ctx.moveTo(xcenter, ycenter + ysign * radius);
+    path.moveTo(xcenter, ycenter + ysign * radius);
 
-    // Draw inner terminator arc, from anchor toward center
+    // Inner terminator arc, from anchor toward center
     let x: number, y: number;
     for (let i = n - 1; i >= -overlap; i--) {
         [x, y] = terminatorArcPoint(i, n, xsign, ysign, xcenter, ycenter, radius, paInner);
-        ctx.lineTo(x, y);
+        path.lineTo(x, y);
     }
 
-    // Draw end cap (semicircular arc connecting inner to outer)
+    // End cap (semicircular arc connecting inner to outer)
     let [nextX, nextY] = terminatorArcPoint(-overlap, n, xsign, ysign, xcenter, ycenter, radius, paOuter);
     const midX = (x! + nextX) / 2;
     const midY = (y! + nextY) / 2;
@@ -428,17 +440,16 @@ export function drawTerminatorLeaf(
     // We draw with scale(1, -1) to match CG Y-up convention.
     // With Y-flip, CG clockwise maps directly to Canvas counterclockwise
     // (same boolean value — the Y-flip re-inverts the winding).
-    ctx.arc(midX, midY, endRadius, startAngle, endAngle, clockwiseEndArc);
+    path.arc(midX, midY, endRadius, startAngle, endAngle, clockwiseEndArc);
 
-    // Draw outer terminator arc, back toward anchor
+    // Outer terminator arc, back toward anchor
     for (let i = -overlap; i <= n; i++) {
         [x, y] = terminatorArcPoint(i, n, xsign, ysign, xcenter, ycenter, radius, paOuter);
-        ctx.lineTo(x, y);
+        path.lineTo(x, y);
     }
 
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
+    path.closePath();
+    return path;
 }
 
 /**
@@ -505,8 +516,18 @@ export function drawTerminator(
         //    scale(1, -1) restores that convention in our local coordinate system.
         ctx.scale(scale, -scale);
 
-        // 5. Draw the leaf shape (in CG Y-up local coordinates)
-        drawTerminatorLeaf(ctx, leaf);
+        // 5. Draw the leaf shape (in CG Y-up local coordinates). The path
+        //    geometry is rigid per leaf (quadrant/index/radius are fixed;
+        //    only the transform above changes per frame), so it's built once
+        //    into a retained Path2D — replacing ~60 trig-computed lineTo
+        //    commands per leaf per frame with two draw calls. Pixel-identical
+        //    to the inline path by construction.
+        if (!leaf._cachedPath) leaf._cachedPath = buildTerminatorLeafPath(leaf);
+        ctx.fillStyle = leaf.leafFillColor;
+        ctx.strokeStyle = leaf.leafBorderColor;
+        ctx.lineWidth = 0.5;
+        ctx.fill(leaf._cachedPath);
+        ctx.stroke(leaf._cachedPath);
 
         ctx.restore();
     }

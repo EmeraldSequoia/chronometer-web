@@ -185,17 +185,9 @@ export interface QHandPart extends PartBase {
     alpha?: string;
     /** Text orientation (e.g. 'radial' for bottom-facing-center text). */
     orientation?: string;
-    // --- Pre-rendered shadow cache (not from XML) ---
-    /** Pre-rendered hand + shadow bitmap. Created at init/resize. */
-    _shadowBitmap?: OffscreenCanvas;
-    /** Anchor X within the bitmap in XML coords (rotation pivot point). */
-    _shadowAnchorX?: number;
-    /** Anchor Y within the bitmap in XML coords (rotation pivot point). */
-    _shadowAnchorY?: number;
-    /** Bitmap width in XML coordinate units. */
-    _shadowBitmapW?: number;
-    /** Bitmap height in XML coordinate units. */
-    _shadowBitmapH?: number;
+    /** Renderer-internal memo for the appearance-keyed hand bitmap cache
+     *  (avoids re-evaluating the appearance key every frame). */
+    _hbMemo?: unknown;
 }
 
 // ============================================================================
