@@ -145,7 +145,7 @@ The renderer uses a two-state system to minimize CPU usage:
 | **Idle** | All hands at rest | `setTimeout` to next boundary; zero drawing |
 | **Animating** | Hands sweeping | `requestAnimationFrame` at full monitor rate (up to 240fps) |
 
-A shared scheduler tracks `min(handState.nextUpdateTime)` across all active faces and arms a single `setTimeout`. Outside animation windows (~250ms per second-hand tick), the tab is completely idle — roughly 2.5% CPU duty cycle vs. 100%.
+A shared scheduler tracks `min(nextWakeupTime)` across all active faces and arms a single `setTimeout`. Since the on-beat scheduler, interleaved face cadences keep the loop awake ~85% of the time on all.html, so the savings come from a second mechanism: a **per-face render gate**. Each frame ticks every face's values, but `renderFrame` runs only for faces whose rendered values actually changed (`face.renderDirty`, set by the updater or forced by anything that changes pixels without moving a value — resize, env rebuild, mode change, scrub end). A typical 1× frame draws the 0–3 faces mid-snap instead of all 16 (~10× less idle redraw work). During scrub the gate never engages — every face changes every tick by design. Verify with `?drawstats` (logs face-draws/s vs loop-frames/s).
 
 ## Memory Budget (25 Faces at 2× DPR)
 

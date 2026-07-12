@@ -19306,6 +19306,8 @@ return {${names2.join(",")}};`;
       this.byName = /* @__PURE__ */ new Map();
       /** Whether {@link values} has been grouped for astro-cache sharing (see tick). */
       this._grouped = false;
+      /** Scratch buffer holding every value's `currentValue` at tick start. */
+      this._tickBaseline = new Float64Array(0);
     }
     /** Register a value; returns it for convenient handle capture. */
     add(v) {
@@ -19339,12 +19341,27 @@ return {${names2.join(",")}};`;
     has(name) {
       return this.byName.has(name);
     }
-    /** Per-frame: re-evaluate expired values + animate the whole collection. */
+    /**
+     * Per-frame: re-evaluate expired values + animate the whole collection.
+     *
+     * Returns **true when any value's `currentValue` changed during this call** —
+     * i.e. something a renderer reads has moved. Detected by brute-force
+     * before/after comparison rather than per-branch bookkeeping, so every
+     * mutation path through the update/animate passes is caught (NaN compares as
+     * changed, erring toward "moved"). The per-face render gate ORs this into its
+     * dirty flag. Two caveats for gate authors: `finish()`/`reset()` mutate values
+     * *outside* tick, and anything that changes pixels without moving an ObsValue
+     * (static-cache rebuild, resize, env swap) — both need an explicit dirty mark.
+     */
     tick(env, perfNow, getNow, withDisplayTime, ctx) {
       if (!this._grouped) {
         this.values.sort(byEvalTimeClass);
         this._grouped = true;
       }
+      const n = this.values.length;
+      if (this._tickBaseline.length < n) this._tickBaseline = new Float64Array(n);
+      const baseline = this._tickBaseline;
+      for (let i = 0; i < n; i++) baseline[i] = this.values[i].currentValue;
       if (!profileEnabled) {
         updateObsValues(
           this.values,
@@ -19357,23 +19374,27 @@ return {${names2.join(",")}};`;
           withDisplayTime
         );
         animateObsValues(this.values, perfNow);
-        return;
+      } else {
+        const _u0 = performance.now();
+        updateObsValues(
+          this.values,
+          env,
+          perfNow,
+          getNow,
+          ctx.tickIntervalMs,
+          ctx.displayDeltaSec,
+          ctx.direction,
+          withDisplayTime
+        );
+        const _u1 = performance.now();
+        animateObsValues(this.values, perfNow);
+        tickProfile.updateMs += _u1 - _u0;
+        tickProfile.animateMs += performance.now() - _u1;
       }
-      const _u0 = performance.now();
-      updateObsValues(
-        this.values,
-        env,
-        perfNow,
-        getNow,
-        ctx.tickIntervalMs,
-        ctx.displayDeltaSec,
-        ctx.direction,
-        withDisplayTime
-      );
-      const _u1 = performance.now();
-      animateObsValues(this.values, perfNow);
-      tickProfile.updateMs += _u1 - _u0;
-      tickProfile.animateMs += performance.now() - _u1;
+      for (let i = 0; i < n; i++) {
+        if (baseline[i] !== this.values[i].currentValue) return true;
+      }
+      return false;
     }
     /** True while any value is mid-animation (for idle-scheduler decisions). */
     anyAnimating() {
@@ -21556,6 +21577,7 @@ return {${names2.join(",")}};`;
   setAstroProfiling(_tickProfile);
   setPartProfiling(_tickProfile);
   var _probeEnabled = typeof location !== "undefined" && new URLSearchParams(location.search).has("probe") && !new URLSearchParams(location.search).has("noprobe");
+  var _drawStats = typeof location !== "undefined" && new URLSearchParams(location.search).has("drawstats");
   var _ablate = new Set(
     (typeof location !== "undefined" ? new URLSearchParams(location.search).get("ablate") ?? "" : "").split(",").filter(Boolean)
   );
@@ -22067,6 +22089,7 @@ return {${names2.join(",")}};`;
         images: allImages[i],
         enabled: true,
         scale: 1,
+        renderDirty: true,
         terminatorLeaves: [],
         analemmaState: null,
         faceDataIndex: i,
@@ -22165,6 +22188,7 @@ return {${names2.join(",")}};`;
       face.updater = buildHandValues(watch.name, watch, env, performance.now());
       buildTerminatorValues(face.updater, watch.name, face.terminatorLeaves, env, performance.now());
       if (face.analemmaState) buildAnalemmaValues(face.updater, watch.name, face.analemmaState, env, performance.now());
+      face.renderDirty = true;
     }
     async function decodeFaceImages(face) {
       if (!face.enabled || face.sizePx === 0) return;
@@ -22216,6 +22240,7 @@ return {${names2.join(",")}};`;
         if (oldKnockout) face.env._terraCityKnockout = oldKnockout;
         const { canvas, watch, env, images, scale } = face;
         buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
+        face.renderDirty = true;
         if (oldTzOffset !== void 0 && face.env.tzOffsetSec !== oldTzOffset) {
           console.log(`[rebuildEnvironments] DST transition detected (offset ${oldTzOffset} -> ${face.env.tzOffsetSec}) - resetting schedules`);
           tzOffsetChanged = true;
@@ -22241,6 +22266,9 @@ return {${names2.join(",")}};`;
         rafId = null;
       }
     }
+    let _dsDraws = 0;
+    let _dsFrames = 0;
+    let _dsLastReport = 0;
     let _wasScrubbing = false;
     let _scrubTotalExpectedTicks = 0;
     let _scrubProcessedTicks = 0;
@@ -22336,7 +22364,7 @@ return {${names2.join(",")}};`;
       return `canvas/bitmap est TOTAL ${MB(total)}MB: faces ${MB(facesB)} \xB7 static caches ${MB(staticB)} \xB7 images ${MB(imagesB)} \xB7 src blobs ${MB(srcBlobB)} \xB7 shadows ${MB(shadowB)} \xB7 wedge cache ${MB(rc.wedgeCache)} \xB7 wheel cache ${MB(rc.wheelCache)} \xB7 hand cache ${MB(rc.handCache)} \xB7 analemma ${MB(analemmaB)} \xB7 terra ring ${MB(terraB)} \xB7 cutout temp ${MB(rc.cutoutTemp)} \xB7 face buffers ${MB(buffersB)} \xB7 shared canvas ${MB(sharedB)}${jsHeap}`;
     }
     function _buildStamp() {
-      return true ? "2.0.30" : "dev";
+      return true ? "2.0.33" : "dev";
     }
     function _browserShort() {
       const ua = navigator.userAgent;
@@ -22575,13 +22603,15 @@ return {${names2.join(",")}};`;
         if (!face.enabled || !face.cachesBuilt) continue;
         try {
           const doTick = !isScrubbing || !_ablateStaggerTick || _framesSinceTick >= fi % 2;
-          const doRender = !isScrubbing || doTick && !_ablateRender && fi < _facesLimit && (!_ablateStaggerRender || (_frameCounter + fi) % 2 === 0);
           const tickStart = performance.now();
           if (doTick) {
-            face.updater.tick(face.env, now, face.getNow, face.withDisplayTime, timingCtx);
+            if (face.updater.tick(face.env, now, face.getNow, face.withDisplayTime, timingCtx)) {
+              face.renderDirty = true;
+            }
           }
           const tickEnd = performance.now();
           tickCpuMs += tickEnd - tickStart;
+          const doRender = isScrubbing ? doTick && !_ablateRender && fi < _facesLimit && (!_ablateStaggerRender || (_frameCounter + fi) % 2 === 0) : face.renderDirty;
           if (doRender) {
             const fbW = face.canvas.width;
             const fbH = face.canvas.height;
@@ -22636,6 +22666,8 @@ return {${names2.join(",")}};`;
                 _ablateNoBezel ? { noBezel: true } : void 0
               );
             }
+            face.renderDirty = false;
+            _dsDraws++;
           }
           const renderEnd = performance.now();
           renderMs += renderEnd - tickEnd;
@@ -22649,6 +22681,7 @@ return {${names2.join(",")}};`;
             animatingFaceCount++;
           }
         } catch (err) {
+          face.renderDirty = true;
           console.error(`[frame] face "${face.watch?.name ?? "?"}" tick/render threw; skipping this frame:`, err);
         }
       }
@@ -22711,6 +22744,27 @@ return {${names2.join(",")}};`;
         _memReported = true;
         console.log(`[mem] build ${_buildStamp()} \xB7 ` + canvasMemoryReport());
       }
+      if (_drawStats) {
+        if (isScrubbing) {
+          _dsDraws = 0;
+          _dsFrames = 0;
+          _dsLastReport = 0;
+        } else {
+          _dsFrames++;
+          if (_dsLastReport === 0) {
+            _dsLastReport = now;
+            _dsDraws = 0;
+            _dsFrames = 0;
+          } else if (now - _dsLastReport >= 5e3) {
+            const s = (now - _dsLastReport) / 1e3;
+            const nFaces = faces.filter((f) => f.enabled).length;
+            console.log(`[drawstats] build ${_buildStamp()} \xB7 ${(_dsDraws / s).toFixed(1)} face-draws/s \xB7 ${(_dsFrames / s).toFixed(1)} loop-frames/s \xB7 ${nFaces} faces (ungated would draw ${(_dsFrames / s * nFaces).toFixed(0)}/s)`);
+            _dsDraws = 0;
+            _dsFrames = 0;
+            _dsLastReport = now;
+          }
+        }
+      }
       const willContinue = timeController.needsContinuousRender || stillAnimating;
       _fps?.recordFrame(willContinue, performance.now() - frameStart);
       if (willContinue) {
@@ -22739,6 +22793,7 @@ return {${names2.join(",")}};`;
     }
     function startScheduler() {
       stopScheduler();
+      for (const face of faces) face.renderDirty = true;
       rafId = requestAnimationFrame(frame);
     }
     let _dstTimerId = null;
@@ -23501,11 +23556,13 @@ return {${names2.join(",")}};`;
     function finishAllAnimations(bakeNow = false) {
       for (const face of faces) {
         face.updater.finish(bakeNow ? face.env : void 0);
+        face.renderDirty = true;
       }
     }
     function resetAllSchedules() {
       for (const face of faces) {
         face.updater.reset();
+        face.renderDirty = true;
       }
     }
     function ensureSchedulerRunning() {

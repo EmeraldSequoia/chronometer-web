@@ -58,6 +58,15 @@ stopping point, not an open bug (see [Hard constraints](#hard-constraints)).
 - **Tick-stagger / CPU-spreaders** — *not worth it.* A fast-forward proxy
   (`Now`>1×, no discrete tick spikes) tops out at ~36–40 fps on Safari, and
   spreading updates introduces its own cross-face lag. Ceiling too low.
+- **Z-order layered rendering** (per-part / per-z-band retained canvases so
+  unchanged parts never re-render) — *re-assessed 2026-07 with full data,
+  rejected.* facebuffers is this idea's best case (1 layer/face, max staleness)
+  and its 44 fps was already rejected as pure staleness; finer layers cost
+  strictly more (3 bands alone +140 MB at 4K, per-part = GB-scale + hundreds of
+  compositor layers) and save nothing during scrub since every part moves. Also
+  breaks correctness: 12/16 faces have dynamics *under* the mid-z static cache,
+  and Terra uses a `difference` blend against the live canvas. Full analysis +
+  memory table in the investigation doc ("Z-order layered rendering").
 - **Level-of-detail during motion**, **incremental/delta astronomy**,
   **WebGL/OffscreenCanvas** — unexplored; each is a large change against an
   already-characterized ceiling, and the first two trade fidelity the product
@@ -96,6 +105,37 @@ Two product constraints bound every future perf idea:
 
 Any lever must preserve both. That leaves op-count-neutral CPU wins and better
 caches — not resolution, layer, or update-rate trades.
+
+## Idle (1×) and battery
+
+Scrub perf and idle power are different problems. At 1× nothing animates
+perpetually (hands sit-then-snap; beat-sweep is scrub-only) and the loop sleeps
+between beats — but interleaved face cadences keep it awake **~85% of the
+time** on all.html, and the 50 ms scheduler lookahead free-runs frames while
+values sit.
+
+**Per-face render gate (implemented 2026-07-10,
+[plan](../planning/2026-07-07-per-face-render-gate-plan.md)).** Every awake
+frame still ticks every face's values, but `renderFrame` runs only for faces
+whose rendered values changed since their last draw. `Updater.tick()` reports
+"any `currentValue` moved" by brute-force before/after comparison (robust to
+every internal mutation path; NaN counts as moved), OR-ed into
+`face.renderDirty`; the frame loop skips clean faces and clears the flag on
+draw. Anything that changes pixels *without* moving a value forces the flag:
+`buildCache` (resize/dpr, `cachesBuilt` flip), `rebuildEnvironments`' rebuild
+branch (DST/tz), `finishAllAnimations` + `resetAllSchedules` (step, Now,
+scrub start/end, transport), and `startScheduler` (every explicit kick:
+location change, mode/slot toggles, cross-tab sync — preserving the legacy
+"next frame redraws everything" contract). The gate must stay conservative:
+a spurious draw costs microwatts, a missed one is a visibly stale face.
+
+Effect at 1× on all.html: **~90 face-draws/s vs ~920 ungated** at 60 Hz
+(measured in-VM, build 2.0.33, `?drawstats` — logs face-draws/s vs
+loop-frames/s). Scrub is a strict no-op by construction: during scrub every
+value moves every tick, and the scrub path keeps its original render logic.
+The duty cycle itself is unchanged (non-goal — no scheduler surgery); awake
+frames just draw the 0–3 faces mid-snap instead of all 16. Energy readings
+(Activity Monitor / `powermetrics`, Safari + Chrome) are native-only.
 
 ## Measuring
 

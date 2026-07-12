@@ -19297,6 +19297,8 @@
       this.byName = /* @__PURE__ */ new Map();
       /** Whether {@link values} has been grouped for astro-cache sharing (see tick). */
       this._grouped = false;
+      /** Scratch buffer holding every value's `currentValue` at tick start. */
+      this._tickBaseline = new Float64Array(0);
     }
     /** Register a value; returns it for convenient handle capture. */
     add(v) {
@@ -19330,12 +19332,27 @@
     has(name) {
       return this.byName.has(name);
     }
-    /** Per-frame: re-evaluate expired values + animate the whole collection. */
+    /**
+     * Per-frame: re-evaluate expired values + animate the whole collection.
+     *
+     * Returns **true when any value's `currentValue` changed during this call** —
+     * i.e. something a renderer reads has moved. Detected by brute-force
+     * before/after comparison rather than per-branch bookkeeping, so every
+     * mutation path through the update/animate passes is caught (NaN compares as
+     * changed, erring toward "moved"). The per-face render gate ORs this into its
+     * dirty flag. Two caveats for gate authors: `finish()`/`reset()` mutate values
+     * *outside* tick, and anything that changes pixels without moving an ObsValue
+     * (static-cache rebuild, resize, env swap) — both need an explicit dirty mark.
+     */
     tick(env2, perfNow, getNow2, withDisplayTime2, ctx2) {
       if (!this._grouped) {
         this.values.sort(byEvalTimeClass);
         this._grouped = true;
       }
+      const n = this.values.length;
+      if (this._tickBaseline.length < n) this._tickBaseline = new Float64Array(n);
+      const baseline = this._tickBaseline;
+      for (let i = 0; i < n; i++) baseline[i] = this.values[i].currentValue;
       if (!profileEnabled) {
         updateObsValues(
           this.values,
@@ -19348,23 +19365,27 @@
           withDisplayTime2
         );
         animateObsValues(this.values, perfNow);
-        return;
+      } else {
+        const _u0 = performance.now();
+        updateObsValues(
+          this.values,
+          env2,
+          perfNow,
+          getNow2,
+          ctx2.tickIntervalMs,
+          ctx2.displayDeltaSec,
+          ctx2.direction,
+          withDisplayTime2
+        );
+        const _u1 = performance.now();
+        animateObsValues(this.values, perfNow);
+        tickProfile.updateMs += _u1 - _u0;
+        tickProfile.animateMs += performance.now() - _u1;
       }
-      const _u0 = performance.now();
-      updateObsValues(
-        this.values,
-        env2,
-        perfNow,
-        getNow2,
-        ctx2.tickIntervalMs,
-        ctx2.displayDeltaSec,
-        ctx2.direction,
-        withDisplayTime2
-      );
-      const _u1 = performance.now();
-      animateObsValues(this.values, perfNow);
-      tickProfile.updateMs += _u1 - _u0;
-      tickProfile.animateMs += performance.now() - _u1;
+      for (let i = 0; i < n; i++) {
+        if (baseline[i] !== this.values[i].currentValue) return true;
+      }
+      return false;
     }
     /** True while any value is mid-animation (for idle-scheduler decisions). */
     anyAnimating() {

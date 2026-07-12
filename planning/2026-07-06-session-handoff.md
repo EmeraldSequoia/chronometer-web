@@ -130,7 +130,12 @@ answers it (~0). Sandwich + facebuffers-style buffering are off the table.
    eager-parses 167k cities" was stale. The one real remaining lever is
    decoding source images at display size (the 82 MB `createImageBitmap`).
 5. Parked: dirty-rect alternative, `_hbMemo` dynamic-color support (fixed
-   appearance is the contract), image-hand `_imageHandShadowCache` memo.
+   appearance is the contract), image-hand `_imageHandShadowCache` memo,
+   **per-face 1× render gate** (battery nice-to-have, fidelity-free; ready-to-
+   run plan: [2026-07-07-per-face-render-gate-plan.md](2026-07-07-per-face-render-gate-plan.md)).
+6. **Z-order layering: assessed and rejected 2026-07-07** (bounded by
+   facebuffers on every axis; memory table + correctness analysis in the
+   investigation doc; one-liner in performance.md).
 
 ## Mechanics a new session needs
 

@@ -92,6 +92,12 @@ const _probeEnabled = typeof location !== 'undefined'
     && new URLSearchParams(location.search).has('probe')
     && !new URLSearchParams(location.search).has('noprobe');
 
+// ?drawstats logs face-draws/s vs loop frames/s at 1× every ~5s, to verify the
+// per-face render gate (planning/2026-07-07-per-face-render-gate-plan.md):
+// frames/s × enabled faces is what an ungated loop would draw.
+const _drawStats = typeof location !== 'undefined'
+    && new URLSearchParams(location.search).has('drawstats');
+
 // --- Phase 1 render-perf ablation flags ---
 // (planning/2026-07-03-scrub-render-perf-investigation.md — bounding ablations.)
 // All are measurement flags: they may produce visual artifacts during scrub and
@@ -303,6 +309,14 @@ interface FaceInstance {
     images: Map<string, LoadedImage>;
     enabled: boolean;
     scale: number;
+    /**
+     * Per-face render gate (1×/idle only; scrub always draws). Set when the
+     * updater reports a value moved, or explicitly by anything that changes
+     * pixels without moving an ObsValue (cache rebuild, env swap, finish/reset,
+     * scheduler kick). Cleared when the face is drawn. Must stay conservative:
+     * a spurious draw costs microwatts, a missed one is a visibly stale face.
+     */
+    renderDirty: boolean;
     terminatorLeaves: TerminatorLeafState[];
     analemmaState: AnalemmaState | null;
     faceDataIndex: number;
@@ -858,6 +872,7 @@ async function main() {
             images: allImages[i],
             enabled: true,
             scale: 1,
+            renderDirty: true,
             terminatorLeaves: [],
             analemmaState: null,
             faceDataIndex: i,
@@ -982,6 +997,9 @@ async function main() {
         face.updater = buildHandValues(watch.name, watch, env, performance.now());
         buildTerminatorValues(face.updater, watch.name, face.terminatorLeaves, env, performance.now());
         if (face.analemmaState) buildAnalemmaValues(face.updater, watch.name, face.analemmaState, env, performance.now());
+        // Statics + backing store just changed (resize clears the canvas): the
+        // first frame after cachesBuilt flips true must draw unconditionally.
+        face.renderDirty = true;
     }
 
     /**
@@ -1094,6 +1112,8 @@ async function main() {
             // don't need recreating. Recreating them would destroy animation state.
             const { canvas, watch, env, images, scale } = face;
             buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
+            // Statics changed without any ObsValue moving — force a redraw.
+            face.renderDirty = true;
             // Force analemma to recompute on the next frame
 
             // If the timezone offset changed (e.g. DST transition), reset schedules to force immediate hand re-evaluation
@@ -1136,6 +1156,11 @@ async function main() {
         if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
     }
 
+
+    // --- ?drawstats: render-gate verification counters (reported at 1× only) ---
+    let _dsDraws = 0;
+    let _dsFrames = 0;
+    let _dsLastReport = 0;
 
     // --- Scrubbing performance instrumentation ---
     let _wasScrubbing = false;
@@ -1606,18 +1631,27 @@ async function main() {
                 // chains ARRIVED→SITTING→SWEEPING for late processing).
                 const doTick = !isScrubbing
                     || !_ablateStaggerTick || _framesSinceTick >= (fi % 2);
-                const doRender = !isScrubbing || (
-                    doTick
-                    && !_ablateRender
-                    && fi < _facesLimit
-                    && (!_ablateStaggerRender || (_frameCounter + fi) % 2 === 0));
 
                 const tickStart = performance.now();
                 if (doTick) {
-                    face.updater.tick(face.env, now, face.getNow, face.withDisplayTime, timingCtx);
+                    if (face.updater.tick(face.env, now, face.getNow, face.withDisplayTime, timingCtx)) {
+                        face.renderDirty = true;
+                    }
                 }
                 const tickEnd = performance.now();
                 tickCpuMs += tickEnd - tickStart;
+
+                // Per-face render gate: at 1×/idle, skip the draw when nothing that
+                // draws has changed since this face's last draw (lookahead frames and
+                // other faces' beats otherwise cause byte-identical full redraws).
+                // During scrub every value moves every tick, so the gate never
+                // engages there — scrub keeps its original (ablation-gated) logic.
+                const doRender = isScrubbing
+                    ? (doTick
+                        && !_ablateRender
+                        && fi < _facesLimit
+                        && (!_ablateStaggerRender || (_frameCounter + fi) % 2 === 0))
+                    : face.renderDirty;
 
                 if (doRender) {
                     const fbW = face.canvas.width;
@@ -1652,6 +1686,8 @@ async function main() {
                         renderFrame(face.ctx, face.watch, face.env, face.scale, face.images, face.terminatorLeaves, face.analemmaState,
                             _ablateNoBezel ? { noBezel: true } : undefined);
                     }
+                    face.renderDirty = false;
+                    _dsDraws++;
                 }
 
                 const renderEnd = performance.now();
@@ -1668,6 +1704,9 @@ async function main() {
                 }
             } catch (err) {
                 // Log loudly (this should never happen) but keep the loop alive.
+                // A throw mid-tick may have moved values without reporting it, and a
+                // throw mid-render leaves a half-drawn canvas — either way, redraw.
+                face.renderDirty = true;
                 console.error(`[frame] face "${face.watch?.name ?? '?'}" tick/render threw; skipping this frame:`, err);
             }
         }
@@ -1747,6 +1786,26 @@ async function main() {
             console.log(`[mem] build ${_buildStamp()} · ` + canvasMemoryReport());
         }
 
+        if (_drawStats) {
+            if (isScrubbing) {
+                // Scrub draws are ungated by design; keep them out of the numbers.
+                _dsDraws = 0; _dsFrames = 0; _dsLastReport = 0;
+            } else {
+                _dsFrames++;
+                if (_dsLastReport === 0) {
+                    _dsLastReport = now; _dsDraws = 0; _dsFrames = 0;
+                } else if (now - _dsLastReport >= 5000) {
+                    const s = (now - _dsLastReport) / 1000;
+                    const nFaces = faces.filter(f => f.enabled).length;
+                    console.log(`[drawstats] build ${_buildStamp()} · `
+                        + `${(_dsDraws / s).toFixed(1)} face-draws/s · `
+                        + `${(_dsFrames / s).toFixed(1)} loop-frames/s · `
+                        + `${nFaces} faces (ungated would draw ${(_dsFrames / s * nFaces).toFixed(0)}/s)`);
+                    _dsDraws = 0; _dsFrames = 0; _dsLastReport = now;
+                }
+            }
+        }
+
         // Decide whether to keep the RAF loop running
         const willContinue = timeController.needsContinuousRender || stillAnimating;
         _fps?.recordFrame(willContinue, performance.now() - frameStart);
@@ -1784,6 +1843,10 @@ async function main() {
 
     function startScheduler() {
         stopScheduler();
+        // Every explicit kick (location/DST rebuild, planet/mode/slot toggles,
+        // cross-tab sync, Now) historically relied on "the next frame redraws
+        // everything anyway" — preserve that contract under the render gate.
+        for (const face of faces) face.renderDirty = true;
         rafId = requestAnimationFrame(frame);
     }
 
@@ -2882,6 +2945,9 @@ async function main() {
     function finishAllAnimations(bakeNow = false) {
         for (const face of faces) {
             face.updater.finish(bakeNow ? face.env : undefined);
+            // finish() moves currentValues outside tick() (which reports changes
+            // relative to its own start), so the gate can't see them — force a draw.
+            face.renderDirty = true;
         }
     }
 
@@ -2889,6 +2955,9 @@ async function main() {
     function resetAllSchedules() {
         for (const face of faces) {
             face.updater.reset();
+            // Conservative: reset paths (scrub start/end, step, resume) change what
+            // the next eval sees; draw once even if values land unchanged.
+            face.renderDirty = true;
         }
     }
 

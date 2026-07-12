@@ -1002,6 +1002,77 @@ is **tick-stagger** (spread the per-tick update spike, op-count-neutral, ~+5–6
 fps in earlier probes); beyond that, Safari's ~26–34 fps is the characterized
 cost of full-res continuous celestial motion on WebKit.
 
+## Z-order layered rendering: assessed and rejected again, now with data (2026-07-07)
+
+Steve asked (post-timings-11) whether per-part / per-z-band retained layers —
+DOM-stacked canvases so unchanged parts never re-render even when overdrawn by
+movers — deserve a fresh look under the settled model. The original rejection
+(dev-rules §4 "rendering order is sacred") was a *correctness* rule from the
+iOS port with no perf data behind it. The re-assessment (code + docs sweep,
+2026-07-07) says the new data argues **harder against** it:
+
+**1. Bounding argument (decisive):** facebuffers *is* z-order layering with
+maximally favorable parameters — 1 layer/face (minimum possible layer count /
+memory / compositor area of any retained-layer scheme) and maximum staleness
+(the entire face). It measured 44 fps and was rejected because all of its win
+IS the staleness. Every finer-grained z-scheme has strictly more layers, more
+memory, more blended area, and less staleness; at the fidelity-preserving end
+staleness = 0 by design (every astro part moves every tick, day AND month
+scrub) → zero re-render savings, full layer costs. No point on the curve beats
+the status quo.
+
+**2. Op-count model:** during scrub every layer's part moves, so layering
+removes no draw ops from the workload that matters — while multiplying the
+compositor's blended area by the layer count. Measured anchor: onecanvas's
++21% presented area alone cost ~2 fps on Safari (timings-10). 3 bands = 3×
+area; per-part ≈ 56×. Also the staggerrender anomaly (alternating dirty sets
+≈ 2× per-canvas overhead, "texture-recycling defeat") is exactly the many-
+layers-varying-dirty-subsets regime.
+
+**3. Memory** (real part counts: median 56 parts/face, ~21 dynamic; Selene
+164, Kyoto 150; canvases at w×h×4):
+
+| scheme | canvases | phone (208 px) | 4K (1070 px) |
+|---|---|---|---|
+| today (1/face) | 16 | 2.6 MB | 70 MB |
+| 3 z-bands/face | 48 | 7.9 MB | +140 MB → ~548 MB total, over budget |
+| dynamic parts + static base (~22/face) | 352 | 58 MB | 1.5 GB (3.1× budget) |
+| per-part (~56/face) | 896 | 148 MB (= entire phone floor) | 3.8 GB; Selene alone 716 MB |
+
+Browsers hold a GPU texture (Safari: IOSurface, double/triple-buffered)
+alongside each backing store → real footprint ~2–3× nominal. Tight-cropped
+per-part layers fix the bytes but create hundreds of positioned DOM canvases
+per face — at Safari's measured ~1 ms per dirty layer commit, hundreds of
+dirty layers per scrub frame is its own catastrophe.
+
+**4. Correctness (the original objection, now quantified):** in 12/16 faces
+the static cache sits in the *middle* of z (dynamics below it show through
+destination-out window holes; hands above); Miami/Selene have two statics with
+live parts between; Venezia's static is topmost. Cross-part compositing that
+resists layer isolation: window holes cut through multi-part composites with
+inner shadows painted into the holes; Terra's ring knockout depends on the 50
+wedges beneath showing through moving alpha holes; Terra's `dial 24 s` wheel
+uses a `difference` blend **against the live canvas** — flatly incompatible
+with rendering onto an isolated transparent layer.
+
+**Verdict: dead.** Recorded in docs/performance.md (ideas not pursued).
+
+**Useful by-product — idle (1×) behavior & the battery lever:** at 1× no face
+animates perpetually (beat-sweep is scrub-only; hands sit-then-snap), and the
+loop sleeps via `armIdle`/`nextWakeupTime` — but a wake for *any* face redraws
+**all 16** (no per-face gate; `anyAnimating` only decides loop continuation),
+and the 50 ms `SCHEDULER_LOOKAHEAD_MS` early-wake free-runs display-rate
+full-grid redraws while values sit. With Geneva/Basel/Mauna Kea at 10 Hz and
+Vienna/Terra/Gaia at 8 Hz, the merged awake windows put all.html at roughly
+**~85% duty cycle at 1×**, redrawing 16 faces each frame (architecture-
+overview.md's "2.5% duty cycle" claim predates the on-beat scheduler and is
+stale). If idle battery ever matters: the fidelity-FREE fix is a per-face
+render gate ("skip renderFrame when no rendered value changed since last
+draw" — pixels would be identical), which drops a typical 1× frame from 16
+face redraws to the 0–3 actually snapping, and lets high-Hz displays drop
+refresh. Z-layers are battery-*negative* (more compositor area every presented
+frame). Parked as a nice-to-have.
+
 ## Phase 2 — Primitive attribution (only where Phase 1 leaves questions)
 
 - **Toggles**, same protocol: no-op `drawBezel` (per-frame conic/radial
