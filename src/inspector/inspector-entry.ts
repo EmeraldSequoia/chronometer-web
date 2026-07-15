@@ -21,6 +21,7 @@ import { registerHotkey } from '../shared/hotkeys.js';
 import { initAppNavLinks, registerAppNavHotkeys } from '../shared/app-nav.js';
 import { createFpsIndicator } from '../shared/fps-indicator.js';
 import { getState, setState, initAppState, onSharedChange, isPersistentMode } from '../shared/app-state.js';
+import { locationSourceOf } from '../shared/url-state.js';
 import { initShareButton } from '../shared/share-button.js';
 import { initHelpPopover, openGeneralHelpTopic } from '../shared/help-popover.js';
 import { resolveTimezone, resolveTimezoneFromDb } from '../shared/tz-resolve.js';
@@ -208,9 +209,9 @@ const locationDialog = initLocationDialog({
             // Persist bloc intent *with* the fix, so a reload seeds the display
             // (no 0,0 flash) and can skip the DB while stationary.
             const derived = isCityDataLoaded() ? (findClosestCity(info.lat, info.lon)?.shortLabel ?? null) : null;
-            setState({ bloc: true, lat: info.lat, lon: info.lon, city: derived, tz: info.timezone || null });
+            setState({ bloc: true, lsrc: 'browser', lat: info.lat, lon: info.lon, city: derived, tz: info.timezone || null });
         } else {
-            setState({ bloc: false, lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
+            setState({ bloc: false, lsrc: info.sourceType, lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
         }
 
         // Rebuild the astronomy environment with new location
@@ -228,8 +229,7 @@ if (locationDialog) {
     setLocationBtn.addEventListener('click', () => {
         const s = getState();
         if (s.lat !== null && s.lon !== null) {
-            const sourceType = s.bloc ? 'browser' : (s.city ? 'url-city' : 'manual');
-            locationDialog.updateState(s.lat, s.lon, sourceType, s.city || '', s.city || '');
+            locationDialog.updateState(s.lat, s.lon, locationSourceOf(s), s.city || '', s.city || '');
         }
         locationDialog.show();
     });
@@ -253,7 +253,7 @@ if (locationDialog) {
                 // Seed the fix so the next reload shows it immediately (no 0,0
                 // flash) and can skip the DB while stationary; the city name is
                 // filled by updateLocationDisplay's reverse-geocode.
-                if (isPersistentMode()) setState({ bloc: true, lat, lon, tz: locationTimezone || null });
+                if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat, lon, tz: locationTimezone || null });
                 locationDialog.updateState(lat, lon, 'browser', '', '');
                 env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
                 updateLocationDisplay();
@@ -287,7 +287,7 @@ if (locationDialog) {
             tzDeltaMs = computeTzDeltaMs(locationTimezone);
             // Moved: reseed and clear the stale city so updateLocationDisplay
             // reverse-geocodes the new spot.
-            if (isPersistentMode()) setState({ bloc: true, lat, lon, city: null, tz });
+            if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat, lon, city: null, tz });
             locationDialog.updateState(lat, lon, 'browser', '', '');
             env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
             updateLocationDisplay();

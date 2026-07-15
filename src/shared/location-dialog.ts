@@ -19,6 +19,7 @@ import { loadCityData, releaseCityData, searchCities, findClosestCity, isCityDat
 import type { CityResult } from './city-search.js';
 import { renderGlobe, loadOSMTile } from './mini-map.js';
 import { resolveTimezone } from './tz-resolve.js';
+import type { LocationSource } from './url-state.js';
 
 // ============================================================================
 // Types
@@ -30,7 +31,8 @@ export type GeoResult =
     | { status: 'timeout' }
     | { status: 'unavailable' };
 
-export type LocationSourceType = 'url-city' | 'browser' | 'manual' | 'none';
+/** A LocationSource (persistable provenance), or 'none' while no location is set. */
+export type LocationSourceType = LocationSource | 'none';
 
 export interface LocationDialogConfig {
     /**
@@ -73,7 +75,8 @@ export interface LocationChangeInfo {
     source: string;
     /** Full label like "San Jose, CA, US" for dialog display. */
     fullLabel: string;
-    sourceType: LocationSourceType;
+    /** Where the new location came from — assignable directly to state `lsrc`. */
+    sourceType: LocationSource;
     /** Resolved Olson timezone ID, e.g. "America/Los_Angeles". */
     timezone: string;
     /** City timezone from the database, if available (used as hint for resolveTimezone). */
@@ -225,12 +228,13 @@ export function initLocationDialog(config: LocationDialogConfig): LocationDialog
     // --- Location name formatting ---
 
     function buildLocationNameHTML(): string {
-        if (locationSourceType === 'url-city' && locationFullLabel) {
+        if (locationSourceType === 'city' && locationFullLabel) {
             return `${locationFullLabel} <span class="lp-loc-source">(from cities database)</span>`;
         }
-        if (locationSourceType === 'browser' || locationSourceType === 'manual') {
+        if (locationSourceType === 'browser' || locationSourceType === 'map' || locationSourceType === 'manual') {
             const closest = findClosestCity(currentLat, currentLon);
-            const sourceLabel = locationSourceType === 'browser' ? '(from browser)' : '(manually entered)';
+            const sourceLabel = locationSourceType === 'browser' ? '(from browser)'
+                : locationSourceType === 'map' ? '(from map)' : '(manually entered)';
             if (closest) {
                 const distKm = haversineKm(currentLat, currentLon, closest.lat, closest.lon);
                 const THRESHOLD_KM = 16; // ~10 miles
@@ -282,7 +286,7 @@ export function initLocationDialog(config: LocationDialogConfig): LocationDialog
     function applyLocation(
         newLat: number, newLon: number,
         source: string, fullLabel: string,
-        sourceType: LocationSourceType,
+        sourceType: LocationSource,
         cityTz: string | null = null,
     ): void {
         currentLat = newLat;
@@ -496,7 +500,7 @@ export function initLocationDialog(config: LocationDialogConfig): LocationDialog
                 div.textContent = r.label;
             }
             div.addEventListener('click', () => {
-                applyLocation(r.lat, r.lon, r.shortLabel, r.label, 'url-city', r.timezone);
+                applyLocation(r.lat, r.lon, r.shortLabel, r.label, 'city', r.timezone);
                 lpCityInput.value = '';
                 lpCityResults.innerHTML = '';
                 lpLatInput.value = r.lat.toFixed(3);

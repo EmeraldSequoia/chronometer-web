@@ -326,6 +326,9 @@
   }
 
   // src/shared/url-state.ts
+  function parseLocationSource(v) {
+    return v === "browser" || v === "city" || v === "map" || v === "manual" ? v : null;
+  }
   function readUrlState() {
     const params = new URLSearchParams(window.location.search);
     const latStr = params.get("lat");
@@ -346,6 +349,7 @@
       lon: !isNaN(lon) ? lon : null,
       city: city || null,
       bloc: blocStr === "1",
+      lsrc: parseLocationSource(params.get("lsrc")),
       tc: tcStr === "1",
       t: tStr !== null ? parseInt(tStr, 10) : null,
       off: offStr !== null ? parseInt(offStr, 10) : null,
@@ -407,6 +411,13 @@
         params.set("bloc", "1");
       } else {
         params.delete("bloc");
+      }
+    }
+    if ("lsrc" in changes) {
+      if (changes.lsrc) {
+        params.set("lsrc", changes.lsrc);
+      } else {
+        params.delete("lsrc");
       }
     }
     if ("tc" in changes) {
@@ -710,6 +721,7 @@
     "city",
     "tz",
     "bloc",
+    "lsrc",
     "t",
     "off",
     "dir"
@@ -744,6 +756,7 @@
       lon: null,
       city: null,
       bloc: false,
+      lsrc: null,
       tc: false,
       t: null,
       off: null,
@@ -910,6 +923,7 @@
     "city",
     "tz",
     "bloc",
+    "lsrc",
     "t",
     "off",
     "dir",
@@ -930,6 +944,7 @@
     "loc",
     "tz",
     "bloc",
+    "lsrc",
     "t",
     "off",
     "dir",
@@ -991,6 +1006,7 @@
     if (has("city")) out.city = url.city;
     if (has("tz")) out.tz = url.tz;
     if (has("bloc")) out.bloc = url.bloc;
+    if (has("lsrc")) out.lsrc = url.lsrc;
     if (has("t")) out.t = url.t;
     if (has("off")) out.off = url.off;
     if (has("dir")) out.dir = url.dir;

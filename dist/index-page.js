@@ -478,6 +478,12 @@
   }
 
   // src/shared/url-state.ts
+  function parseLocationSource(v) {
+    return v === "browser" || v === "city" || v === "map" || v === "manual" ? v : null;
+  }
+  function locationSourceOf(s) {
+    return s.lsrc ?? (s.bloc ? "browser" : s.city ? "city" : "manual");
+  }
   function readUrlState() {
     const params = new URLSearchParams(window.location.search);
     const latStr = params.get("lat");
@@ -498,6 +504,7 @@
       lon: !isNaN(lon) ? lon : null,
       city: city || null,
       bloc: blocStr === "1",
+      lsrc: parseLocationSource(params.get("lsrc")),
       tc: tcStr === "1",
       t: tStr !== null ? parseInt(tStr, 10) : null,
       off: offStr !== null ? parseInt(offStr, 10) : null,
@@ -559,6 +566,13 @@
         params.set("bloc", "1");
       } else {
         params.delete("bloc");
+      }
+    }
+    if ("lsrc" in changes) {
+      if (changes.lsrc) {
+        params.set("lsrc", changes.lsrc);
+      } else {
+        params.delete("lsrc");
       }
     }
     if ("tc" in changes) {
@@ -862,6 +876,7 @@
     "city",
     "tz",
     "bloc",
+    "lsrc",
     "t",
     "off",
     "dir"
@@ -896,6 +911,7 @@
       lon: null,
       city: null,
       bloc: false,
+      lsrc: null,
       tc: false,
       t: null,
       off: null,
@@ -1062,6 +1078,7 @@
     "city",
     "tz",
     "bloc",
+    "lsrc",
     "t",
     "off",
     "dir",
@@ -1082,6 +1099,7 @@
     "loc",
     "tz",
     "bloc",
+    "lsrc",
     "t",
     "off",
     "dir",
@@ -1143,6 +1161,7 @@
     if (has("city")) out.city = url.city;
     if (has("tz")) out.tz = url.tz;
     if (has("bloc")) out.bloc = url.bloc;
+    if (has("lsrc")) out.lsrc = url.lsrc;
     if (has("t")) out.t = url.t;
     if (has("off")) out.off = url.off;
     if (has("dir")) out.dir = url.dir;
@@ -1494,12 +1513,12 @@
     locationPrompt.style.display = "none";
   }
   function buildLocationNameHTML() {
-    if (locationSourceType === "url-city" && locationFullLabel) {
+    if (locationSourceType === "city" && locationFullLabel) {
       return `${locationFullLabel} <span class="lp-loc-source">(from cities database)</span>`;
     }
-    if (locationSourceType === "browser" || locationSourceType === "manual") {
+    if (locationSourceType === "browser" || locationSourceType === "map" || locationSourceType === "manual") {
       const closest = findClosestCity(currentLat, currentLon);
-      const sourceLabel = locationSourceType === "browser" ? "(from browser)" : "(manually entered)";
+      const sourceLabel = locationSourceType === "browser" ? "(from browser)" : locationSourceType === "map" ? "(from map)" : "(manually entered)";
       if (closest) {
         return `${closest.label} <span class="lp-loc-source">${sourceLabel}</span>`;
       }
@@ -1537,7 +1556,7 @@
     locationSourceType = sourceType;
     if (writeToUrl) {
       const tz = cityTz ? cityTz : isCityDataLoaded() ? resolveTimezone(newLat, newLon, null) : null;
-      setState({ lat: newLat, lon: newLon, city: source || null, ...tz ? { tz } : {} });
+      setState({ bloc: false, lsrc: sourceType, lat: newLat, lon: newLon, city: source || null, ...tz ? { tz } : {} });
     }
     updateLinks();
     updateMapPreview(newLat, newLon);
@@ -1555,7 +1574,7 @@
     if (result.status === "success") {
       lpUseBrowser.textContent = browserBtnLabel;
       applyLocation(result.lat, result.lon, "", "", "browser", false);
-      setState({ bloc: true, lat: null, lon: null, city: null });
+      setState({ bloc: true, lsrc: null, lat: null, lon: null, city: null });
       updateLinks();
     } else if (result.status === "denied") {
       const btn = lpUseBrowser;
@@ -1595,7 +1614,7 @@
         div.textContent = r.label;
       }
       div.addEventListener("click", () => {
-        applyLocation(r.lat, r.lon, r.shortLabel, r.label, "url-city", true, r.timezone || null);
+        applyLocation(r.lat, r.lon, r.shortLabel, r.label, "city", true, r.timezone || null);
         lpCityInput.value = "";
         lpCityResults.innerHTML = "";
         lpLatInput.value = r.lat.toFixed(3);
@@ -1690,7 +1709,7 @@
       currentLat = urlState.lat;
       currentLon = urlState.lon;
       locationSource = urlState.city || "";
-      locationSourceType = urlState.city ? "url-city" : "manual";
+      locationSourceType = locationSourceOf(urlState);
       updateLinks();
     } else if (urlState.bloc) {
       const result = await requestBrowserLocation(1e4);

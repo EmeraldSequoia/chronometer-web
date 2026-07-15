@@ -9,6 +9,10 @@
  *   lon   - Observer longitude (degrees, negative = west)
  *   city  - City/location label (URL-encoded, e.g. "San Francisco")
  *   bloc  - Browser location: 1 = ask browser for location on startup
+ *   lsrc  - Provenance of the stored lat/lon fix: browser | city | map | manual.
+ *           Distinct from bloc: bloc is the *mode* ("follow the device"), lsrc
+ *           records where the current coordinates came from. Absent on legacy
+ *           state — see locationSourceOf() for the inference fallback.
  *   tc    - Time controller popover visible (1 = shown, absent = hidden)
  *   t     - Display time as Unix ms (absent = real time)
  *   off   - Millisecond offset from real time (used for 1× forward with offset)
@@ -22,11 +26,17 @@
  *   onoon - Observatory noon-on-top toggle: 1 = noon at top of the 24h dial (absent = midnight on top)
  */
 
+/** Provenance of a stored lat/lon fix — where the coordinates came from. */
+export type LocationSource = 'browser' | 'city' | 'map' | 'manual';
+
 export interface UrlState {
     lat: number | null;
     lon: number | null;
+    /** Display name for the location (may be backfilled with the nearest city) — not provenance. */
     city: string | null;
     bloc: boolean;
+    /** Provenance of the stored lat/lon fix; null on legacy state (see locationSourceOf). */
+    lsrc: LocationSource | null;
     tc: boolean;
     t: number | null;
     off: number | null;
@@ -54,6 +64,24 @@ export interface UrlState {
     vnoon: boolean;
 }
 
+/** Validate an lsrc value from a URL/blob; unknown values collapse to null. */
+function parseLocationSource(v: string | null): LocationSource | null {
+    return (v === 'browser' || v === 'city' || v === 'map' || v === 'manual') ? v : null;
+}
+
+/**
+ * Resolve the provenance of a state's stored location for display.
+ *
+ * `lsrc` is authoritative when present. Legacy state (written before lsrc
+ * existed) falls back to the historical inference: bloc → browser, a city
+ * name → city, else manual. The fallback can't distinguish a backfilled
+ * nearest-city name from a real city pick (manual entries near a city read
+ * as 'city'); such state self-heals on the next explicit location change.
+ */
+export function locationSourceOf(s: UrlState): LocationSource {
+    return s.lsrc ?? (s.bloc ? 'browser' : s.city ? 'city' : 'manual');
+}
+
 /** Parse URL query parameters into a typed state object. */
 export function readUrlState(): UrlState {
     const params = new URLSearchParams(window.location.search);
@@ -79,6 +107,7 @@ export function readUrlState(): UrlState {
         lon: !isNaN(lon) ? lon : null,
         city: city || null,
         bloc: blocStr === '1',
+        lsrc: parseLocationSource(params.get('lsrc')),
         tc: tcStr === '1',
         t: tStr !== null ? parseInt(tStr, 10) : null,
         off: offStr !== null ? parseInt(offStr, 10) : null,
@@ -146,6 +175,13 @@ export function writeUrlState(changes: Partial<UrlState>): void {
             params.set('bloc', '1');
         } else {
             params.delete('bloc');
+        }
+    }
+    if ('lsrc' in changes) {
+        if (changes.lsrc) {
+            params.set('lsrc', changes.lsrc);
+        } else {
+            params.delete('lsrc');
         }
     }
     if ('tc' in changes) {
@@ -248,7 +284,8 @@ export function getQueryString(): string {
  *   - Time (`t`/`off`/`dir`) is included only when "interesting" — i.e. the
  *     clock is stopped, reversed, or running with an offset. A live real-time
  *     clock contributes nothing, so the recipient sees their own current time.
- *   - `bloc` is included (the recipient's session/save choice resolves intent).
+ *   - `bloc` is included (the recipient's session/save choice resolves intent);
+ *     `lsrc` likewise, so the location's provenance survives sharing.
  *
  * @param state   The state to serialize (typically app-state's getState()).
  * @param options `slots` — Terra/Gaia per-slot overrides (flat key→value map)
@@ -267,6 +304,7 @@ export function buildShareUrl(
     if (state.city) p.set('city', state.city);
     if (state.tz) p.set('tz', state.tz);
     if (state.bloc) p.set('bloc', '1');
+    if (state.lsrc) p.set('lsrc', state.lsrc);
 
     // --- Time (only when not a plain live real-time clock) ---
     if (state.off !== null && state.off !== undefined) p.set('off', state.off.toString());

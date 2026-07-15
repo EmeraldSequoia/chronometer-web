@@ -13,6 +13,8 @@ import type { CityResult } from './shared/city-search.js';
 import { renderGlobe, loadOSMTile } from './shared/mini-map.js';
 import { resolveTimezone } from './shared/tz-resolve.js';
 import { initAppState, getState, setState } from './shared/app-state.js';
+import { locationSourceOf } from './shared/url-state.js';
+import type { LocationSource } from './shared/url-state.js';
 import { registerHotkey } from './shared/hotkeys.js';
 import { initAppNavLinks, registerAppNavHotkeys } from './shared/app-nav.js';
 import { openGeneralHelpTopic } from './shared/help-popover.js';
@@ -122,7 +124,7 @@ let currentLat = 0;
 let currentLon = 0;
 let locationSource = '';
 let locationFullLabel = '';  // Full "City, State, Country" for dialog display
-let locationSourceType: 'url-city' | 'browser' | 'manual' | 'none' = 'none';
+let locationSourceType: LocationSource | 'none' = 'none';
 let needsPrompt = false;  // true when showing prompt at startup (no URL location)
 
 function showPrompt(geoDenied: boolean) {
@@ -161,12 +163,13 @@ function hidePrompt() {
 }
 
 function buildLocationNameHTML(): string {
-    if (locationSourceType === 'url-city' && locationFullLabel) {
+    if (locationSourceType === 'city' && locationFullLabel) {
         return `${locationFullLabel} <span class="lp-loc-source">(from cities database)</span>`;
     }
-    if (locationSourceType === 'browser' || locationSourceType === 'manual') {
+    if (locationSourceType === 'browser' || locationSourceType === 'map' || locationSourceType === 'manual') {
         const closest = findClosestCity(currentLat, currentLon);
-        const sourceLabel = locationSourceType === 'browser' ? '(from browser)' : '(manually entered)';
+        const sourceLabel = locationSourceType === 'browser' ? '(from browser)'
+            : locationSourceType === 'map' ? '(from map)' : '(manually entered)';
         if (closest) {
             return `${closest.label} <span class="lp-loc-source">${sourceLabel}</span>`;
         }
@@ -198,7 +201,7 @@ function updateMapPreview(mapLat: number, mapLon: number) {
     lpLocationName.innerHTML = buildLocationNameHTML();
 }
 
-function applyLocation(newLat: number, newLon: number, source: string, fullLabel: string, sourceType: typeof locationSourceType, writeToUrl: boolean, cityTz: string | null = null) {
+function applyLocation(newLat: number, newLon: number, source: string, fullLabel: string, sourceType: LocationSource, writeToUrl: boolean, cityTz: string | null = null) {
     hasLocation = true;
     currentLat = newLat;
     currentLon = newLon;
@@ -216,7 +219,8 @@ function applyLocation(newLat: number, newLon: number, source: string, fullLabel
         const tz = cityTz
             ? cityTz
             : (isCityDataLoaded() ? resolveTimezone(newLat, newLon, null) : null);
-        setState({ lat: newLat, lon: newLon, city: source || null, ...(tz ? { tz } : {}) });
+        // Explicit non-browser location → clear any prior bloc intent.
+        setState({ bloc: false, lsrc: sourceType, lat: newLat, lon: newLon, city: source || null, ...(tz ? { tz } : {}) });
     }
     updateLinks();
     updateMapPreview(newLat, newLon);
@@ -240,8 +244,10 @@ lpUseBrowser.addEventListener('click', async () => {
     if (result.status === 'success') {
         lpUseBrowser.textContent = browserBtnLabel;
         applyLocation(result.lat, result.lon, '', '', 'browser', false);
-        // Write bloc=1 and clear lat/lon/city so next reload asks browser again
-        setState({ bloc: true, lat: null, lon: null, city: null });
+        // Write bloc=1 and clear lat/lon/city so next reload asks browser again.
+        // lsrc: null — with lat/lon cleared there is no stored fix to describe;
+        // the next load's fetch writes lsrc: 'browser' with the fix.
+        setState({ bloc: true, lsrc: null, lat: null, lon: null, city: null });
         updateLinks();
     } else if (result.status === 'denied') {
         // User denied — disable the button
@@ -296,7 +302,7 @@ function renderCityResults(results: CityResult[]) {
             div.textContent = r.label;
         }
         div.addEventListener('click', () => {
-            applyLocation(r.lat, r.lon, r.shortLabel, r.label, 'url-city', true, r.timezone || null);
+            applyLocation(r.lat, r.lon, r.shortLabel, r.label, 'city', true, r.timezone || null);
             lpCityInput.value = '';
             lpCityResults.innerHTML = '';
             lpLatInput.value = r.lat.toFixed(3);
@@ -418,7 +424,7 @@ registerHotkey('l', () => showPrompt(false));
         currentLat = urlState.lat;
         currentLon = urlState.lon;
         locationSource = urlState.city || '';
-        locationSourceType = urlState.city ? 'url-city' : 'manual';
+        locationSourceType = locationSourceOf(urlState);
         updateLinks();
     } else if (urlState.bloc) {
         // bloc=1 set — ask browser for location with 10s timeout

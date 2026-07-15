@@ -50,7 +50,8 @@ import { expandAnalemma } from './watch/analemma.js';
 import { evalAttr } from './watch/watch-env.js';
 import { TimeController, TICK_INTERVAL_MS, displaySecondsPerTick } from './shared/time-controller.js';
 
-import { initNavigationLinks, updateNavigationLinks } from './shared/url-state.js';
+import { initNavigationLinks, updateNavigationLinks, locationSourceOf } from './shared/url-state.js';
+import type { LocationSource } from './shared/url-state.js';
 import { getState, setState, initAppState, onSharedChange, getSlotOverrides, setSlotOverrides, isPersistentMode } from './shared/app-state.js';
 import { createFpsIndicator } from './shared/fps-indicator.js';
 import { initHelpPopover, openGeneralHelpTopic } from './shared/help-popover.js';
@@ -423,7 +424,7 @@ async function main() {
     let locationSource = '';
     let locationFullLabel = '';  // Full "City, State, Country" for dialog display
     // Track how the location was obtained for display purposes
-    let locationSourceType: 'url-city' | 'browser' | 'manual' | 'none' = 'none';
+    let locationSourceType: LocationSource | 'none' = 'none';
     let needsPrompt = false;
     // Resolved IANA timezone for the current location (e.g. "America/Los_Angeles")
     let locationTimezone: string | undefined = urlState.tz || undefined;
@@ -450,7 +451,7 @@ async function main() {
         lat = urlState.lat;
         lon = urlState.lon;
         locationSource = urlState.city || '';
-        locationSourceType = urlState.city ? 'url-city' : 'manual';
+        locationSourceType = locationSourceOf(urlState);
         // Seeded bloc: keep showing this stored location, but refresh geolocation
         // quietly in the background once the watch is up (see below).
         needsBlocRefresh = urlState.bloc === true;
@@ -491,7 +492,7 @@ async function main() {
             // and can skip the DB while stationary. Automatic write — gated on
             // persistent mode; the city name is filled by updateLocationDisplay's
             // on-demand reverse-geocode.
-            if (isPersistentMode()) setState({ bloc: true, lat, lon, tz: locationTimezone || null });
+            if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat, lon, tz: locationTimezone || null });
         } else if (result.status === 'denied') {
             // User explicitly denied — show prompt with button disabled
             lat = 0; lon = 0;
@@ -2579,8 +2580,9 @@ async function main() {
     /**
      * Build the location name string for the dialog header.
      * Rules:
-     *   - If locationSourceType is 'url-city' → use locationSource + "(from cities database)"
+     *   - If locationSourceType is 'city'    → use locationSource + "(from cities database)"
      *   - If locationSourceType is 'browser' → find closest city + "(from browser)"
+     *   - If locationSourceType is 'map'     → find closest city + "(from map)"
      *   - If locationSourceType is 'manual'  → find closest city + "(manually entered)"
      *   - If no city data loaded yet, just show coords
      */
@@ -2627,13 +2629,14 @@ async function main() {
     }
 
     function buildLocationNameHTML(): string {
-        if (locationSourceType === 'url-city' && locationFullLabel) {
+        if (locationSourceType === 'city' && locationFullLabel) {
             return `${locationFullLabel} <span class="lp-loc-source">(from cities database)</span>`;
         }
-        // For browser or manual, find closest city
-        if (locationSourceType === 'browser' || locationSourceType === 'manual') {
+        // For browser, map, or manual, find closest city
+        if (locationSourceType === 'browser' || locationSourceType === 'map' || locationSourceType === 'manual') {
             const closest = findClosestCity(lat, lon);
-            const sourceLabel = locationSourceType === 'browser' ? '(from browser)' : '(manually entered)';
+            const sourceLabel = locationSourceType === 'browser' ? '(from browser)'
+                : locationSourceType === 'map' ? '(from map)' : '(manually entered)';
             if (closest) {
                 const distKm = haversineKm(lat, lon, closest.lat, closest.lon);
                 const THRESHOLD_KM = 16; // ~10 miles
@@ -2687,7 +2690,7 @@ async function main() {
     }
 
     /** Apply location to the watch AND update the map preview (dialog stays open). */
-    function applyLocation(newLat: number, newLon: number, source: string, fullLabel: string, sourceType: typeof locationSourceType, writeToUrl: boolean, cityTz: string | null = null) {
+    function applyLocation(newLat: number, newLon: number, source: string, fullLabel: string, sourceType: LocationSource, writeToUrl: boolean, cityTz: string | null = null) {
         locationSource = source;
         locationFullLabel = fullLabel;
         locationSourceType = sourceType;
@@ -2699,7 +2702,7 @@ async function main() {
         scheduleDstRebuild();
         if (writeToUrl) {
             // Explicit non-browser location → clear any prior bloc intent.
-            setState({ bloc: false, lat: newLat, lon: newLon, city: source || null, tz: locationTimezone || null });
+            setState({ bloc: false, lsrc: sourceType, lat: newLat, lon: newLon, city: source || null, tz: locationTimezone || null });
         }
         // Update the map preview and show Done button
         updateMapPreview(newLat, newLon);
@@ -2725,7 +2728,7 @@ async function main() {
             // Persist bloc intent *with* the fix as a seed, so a reload shows it
             // immediately (no 0,0 flash) and can skip the DB while stationary.
             const derived = isCityDataLoaded() ? (findClosestCity(result.lat, result.lon)?.shortLabel ?? null) : null;
-            setState({ bloc: true, lat: result.lat, lon: result.lon, city: derived, tz: locationTimezone || null });
+            setState({ bloc: true, lsrc: 'browser', lat: result.lat, lon: result.lon, city: derived, tz: locationTimezone || null });
         } else if (result.status === 'denied') {
             // User denied — disable the button
             geoPermission = 'denied';
@@ -2823,7 +2826,7 @@ async function main() {
                 div.textContent = r.label;
             }
             div.addEventListener('click', () => {
-                applyLocation(r.lat, r.lon, r.shortLabel, r.label, 'url-city', true, r.timezone);
+                applyLocation(r.lat, r.lon, r.shortLabel, r.label, 'city', true, r.timezone);
                 lpCityInput.value = '';
                 lpCityResults.innerHTML = '';
                 // Update lat/lon inputs to reflect selection
@@ -3060,7 +3063,7 @@ async function main() {
             (s.lat !== lat || s.lon !== lon || (s.tz || undefined) !== (locationTimezone || undefined))) {
             locationSource = s.city || '';
             locationFullLabel = s.city || '';
-            locationSourceType = s.city ? 'url-city' : 'manual';
+            locationSourceType = locationSourceOf(s);
             locationTimezone = resolveTimezone(s.lat, s.lon, s.tz || null);
             tzDeltaMs = computeTzDeltaMs(locationTimezone);
             rebuildAllForLocation(s.lat, s.lon);  // sets lat/lon, rebuilds, updates display, kicks scheduler
@@ -4188,7 +4191,7 @@ async function main() {
             applyLocation(result.lat, result.lon, '', '', 'browser', false, null);
             // Moved: reseed and clear the stale city so updateLocationDisplay
             // reverse-geocodes the new spot.
-            if (isPersistentMode()) setState({ bloc: true, lat: result.lat, lon: result.lon, city: null, tz: locationTimezone || null });
+            if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat: result.lat, lon: result.lon, city: null, tz: locationTimezone || null });
             updateLocationDisplay();
         }).catch(() => notifyBlocRefreshFailed()).finally(() => {
             if (sourceLabel) sourceLabel.style.color = '';

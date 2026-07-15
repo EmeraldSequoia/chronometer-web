@@ -11462,6 +11462,12 @@ return {${names2.join(",")}};`;
   }
 
   // src/shared/url-state.ts
+  function parseLocationSource(v) {
+    return v === "browser" || v === "city" || v === "map" || v === "manual" ? v : null;
+  }
+  function locationSourceOf(s) {
+    return s.lsrc ?? (s.bloc ? "browser" : s.city ? "city" : "manual");
+  }
   function readUrlState() {
     const params = new URLSearchParams(window.location.search);
     const latStr = params.get("lat");
@@ -11482,6 +11488,7 @@ return {${names2.join(",")}};`;
       lon: !isNaN(lon) ? lon : null,
       city: city || null,
       bloc: blocStr === "1",
+      lsrc: parseLocationSource(params.get("lsrc")),
       tc: tcStr === "1",
       t: tStr !== null ? parseInt(tStr, 10) : null,
       off: offStr !== null ? parseInt(offStr, 10) : null,
@@ -11543,6 +11550,13 @@ return {${names2.join(",")}};`;
         params.set("bloc", "1");
       } else {
         params.delete("bloc");
+      }
+    }
+    if ("lsrc" in changes) {
+      if (changes.lsrc) {
+        params.set("lsrc", changes.lsrc);
+      } else {
+        params.delete("lsrc");
       }
     }
     if ("tc" in changes) {
@@ -11624,6 +11638,7 @@ return {${names2.join(",")}};`;
     if (state.city) p.set("city", state.city);
     if (state.tz) p.set("tz", state.tz);
     if (state.bloc) p.set("bloc", "1");
+    if (state.lsrc) p.set("lsrc", state.lsrc);
     if (state.off !== null && state.off !== void 0) p.set("off", state.off.toString());
     if (state.t !== null && state.t !== void 0) p.set("t", state.t.toString());
     if (state.dir !== 1) p.set("dir", state.dir.toString());
@@ -11887,6 +11902,7 @@ return {${names2.join(",")}};`;
     "city",
     "tz",
     "bloc",
+    "lsrc",
     "t",
     "off",
     "dir"
@@ -11921,6 +11937,7 @@ return {${names2.join(",")}};`;
       lon: null,
       city: null,
       bloc: false,
+      lsrc: null,
       tc: false,
       t: null,
       off: null,
@@ -12087,6 +12104,7 @@ return {${names2.join(",")}};`;
     "city",
     "tz",
     "bloc",
+    "lsrc",
     "t",
     "off",
     "dir",
@@ -12107,6 +12125,7 @@ return {${names2.join(",")}};`;
     "loc",
     "tz",
     "bloc",
+    "lsrc",
     "t",
     "off",
     "dir",
@@ -12168,6 +12187,7 @@ return {${names2.join(",")}};`;
     if (has("city")) out.city = url.city;
     if (has("tz")) out.tz = url.tz;
     if (has("bloc")) out.bloc = url.bloc;
+    if (has("lsrc")) out.lsrc = url.lsrc;
     if (has("t")) out.t = url.t;
     if (has("off")) out.off = url.off;
     if (has("dir")) out.dir = url.dir;
@@ -21765,7 +21785,7 @@ return {${names2.join(",")}};`;
       lat = urlState.lat;
       lon = urlState.lon;
       locationSource = urlState.city || "";
-      locationSourceType = urlState.city ? "url-city" : "manual";
+      locationSourceType = locationSourceOf(urlState);
       needsBlocRefresh = urlState.bloc === true;
       if (!locationTimezone) {
         if (isCityDataLoaded()) {
@@ -21795,7 +21815,7 @@ return {${names2.join(",")}};`;
         geoPermission = "granted";
         locationTimezone = resolveTimezone(lat, lon, null);
         tzDeltaMs = computeTzDeltaMs(locationTimezone);
-        if (isPersistentMode()) setState({ bloc: true, lat, lon, tz: locationTimezone || null });
+        if (isPersistentMode()) setState({ bloc: true, lsrc: "browser", lat, lon, tz: locationTimezone || null });
       } else if (result.status === "denied") {
         lat = 0;
         lon = 0;
@@ -22364,7 +22384,7 @@ return {${names2.join(",")}};`;
       return `canvas/bitmap est TOTAL ${MB(total)}MB: faces ${MB(facesB)} \xB7 static caches ${MB(staticB)} \xB7 images ${MB(imagesB)} \xB7 src blobs ${MB(srcBlobB)} \xB7 shadows ${MB(shadowB)} \xB7 wedge cache ${MB(rc.wedgeCache)} \xB7 wheel cache ${MB(rc.wheelCache)} \xB7 hand cache ${MB(rc.handCache)} \xB7 analemma ${MB(analemmaB)} \xB7 terra ring ${MB(terraB)} \xB7 cutout temp ${MB(rc.cutoutTemp)} \xB7 face buffers ${MB(buffersB)} \xB7 shared canvas ${MB(sharedB)}${jsHeap}`;
     }
     function _buildStamp() {
-      return true ? "2.0.33" : "dev";
+      return true ? "2.0.34" : "dev";
     }
     function _browserShort() {
       const ua = navigator.userAgent;
@@ -23326,12 +23346,12 @@ return {${names2.join(",")}};`;
       return dirs[Math.round(bearing / 22.5) % 16];
     }
     function buildLocationNameHTML() {
-      if (locationSourceType === "url-city" && locationFullLabel) {
+      if (locationSourceType === "city" && locationFullLabel) {
         return `${locationFullLabel} <span class="lp-loc-source">(from cities database)</span>`;
       }
-      if (locationSourceType === "browser" || locationSourceType === "manual") {
+      if (locationSourceType === "browser" || locationSourceType === "map" || locationSourceType === "manual") {
         const closest = findClosestCity(lat, lon);
-        const sourceLabel2 = locationSourceType === "browser" ? "(from browser)" : "(manually entered)";
+        const sourceLabel2 = locationSourceType === "browser" ? "(from browser)" : locationSourceType === "map" ? "(from map)" : "(manually entered)";
         if (closest) {
           const distKm = haversineKm(lat, lon, closest.lat, closest.lon);
           const THRESHOLD_KM = 16;
@@ -23382,7 +23402,7 @@ return {${names2.join(",")}};`;
       rebuildAllForLocation(newLat, newLon);
       scheduleDstRebuild();
       if (writeToUrl) {
-        setState({ bloc: false, lat: newLat, lon: newLon, city: source || null, tz: locationTimezone || null });
+        setState({ bloc: false, lsrc: sourceType, lat: newLat, lon: newLon, city: source || null, tz: locationTimezone || null });
       }
       updateMapPreview(newLat, newLon);
       lpDialogFooter.classList.add("visible");
@@ -23401,7 +23421,7 @@ return {${names2.join(",")}};`;
         lpUseBrowser.textContent = browserBtnLabel;
         applyLocation(result.lat, result.lon, "", "", "browser", false, null);
         const derived = isCityDataLoaded() ? findClosestCity(result.lat, result.lon)?.shortLabel ?? null : null;
-        setState({ bloc: true, lat: result.lat, lon: result.lon, city: derived, tz: locationTimezone || null });
+        setState({ bloc: true, lsrc: "browser", lat: result.lat, lon: result.lon, city: derived, tz: locationTimezone || null });
       } else if (result.status === "denied") {
         geoPermission = "denied";
         const btn = lpUseBrowser;
@@ -23470,7 +23490,7 @@ return {${names2.join(",")}};`;
           div.textContent = r.label;
         }
         div.addEventListener("click", () => {
-          applyLocation(r.lat, r.lon, r.shortLabel, r.label, "url-city", true, r.timezone);
+          applyLocation(r.lat, r.lon, r.shortLabel, r.label, "city", true, r.timezone);
           lpCityInput.value = "";
           lpCityResults.innerHTML = "";
           lpLatInput.value = r.lat.toFixed(3);
@@ -23631,7 +23651,7 @@ return {${names2.join(",")}};`;
       if (s.lat !== null && s.lon !== null && (s.lat !== lat || s.lon !== lon || (s.tz || void 0) !== (locationTimezone || void 0))) {
         locationSource = s.city || "";
         locationFullLabel = s.city || "";
-        locationSourceType = s.city ? "url-city" : "manual";
+        locationSourceType = locationSourceOf(s);
         locationTimezone = resolveTimezone(s.lat, s.lon, s.tz || null);
         tzDeltaMs = computeTzDeltaMs(locationTimezone);
         rebuildAllForLocation(s.lat, s.lon);
@@ -24544,7 +24564,7 @@ return {${names2.join(",")}};`;
         }
         if (haversineKm(lat, lon, result.lat, result.lon) <= 16) return;
         applyLocation(result.lat, result.lon, "", "", "browser", false, null);
-        if (isPersistentMode()) setState({ bloc: true, lat: result.lat, lon: result.lon, city: null, tz: locationTimezone || null });
+        if (isPersistentMode()) setState({ bloc: true, lsrc: "browser", lat: result.lat, lon: result.lon, city: null, tz: locationTimezone || null });
         updateLocationDisplay();
       }).catch(() => notifyBlocRefreshFailed()).finally(() => {
         if (sourceLabel) sourceLabel.style.color = "";

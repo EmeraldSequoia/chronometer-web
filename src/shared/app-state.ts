@@ -54,7 +54,7 @@ const STORAGE_KEY_PREFIX = 'ec:';
  * so opening any app with no URL params shows the same time and location.
  */
 const SHARED_FIELDS: ReadonlySet<keyof UrlState> = new Set([
-    'lat', 'lon', 'city', 'tz', 'bloc', 't', 'off', 'dir',
+    'lat', 'lon', 'city', 'tz', 'bloc', 'lsrc', 't', 'off', 'dir',
 ]);
 
 /**
@@ -100,7 +100,7 @@ function namespaceOf(field: keyof UrlState, app: AppName): Namespace | null {
 
 function defaultState(): UrlState {
     return {
-        lat: null, lon: null, city: null, bloc: false, tc: false,
+        lat: null, lon: null, city: null, bloc: false, lsrc: null, tc: false,
         t: null, off: null, dir: 1, tz: null, picks: null, tp: 'd',
         embed: false, fps: false, kyhand: null, kmode: null, op: null, onoon: false,
         body: null, vnoon: false,
@@ -305,7 +305,7 @@ const TIME_FIELDS: ReadonlySet<keyof UrlState> = new Set(['t', 'off', 'dir']);
  * URL-only fields (embed/fps/tc/picks).
  */
 const SHAREABLE_FIELDS: readonly (keyof UrlState)[] = [
-    'lat', 'lon', 'city', 'tz', 'bloc', 't', 'off', 'dir',
+    'lat', 'lon', 'city', 'tz', 'bloc', 'lsrc', 't', 'off', 'dir',
     'picks', 'kyhand', 'kmode', 'op', 'onoon', 'body', 'vnoon', 'tp',
 ];
 
@@ -316,7 +316,7 @@ const SHAREABLE_FIELDS: readonly (keyof UrlState)[] = [
  * navigates with a clean URL, so a `?picks=` URL is an external/shared link.
  */
 const SHAREABLE_URL_KEYS: readonly string[] = [
-    'lat', 'lon', 'long', 'city', 'loc', 'tz', 'bloc',
+    'lat', 'lon', 'long', 'city', 'loc', 'tz', 'bloc', 'lsrc',
     't', 'off', 'dir', 'picks', 'kyhand', 'kmode', 'op', 'onoon', 'body', 'vnoon', 'tp',
 ];
 
@@ -393,6 +393,7 @@ function urlScalarOverrides(): Partial<UrlState> {
     if (has('city')) out.city = url.city;
     if (has('tz')) out.tz = url.tz;
     if (has('bloc')) out.bloc = url.bloc;
+    if (has('lsrc')) out.lsrc = url.lsrc;
     if (has('t')) out.t = url.t;
     if (has('off')) out.off = url.off;
     if (has('dir')) out.dir = url.dir;

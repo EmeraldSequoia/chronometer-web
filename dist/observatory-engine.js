@@ -13011,6 +13011,12 @@
   }
 
   // src/shared/url-state.ts
+  function parseLocationSource(v) {
+    return v === "browser" || v === "city" || v === "map" || v === "manual" ? v : null;
+  }
+  function locationSourceOf(s) {
+    return s.lsrc ?? (s.bloc ? "browser" : s.city ? "city" : "manual");
+  }
   function readUrlState() {
     const params = new URLSearchParams(window.location.search);
     const latStr = params.get("lat");
@@ -13031,6 +13037,7 @@
       lon: !isNaN(lon2) ? lon2 : null,
       city: city || null,
       bloc: blocStr === "1",
+      lsrc: parseLocationSource(params.get("lsrc")),
       tc: tcStr === "1",
       t: tStr !== null ? parseInt(tStr, 10) : null,
       off: offStr !== null ? parseInt(offStr, 10) : null,
@@ -13092,6 +13099,13 @@
         params.set("bloc", "1");
       } else {
         params.delete("bloc");
+      }
+    }
+    if ("lsrc" in changes) {
+      if (changes.lsrc) {
+        params.set("lsrc", changes.lsrc);
+      } else {
+        params.delete("lsrc");
       }
     }
     if ("tc" in changes) {
@@ -13173,6 +13187,7 @@
     if (state.city) p.set("city", state.city);
     if (state.tz) p.set("tz", state.tz);
     if (state.bloc) p.set("bloc", "1");
+    if (state.lsrc) p.set("lsrc", state.lsrc);
     if (state.off !== null && state.off !== void 0) p.set("off", state.off.toString());
     if (state.t !== null && state.t !== void 0) p.set("t", state.t.toString());
     if (state.dir !== 1) p.set("dir", state.dir.toString());
@@ -13419,6 +13434,7 @@
     "city",
     "tz",
     "bloc",
+    "lsrc",
     "t",
     "off",
     "dir"
@@ -13453,6 +13469,7 @@
       lon: null,
       city: null,
       bloc: false,
+      lsrc: null,
       tc: false,
       t: null,
       off: null,
@@ -13619,6 +13636,7 @@
     "city",
     "tz",
     "bloc",
+    "lsrc",
     "t",
     "off",
     "dir",
@@ -13639,6 +13657,7 @@
     "loc",
     "tz",
     "bloc",
+    "lsrc",
     "t",
     "off",
     "dir",
@@ -13700,6 +13719,7 @@
     if (has("city")) out.city = url.city;
     if (has("tz")) out.tz = url.tz;
     if (has("bloc")) out.bloc = url.bloc;
+    if (has("lsrc")) out.lsrc = url.lsrc;
     if (has("t")) out.t = url.t;
     if (has("off")) out.off = url.off;
     if (has("dir")) out.dir = url.dir;
@@ -14523,12 +14543,12 @@
     let locating = false;
     const browserBtnLabel = lpUseBrowser.textContent || "Use device location via browser";
     function buildLocationNameHTML() {
-      if (locationSourceType === "url-city" && locationFullLabel) {
+      if (locationSourceType === "city" && locationFullLabel) {
         return `${locationFullLabel} <span class="lp-loc-source">(from cities database)</span>`;
       }
-      if (locationSourceType === "browser" || locationSourceType === "manual") {
+      if (locationSourceType === "browser" || locationSourceType === "map" || locationSourceType === "manual") {
         const closest = findClosestCity(currentLat, currentLon);
-        const sourceLabel = locationSourceType === "browser" ? "(from browser)" : "(manually entered)";
+        const sourceLabel = locationSourceType === "browser" ? "(from browser)" : locationSourceType === "map" ? "(from map)" : "(manually entered)";
         if (closest) {
           const distKm = haversineKm(currentLat, currentLon, closest.lat, closest.lon);
           const THRESHOLD_KM = 16;
@@ -14724,7 +14744,7 @@
           div.textContent = r.label;
         }
         div.addEventListener("click", () => {
-          applyLocation(r.lat, r.lon, r.shortLabel, r.label, "url-city", r.timezone);
+          applyLocation(r.lat, r.lon, r.shortLabel, r.label, "city", r.timezone);
           lpCityInput.value = "";
           lpCityResults.innerHTML = "";
           lpLatInput.value = r.lat.toFixed(3);
@@ -21498,9 +21518,9 @@
         needsPrompt = false;
         if (info.sourceType === "browser") {
           const derived = isCityDataLoaded() ? findClosestCity(info.lat, info.lon)?.shortLabel : null;
-          setState({ bloc: true, lat: info.lat, lon: info.lon, city: derived ?? null, tz: info.timezone || null });
+          setState({ bloc: true, lsrc: "browser", lat: info.lat, lon: info.lon, city: derived ?? null, tz: info.timezone || null });
         } else {
-          setState({ bloc: false, lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
+          setState({ bloc: false, lsrc: info.sourceType, lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
         }
         updater?.reset();
         rebuildEnv();
@@ -21512,8 +21532,7 @@
       setLocationBtn.addEventListener("click", () => {
         const s = getState();
         if (s.lat !== null && s.lon !== null) {
-          const sourceType = s.bloc ? "browser" : s.city ? "url-city" : "manual";
-          locationDialog.updateState(s.lat, s.lon, sourceType, s.city || "", s.city || "");
+          locationDialog.updateState(s.lat, s.lon, locationSourceOf(s), s.city || "", s.city || "");
         }
         locationDialog.show();
       });
@@ -21549,7 +21568,7 @@
               lon = result.lon;
               locationTimezone = tz;
               needsPrompt = false;
-              if (isPersistentMode()) setState({ bloc: true, lat, lon, tz });
+              if (isPersistentMode()) setState({ bloc: true, lsrc: "browser", lat, lon, tz });
               locationDialog.updateState(lat, lon, "browser", "", "");
               updater?.reset();
               rebuildEnv();
@@ -21580,7 +21599,7 @@
           lat = result.lat;
           lon = result.lon;
           locationTimezone = tz;
-          if (isPersistentMode()) setState({ bloc: true, lat, lon, city: null, tz });
+          if (isPersistentMode()) setState({ bloc: true, lsrc: "browser", lat, lon, city: null, tz });
           locationDialog.updateState(lat, lon, "browser", "", "");
           updater?.reset();
           rebuildEnv();
@@ -21799,7 +21818,7 @@
           locationTimezone = savedTz;
         }
       }
-      setState({ lat, lon, city: null, tz: locationTimezone || null });
+      setState({ bloc: false, lsrc: "map", lat, lon, city: null, tz: locationTimezone || null });
       updateLocationDisplay();
       timeUI?.updateTimezoneDisplay();
       rebuildEnv();

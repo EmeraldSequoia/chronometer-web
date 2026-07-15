@@ -14,6 +14,7 @@
 import { createAstroEnvironment, computeTzDeltaMs } from '../shared/astro-env.js';
 import type { Environment } from '../expr/env.js';
 import { getState, setState, initAppState, onSharedChange, isPersistentMode } from '../shared/app-state.js';
+import { locationSourceOf } from '../shared/url-state.js';
 import { resolveTimezone } from '../shared/tz-resolve.js';
 import { findClosestCity, findLargestCityNear, prefetchCityData, loadCityData, releaseCityData, isCityDataLoaded } from '../shared/city-search.js';
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
@@ -594,9 +595,9 @@ function setupLocationDialog(): void {
                 // Persist bloc intent *with* the fix, so a reload seeds the
                 // display (no 0,0 flash) and can skip the DB while stationary.
                 const derived = isCityDataLoaded() ? findClosestCity(info.lat, info.lon)?.shortLabel : null;
-                setState({ bloc: true, lat: info.lat, lon: info.lon, city: derived ?? null, tz: info.timezone || null });
+                setState({ bloc: true, lsrc: 'browser', lat: info.lat, lon: info.lon, city: derived ?? null, tz: info.timezone || null });
             } else {
-                setState({ bloc: false, lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
+                setState({ bloc: false, lsrc: info.sourceType, lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
             }
 
             // Re-evaluate all values at the new location: sentinel-scheduled
@@ -614,8 +615,7 @@ function setupLocationDialog(): void {
         setLocationBtn.addEventListener('click', () => {
             const s = getState();
             if (s.lat !== null && s.lon !== null) {
-                const sourceType = s.bloc ? 'browser' : (s.city ? 'url-city' : 'manual');
-                locationDialog.updateState(s.lat, s.lon, sourceType, s.city || '', s.city || '');
+                locationDialog.updateState(s.lat, s.lon, locationSourceOf(s), s.city || '', s.city || '');
             }
             locationDialog.show();
         });
@@ -670,7 +670,7 @@ function setupLocationDialog(): void {
                         // can skip the DB while stationary (automatic write — gated
                         // on persistent mode; the city name is filled by
                         // updateLocationDisplay's reverse-geocode).
-                        if (isPersistentMode()) setState({ bloc: true, lat, lon, tz });
+                        if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat, lon, tz });
                         locationDialog.updateState(lat, lon, 'browser', '', '');
                         // Async location arrived after buildObsValues ran at the
                         // startup default — re-evaluate everything (esp. the
@@ -711,7 +711,7 @@ function setupLocationDialog(): void {
                 locationTimezone = tz;
                 // Moved: the stored city name is stale — clear it so
                 // updateLocationDisplay reverse-geocodes the new spot; reseed.
-                if (isPersistentMode()) setState({ bloc: true, lat, lon, city: null, tz });
+                if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat, lon, city: null, tz });
                 locationDialog.updateState(lat, lon, 'browser', '', '');
                 updater?.reset();
                 rebuildEnv();
@@ -1038,8 +1038,12 @@ function dismissKeepDialog(keep: boolean): void {
                 locationTimezone = savedTz;
             }
         }
-        // Persist the new location.
-        setState({ lat, lon, city: null, tz: locationTimezone || null });
+        // Persist the new location as a map pick. Clear bloc: a kept map pick
+        // is a fixed location — without this, a reload would re-request browser
+        // geolocation and overwrite the pick. lsrc records the provenance for
+        // the location dialog ("from map"); the nearest-city name is backfilled
+        // into `city` by updateLocationDisplay for display only.
+        setState({ bloc: false, lsrc: 'map', lat, lon, city: null, tz: locationTimezone || null });
         updateLocationDisplay();
         timeUI?.updateTimezoneDisplay();
         // Transition values back to normal scheduling and trigger redraw

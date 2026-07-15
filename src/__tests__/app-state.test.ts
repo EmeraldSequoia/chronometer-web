@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, test, expect, beforeEach } from 'vitest';
 import { storageWorks, __test__ } from '../shared/app-state.js';
-import { buildShareUrl } from '../shared/url-state.js';
+import { buildShareUrl, locationSourceOf, readUrlState } from '../shared/url-state.js';
 
 const {
     namespaceOf, isDefaultValue, LocalStorageBackend, InMemoryBackend, STORAGE_KEY_PREFIX,
@@ -18,7 +18,7 @@ beforeEach(clearStorage);
 
 describe('namespaceOf', () => {
     test('shared location/time fields route to shared', () => {
-        for (const f of ['lat', 'lon', 'city', 'tz', 'bloc', 't', 'off', 'dir'] as const) {
+        for (const f of ['lat', 'lon', 'city', 'tz', 'bloc', 'lsrc', 't', 'off', 'dir'] as const) {
             expect(namespaceOf(f, 'chronometer')).toBe('shared');
             expect(namespaceOf(f, 'observatory')).toBe('shared');
             expect(namespaceOf(f, 'inspector')).toBe('shared');
@@ -61,6 +61,8 @@ describe('isDefaultValue', () => {
         expect(isDefaultValue('tp', 'a')).toBe(false);
         expect(isDefaultValue('bloc', false)).toBe(true);
         expect(isDefaultValue('bloc', true)).toBe(false);
+        expect(isDefaultValue('lsrc', null)).toBe(true);
+        expect(isDefaultValue('lsrc', 'map')).toBe(false);
         expect(isDefaultValue('op', 0)).toBe(true);
         expect(isDefaultValue('op', 3)).toBe(false);
         expect(isDefaultValue('onoon', false)).toBe(true);
@@ -137,7 +139,7 @@ describe('LocalStorageBackend', () => {
 
     test('round-trips a representative state', () => {
         const be = new LocalStorageBackend('chronometer');
-        be.write({ lat: 51.5, lon: -0.13, city: 'London', tz: 'Europe/London', t: 1700000000000, dir: -1, kyhand: '1' });
+        be.write({ lat: 51.5, lon: -0.13, city: 'London', tz: 'Europe/London', t: 1700000000000, dir: -1, kyhand: '1', lsrc: 'map' });
         const s = be.read();
         expect(s.lat).toBe(51.5);
         expect(s.lon).toBe(-0.13);
@@ -146,6 +148,7 @@ describe('LocalStorageBackend', () => {
         expect(s.t).toBe(1700000000000);
         expect(s.dir).toBe(-1);
         expect(s.kyhand).toBe('1');
+        expect(s.lsrc).toBe('map');
     });
 
     test('URL-only fields come from the URL, not storage', () => {
@@ -224,6 +227,7 @@ describe('buildShareUrl', () => {
             kyhand: '1', body: 'jupiter', vnoon: true, fps: true, embed: true, tc: true,
         }, { baseUrl: base }));
         expect(u.searchParams.get('bloc')).toBe('1');
+        expect(u.searchParams.has('lsrc')).toBe(false);
         expect(u.searchParams.get('op')).toBe('3');
         expect(u.searchParams.get('onoon')).toBe('1');
         expect(u.searchParams.get('tp')).toBe('a');
@@ -234,6 +238,11 @@ describe('buildShareUrl', () => {
         expect(u.searchParams.has('fps')).toBe(false);
         expect(u.searchParams.has('embed')).toBe(false);
         expect(u.searchParams.has('tc')).toBe(false);
+    });
+
+    test('includes lsrc so location provenance survives sharing', () => {
+        const u = new URL(buildShareUrl({ ...defaults, lat: 1, lon: 2, lsrc: 'map' }, { baseUrl: base }));
+        expect(u.searchParams.get('lsrc')).toBe('map');
     });
 
     test('omits default op (Sun=0)', () => {
@@ -249,6 +258,31 @@ describe('buildShareUrl', () => {
         expect(u.searchParams.get('r5')).toBe('Denver');
         expect(u.searchParams.get('r5tz')).toBe('America/Denver');
         expect(u.searchParams.get('d2')).toBe('Tokyo');
+    });
+});
+
+describe('locationSourceOf', () => {
+    const defaults = __test__.defaultState();
+
+    test('explicit lsrc wins over a backfilled city name', () => {
+        expect(locationSourceOf({ ...defaults, lsrc: 'manual', city: 'Paris' })).toBe('manual');
+        expect(locationSourceOf({ ...defaults, lsrc: 'map', city: 'Downtown' })).toBe('map');
+        expect(locationSourceOf({ ...defaults, lsrc: 'browser', city: 'San Jose', bloc: true })).toBe('browser');
+    });
+
+    test('legacy state (no lsrc) falls back to the historical inference', () => {
+        expect(locationSourceOf({ ...defaults, bloc: true, city: 'San Jose' })).toBe('browser');
+        expect(locationSourceOf({ ...defaults, city: 'London' })).toBe('city');
+        expect(locationSourceOf({ ...defaults })).toBe('manual');
+    });
+
+    test('invalid lsrc URL values collapse to null and use the fallback', () => {
+        window.history.replaceState(null, '', '/?lat=10&lon=20&city=London&lsrc=bogus');
+        const s = readUrlState();
+        expect(s.lsrc).toBeNull();
+        expect(locationSourceOf(s)).toBe('city');
+        window.history.replaceState(null, '', '/?lat=10&lon=20&lsrc=map');
+        expect(readUrlState().lsrc).toBe('map');
     });
 });
 
