@@ -165,7 +165,11 @@ let selectedPlanet: number =
 // Drag-to-explore state
 // ============================================================================
 
-/** Drag-to-explore state machine: idle → dragging → confirming → idle. */
+/**
+ * Drag-to-explore state machine: idle → dragging → confirming → idle.
+ * A map press while confirming goes back to dragging (resume), keeping the
+ * original pre-drag location as the revert point.
+ */
 let dragState: 'idle' | 'dragging' | 'confirming' = 'idle';
 /** Saved location before drag started (restored on Revert). */
 let savedLat = 0;
@@ -568,8 +572,10 @@ function rebuildEnv(): void {
     if (locationTimezone !== lastLayoutTz) {
         if (dragState === 'dragging') {
             // Defer layout recomputation and static cache invalidation during active drag
-            // to keep the drag interaction smooth. The layout will be recomputed for the
-            // final timezone upon release.
+            // to keep the drag interaction smooth. Release also calls rebuildEnv while
+            // still 'dragging' (see pointerup), so the layout is recomputed for the final
+            // timezone only when the user commits (Keep); Revert restores savedTz, which
+            // still matches lastLayoutTz, so it relayouts nothing.
         } else {
             resizeCanvas();
             return;
@@ -867,6 +873,10 @@ function applyTemporaryLocation(newLat: number, newLon: number, lockTimezone?: b
  * Press on the earth map to immediately switch the display to that location;
  * drag to explore in real time; on release, confirm (Keep) or revert.
  *
+ * Releasing too early pops the Keep/Revert dialog; pressing the map again
+ * through the dialog backdrop resumes dragging instead of dead-ending. The
+ * resumed drag keeps the original pre-drag location as its revert point.
+ *
  * Shift-key axis lock: hold Shift to constrain to latitude-only or
  * longitude-only change from the saved position (whichever axis has the
  * larger delta). The lock is re-evaluated on every move — no sticky axis.
@@ -880,28 +890,33 @@ function setupMapDrag(): void {
         const y = ev.clientY - rect.top;
         if (!isInsideEarthMap(x, y, layout)) return;
 
-        // Ensure city DB is loaded for timezone resolution during drag.
-        // The compressed blob is already prefetched; this just decompresses
-        // + parses (~few ms from cache). The first pointerdown/move may use
-        // the longitude-based fallback if the async load hasn't finished.
-        if (!isCityDataLoaded()) {
-            loadCityData().catch(() => {});
-        }
-
         // Save the current location so we can revert.
         savedLat = lat;
         savedLon = lon;
         savedTz = locationTimezone;
         savedCity = getState().city;
 
-        // Compute the clicked lat/lon and apply immediately.
-        dragWasTimezoneLocked = ev.altKey;
-        const { lat: newLat, lon: newLon } = computeDragLatLon(x, y, ev.shiftKey);
-        applyTemporaryLocation(newLat, newLon, dragWasTimezoneLocked);
+        startDragAt(ev, x, y);
+    });
 
-        dragState = 'dragging';
-        canvas.setPointerCapture(ev.pointerId);
-        ev.preventDefault();  // prevent text selection / default touch behavior
+    // Resume dragging when a press lands on the map while the Keep/Revert
+    // dialog is up (an early release otherwise dead-ends: the full-screen
+    // backdrop swallows the press). Presses on the pill itself still go to
+    // its buttons; backdrop presses outside the map remain inert.
+    const overlay = document.getElementById('map-drag-confirm');
+    overlay?.addEventListener('pointerdown', (ev: PointerEvent) => {
+        if (!layout) return;
+        if (dragState !== 'confirming') return;
+        if (ev.target !== overlay) return;  // pill press, not backdrop
+        const rect = canvas.getBoundingClientRect();
+        const x = ev.clientX - rect.left;
+        const y = ev.clientY - rect.top;
+        if (!isInsideEarthMap(x, y, layout)) return;
+
+        // Hide the dialog without keeping or reverting; saved* stay as the
+        // original pre-drag location so Revert undoes the whole chain.
+        hideKeepDialogOverlay();
+        startDragAt(ev, x, y);
     });
 
     canvas.addEventListener('pointermove', (ev: PointerEvent) => {
@@ -946,7 +961,10 @@ function setupMapDrag(): void {
 
             // Standard resolution (if dragging without Alt, timezone is already resolved at coordinates)
             locationTimezone = resolveTimezone(lat, lon, null);
-            dragState = 'confirming';
+            // Still 'dragging' here on purpose: rebuildEnv then defers the
+            // tz relayout, so the dialog and the final crosshair paint
+            // immediately. The relayout runs on Keep (dismissKeepDialog);
+            // Revert never needs one — the layout still matches savedTz.
             rebuildEnv();
             scheduleFrame();
         }
@@ -954,6 +972,39 @@ function setupMapDrag(): void {
         dragState = 'confirming';
         showKeepLocationDialog();
     });
+}
+
+/**
+ * Begin (or resume) a drag at canvas CSS coordinates (x, y): apply the
+ * location immediately and enter the 'dragging' state. Callers decide the
+ * revert point — a fresh drag snapshots saved* first, a resume keeps the
+ * original.
+ */
+function startDragAt(ev: PointerEvent, x: number, y: number): void {
+    // Ensure city DB is loaded for timezone resolution during drag.
+    // The compressed blob is already prefetched; this just decompresses
+    // + parses (~few ms from cache). The first pointerdown/move may use
+    // the longitude-based fallback if the async load hasn't finished.
+    if (!isCityDataLoaded()) {
+        loadCityData().catch(() => {});
+    }
+
+    // Enter 'dragging' before applying the location: rebuildEnv defers the
+    // full relayout (resizeCanvas + static cache invalidation) only while
+    // dragging. With the old state still set, a cross-timezone press paid
+    // that relayout synchronously in the pointerdown handler — and the next
+    // rAF tick rebuilt every static cache before the browser could paint,
+    // a sub-second freeze. Deferred, the press costs the same as a move;
+    // the relayout runs once at release, as designed.
+    dragState = 'dragging';
+
+    // Compute the pressed lat/lon and apply immediately.
+    dragWasTimezoneLocked = ev.altKey;
+    const { lat: newLat, lon: newLon } = computeDragLatLon(x, y, ev.shiftKey);
+    applyTemporaryLocation(newLat, newLon, dragWasTimezoneLocked);
+
+    canvas.setPointerCapture(ev.pointerId);
+    ev.preventDefault();  // prevent text selection / default touch behavior
 }
 
 /**
@@ -1014,17 +1065,21 @@ function showKeepLocationDialog(): void {
     }
 }
 
-function dismissKeepDialog(keep: boolean): void {
+/** Hide the Keep/Revert overlay and unhook its keyboard handler. */
+function hideKeepDialogOverlay(): void {
     const overlay = document.getElementById('map-drag-confirm');
-    if (overlay) {
-        overlay.classList.remove('visible');
-        overlay.style.display = 'none';
-        const handler = (overlay as any)._keyHandler;
-        if (handler) {
-            document.removeEventListener('keydown', handler, { capture: true } as EventListenerOptions);
-            (overlay as any)._keyHandler = null;
-        }
+    if (!overlay) return;
+    overlay.classList.remove('visible');
+    overlay.style.display = 'none';
+    const handler = (overlay as any)._keyHandler;
+    if (handler) {
+        document.removeEventListener('keydown', handler, { capture: true } as EventListenerOptions);
+        (overlay as any)._keyHandler = null;
     }
+}
+
+function dismissKeepDialog(keep: boolean): void {
+    hideKeepDialogOverlay();
 
     const tzLabel = document.getElementById('map-drag-tz-label');
     const tzCheckbox = document.getElementById('map-drag-tz-checkbox') as HTMLInputElement;

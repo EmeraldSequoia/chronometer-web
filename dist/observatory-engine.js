@@ -21702,20 +21702,23 @@
       const x = ev.clientX - rect.left;
       const y = ev.clientY - rect.top;
       if (!isInsideEarthMap(x, y, layout)) return;
-      if (!isCityDataLoaded()) {
-        loadCityData().catch(() => {
-        });
-      }
       savedLat = lat;
       savedLon = lon;
       savedTz = locationTimezone;
       savedCity = getState().city;
-      dragWasTimezoneLocked = ev.altKey;
-      const { lat: newLat, lon: newLon } = computeDragLatLon(x, y, ev.shiftKey);
-      applyTemporaryLocation(newLat, newLon, dragWasTimezoneLocked);
-      dragState = "dragging";
-      canvas.setPointerCapture(ev.pointerId);
-      ev.preventDefault();
+      startDragAt(ev, x, y);
+    });
+    const overlay = document.getElementById("map-drag-confirm");
+    overlay?.addEventListener("pointerdown", (ev) => {
+      if (!layout) return;
+      if (dragState !== "confirming") return;
+      if (ev.target !== overlay) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = ev.clientX - rect.left;
+      const y = ev.clientY - rect.top;
+      if (!isInsideEarthMap(x, y, layout)) return;
+      hideKeepDialogOverlay();
+      startDragAt(ev, x, y);
     });
     canvas.addEventListener("pointermove", (ev) => {
       const rect = canvas.getBoundingClientRect();
@@ -21746,13 +21749,24 @@
       } else {
         if (tzLabel) tzLabel.style.display = "none";
         locationTimezone = resolveTimezone(lat, lon, null);
-        dragState = "confirming";
         rebuildEnv();
         scheduleFrame();
       }
       dragState = "confirming";
       showKeepLocationDialog();
     });
+  }
+  function startDragAt(ev, x, y) {
+    if (!isCityDataLoaded()) {
+      loadCityData().catch(() => {
+      });
+    }
+    dragState = "dragging";
+    dragWasTimezoneLocked = ev.altKey;
+    const { lat: newLat, lon: newLon } = computeDragLatLon(x, y, ev.shiftKey);
+    applyTemporaryLocation(newLat, newLon, dragWasTimezoneLocked);
+    canvas.setPointerCapture(ev.pointerId);
+    ev.preventDefault();
   }
   function computeDragLatLon(cssX, cssY, shiftKey) {
     const raw = earthPixelToLatLon(cssX, cssY, layout);
@@ -21797,17 +21811,19 @@
       revertBtn.addEventListener("click", () => dismissKeepDialog(false));
     }
   }
-  function dismissKeepDialog(keep) {
+  function hideKeepDialogOverlay() {
     const overlay = document.getElementById("map-drag-confirm");
-    if (overlay) {
-      overlay.classList.remove("visible");
-      overlay.style.display = "none";
-      const handler = overlay._keyHandler;
-      if (handler) {
-        document.removeEventListener("keydown", handler, { capture: true });
-        overlay._keyHandler = null;
-      }
+    if (!overlay) return;
+    overlay.classList.remove("visible");
+    overlay.style.display = "none";
+    const handler = overlay._keyHandler;
+    if (handler) {
+      document.removeEventListener("keydown", handler, { capture: true });
+      overlay._keyHandler = null;
     }
+  }
+  function dismissKeepDialog(keep) {
+    hideKeepDialogOverlay();
     const tzLabel = document.getElementById("map-drag-tz-label");
     const tzCheckbox = document.getElementById("map-drag-tz-checkbox");
     if (keep) {
