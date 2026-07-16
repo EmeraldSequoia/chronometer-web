@@ -202,6 +202,15 @@ export class TimeController {
      */
     private frameSnapshot: Date | null = null;
 
+    /**
+     * Long-lived read-side hold (map drag-to-explore): when set, the displayed
+     * time is frozen at this value while the underlying transport (running/
+     * stopped/rate/offset) keeps flowing untouched beneath it. releaseHold()
+     * reveals the live time again — so a hold never accumulates an offset and
+     * never changes user-visible transport state.
+     */
+    private holdSnapshot: Date | null = null;
+
     // ========================================================================
     // Public getters
     // ========================================================================
@@ -219,6 +228,9 @@ export class TimeController {
 
     /** Is time stopped? */
     get isStopped(): boolean { return this.stopped; }
+
+    /** True while a display hold is active (see holdDisplayTime). */
+    get isHeld(): boolean { return this.holdSnapshot !== null; }
 
     /** Millisecond offset from real time (used in 1× mode). */
     get timeOffset(): number { return this.offsetMs; }
@@ -275,8 +287,30 @@ export class TimeController {
         this.frameSnapshot = null;
     }
 
+    /**
+     * Freeze the *displayed* time at its current value. Read-side only:
+     * transport state is untouched and real/simulated time keeps flowing
+     * underneath, so releaseHold() snaps the display back to live time
+     * (the caller is expected to animate that catch-up). Idempotent —
+     * holding while already held keeps the original instant, which lets a
+     * resumed map drag share the first press's frozen time.
+     */
+    holdDisplayTime(): void {
+        if (this.holdSnapshot === null) this.holdSnapshot = this._computeDisplayTime();
+    }
+
+    /** Release a display hold (no-op if none is active). */
+    releaseHold(): void {
+        this.holdSnapshot = null;
+    }
+
     /** Internal: compute the display time without snapshotting. */
     private _computeDisplayTime(): Date {
+        // A display hold overrides every transport mode; beginFrame() also
+        // lands here, so frame snapshots taken during a hold see the held time.
+        if (this.holdSnapshot !== null) {
+            return new Date(this.holdSnapshot.getTime());
+        }
         // 1× or -1× mode (no quantized rate selected)
         if (this.rate === null && !this.stopped) {
             if (this.direction === -1) {

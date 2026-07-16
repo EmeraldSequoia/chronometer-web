@@ -116,7 +116,11 @@ function rawTzOffsetSecondsAt(tz: string, utcMs: number): number {
     for (const part of parts) if (part.type !== 'literal') p[part.type] = +part.value;
     // h23 yields 00..23, but guard the midnight-as-24 quirk seen on some engines.
     const asUTC = Date.UTC(p.year, p.month - 1, p.day, p.hour % 24, p.minute, p.second);
-    return Math.round((asUTC - utcMs) / 1000);
+    // formatToParts truncates to whole seconds, so compare against the equally
+    // truncated input — differencing against raw utcMs made the offset come out
+    // 1s low whenever the sub-second fraction exceeded 500ms (and the per-tz
+    // window memo then served that poisoned value for days of queries).
+    return Math.round((asUTC - Math.floor(utcMs / 1000) * 1000) / 1000);
 }
 
 /**
@@ -234,8 +238,8 @@ export function envTzOffsetSec(olsonTimezone: string | undefined, now: Date): nu
  * is needed iff either differs from what a fresh build would capture now.
  *
  * The check reads the env's own (quantized) getNow — the exact source the
- * captured values came from — because tzOffsetSecondsAt is sensitive to
- * sub-second inputs (a …:59.999 display time can resolve 1s off).
+ * captured values came from — so both sides of the comparison see the same
+ * instant.
  *
  * This is the per-tick rebuild guard's predicate: when it returns false, the
  * env is byte-equivalent to a fresh build (given an invalidated astro cache

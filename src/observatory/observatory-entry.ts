@@ -472,7 +472,11 @@ function tick(): void {
                 updater.tickFixedDuration(env, perfNow, 300);
                 dragNeedsUpdate = false;
             } else {
-                // No location change — just interpolate existing animations.
+                // No location change — just settle in-flight animations.
+                // Display time is held for the whole drag/confirm interaction
+                // (see holdDisplayTime at drag start), so there is nothing
+                // time-driven to advance; once animations settle the loop
+                // parks (see `continuous` below).
                 updater.animateOnly(perfNow);
             }
         } else {
@@ -493,7 +497,15 @@ function tick(): void {
     // animation is still settling; otherwise go fully idle. A stopped, settled
     // clock has nothing to re-render — display time is frozen. The loop is
     // restarted by scheduleFrame()/ensureSchedulerRunning() on the next change.
-    const continuous = !timeController.isStopped || animating;
+    //
+    // Throughout drag-to-explore ('dragging' and 'confirming'), display time
+    // is held, so once animations settle nothing can change and the loop
+    // parks even though the clock is running. That's load-bearing for the
+    // dialog: per-frame repaints under its backdrop-filter intermittently
+    // composite one frame unblurred (WebKit); a static backdrop can't flash.
+    // Map moves, dismissal, resume, and resize all wake via scheduleFrame().
+    const continuous = (!timeController.isStopped || animating)
+        && (dragState === 'idle' || animating);
     fpsIndicator?.recordFrame(continuous, performance.now() - perfNow);
     inTick = false;
     if (continuous || frameRequestedDuringTick) {
@@ -896,6 +908,12 @@ function setupMapDrag(): void {
         savedTz = locationTimezone;
         savedCity = getState().city;
 
+        // Freeze the displayed time for the whole interaction (drag, dialog,
+        // resumed drags): every change on the face is then attributable to
+        // location, not time. Released on Keep/Revert (dismissKeepDialog),
+        // where updater.reset() sweeps the display back to live time.
+        timeController.holdDisplayTime();
+
         startDragAt(ev, x, y);
     });
 
@@ -1080,6 +1098,10 @@ function hideKeepDialogOverlay(): void {
 
 function dismissKeepDialog(keep: boolean): void {
     hideKeepDialogOverlay();
+
+    // Resume the display clock. Both branches below call updater.reset(),
+    // which sweeps every value from its held-time position to live time.
+    timeController.releaseHold();
 
     const tzLabel = document.getElementById('map-drag-tz-label');
     const tzCheckbox = document.getElementById('map-drag-tz-checkbox') as HTMLInputElement;

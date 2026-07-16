@@ -11205,7 +11205,7 @@
     const p = {};
     for (const part of parts) if (part.type !== "literal") p[part.type] = +part.value;
     const asUTC = Date.UTC(p.year, p.month - 1, p.day, p.hour % 24, p.minute, p.second);
-    return Math.round((asUTC - utcMs) / 1e3);
+    return Math.round((asUTC - Math.floor(utcMs / 1e3) * 1e3) / 1e3);
   }
   var _tzOffsetWindow = /* @__PURE__ */ new Map();
   var _PROBE_RADII_MS = [10 * 864e5, 2 * 864e5, 6 * 36e5, 36e5];
@@ -13132,6 +13132,14 @@
        * see exactly the same time.
        */
       this.frameSnapshot = null;
+      /**
+       * Long-lived read-side hold (map drag-to-explore): when set, the displayed
+       * time is frozen at this value while the underlying transport (running/
+       * stopped/rate/offset) keeps flowing untouched beneath it. releaseHold()
+       * reveals the live time again — so a hold never accumulates an offset and
+       * never changes user-visible transport state.
+       */
+      this.holdSnapshot = null;
       // ========================================================================
       // Internal helpers
       // ========================================================================
@@ -13172,6 +13180,10 @@
     /** Is time stopped? */
     get isStopped() {
       return this.stopped;
+    }
+    /** True while a display hold is active (see holdDisplayTime). */
+    get isHeld() {
+      return this.holdSnapshot !== null;
     }
     /** Millisecond offset from real time (used in 1× mode). */
     get timeOffset() {
@@ -13223,8 +13235,26 @@
     endFrame() {
       this.frameSnapshot = null;
     }
+    /**
+     * Freeze the *displayed* time at its current value. Read-side only:
+     * transport state is untouched and real/simulated time keeps flowing
+     * underneath, so releaseHold() snaps the display back to live time
+     * (the caller is expected to animate that catch-up). Idempotent —
+     * holding while already held keeps the original instant, which lets a
+     * resumed map drag share the first press's frozen time.
+     */
+    holdDisplayTime() {
+      if (this.holdSnapshot === null) this.holdSnapshot = this._computeDisplayTime();
+    }
+    /** Release a display hold (no-op if none is active). */
+    releaseHold() {
+      this.holdSnapshot = null;
+    }
     /** Internal: compute the display time without snapshotting. */
     _computeDisplayTime() {
+      if (this.holdSnapshot !== null) {
+        return new Date(this.holdSnapshot.getTime());
+      }
       if (this.rate === null && !this.stopped) {
         if (this.direction === -1) {
           const realNow = Date.now();
@@ -15454,7 +15484,7 @@
       timeBar.classList.toggle("at-limit", atLimit);
       if (!isReal) {
         timeBarRate.textContent = timeController2.statusLabel;
-        timeBarOffset.textContent = formatOffset(sim, /* @__PURE__ */ new Date());
+        timeBarOffset.textContent = timeController2.isHeld ? "Hold for location change" : formatOffset(sim, /* @__PURE__ */ new Date());
       }
       tpRateLabel.textContent = timeController2.statusLabel;
       renderTransport();

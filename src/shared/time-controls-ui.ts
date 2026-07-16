@@ -482,7 +482,11 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
 
         if (!isReal) {
             timeBarRate.textContent = timeController.statusLabel;
-            timeBarOffset.textContent = formatOffset(sim, new Date());
+            // During a map-drag display hold the sim time is frozen while real
+            // time flows, so the live offset would drift; explain instead.
+            timeBarOffset.textContent = timeController.isHeld
+                ? 'Hold for location change'
+                : formatOffset(sim, new Date());
         }
         tpRateLabel.textContent = timeController.statusLabel;
 

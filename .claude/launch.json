@@ -50,6 +50,66 @@
       "port": 8795
     },
     {
+      "name": "dist-fresh29",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8811",
+        "--directory",
+        "dist"
+      ],
+      "port": 8811
+    },
+    {
+      "name": "dist-fresh28",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8809",
+        "--directory",
+        "dist"
+      ],
+      "port": 8809
+    },
+    {
+      "name": "dist-fresh27",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8807",
+        "--directory",
+        "dist"
+      ],
+      "port": 8807
+    },
+    {
+      "name": "dist-fresh26",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8805",
+        "--directory",
+        "dist"
+      ],
+      "port": 8805
+    },
+    {
+      "name": "dist-fresh25",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8803",
+        "--directory",
+        "dist"
+      ],
+      "port": 8803
+    },
+    {
       "name": "dist-fresh24",
       "runtimeExecutable": "python3",
       "runtimeArgs": [
