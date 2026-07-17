@@ -1991,80 +1991,10 @@ async function main() {
 
     const GAP_PX = 12;
     const PADDING_PX = 12;
-    const POPOVER_GAP = 8;   // minimum gap between face edge and popover
 
     let resizeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
     let lastContainerW = 0;
     let lastContainerH = 0;
-    let wasShifted = false;  // tracks if face is currently in a popover-dodged position
-    let wasAstroTab = false;  // tracks if the Astro tab was active during last layout
-
-    /**
-     * Compute face center positions (relative to the grid container)
-     * for a given grid configuration and face size.
-     * offsetAdjustX/Y shift the grid from its default centered position.
-     */
-    function computeFaceCenters(
-        nFaces: number, gridCols: number, gridRows: number,
-        size: number, containerW: number, containerH: number,
-        offsetAdjustX = 0, offsetAdjustY = 0,
-    ): Array<{ cx: number; cy: number }> {
-        const cellStep = size + GAP_PX;
-        const remainder = nFaces - gridCols * (gridRows - 1);
-        const canNestle = gridRows > 1 && remainder !== gridCols
-                          && (gridCols - remainder) % 2 === 1;
-        const nestledStep = canNestle ? cellStep * Math.sqrt(3) / 2 : cellStep;
-
-        const gridW = gridCols * size + (gridCols - 1) * GAP_PX;
-        const lastRowY = gridRows === 1 ? 0 : nestledStep + (gridRows - 2) * cellStep;
-        const totalH = lastRowY + size;
-
-        const offsetX = (containerW - gridW) / 2 + offsetAdjustX;
-        const offsetY = (containerH - totalH) / 2 + offsetAdjustY;
-
-        const centers: Array<{ cx: number; cy: number }> = [];
-        for (let i = 0; i < nFaces; i++) {
-            let row: number, colIdx: number, itemsInRow: number;
-            if (i < remainder) {
-                row = 0; colIdx = i; itemsInRow = remainder;
-            } else {
-                const j = i - remainder;
-                row = 1 + Math.floor(j / gridCols);
-                colIdx = j % gridCols;
-                itemsInRow = gridCols;
-            }
-            const rowW = itemsInRow * size + (itemsInRow - 1) * GAP_PX;
-            const rowOffsetX = (gridW - rowW) / 2;
-            const x = offsetX + rowOffsetX + colIdx * cellStep;
-            const rowY = row === 0 ? 0 : nestledStep + (row - 1) * cellStep;
-            const y = offsetY + rowY;
-            centers.push({ cx: x + size / 2, cy: y + size / 2 });
-        }
-        return centers;
-    }
-
-    /**
-     * Check if any circular face overlaps a rectangle (the popover).
-     * Returns true if overlap detected.
-     */
-    function anyFaceOverlapsRect(
-        centers: Array<{ cx: number; cy: number }>,
-        radius: number,
-        rectLeft: number, rectTop: number,
-        rectRight: number, rectBottom: number,
-    ): boolean {
-        for (const { cx, cy } of centers) {
-            const nearX = Math.max(rectLeft, Math.min(cx, rectRight));
-            const nearY = Math.max(rectTop, Math.min(cy, rectBottom));
-            const dx = cx - nearX;
-            const dy = cy - nearY;
-            if (dx * dx + dy * dy < (radius + POPOVER_GAP) * (radius + POPOVER_GAP)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
 
     function onGridResize(W: number, H: number) {
         lastContainerW = W;
@@ -2073,224 +2003,16 @@ async function main() {
         const result = optimizeGrid(faces.length, W, H, GAP_PX, PADDING_PX);
         if (result.size <= 0) return;
 
-        let size = result.size;
-        let gridShiftX = 0, gridShiftY = 0;
-        let useTopLeftAlign = false;
+        const size = result.size;
 
-        // Compute X position for column c with hex close-pack at the
-        // long/short boundary.  Long columns use normal cellStep spacing,
-        // and the first short column is placed hexStep from the last long
-        // column. Subsequent short columns use normal cellStep.
-        const hexColX = (
-            col: number, remainder: number, nCols: number,
-            cellStep: number, hasNestle: boolean,
-        ): number => {
-            if (!hasNestle || col < remainder) {
-                return col * cellStep;
-            }
-            const hexStep = cellStep * Math.sqrt(3) / 2;
-            return (remainder - 1) * cellStep + hexStep + (col - remainder) * cellStep;
-        };
-
-        // If the popover is open, find the largest face size where some
-        // grid configuration (column count) places the grid top-left-aligned
-        // without the bottom-right face overlapping the popover.
-        if (timeUI?.isPopoverOpen()) {
-            const gridRect = grid.getBoundingClientRect();
-            const popRect = document.getElementById('time-popover')!.getBoundingClientRect();
-            // Use tp-upper's narrow width for horizontal bounds (tp-lower
-            // sits over the time bar/location panel below the grid, so its
-            // extra width doesn't block faces in the grid area).
-            const upperEl = document.getElementById('tp-upper')!;
-            const upperRect = upperEl.getBoundingClientRect();
-            const pLeft = upperRect.left - gridRect.left;
-            const pTop = popRect.top - gridRect.top;
-            const pRight = upperRect.right - gridRect.left;
-            const pBottom = popRect.bottom - gridRect.top;
-
-            // Build exclusion rects: always include tp-upper region.
-            // When the Astro tab is active, tp-lower is taller and can
-            // overlap faces, so add it as a second exclusion zone.
-            type Rect = { left: number; top: number; right: number; bottom: number };
-            const exclusionRects: Rect[] = [
-                { left: pLeft, top: pTop, right: pRight, bottom: pBottom },
-            ];
-            const lowerEl = document.getElementById('tp-lower');
-            const astroActive = lowerEl &&
-                !document.getElementById('tp-tab-astro')?.classList.contains('tp-pane-hidden');
-            if (astroActive && lowerEl) {
-                const lowerRect = lowerEl.getBoundingClientRect();
-                exclusionRects.push({
-                    left: lowerRect.left - gridRect.left,
-                    top: lowerRect.top - gridRect.top,
-                    right: lowerRect.right - gridRect.left,
-                    bottom: lowerRect.bottom - gridRect.top,
-                });
-            }
-
-            /** Check if a circle overlaps any exclusion rect. */
-            const circleOverlapsExclusion = (
-                cx: number, cy: number, r: number,
-            ): boolean => {
-                for (const rect of exclusionRects) {
-                    const nearX = Math.max(rect.left, Math.min(cx, rect.right));
-                    const nearY = Math.max(rect.top, Math.min(cy, rect.bottom));
-                    const dx = cx - nearX;
-                    const dy = cy - nearY;
-                    if (dx * dx + dy * dy < (r + POPOVER_GAP) * (r + POPOVER_GAP)) {
-                        return true;
-                    }
-                }
-                return false;
-            };
-
-            // Check whether a grid with `cols` columns at face `size`
-            // fits without any face overlapping the popover.
-            // The grid is pinned to top-left (PADDING offset).
-            const configFits = (cols: number, s: number): boolean => {
-                const rows = Math.ceil(faces.length / cols);
-                const cellStep = s + GAP_PX;
-                const remainder = faces.length - cols * (rows - 1);
-                const r = s / 2;
-
-                const hasNestle = remainder > 0 && remainder < cols;
-
-                // Check grid fits in container at all
-                const lastColX = hexColX(cols - 1, remainder, cols, cellStep, hasNestle);
-                const gridW = lastColX + s + 2 * PADDING_PX;
-                const gridH = (rows - 1) * cellStep + s + 2 * PADDING_PX;
-                if (gridW > W || gridH > H) return false;
-
-                // Check ALL faces for overlap with exclusion zones
-                for (let i = 0; i < faces.length; i++) {
-                    const row = Math.floor(i / cols);
-                    const col = i % cols;
-                    const isShortCol = col >= remainder;
-                    const ny = isShortCol && hasNestle ? cellStep / 2 : 0;
-                    const cx = PADDING_PX + hexColX(col, remainder, cols, cellStep, hasNestle) + r;
-                    const cy = PADDING_PX + row * cellStep + ny + r;
-
-                    if (circleOverlapsExclusion(cx, cy, r)) {
-                        return false;
-                    }
-                }
-                return true;
-            };
-
-            // Check if the current full-size layout has overlap
-            const centers = computeFaceCenters(
-                faces.length, result.cols, result.rows, size, W, H);
-            let hasOverlap = false;
-            for (const { cx, cy } of centers) {
-                if (circleOverlapsExclusion(cx, cy, size / 2)) {
-                    hasOverlap = true;
-                    break;
-                }
-            }
-            if (hasOverlap) {
-
-                // Binary search for the largest face size that works
-                // with some grid configuration, pinned top-left.
-                // Use max(W,H) as upper bound since hex packing allows
-                // larger faces than optimizeGrid's uniform-spacing estimate.
-                let lo = 0, hi = Math.max(W, H);
-
-                for (let iter = 0; iter < 25; iter++) {
-                    const mid = Math.floor((lo + hi) / 2);
-                    if (mid <= 0) break;
-
-                    // Try all possible column counts
-                    let anyWorks = false;
-                    for (let c = 1; c <= faces.length; c++) {
-                        if (configFits(c, mid)) {
-                            anyWorks = true;
-                            break;
-                        }
-                    }
-                    if (anyWorks) {
-                        lo = mid;
-                    } else {
-                        hi = mid;
-                    }
-                }
-
-                // Found the max size. Now pick the best column count at that size:
-                // prefer the config that gives the largest face (they're all `lo`,
-                // so prefer fewer total cells = more balanced layout).
-                size = lo;
-                let bestConfig = result.cols;
-                for (let c = 1; c <= faces.length; c++) {
-                    if (configFits(c, size)) {
-                        bestConfig = c;
-                        break;  // first valid config at this size
-                    }
-                }
-
-                result.cols = bestConfig;
-                result.rows = Math.ceil(faces.length / bestConfig);
-                useTopLeftAlign = true;
-                if (size <= 0) return;
-
-                // Now find the best position that doesn't overlap.
-                const cellStep = size + GAP_PX;
-                const remainder = faces.length - bestConfig * (result.rows - 1);
-                const hasNestle = remainder > 0 && remainder < bestConfig;
-                const lastColX = hexColX(bestConfig - 1, remainder, bestConfig, cellStep, hasNestle);
-                const gridW = lastColX + size;
-                const gridH = (result.rows - 1) * cellStep + size;
-                const centeredX = (W - gridW) / 2 - PADDING_PX;
-                const centeredY = (H - gridH) / 2 - PADDING_PX;
-                const r = size / 2;
-
-                const shiftFits = (dx: number, dy: number): boolean => {
-                    for (let i = 0; i < faces.length; i++) {
-                        const row = Math.floor(i / bestConfig);
-                        const col = i % bestConfig;
-                        const isShort = col >= remainder;
-                        const cx = PADDING_PX + dx + hexColX(col, remainder, bestConfig, cellStep, hasNestle) + r;
-                        const cy = PADDING_PX + dy + row * cellStep + (isShort && hasNestle ? cellStep / 2 : 0) + r;
-                        if (circleOverlapsExclusion(cx, cy, r)) {
-                            return false;
-                        }
-                    }
-                    return true;
-                };
-
-                // Step 1: find best horizontal position
-                let sLo = 0, sHi = Math.max(0, centeredX);
-                for (let iter = 0; iter < 20; iter++) {
-                    const sMid = (sLo + sHi) / 2;
-                    if (shiftFits(sMid, 0)) {
-                        sLo = sMid;
-                    } else {
-                        sHi = sMid;
-                    }
-                }
-                gridShiftX = sLo;
-
-                // Step 2: at that horizontal position, find best vertical position
-                let vLo = 0, vHi = Math.max(0, centeredY);
-                for (let iter = 0; iter < 20; iter++) {
-                    const vMid = (vLo + vHi) / 2;
-                    if (shiftFits(gridShiftX, vMid)) {
-                        vLo = vMid;
-                    } else {
-                        vHi = vMid;
-                    }
-                }
-                gridShiftY = vLo;
-            }
-        }
+        // The time-controller popover no longer reshapes the grid: it is a
+        // pure overlay (ghosted while scrubbing and on actuating taps), so
+        // faces always use the centered layout below at full size.
 
         const dpr = effectiveDpr();
         const newPhys = Math.round(size * dpr);
-        // Skip if size hasn't changed AND layout position hasn't changed
-        const isAstroTab = (timeUI?.isPopoverOpen() ?? false) &&
-            !document.getElementById('tp-tab-astro')?.classList.contains('tp-pane-hidden');
-        const positionChanged = useTopLeftAlign !== wasShifted || isAstroTab !== wasAstroTab;
-        if (newPhys === faces[0]?.canvas.width && !positionChanged) return;
-        wasShifted = useTopLeftAlign;
-        wasAstroTab = isAstroTab;
+        // Skip if the face size hasn't changed (layout is a pure function of it).
+        if (newPhys === faces[0]?.canvas.width) return;
 
         // Deliberately NOT stopScheduler() here. The render loop keeps running
         // across the (async, per-face) cache rebuild below: a face whose cache we
@@ -2307,26 +2029,7 @@ async function main() {
         cols = result.cols;
         rows = result.rows;
 
-        if (useTopLeftAlign) {
-            // Top-left-aligned grid with hex close-pack (matches configFits() geometry)
-            const cellStep = size + GAP_PX;
-            const remainder = faces.length - cols * (rows - 1);
-            const hasNestle = remainder > 0 && remainder < cols;
-
-            for (let i = 0; i < faces.length; i++) {
-                const row = Math.floor(i / cols);
-                const col = i % cols;
-                const isShortCol = col >= remainder;
-                const x = PADDING_PX + gridShiftX + hexColX(col, remainder, cols, cellStep, hasNestle);
-                const y = PADDING_PX + gridShiftY + row * cellStep + (isShortCol && hasNestle ? cellStep / 2 : 0);
-                const cell = faces[i].canvas.parentElement as HTMLElement;
-                cell.style.position = 'absolute';
-                cell.style.left = `${x}px`;
-                cell.style.top = `${y}px`;
-                cell.style.width = `${size}px`;
-                cell.style.height = `${size}px`;
-            }
-        } else {
+        {
             const cellStep = size + GAP_PX; // center-to-center distance
 
             // Position each face cell absolutely.
@@ -2347,9 +2050,9 @@ async function main() {
             const lastRowY = rows === 1 ? 0 : nestledStep + (rows - 2) * cellStep;
             const totalH = lastRowY + size;
 
-            // Offset to center the grid in the container, with popover shift
-            const offsetX = (W - gridW) / 2 + gridShiftX;
-            const offsetY = (H - totalH) / 2 + gridShiftY;
+            // Offset to center the grid in the container
+            const offsetX = (W - gridW) / 2;
+            const offsetY = (H - totalH) / 2;
 
             for (let i = 0; i < faces.length; i++) {
                 let row: number, colIdx: number, itemsInRow: number;
@@ -3034,19 +2737,12 @@ async function main() {
         },
         ensureSchedulerRunning,
         writeTimeState,
-        onPopoverToggle: (open) => {
-            if (open) {
-                requestAnimationFrame(() => {
-                    if (lastContainerW > 0) {
-                        onGridResize(lastContainerW, lastContainerH);
-                    }
-                });
-            } else {
-                if (lastContainerW > 0) {
-                    onGridResize(lastContainerW, lastContainerH);
-                }
-            }
-        },
+        // Settle probe for the tap ghost (no shared `updater` here — faces
+        // drive their own): landed when no enabled face is still sweeping.
+        isSettled: () => !faces.some(f => f.enabled && f.updater.anyAnimating()),
+        // No onPopoverToggle: the popover is a pure overlay, so open/close
+        // needs no relayout (and must not trigger one — a relayout invalidates
+        // every face cache).
     });
 
 

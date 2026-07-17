@@ -46,9 +46,23 @@ export interface TimeControlsConfig {
      * after **every** time transition (scrub / step / now / transport) so the
      * app's values re-evaluate at the new time — the generic controller→updater
      * coupling. Apps driving values by hand (Chronometer's `HandState`) omit this
-     * and do their own work in the callbacks below.
+     * and do their own work in the callbacks below. When the updater also
+     * exposes `anyAnimating()` (the shared Updater does), it doubles as the
+     * default settle probe for the tap ghost — see `isSettled`.
      */
-    updater?: { reset: () => void };
+    updater?: { reset: () => void; anyAnimating?: () => boolean };
+
+    /**
+     * "Step animations have settled" probe for the tap ghost. After a step or
+     * astro jump the ghosted popover is restored at the LATER of the dwell
+     * and this returning true (bounded by a cap), so the change finishes
+     * landing on screen before the popover re-covers it. Only consulted after
+     * taps that stop the clock — a running 1× clock animates forever, so
+     * transport/Now taps always use the plain dwell. Defaults to
+     * `!updater.anyAnimating()` when `updater` provides it; omit both and the
+     * ghost restores on the fixed dwell.
+     */
+    isSettled?: () => boolean;
 
     // ---- App-specific callbacks (all optional — for *custom* work only) ----
     // The generic parts (the controller action, `updater.reset()`,
@@ -161,6 +175,11 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
         writeTimeState = () => flushTimeState(timeController),
         onPopoverToggle,
     } = config;
+
+    // Settle probe for the tap ghost: explicit config wins, else derive from
+    // the updater's anyAnimating() (arrow wrapper preserves `this`).
+    const settledProbe = config.isSettled ??
+        (updater?.anyAnimating ? () => !updater.anyAnimating!() : undefined);
 
     // ---- Required DOM elements ----
     const _timeBar = document.getElementById('time-bar');
@@ -408,6 +427,7 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
             pauseBtn.textContent = '‖';
             pauseBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
+                ghostTap();
                 timeController.stop();
                 updater?.reset();
                 onTransportChange();
@@ -432,6 +452,7 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
             revBtn.textContent = '◀';
             revBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
+                ghostTap();
                 timeController.setDirection(-1);
                 timeController.setRate(null);
                 updater?.reset();
@@ -446,6 +467,7 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
             fwdBtn.textContent = '▶';
             fwdBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
+                ghostTap();
                 timeController.setDirection(1);
                 timeController.setRate(null);
                 updater?.reset();
@@ -539,6 +561,10 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
     function showPopover() {
         popoverOpen = true;
         timePopover.style.display = '';
+        // Stale-ghost guard: a force-close mid-hold (e.g. Escape) can skip
+        // endHold(), leaving the scrub ghost class behind; a close within the
+        // tap-ghost dwell similarly strands .tp-ghost until its timer fires.
+        timePopover.classList.remove('tp-hidden', 'tp-ghost');
         timeBarLabel.textContent = '⏱ Hide time controller';
         timeBarLabel.classList.add('active');
         updateTimeUI();
@@ -561,6 +587,7 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
     // ===================================================================
 
     function nowClicked() {
+        ghostTap();
         timeController.reset();    // generic controller action (was delegated to clients)
         updater?.reset();
         onNowClicked();
@@ -580,6 +607,9 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
     function startHold(btn: HTMLElement, unit: string, dir: 1 | -1) {
         holdingBtn = btn;
         btn.classList.add('holding');
+        // Ghost the popover so the app is visible while scrubbing. Opacity-only
+        // (see .tp-hidden in the CSS): the held button must keep hit-testing.
+        timePopover.classList.add('tp-hidden');
 
         // Set direction and start the corresponding rate
         timeController.setDirection(dir);
@@ -601,6 +631,14 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
         if (holdingBtn) {
             holdingBtn.classList.remove('holding');
             holdingBtn = null;
+            // Release always restores immediately (hold = ghosted, release =
+            // restored): clear the initiating tap's ghost too — its settle-wait
+            // would otherwise keep short holds ghosted after release.
+            timePopover.classList.remove('tp-hidden', 'tp-ghost');
+            if (ghostTimer !== null) {
+                clearTimeout(ghostTimer);
+                ghostTimer = null;
+            }
 
             // Stop at the current position (generic — was delegated to clients),
             // then let the app run any custom snap/finish logic.
@@ -611,6 +649,41 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
             ensureSchedulerRunning();
             writeTimeState();
         }
+    }
+
+    // ===================================================================
+    // Tap ghosting
+    // ===================================================================
+
+    const GHOST_DWELL_MS = 1000;
+    const GHOST_SETTLE_POLL_MS = 200;
+    const GHOST_SETTLE_CAP_MS = 4000;
+    let ghostTimer: ReturnType<typeof setTimeout> | null = null;
+
+    /**
+     * Ghost the popover briefly after an actuating tap (step / astro jump /
+     * transport / Now) so the app is visible while the change lands. The
+     * dwell timer restarts on every tap, so repeated taps keep it ghosted.
+     * With `waitSettle` (step/astro taps — the clock is stopped afterwards),
+     * restore waits for the app's animations to finish landing: the later of
+     * the dwell and the settle probe, bounded by a cap so a stuck probe can't
+     * strand the ghost. Opacity-only, same constraint as the scrub ghost.
+     */
+    function ghostTap(waitSettle = false) {
+        if (!popoverOpen) return;
+        timePopover.classList.add('tp-ghost');
+        if (ghostTimer !== null) clearTimeout(ghostTimer);
+        const deadline = Date.now() + GHOST_SETTLE_CAP_MS;
+        const expire = () => {
+            if (waitSettle && settledProbe && !settledProbe() &&
+                Date.now() < deadline) {
+                ghostTimer = setTimeout(expire, GHOST_SETTLE_POLL_MS);
+                return;
+            }
+            ghostTimer = null;
+            timePopover.classList.remove('tp-ghost');
+        };
+        ghostTimer = setTimeout(expire, GHOST_DWELL_MS);
     }
 
     // ===================================================================
@@ -628,6 +701,7 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
         function doStep(e: Event) {
             e.preventDefault();
             e.stopPropagation();
+            ghostTap(true);
             // Stop time and snap in-flight animations before stepping
             timeController.stop();
             timeController.step(unit, dir);
@@ -687,12 +761,6 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
             el.classList.toggle('active', el.dataset.tab === (tabName === 'a' ? 'astro' : 'date'));
         });
         setState({ tp: tabName });
-        // Notify consumer for relayout after the CSS transition
-        if (popoverOpen) {
-            setTimeout(() => {
-                onPopoverToggle?.(true);
-            }, 320);
-        }
     }
 
     // Initialize tab from URL state
@@ -731,13 +799,15 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
         );
 
         if (!targetDate || isNaN(targetDate.getTime())) {
-            // No event found — flash the button
+            // No event found — flash the button. Deliberately no ghostTap():
+            // the flash is on the popover and must stay readable.
             btnEl.classList.add('flash-fail');
             setTimeout(() => btnEl.classList.remove('flash-fail'), 300);
             return;
         }
 
         // Same as single-tap time step:
+        ghostTap(true);
         timeController.stop();
         timeController.setTime(targetDate);
         updater?.reset();

@@ -20919,6 +20919,7 @@ return {${names2.join(",")}};`;
       writeTimeState = () => flushTimeState(timeController),
       onPopoverToggle
     } = config;
+    const settledProbe = config.isSettled ?? (updater?.anyAnimating ? () => !updater.anyAnimating() : void 0);
     const _timeBar = document.getElementById("time-bar");
     const _timeBarLabel = document.getElementById("time-bar-label");
     const _timeBarDate = document.getElementById("time-bar-date");
@@ -21140,6 +21141,7 @@ return {${names2.join(",")}};`;
         pauseBtn.textContent = "\u2016";
         pauseBtn.addEventListener("click", (e) => {
           e.stopPropagation();
+          ghostTap();
           timeController.stop();
           updater?.reset();
           onTransportChange();
@@ -21160,6 +21162,7 @@ return {${names2.join(",")}};`;
         revBtn.textContent = "\u25C0";
         revBtn.addEventListener("click", (e) => {
           e.stopPropagation();
+          ghostTap();
           timeController.setDirection(-1);
           timeController.setRate(null);
           updater?.reset();
@@ -21173,6 +21176,7 @@ return {${names2.join(",")}};`;
         fwdBtn.textContent = "\u25B6";
         fwdBtn.addEventListener("click", (e) => {
           e.stopPropagation();
+          ghostTap();
           timeController.setDirection(1);
           timeController.setRate(null);
           updater?.reset();
@@ -21232,6 +21236,7 @@ return {${names2.join(",")}};`;
     function showPopover() {
       popoverOpen = true;
       timePopover.style.display = "";
+      timePopover.classList.remove("tp-hidden", "tp-ghost");
       timeBarLabel.textContent = "\u23F1 Hide time controller";
       timeBarLabel.classList.add("active");
       updateTimeUI();
@@ -21248,6 +21253,7 @@ return {${names2.join(",")}};`;
       onPopoverToggle?.(false);
     }
     function nowClicked() {
+      ghostTap();
       timeController.reset();
       updater?.reset();
       onNowClicked();
@@ -21261,6 +21267,7 @@ return {${names2.join(",")}};`;
     function startHold(btn, unit, dir) {
       holdingBtn = btn;
       btn.classList.add("holding");
+      timePopover.classList.add("tp-hidden");
       timeController.setDirection(dir);
       const rateIdx = unitToRateIndex[unit];
       if (rateIdx !== void 0) {
@@ -21279,6 +21286,11 @@ return {${names2.join(",")}};`;
       if (holdingBtn) {
         holdingBtn.classList.remove("holding");
         holdingBtn = null;
+        timePopover.classList.remove("tp-hidden", "tp-ghost");
+        if (ghostTimer !== null) {
+          clearTimeout(ghostTimer);
+          ghostTimer = null;
+        }
         timeController.stop();
         updater?.reset();
         onScrubEnd();
@@ -21286,6 +21298,25 @@ return {${names2.join(",")}};`;
         ensureSchedulerRunning();
         writeTimeState();
       }
+    }
+    const GHOST_DWELL_MS = 1e3;
+    const GHOST_SETTLE_POLL_MS = 200;
+    const GHOST_SETTLE_CAP_MS = 4e3;
+    let ghostTimer = null;
+    function ghostTap(waitSettle = false) {
+      if (!popoverOpen) return;
+      timePopover.classList.add("tp-ghost");
+      if (ghostTimer !== null) clearTimeout(ghostTimer);
+      const deadline = Date.now() + GHOST_SETTLE_CAP_MS;
+      const expire = () => {
+        if (waitSettle && settledProbe && !settledProbe() && Date.now() < deadline) {
+          ghostTimer = setTimeout(expire, GHOST_SETTLE_POLL_MS);
+          return;
+        }
+        ghostTimer = null;
+        timePopover.classList.remove("tp-ghost");
+      };
+      ghostTimer = setTimeout(expire, GHOST_DWELL_MS);
     }
     timePopover.querySelectorAll("[data-step]").forEach((btn) => {
       const el = btn;
@@ -21297,6 +21328,7 @@ return {${names2.join(",")}};`;
       function doStep(e) {
         e.preventDefault();
         e.stopPropagation();
+        ghostTap(true);
         timeController.stop();
         timeController.step(unit, dir);
         updater?.reset();
@@ -21338,11 +21370,6 @@ return {${names2.join(",")}};`;
         el.classList.toggle("active", el.dataset.tab === (tabName === "a" ? "astro" : "date"));
       });
       setState({ tp: tabName });
-      if (popoverOpen) {
-        setTimeout(() => {
-          onPopoverToggle?.(true);
-        }, 320);
-      }
     }
     const urlTp = new URLSearchParams(window.location.search).get("tp");
     if (urlTp === "a") {
@@ -21377,6 +21404,7 @@ return {${names2.join(",")}};`;
         setTimeout(() => btnEl.classList.remove("flash-fail"), 300);
         return;
       }
+      ghostTap(true);
       timeController.stop();
       timeController.setTime(targetDate);
       updater?.reset();
@@ -22414,7 +22442,7 @@ return {${names2.join(",")}};`;
       return `canvas/bitmap est TOTAL ${MB(total)}MB: faces ${MB(facesB)} \xB7 static caches ${MB(staticB)} \xB7 images ${MB(imagesB)} \xB7 src blobs ${MB(srcBlobB)} \xB7 shadows ${MB(shadowB)} \xB7 wedge cache ${MB(rc.wedgeCache)} \xB7 wheel cache ${MB(rc.wheelCache)} \xB7 hand cache ${MB(rc.handCache)} \xB7 analemma ${MB(analemmaB)} \xB7 terra ring ${MB(terraB)} \xB7 cutout temp ${MB(rc.cutoutTemp)} \xB7 face buffers ${MB(buffersB)} \xB7 shared canvas ${MB(sharedB)}${jsHeap}`;
     }
     function _buildStamp() {
-      return true ? "2.0.41" : "dev";
+      return true ? "2.0.47" : "dev";
     }
     function _browserShort() {
       const ua = navigator.userAgent;
@@ -22910,245 +22938,21 @@ return {${names2.join(",")}};`;
     }, 1e3);
     const GAP_PX = 12;
     const PADDING_PX = 12;
-    const POPOVER_GAP = 8;
     let resizeDebounceTimer = null;
     let lastContainerW = 0;
     let lastContainerH = 0;
-    let wasShifted = false;
-    let wasAstroTab = false;
-    function computeFaceCenters(nFaces, gridCols, gridRows, size, containerW, containerH, offsetAdjustX = 0, offsetAdjustY = 0) {
-      const cellStep = size + GAP_PX;
-      const remainder = nFaces - gridCols * (gridRows - 1);
-      const canNestle = gridRows > 1 && remainder !== gridCols && (gridCols - remainder) % 2 === 1;
-      const nestledStep = canNestle ? cellStep * Math.sqrt(3) / 2 : cellStep;
-      const gridW = gridCols * size + (gridCols - 1) * GAP_PX;
-      const lastRowY = gridRows === 1 ? 0 : nestledStep + (gridRows - 2) * cellStep;
-      const totalH = lastRowY + size;
-      const offsetX = (containerW - gridW) / 2 + offsetAdjustX;
-      const offsetY = (containerH - totalH) / 2 + offsetAdjustY;
-      const centers = [];
-      for (let i = 0; i < nFaces; i++) {
-        let row, colIdx, itemsInRow;
-        if (i < remainder) {
-          row = 0;
-          colIdx = i;
-          itemsInRow = remainder;
-        } else {
-          const j = i - remainder;
-          row = 1 + Math.floor(j / gridCols);
-          colIdx = j % gridCols;
-          itemsInRow = gridCols;
-        }
-        const rowW = itemsInRow * size + (itemsInRow - 1) * GAP_PX;
-        const rowOffsetX = (gridW - rowW) / 2;
-        const x = offsetX + rowOffsetX + colIdx * cellStep;
-        const rowY = row === 0 ? 0 : nestledStep + (row - 1) * cellStep;
-        const y = offsetY + rowY;
-        centers.push({ cx: x + size / 2, cy: y + size / 2 });
-      }
-      return centers;
-    }
-    function anyFaceOverlapsRect(centers, radius, rectLeft, rectTop, rectRight, rectBottom) {
-      for (const { cx, cy } of centers) {
-        const nearX = Math.max(rectLeft, Math.min(cx, rectRight));
-        const nearY = Math.max(rectTop, Math.min(cy, rectBottom));
-        const dx = cx - nearX;
-        const dy = cy - nearY;
-        if (dx * dx + dy * dy < (radius + POPOVER_GAP) * (radius + POPOVER_GAP)) {
-          return true;
-        }
-      }
-      return false;
-    }
     function onGridResize(W, H) {
       lastContainerW = W;
       lastContainerH = H;
       const result = optimizeGrid(faces.length, W, H, GAP_PX, PADDING_PX);
       if (result.size <= 0) return;
-      let size = result.size;
-      let gridShiftX = 0, gridShiftY = 0;
-      let useTopLeftAlign = false;
-      const hexColX = (col, remainder, nCols, cellStep, hasNestle) => {
-        if (!hasNestle || col < remainder) {
-          return col * cellStep;
-        }
-        const hexStep = cellStep * Math.sqrt(3) / 2;
-        return (remainder - 1) * cellStep + hexStep + (col - remainder) * cellStep;
-      };
-      if (timeUI?.isPopoverOpen()) {
-        const gridRect = grid.getBoundingClientRect();
-        const popRect = document.getElementById("time-popover").getBoundingClientRect();
-        const upperEl = document.getElementById("tp-upper");
-        const upperRect = upperEl.getBoundingClientRect();
-        const pLeft = upperRect.left - gridRect.left;
-        const pTop = popRect.top - gridRect.top;
-        const pRight = upperRect.right - gridRect.left;
-        const pBottom = popRect.bottom - gridRect.top;
-        const exclusionRects = [
-          { left: pLeft, top: pTop, right: pRight, bottom: pBottom }
-        ];
-        const lowerEl = document.getElementById("tp-lower");
-        const astroActive = lowerEl && !document.getElementById("tp-tab-astro")?.classList.contains("tp-pane-hidden");
-        if (astroActive && lowerEl) {
-          const lowerRect = lowerEl.getBoundingClientRect();
-          exclusionRects.push({
-            left: lowerRect.left - gridRect.left,
-            top: lowerRect.top - gridRect.top,
-            right: lowerRect.right - gridRect.left,
-            bottom: lowerRect.bottom - gridRect.top
-          });
-        }
-        const circleOverlapsExclusion = (cx, cy, r) => {
-          for (const rect of exclusionRects) {
-            const nearX = Math.max(rect.left, Math.min(cx, rect.right));
-            const nearY = Math.max(rect.top, Math.min(cy, rect.bottom));
-            const dx = cx - nearX;
-            const dy = cy - nearY;
-            if (dx * dx + dy * dy < (r + POPOVER_GAP) * (r + POPOVER_GAP)) {
-              return true;
-            }
-          }
-          return false;
-        };
-        const configFits = (cols2, s) => {
-          const rows2 = Math.ceil(faces.length / cols2);
-          const cellStep = s + GAP_PX;
-          const remainder = faces.length - cols2 * (rows2 - 1);
-          const r = s / 2;
-          const hasNestle = remainder > 0 && remainder < cols2;
-          const lastColX = hexColX(cols2 - 1, remainder, cols2, cellStep, hasNestle);
-          const gridW = lastColX + s + 2 * PADDING_PX;
-          const gridH = (rows2 - 1) * cellStep + s + 2 * PADDING_PX;
-          if (gridW > W || gridH > H) return false;
-          for (let i = 0; i < faces.length; i++) {
-            const row = Math.floor(i / cols2);
-            const col = i % cols2;
-            const isShortCol = col >= remainder;
-            const ny = isShortCol && hasNestle ? cellStep / 2 : 0;
-            const cx = PADDING_PX + hexColX(col, remainder, cols2, cellStep, hasNestle) + r;
-            const cy = PADDING_PX + row * cellStep + ny + r;
-            if (circleOverlapsExclusion(cx, cy, r)) {
-              return false;
-            }
-          }
-          return true;
-        };
-        const centers = computeFaceCenters(
-          faces.length,
-          result.cols,
-          result.rows,
-          size,
-          W,
-          H
-        );
-        let hasOverlap = false;
-        for (const { cx, cy } of centers) {
-          if (circleOverlapsExclusion(cx, cy, size / 2)) {
-            hasOverlap = true;
-            break;
-          }
-        }
-        if (hasOverlap) {
-          let lo = 0, hi = Math.max(W, H);
-          for (let iter = 0; iter < 25; iter++) {
-            const mid = Math.floor((lo + hi) / 2);
-            if (mid <= 0) break;
-            let anyWorks = false;
-            for (let c = 1; c <= faces.length; c++) {
-              if (configFits(c, mid)) {
-                anyWorks = true;
-                break;
-              }
-            }
-            if (anyWorks) {
-              lo = mid;
-            } else {
-              hi = mid;
-            }
-          }
-          size = lo;
-          let bestConfig = result.cols;
-          for (let c = 1; c <= faces.length; c++) {
-            if (configFits(c, size)) {
-              bestConfig = c;
-              break;
-            }
-          }
-          result.cols = bestConfig;
-          result.rows = Math.ceil(faces.length / bestConfig);
-          useTopLeftAlign = true;
-          if (size <= 0) return;
-          const cellStep = size + GAP_PX;
-          const remainder = faces.length - bestConfig * (result.rows - 1);
-          const hasNestle = remainder > 0 && remainder < bestConfig;
-          const lastColX = hexColX(bestConfig - 1, remainder, bestConfig, cellStep, hasNestle);
-          const gridW = lastColX + size;
-          const gridH = (result.rows - 1) * cellStep + size;
-          const centeredX = (W - gridW) / 2 - PADDING_PX;
-          const centeredY = (H - gridH) / 2 - PADDING_PX;
-          const r = size / 2;
-          const shiftFits = (dx, dy) => {
-            for (let i = 0; i < faces.length; i++) {
-              const row = Math.floor(i / bestConfig);
-              const col = i % bestConfig;
-              const isShort = col >= remainder;
-              const cx = PADDING_PX + dx + hexColX(col, remainder, bestConfig, cellStep, hasNestle) + r;
-              const cy = PADDING_PX + dy + row * cellStep + (isShort && hasNestle ? cellStep / 2 : 0) + r;
-              if (circleOverlapsExclusion(cx, cy, r)) {
-                return false;
-              }
-            }
-            return true;
-          };
-          let sLo = 0, sHi = Math.max(0, centeredX);
-          for (let iter = 0; iter < 20; iter++) {
-            const sMid = (sLo + sHi) / 2;
-            if (shiftFits(sMid, 0)) {
-              sLo = sMid;
-            } else {
-              sHi = sMid;
-            }
-          }
-          gridShiftX = sLo;
-          let vLo = 0, vHi = Math.max(0, centeredY);
-          for (let iter = 0; iter < 20; iter++) {
-            const vMid = (vLo + vHi) / 2;
-            if (shiftFits(gridShiftX, vMid)) {
-              vLo = vMid;
-            } else {
-              vHi = vMid;
-            }
-          }
-          gridShiftY = vLo;
-        }
-      }
+      const size = result.size;
       const dpr = effectiveDpr();
       const newPhys = Math.round(size * dpr);
-      const isAstroTab = (timeUI?.isPopoverOpen() ?? false) && !document.getElementById("tp-tab-astro")?.classList.contains("tp-pane-hidden");
-      const positionChanged = useTopLeftAlign !== wasShifted || isAstroTab !== wasAstroTab;
-      if (newPhys === faces[0]?.canvas.width && !positionChanged) return;
-      wasShifted = useTopLeftAlign;
-      wasAstroTab = isAstroTab;
+      if (newPhys === faces[0]?.canvas.width) return;
       cols = result.cols;
       rows = result.rows;
-      if (useTopLeftAlign) {
-        const cellStep = size + GAP_PX;
-        const remainder = faces.length - cols * (rows - 1);
-        const hasNestle = remainder > 0 && remainder < cols;
-        for (let i = 0; i < faces.length; i++) {
-          const row = Math.floor(i / cols);
-          const col = i % cols;
-          const isShortCol = col >= remainder;
-          const x = PADDING_PX + gridShiftX + hexColX(col, remainder, cols, cellStep, hasNestle);
-          const y = PADDING_PX + gridShiftY + row * cellStep + (isShortCol && hasNestle ? cellStep / 2 : 0);
-          const cell = faces[i].canvas.parentElement;
-          cell.style.position = "absolute";
-          cell.style.left = `${x}px`;
-          cell.style.top = `${y}px`;
-          cell.style.width = `${size}px`;
-          cell.style.height = `${size}px`;
-        }
-      } else {
+      {
         const cellStep = size + GAP_PX;
         const remainder = faces.length - cols * (rows - 1);
         const canNestle = rows > 1 && remainder !== cols && (cols - remainder) % 2 === 1;
@@ -23156,8 +22960,8 @@ return {${names2.join(",")}};`;
         const gridW = cols * size + (cols - 1) * GAP_PX;
         const lastRowY = rows === 1 ? 0 : nestledStep + (rows - 2) * cellStep;
         const totalH = lastRowY + size;
-        const offsetX = (W - gridW) / 2 + gridShiftX;
-        const offsetY = (H - totalH) / 2 + gridShiftY;
+        const offsetX = (W - gridW) / 2;
+        const offsetY = (H - totalH) / 2;
         for (let i = 0; i < faces.length; i++) {
           let row, colIdx, itemsInRow;
           if (i < remainder) {
@@ -23661,19 +23465,12 @@ return {${names2.join(",")}};`;
       },
       ensureSchedulerRunning,
       writeTimeState,
-      onPopoverToggle: (open) => {
-        if (open) {
-          requestAnimationFrame(() => {
-            if (lastContainerW > 0) {
-              onGridResize(lastContainerW, lastContainerH);
-            }
-          });
-        } else {
-          if (lastContainerW > 0) {
-            onGridResize(lastContainerW, lastContainerH);
-          }
-        }
-      }
+      // Settle probe for the tap ghost (no shared `updater` here — faces
+      // drive their own): landed when no enabled face is still sweeping.
+      isSettled: () => !faces.some((f) => f.enabled && f.updater.anyAnimating())
+      // No onPopoverToggle: the popover is a pure overlay, so open/close
+      // needs no relayout (and must not trigger one — a relayout invalidates
+      // every face cache).
     });
     initShareButton({ getState });
     onSharedChange((s) => {

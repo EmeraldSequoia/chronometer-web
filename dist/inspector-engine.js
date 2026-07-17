@@ -15207,6 +15207,7 @@
       writeTimeState: writeTimeState2 = () => flushTimeState(timeController2),
       onPopoverToggle
     } = config;
+    const settledProbe = config.isSettled ?? (updater2?.anyAnimating ? () => !updater2.anyAnimating() : void 0);
     const _timeBar = document.getElementById("time-bar");
     const _timeBarLabel = document.getElementById("time-bar-label");
     const _timeBarDate = document.getElementById("time-bar-date");
@@ -15428,6 +15429,7 @@
         pauseBtn.textContent = "\u2016";
         pauseBtn.addEventListener("click", (e) => {
           e.stopPropagation();
+          ghostTap();
           timeController2.stop();
           updater2?.reset();
           onTransportChange();
@@ -15448,6 +15450,7 @@
         revBtn.textContent = "\u25C0";
         revBtn.addEventListener("click", (e) => {
           e.stopPropagation();
+          ghostTap();
           timeController2.setDirection(-1);
           timeController2.setRate(null);
           updater2?.reset();
@@ -15461,6 +15464,7 @@
         fwdBtn.textContent = "\u25B6";
         fwdBtn.addEventListener("click", (e) => {
           e.stopPropagation();
+          ghostTap();
           timeController2.setDirection(1);
           timeController2.setRate(null);
           updater2?.reset();
@@ -15520,6 +15524,7 @@
     function showPopover() {
       popoverOpen = true;
       timePopover.style.display = "";
+      timePopover.classList.remove("tp-hidden", "tp-ghost");
       timeBarLabel.textContent = "\u23F1 Hide time controller";
       timeBarLabel.classList.add("active");
       updateTimeUI();
@@ -15536,6 +15541,7 @@
       onPopoverToggle?.(false);
     }
     function nowClicked() {
+      ghostTap();
       timeController2.reset();
       updater2?.reset();
       onNowClicked();
@@ -15549,6 +15555,7 @@
     function startHold(btn, unit, dir) {
       holdingBtn = btn;
       btn.classList.add("holding");
+      timePopover.classList.add("tp-hidden");
       timeController2.setDirection(dir);
       const rateIdx = unitToRateIndex[unit];
       if (rateIdx !== void 0) {
@@ -15567,6 +15574,11 @@
       if (holdingBtn) {
         holdingBtn.classList.remove("holding");
         holdingBtn = null;
+        timePopover.classList.remove("tp-hidden", "tp-ghost");
+        if (ghostTimer !== null) {
+          clearTimeout(ghostTimer);
+          ghostTimer = null;
+        }
         timeController2.stop();
         updater2?.reset();
         onScrubEnd();
@@ -15574,6 +15586,25 @@
         ensureSchedulerRunning();
         writeTimeState2();
       }
+    }
+    const GHOST_DWELL_MS = 1e3;
+    const GHOST_SETTLE_POLL_MS = 200;
+    const GHOST_SETTLE_CAP_MS = 4e3;
+    let ghostTimer = null;
+    function ghostTap(waitSettle = false) {
+      if (!popoverOpen) return;
+      timePopover.classList.add("tp-ghost");
+      if (ghostTimer !== null) clearTimeout(ghostTimer);
+      const deadline = Date.now() + GHOST_SETTLE_CAP_MS;
+      const expire = () => {
+        if (waitSettle && settledProbe && !settledProbe() && Date.now() < deadline) {
+          ghostTimer = setTimeout(expire, GHOST_SETTLE_POLL_MS);
+          return;
+        }
+        ghostTimer = null;
+        timePopover.classList.remove("tp-ghost");
+      };
+      ghostTimer = setTimeout(expire, GHOST_DWELL_MS);
     }
     timePopover.querySelectorAll("[data-step]").forEach((btn) => {
       const el = btn;
@@ -15585,6 +15616,7 @@
       function doStep(e) {
         e.preventDefault();
         e.stopPropagation();
+        ghostTap(true);
         timeController2.stop();
         timeController2.step(unit, dir);
         updater2?.reset();
@@ -15626,11 +15658,6 @@
         el.classList.toggle("active", el.dataset.tab === (tabName === "a" ? "astro" : "date"));
       });
       setState({ tp: tabName });
-      if (popoverOpen) {
-        setTimeout(() => {
-          onPopoverToggle?.(true);
-        }, 320);
-      }
     }
     const urlTp = new URLSearchParams(window.location.search).get("tp");
     if (urlTp === "a") {
@@ -15665,6 +15692,7 @@
         setTimeout(() => btnEl.classList.remove("flash-fail"), 300);
         return;
       }
+      ghostTap(true);
       timeController2.stop();
       timeController2.setTime(targetDate);
       updater2?.reset();

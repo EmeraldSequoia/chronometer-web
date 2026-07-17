@@ -1092,6 +1092,25 @@
           /* close btn floats above */
           padding: 0;
           pointer-events: none;
+          transition: opacity 0.15s;
+      }
+
+      /* Tap ghosting: any actuating tap (step / astro jump / transport / Now)
+         fades the popover briefly so the change is visible landing; a dwell
+         timer restores it. Same level as .tp-hidden today but kept separate
+         so the two can be retuned independently. */
+      #time-popover.tp-ghost {
+          opacity: 0.25;
+      }
+
+      /* Ghosting while scrubbing: fade so the app underneath is visible while
+         the controls stay findable (0.05 and 0.15 read as fully invisible on
+         a real display). MUST stay opacity-only — the hold gesture depends on
+         the faded button still receiving mouseup/mouseleave/touchend;
+         visibility/display would stop hit-testing and strand the hold.
+         Declared after .tp-ghost so the scrub state wins while both apply. */
+      #time-popover.tp-hidden {
+          opacity: 0.25;
       }
 
       /* Close button: floats above popover top edge */
@@ -1913,7 +1932,7 @@
               <div id="help-content">
                 <!-- Populated from help-template on first info click -->
               </div>
-              <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.41</div>
+              <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.47</div>
             </div>
 
             <div id="info-sub-view">
