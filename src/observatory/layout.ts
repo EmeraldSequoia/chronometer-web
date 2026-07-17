@@ -14,10 +14,9 @@
  *      never smaller than an ext dial (the dials yield to the moon). The date
  *      gets a real box and its text scales to fill it.
  *   4. The layout accounts for the bottom chrome row (time-controller button +
- *      location row, one fixed-height strip) and, when open, the L-shaped time
- *      controller popover: its vertical arm narrows the effective window width
- *      and its bottom arm sets a bottom limit for right-side elements, so the
- *      whole display stays visible while scrubbing.
+ *      location row, one fixed-height strip). The time-controller popover is a
+ *      pure overlay (ghosted during scrubs and actuating taps) and takes no
+ *      part in the layout.
  *
  * Everything *inside* the main dial (rings, planets, the three inner subdials,
  * fonts) still scales as a fixed multiple of `mainR` via `s = mainR / 365`,
@@ -68,27 +67,9 @@ function chooseTemplate(w: number, h: number): Template {
 // Chrome (DOM overlay) insets — plan §4
 // ---------------------------------------------------------------------------
 
-/** Time-controller popover arm sizes (the popover is an L: tp-upper + tp-lower). */
-export interface PopoverArms {
-    upperW: number;
-    upperH: number;
-    lowerW: number;
-    lowerH: number;
-}
-
 export interface ChromeParams {
     /** Height of the bottom chrome row (time-controller button + location). */
     footerH: number;
-    /** Popover arm rects when the time controller is open, else null. */
-    popover: PopoverArms | null;
-}
-
-/** Bottom band occupied by the popover's lower arm (right-anchored). */
-interface LowerBand {
-    /** Left edge (x) of the band. */
-    left: number;
-    /** Top edge (y) of the band, in footer-excluded coordinates. */
-    top: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -426,22 +407,12 @@ export function computeBaseLayout(
 
     const footerH = chrome?.footerH ?? 0;
     const H = viewH - footerH;
-
-    // Popover open: its vertical arm narrows the effective width; its bottom
-    // arm becomes a right-anchored bottom band. If the popover is too large for
-    // this window to absorb (tiny windows), fall back to plain overlay.
-    let W = viewW;
-    let lowerBand: LowerBand | null = null;
-    const pop = chrome?.popover ?? null;
-    if (pop && pop.upperW < 0.5 * viewW && pop.upperH + pop.lowerH < 0.9 * H) {
-        W = viewW - pop.upperW - 8;
-        lowerBand = { left: viewW - pop.lowerW - 8, top: H - pop.lowerH - 4 };
-    }
+    const W = viewW;
 
     const template = chooseTemplate(W, H);
     const L = template === 'landscape'
-        ? computeLandscape(W, H, lowerBand)
-        : computePortrait(W, H, lowerBand);
+        ? computeLandscape(W, H)
+        : computePortrait(W, H);
 
     // Report the real viewport (debug overlay etc.), not the effective one.
     L.viewW = viewW;
@@ -450,20 +421,11 @@ export function computeBaseLayout(
     return L;
 }
 
-/**
- * Bottom limit for an element spanning [xl, xr]: the popover's lower arm
- * pushes right-side elements up; everything else may use the full height.
- */
-function bottomLimitFor(xl: number, xr: number, H: number, band: LowerBand | null, g: number): number {
-    if (band && xr > band.left - g) return band.top - g;
-    return H;
-}
-
 // ---------------------------------------------------------------------------
 // Portrait (tall / square): header on top, ext dials in the corner gaps
 // ---------------------------------------------------------------------------
 
-function computePortrait(W: number, H: number, lowerBand: LowerBand | null): LayoutParams {
+function computePortrait(W: number, H: number): LayoutParams {
     // Provisional sizes for the band-mode decision (refined per-branch below).
     const D0 = clamp(Math.min(DIAL_FRAC_MAX * W, 0.83 * H), DIAL_FRAC_MIN * W, DIAL_FRAC_MAX * W);
     const extR0 = clamp(0.165 * (D0 / 2), 22, 0.20 * (D0 / 2));
@@ -476,8 +438,8 @@ function computePortrait(W: number, H: number, lowerBand: LowerBand | null): Lay
     const oneBand = 2 * moonMin0 + MAP_FRAC_OF_D * D0 + dateWMin + 4 * g0 <= W;
 
     return oneBand
-        ? portraitOneBand(W, H, lowerBand)
-        : portraitTwoBand(W, H, lowerBand);
+        ? portraitOneBand(W, H)
+        : portraitTwoBand(W, H);
 }
 
 /** Shared portrait corner-dial + assembly plumbing. */
@@ -487,7 +449,6 @@ interface PortraitCommon {
     extR: number; g: number;
     /** Y of the header's bottom edge (corner dials must stay below it). */
     headerBottom: number;
-    lowerBand: LowerBand | null;
 }
 
 /**
@@ -505,7 +466,7 @@ const EOT_BOTTOM_FRAC = 0.55;
  * Returns the (possibly reduced) extR alongside the positions.
  */
 function portraitCornerDials(p: PortraitCommon) {
-    const { W, H, mainCX, mainCY, mainR, lowerBand, headerBottom } = p;
+    const { W, H, mainCX, mainCY, mainR, headerBottom } = p;
     const clear = (cx: number, cy: number, extR: number, g: number) =>
         Math.hypot(cx - mainCX, cy - mainCY) >= mainR + extR + g / 2;
 
@@ -517,8 +478,8 @@ function portraitCornerDials(p: PortraitCommon) {
         const cxL = clamp(mainCX - offX, g + extR, mainCX);
         const cxR = clamp(mainCX + offX, mainCX, W - g - extR);
         const cyHi = clamp(mainCY - offY, headerBottom + g + extR, mainCY);
-        const loLimitL = Math.min(bottomLimitFor(cxL - extR, cxL + extR, H, lowerBand, g), H - g);
-        const loLimitR = Math.min(bottomLimitFor(cxR - extR, cxR + extR, H, lowerBand, g), H - g);
+        const loLimitL = H - g;
+        const loLimitR = H - g;
         const azCY = clamp(mainCY + offY, mainCY, loLimitL - extR);
         // EOT stays aligned with az unless that would overlap the rim — then
         // it scoots down on its half-dial allowance before anything shrinks.
@@ -545,10 +506,10 @@ function portraitCornerDials(p: PortraitCommon) {
 }
 
 // --- One-band portrait (iPad / squarish): moon | map | date across the top --
-// Exported (alongside portraitTwoBand) so the iteration-3 harness can pin A3
-// (iPad portrait) to the one-band arrangement across all sizes. Not used by
-// production code.
-export function portraitOneBand(W: number, H: number, lowerBand: LowerBand | null): LayoutParams {
+// Exported (alongside portraitTwoBand) so the iteration-3 orchestrator
+// (anchor-layout) and the layout harness can pin A3/A3m (iPad portrait) to the
+// one-band arrangement across all sizes.
+export function portraitOneBand(W: number, H: number): LayoutParams {
     // Solve D with header coupling: headerH = mapH + 2g = 0.205·D + 2g,
     // contentH = headerH + g + D + g = 1.205·D + 4g ≤ H (trailing g keeps the
     // dial rim off the footer line).
@@ -580,17 +541,9 @@ export function portraitOneBand(W: number, H: number, lowerBand: LowerBand | nul
 
     const headerBand = mapH + 2 * g;
     const contentH = headerBand + g + D + g;
-    let topPad = Math.max(0, (H - contentH) / 2);
+    const topPad = Math.max(0, (H - contentH) / 2);
 
     const mainCX = W / 2;
-    // Keep the dial clear of the popover's lower arm when their x-spans meet.
-    if (lowerBand && mainCX + mainR > lowerBand.left - g) {
-        const maxBottom = lowerBand.top - g;
-        const bottomAt = (pad: number) => pad + headerBand + g + D;
-        if (bottomAt(topPad) > maxBottom) {
-            topPad = Math.max(0, maxBottom - headerBand - g - D);
-        }
-    }
     const mainCY = topPad + headerBand + g + mainR;
     const headerBottom = topPad + g + mapH;
 
@@ -608,7 +561,7 @@ export function portraitOneBand(W: number, H: number, lowerBand: LowerBand | nul
     const dateCY = topPad + g + mapH / 2;
 
     const { extR: extRFit, ...corners } = portraitCornerDials({
-        W, H, mainCX, mainCY, mainR, extR, g, headerBottom, lowerBand,
+        W, H, mainCX, mainCY, mainR, extR, g, headerBottom,
     });
     const ext = extDerived(extRFit);
 
@@ -625,10 +578,11 @@ export function portraitOneBand(W: number, H: number, lowerBand: LowerBand | nul
 }
 
 // --- Two-band portrait (phones): moon+map band, date row, then the dial -----
-// Exported so the iteration-3 layout harness can pin A2 (iPhone portrait) to the
-// two-band phone arrangement across all sizes, bypassing the width-triggered
-// one-band flip in computePortrait. Not used by production code.
-export function portraitTwoBand(W: number, H: number, lowerBand: LowerBand | null): LayoutParams {
+// Exported so the iteration-3 orchestrator (anchor-layout) and the layout
+// harness can pin A2 (iPhone portrait) to the two-band phone arrangement
+// across all sizes, bypassing the width-triggered one-band flip in
+// computePortrait.
+export function portraitTwoBand(W: number, H: number): LayoutParams {
     // Dial first (width-bound on phones), then bands above it.
     const mapHMin = 60, dateHMin = 30;
     let extR = clamp(0.165 * (0.95 * W) / 2, 22, 0.20 * (0.95 * W) / 2);
@@ -664,18 +618,9 @@ export function portraitTwoBand(W: number, H: number, lowerBand: LowerBand | nul
     // Distribute the leftover height as even padding around the bands
     // (4 slots: top, band1↔band2, band2↔dial, bottom).
     const contentH = mapH + g + dateH + g + D;
-    let pad = Math.max(0, (H - contentH - 2 * g) / 4);
+    const pad = Math.max(0, (H - contentH - 2 * g) / 4);
 
     const mainCX = W / 2;
-    // Popover lower arm: lift the whole block if the dial would dip into it.
-    if (lowerBand && mainCX + mainR > lowerBand.left - g) {
-        const maxBottom = lowerBand.top - g;
-        const bottomAt = (p: number) => p + mapH + g + p + dateH + g + p + D;
-        if (bottomAt(pad) > maxBottom) {
-            pad = Math.max(0, (maxBottom - contentH - 2 * g) / 3);
-        }
-    }
-
     const yTop = pad;
     const band2Top = yTop + mapH + g + pad;
     const dialTop = band2Top + dateH + g + pad;
@@ -692,7 +637,7 @@ export function portraitTwoBand(W: number, H: number, lowerBand: LowerBand | nul
 
     const { extR: extRFit, ...corners } = portraitCornerDials({
         W, H, mainCX, mainCY, mainR, extR, g,
-        headerBottom: band2Top + dateH, lowerBand,
+        headerBottom: band2Top + dateH,
     });
     const ext = extDerived(extRFit);
 
@@ -712,7 +657,7 @@ export function portraitTwoBand(W: number, H: number, lowerBand: LowerBand | nul
 // Landscape (wide): dial centered, side margins hold everything else
 // ---------------------------------------------------------------------------
 
-function computeLandscape(W: number, H: number, lowerBand: LowerBand | null): LayoutParams {
+function computeLandscape(W: number, H: number): LayoutParams {
     // Reserve a minimum side band so the dial doesn't crowd out the peripherals.
     // Scales with height so near-square landscape windows yield dial size to
     // the margins (otherwise the moon/dials/date starve at e.g. 1451×1341);
@@ -799,15 +744,13 @@ function computeLandscape(W: number, H: number, lowerBand: LowerBand | null): La
         // Weekday: bottom-left, in the outer column (left of the dial column).
         wkW = Math.max(2 * moonR, xL - extR - 2 * g);
         wkCX = g + wkW / 2;
-        const wkBottom = bottomLimitFor(g, g + wkW, H, lowerBand, g);
-        wkCY = wkBottom - g - wkH / 2;
+        wkCY = H - g - wkH / 2;
 
         // Month/day + year: bottom-right, right of the dial column.
         const d2Left = xR + extR + g;
         d2W = Math.max(60, W - g - d2Left);
         d2CX = d2Left + d2W / 2;
-        const d2Bottom = bottomLimitFor(d2Left, W - g, H, lowerBand, g);
-        d2CY = d2Bottom - g - d2H / 2;
+        d2CY = H - g - d2H / 2;
     } else {
         // Stacked columns centered in each margin. The corner anchors stay
         // pinned (moon / map at the top, date boxes at the bottom) and the two
@@ -818,13 +761,11 @@ function computeLandscape(W: number, H: number, lowerBand: LowerBand | null): La
 
         wkW = sideMargin - 2 * g;
         wkCX = g + wkW / 2;
-        const wkBottom = bottomLimitFor(g, g + wkW, H, lowerBand, g);
-        wkCY = wkBottom - g - wkH / 2;
+        wkCY = H - g - wkH / 2;
 
         d2W = sideMargin - 2 * g;
         d2CX = W - sideMargin + g + d2W / 2;
-        const d2Bottom = bottomLimitFor(W - sideMargin + g, W - g, H, lowerBand, g);
-        d2CY = d2Bottom - g - d2H / 2;
+        d2CY = H - g - d2H / 2;
 
         // Even distribution: centers at the thirds of the free span, kept
         // separated and inside the span when it gets tight.
@@ -851,9 +792,8 @@ function computeLandscape(W: number, H: number, lowerBand: LowerBand | null): La
         eotCX = xR; eotCY = eotY;
     }
 
-    // Keep the right-column dials above the popover's lower arm.
-    const eotBottomLimit = bottomLimitFor(eotCX - extR, eotCX + extR, H, lowerBand, g);
-    if (eotCY + extR > eotBottomLimit) eotCY = eotBottomLimit - extR;
+    // Keep the eot dial inside the window.
+    if (eotCY + extR > H) eotCY = H - extR;
     // And the date2 box clear of the eot dial.
     if (Math.abs(d2CX - eotCX) < d2W / 2 + extR && d2CY - d2H / 2 < eotCY + extR + g) {
         d2CY = eotCY + extR + g + d2H / 2;

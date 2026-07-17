@@ -1,9 +1,31 @@
 # Plan: remove dead popover-arm layout code from Observatory `layout.ts`
 
-> **Status: draft for review, 2026-07-17.** No code written. Spun out of
+> **Status: implemented 2026-07-17, both phases (build 2.0.48).** Steve
+> approved proceeding after a plan re-review (which re-verified every line
+> claim; two fixes: the anchor-layout `:898/:899` nulls are `lowerBand` args
+> and belong to Phase 2, and the stale "Not used by production code" comments
+> on the two exported functions were corrected while touching their
+> signatures). All popover-arm code removed: `PopoverArms`, the `popover`
+> field, `LowerBand`, the `computeBaseLayout` construction block,
+> `bottomLimitFor` (call sites collapsed to their null-case values — the
+> eot clamp at the old :854-856 rewritten to keep its window-bottom clamp),
+> the two dead `if (lowerBand)` branches, and the `lowerBand` param from all
+> six signatures + pass-throughs. CC2 chrome-drop untouched (§3).
+>
+> **Verification**: equivalence sweep (`buildBaseLayout`, 9 anchors × 18
+> sizes × 2 footers = 324 configs) **byte-identical** after each phase;
+> `tsc` clean; the sweep is now permanent as
+> [observatory-layout.test.ts](../src/__tests__/observatory-layout.test.ts)
+> (9 golden snapshots — Q2 answered yes); full suite 8556 green; harness
+> rebuilt (`?v=27`) and all 9 anchors painted + HUD sane in-browser; live
+> Observatory boots with correct canvas/chrome state and no console errors
+> (VM pane's compositor frozen, so painted-frame checks ran in the
+> harness, which draws synchronously). Q3 (wanted-back): nothing suggested
+> it; code recoverable from git before this commit.
+>
+> Spun out of
 > [2026-07-17-time-controller-cleanup.md](2026-07-17-time-controller-cleanup.md)
-> §5 (Q3) at Steve's request. Independent of the scrub-invisibility /
-> Chronometer cleanup work — this is Observatory-only and predates it.
+> §5 (Q3) at Steve's request. Original plan below.
 
 ## 1. What this is
 

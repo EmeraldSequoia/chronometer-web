@@ -895,9 +895,9 @@ const ECLIPSE_R1_RATIO = 49 / 63;
  * header band; `footerH` is reserved at the bottom of the content rect.
  */
 export function buildBaseLayout(anchorId: AnchorId, W: number, H: number, footerH: number): LayoutParams {
-    if (anchorId === 'A2') return portraitTwoBand(W, H - footerH, null);
-    if (anchorId === 'A3' || anchorId === 'A3m') return portraitOneBand(W, H - footerH, null);
-    return computeBaseLayout(W, H, { footerH, popover: null });
+    if (anchorId === 'A2') return portraitTwoBand(W, H - footerH);
+    if (anchorId === 'A3' || anchorId === 'A3m') return portraitOneBand(W, H - footerH);
+    return computeBaseLayout(W, H, { footerH });
 }
 
 /** Every position field, so `shiftLayout` can offset content space → safe rect. */

@@ -16599,36 +16599,26 @@
     const dpr = typeof devicePixelRatio !== "undefined" ? devicePixelRatio : 1;
     const footerH = chrome?.footerH ?? 0;
     const H = viewH - footerH;
-    let W = viewW;
-    let lowerBand = null;
-    const pop = chrome?.popover ?? null;
-    if (pop && pop.upperW < 0.5 * viewW && pop.upperH + pop.lowerH < 0.9 * H) {
-      W = viewW - pop.upperW - 8;
-      lowerBand = { left: viewW - pop.lowerW - 8, top: H - pop.lowerH - 4 };
-    }
+    const W = viewW;
     const template = chooseTemplate(W, H);
-    const L = template === "landscape" ? computeLandscape(W, H, lowerBand) : computePortrait(W, H, lowerBand);
+    const L = template === "landscape" ? computeLandscape(W, H) : computePortrait(W, H);
     L.viewW = viewW;
     L.viewH = viewH;
     L.dpr = dpr;
     return L;
   }
-  function bottomLimitFor(xl, xr, H, band, g) {
-    if (band && xr > band.left - g) return band.top - g;
-    return H;
-  }
-  function computePortrait(W, H, lowerBand) {
+  function computePortrait(W, H) {
     const D0 = clamp(Math.min(DIAL_FRAC_MAX * W, 0.83 * H), DIAL_FRAC_MIN * W, DIAL_FRAC_MAX * W);
     const extR0 = clamp(0.165 * (D0 / 2), 22, 0.2 * (D0 / 2));
     const g0 = gapFor(extR0);
     const moonMin0 = MOON_EXT_PORTRAIT * extR0;
     const dateWMin = Math.max(0.26 * W, 140);
     const oneBand = 2 * moonMin0 + MAP_FRAC_OF_D * D0 + dateWMin + 4 * g0 <= W;
-    return oneBand ? portraitOneBand(W, H, lowerBand) : portraitTwoBand(W, H, lowerBand);
+    return oneBand ? portraitOneBand(W, H) : portraitTwoBand(W, H);
   }
   var EOT_BOTTOM_FRAC = 0.55;
   function portraitCornerDials(p) {
-    const { W, H, mainCX, mainCY, mainR, lowerBand, headerBottom } = p;
+    const { W, H, mainCX, mainCY, mainR, headerBottom } = p;
     const clear = (cx, cy, extR2, g) => Math.hypot(cx - mainCX, cy - mainCY) >= mainR + extR2 + g / 2;
     let extR = p.extR;
     for (let iter = 0; ; iter++) {
@@ -16638,8 +16628,8 @@
       const cxL = clamp(mainCX - offX, g + extR, mainCX);
       const cxR = clamp(mainCX + offX, mainCX, W - g - extR);
       const cyHi = clamp(mainCY - offY, headerBottom + g + extR, mainCY);
-      const loLimitL = Math.min(bottomLimitFor(cxL - extR, cxL + extR, H, lowerBand, g), H - g);
-      const loLimitR = Math.min(bottomLimitFor(cxR - extR, cxR + extR, H, lowerBand, g), H - g);
+      const loLimitL = H - g;
+      const loLimitR = H - g;
       const azCY = clamp(mainCY + offY, mainCY, loLimitL - extR);
       let eotCY = clamp(mainCY + offY, mainCY, Math.min(loLimitR - extR, azCY));
       if (!clear(cxR, eotCY, extR, g)) {
@@ -16662,7 +16652,7 @@
       extR *= 0.92;
     }
   }
-  function portraitOneBand(W, H, lowerBand) {
+  function portraitOneBand(W, H) {
     let extR = clamp(0.165 * (0.95 * W) / 2, 22, 0.2 * (0.95 * W) / 2);
     let g = gapFor(extR);
     const D = clamp(
@@ -16686,15 +16676,8 @@
     const mapH = mapW / 2;
     const headerBand = mapH + 2 * g;
     const contentH = headerBand + g + D + g;
-    let topPad = Math.max(0, (H - contentH) / 2);
+    const topPad = Math.max(0, (H - contentH) / 2);
     const mainCX = W / 2;
-    if (lowerBand && mainCX + mainR > lowerBand.left - g) {
-      const maxBottom = lowerBand.top - g;
-      const bottomAt = (pad) => pad + headerBand + g + D;
-      if (bottomAt(topPad) > maxBottom) {
-        topPad = Math.max(0, maxBottom - headerBand - g - D);
-      }
-    }
     const mainCY = topPad + headerBand + g + mainR;
     const headerBottom = topPad + g + mapH;
     const moonR = clamp(moonRTarget, extR, mapH / 2);
@@ -16714,8 +16697,7 @@
       mainR,
       extR,
       g,
-      headerBottom,
-      lowerBand
+      headerBottom
     });
     const ext = extDerived(extRFit);
     return assemble({
@@ -16746,7 +16728,7 @@
       date2H: 0
     });
   }
-  function portraitTwoBand(W, H, lowerBand) {
+  function portraitTwoBand(W, H) {
     const mapHMin = 60, dateHMin = 30;
     let extR = clamp(0.165 * (0.95 * W) / 2, 22, 0.2 * (0.95 * W) / 2);
     let g = gapFor(extR);
@@ -16774,15 +16756,8 @@
     const dateH = clamp(0.45 * mapH, dateHMin, 80);
     const dateW = W - 2 * g;
     const contentH = mapH + g + dateH + g + D;
-    let pad = Math.max(0, (H - contentH - 2 * g) / 4);
+    const pad = Math.max(0, (H - contentH - 2 * g) / 4);
     const mainCX = W / 2;
-    if (lowerBand && mainCX + mainR > lowerBand.left - g) {
-      const maxBottom = lowerBand.top - g;
-      const bottomAt = (p) => p + mapH + g + p + dateH + g + p + D;
-      if (bottomAt(pad) > maxBottom) {
-        pad = Math.max(0, (maxBottom - contentH - 2 * g) / 3);
-      }
-    }
     const yTop = pad;
     const band2Top = yTop + mapH + g + pad;
     const dialTop = band2Top + dateH + g + pad;
@@ -16801,8 +16776,7 @@
       mainR,
       extR,
       g,
-      headerBottom: band2Top + dateH,
-      lowerBand
+      headerBottom: band2Top + dateH
     });
     const ext = extDerived(extRFit);
     return assemble({
@@ -16833,7 +16807,7 @@
       date2H: 0
     });
   }
-  function computeLandscape(W, H, lowerBand) {
+  function computeLandscape(W, H) {
     const minSideBand = Math.max(56, 0.16 * H);
     const g0 = 8;
     const D = clamp(
@@ -16904,24 +16878,20 @@
       eotCY = upperRightY + 2 * extR + g;
       wkW = Math.max(2 * moonR, xL - extR - 2 * g);
       wkCX = g + wkW / 2;
-      const wkBottom = bottomLimitFor(g, g + wkW, H, lowerBand, g);
-      wkCY = wkBottom - g - wkH / 2;
+      wkCY = H - g - wkH / 2;
       const d2Left = xR + extR + g;
       d2W = Math.max(60, W - g - d2Left);
       d2CX = d2Left + d2W / 2;
-      const d2Bottom = bottomLimitFor(d2Left, W - g, H, lowerBand, g);
-      d2CY = d2Bottom - g - d2H / 2;
+      d2CY = H - g - d2H / 2;
     } else {
       const xL = sideMargin / 2;
       const xR = W - sideMargin / 2;
       wkW = sideMargin - 2 * g;
       wkCX = g + wkW / 2;
-      const wkBottom = bottomLimitFor(g, g + wkW, H, lowerBand, g);
-      wkCY = wkBottom - g - wkH / 2;
+      wkCY = H - g - wkH / 2;
       d2W = sideMargin - 2 * g;
       d2CX = W - sideMargin + g + d2W / 2;
-      const d2Bottom = bottomLimitFor(W - sideMargin + g, W - g, H, lowerBand, g);
-      d2CY = d2Bottom - g - d2H / 2;
+      d2CY = H - g - d2H / 2;
       const distribute = (top, bottom) => {
         const third = (bottom - top) / 3;
         let y1 = top + third;
@@ -16947,8 +16917,7 @@
       eotCX = xR;
       eotCY = eotY;
     }
-    const eotBottomLimit = bottomLimitFor(eotCX - extR, eotCX + extR, H, lowerBand, g);
-    if (eotCY + extR > eotBottomLimit) eotCY = eotBottomLimit - extR;
+    if (eotCY + extR > H) eotCY = H - extR;
     if (Math.abs(d2CX - eotCX) < d2W / 2 + extR && d2CY - d2H / 2 < eotCY + extR + g) {
       d2CY = eotCY + extR + g + d2H / 2;
     }
@@ -18177,9 +18146,9 @@
   }
   var ECLIPSE_R1_RATIO = 49 / 63;
   function buildBaseLayout(anchorId, W, H, footerH) {
-    if (anchorId === "A2") return portraitTwoBand(W, H - footerH, null);
-    if (anchorId === "A3" || anchorId === "A3m") return portraitOneBand(W, H - footerH, null);
-    return computeBaseLayout(W, H, { footerH, popover: null });
+    if (anchorId === "A2") return portraitTwoBand(W, H - footerH);
+    if (anchorId === "A3" || anchorId === "A3m") return portraitOneBand(W, H - footerH);
+    return computeBaseLayout(W, H, { footerH });
   }
   var SHIFT_X = ["mainCX", "utcCX", "solarCX", "sidCX", "moonCX", "earthCX", "altCX", "azCX", "eclipseCX", "eotCX", "dateCX", "date2CX"];
   var SHIFT_Y = ["mainCY", "utcCY", "solarCY", "sidCY", "moonCY", "earthCY", "altCY", "azCY", "eclipseCY", "eotCY", "dateCY", "date2CY"];
