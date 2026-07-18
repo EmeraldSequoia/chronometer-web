@@ -395,6 +395,9 @@ if [ ! -f "$SRC/apple-touch-icon.png" ]; then
   exit 1
 fi
 cp "$SRC/apple-touch-icon.png" "$DIST/" && echo "  → apple-touch-icon.png"
+# Copy web-app manifest (iOS home-screen scope — keeps cross-app navigation
+# inside the installed standalone container)
+cp "$SRC/app.webmanifest" "$DIST/" && echo "  → app.webmanifest"
 
 # Copy help images to dist
 if [ -d "$SRC/help/images" ]; then

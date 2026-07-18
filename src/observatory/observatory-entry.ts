@@ -24,6 +24,7 @@ import { initTimeControls, flushTimeState } from '../shared/time-controls-ui.js'
 import { initHelpPopover, openGeneralHelpTopic } from '../shared/help-popover.js';
 import { registerHotkey } from '../shared/hotkeys.js';
 import { initAppNavLinks, registerAppNavHotkeys } from '../shared/app-nav.js';
+import { initFullscreenToggle } from '../shared/fullscreen.js';
 import { initShareButton } from '../shared/share-button.js';
 import type { TimeControlsAPI } from '../shared/time-controls-ui.js';
 import { updateDynamicCompositeIcon } from '../shared/composite-icon.js';
@@ -271,6 +272,11 @@ function readSafeInsets(): { insetTop: number; insetRight: number; insetBottom: 
 function chromeParams(): ObsChrome {
     // Iteration 3: the time-controller popover and the noon pill are on-demand
     // overlays that cost the static layout nothing (§6 C2), so no popover arms.
+    // Fullscreen (real or faux) hides the header/footer chrome, so the dial
+    // reclaims both bands; only the safe-area insets still apply.
+    if (document.body.classList.contains('is-fullscreen')) {
+        return { footerH: 0, headerH: 0, ...readSafeInsets() };
+    }
     return { footerH: FOOTER_H, headerH: HEADER_H, ...readSafeInsets() };
 }
 
@@ -1182,48 +1188,12 @@ function init(): void {
     registerHotkey('t', () => document.getElementById('time-bar-label')?.click());
     registerHotkey('n', () => document.getElementById('time-bar-now')?.click());
     registerHotkey('l', () => document.getElementById('set-location-btn')?.click());
+    registerHotkey('f', () => document.getElementById('fullscreen-btn')?.click());
 
     // --- Fullscreen toggle button ---
-    const fullscreenBtn = document.getElementById('fullscreen-btn');
-    if (fullscreenBtn) {
-        const isFullscreenSupported = !!(
-            document.fullscreenEnabled ||
-            (document as any).webkitFullscreenEnabled ||
-            (document as any).mozFullScreenEnabled ||
-            (document as any).msFullscreenEnabled
-        );
-        if (!isFullscreenSupported) {
-            fullscreenBtn.style.display = 'none';
-        } else {
-            fullscreenBtn.addEventListener('click', () => {
-                const doc = document as any;
-                const docEl = document.documentElement as any;
-                const fullscreenElement = doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement;
-
-                if (fullscreenElement) {
-                    if (doc.exitFullscreen) {
-                        doc.exitFullscreen();
-                    } else if (doc.webkitExitFullscreen) {
-                        doc.webkitExitFullscreen();
-                    } else if (doc.mozCancelFullScreen) {
-                        doc.mozCancelFullScreen();
-                    } else if (doc.msExitFullscreen) {
-                        doc.msExitFullscreen();
-                    }
-                } else {
-                    if (docEl.requestFullscreen) {
-                        docEl.requestFullscreen();
-                    } else if (docEl.webkitRequestFullscreen) {
-                        docEl.webkitRequestFullscreen();
-                    } else if (docEl.mozRequestFullScreen) {
-                        docEl.mozRequestFullScreen();
-                    } else if (docEl.msRequestFullscreen) {
-                        docEl.msRequestFullscreen();
-                    }
-                }
-            });
-        }
-    }
+    // The canvas layout must recompute when is-fullscreen flips: chromeParams()
+    // zeroes the header/footer bands so the dial reclaims the full surface.
+    initFullscreenToggle(() => resizeCanvas());
 
     // Live cross-tab sync: apply shared location/time and Observatory config
     // (selected planet, noon-on-top) when another tab/app changes them.

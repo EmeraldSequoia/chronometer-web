@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="apple-touch-icon" href="thumb-all-faces.png" />
     <link rel="icon" type="image/png" href="thumb-all-faces.png" />
+    <link rel="manifest" href="app.webmanifest" />
     <title>Selected Faces (Chronometer)</title>
     <style>
       *,
@@ -694,13 +695,41 @@
           fill: currentColor;
       }
 
-      /* Swap icon when in fullscreen */
+      /* Swap icon when in fullscreen. Keyed off body.is-fullscreen (set by
+         shared/fullscreen.ts) rather than :fullscreen so the faux-fullscreen
+         path (iPhone — no element-fullscreen API) swaps it too. */
       #fullscreen-btn .fs-expand { display: block; }
       #fullscreen-btn .fs-compress { display: none; }
-      :fullscreen #fullscreen-btn .fs-expand { display: none; }
-      :fullscreen #fullscreen-btn .fs-compress { display: block; }
-      :-webkit-full-screen #fullscreen-btn .fs-expand { display: none; }
-      :-webkit-full-screen #fullscreen-btn .fs-compress { display: block; }
+      body.is-fullscreen #fullscreen-btn .fs-expand { display: none; }
+      body.is-fullscreen #fullscreen-btn .fs-compress { display: block; }
+
+      /* Fullscreen (real or faux): only the watch face and the exit button
+         remain. On-demand overlays (info, time popover, location prompt) are
+         NOT hidden — hotkeys can still summon them. !important because some
+         of these elements are shown/hidden via inline styles. */
+      body.is-fullscreen #back-link,
+      body.is-fullscreen #all-faces-link,
+      body.is-fullscreen #selected-faces-link,
+      body.is-fullscreen #face-name,
+      body.is-fullscreen #info-btn,
+      body.is-fullscreen #share-btn,
+      body.is-fullscreen #edit-picks-link,
+      body.is-fullscreen #observatory-link,
+      body.is-fullscreen #inspector-link,
+      body.is-fullscreen #location-panel,
+      body.is-fullscreen #time-bar,
+      body.is-fullscreen #planet-selector,
+      body.is-fullscreen #vienna-noon-toggle,
+      body.is-fullscreen #kyoto-hand-toggle,
+      body.is-fullscreen #kyoto-mode-toggle,
+      body.is-fullscreen #change-cities-btn {
+          display: none !important;
+      }
+
+      /* The exit button takes the top-right corner slot vacated by ℹ. */
+      body.is-fullscreen #fullscreen-btn {
+          top: 16px;
+      }
 
       #face-name {
           position: absolute;
@@ -1932,7 +1961,7 @@
               <div id="help-content">
                 <!-- Populated from help-template on first info click -->
               </div>
-              <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.48</div>
+              <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.50</div>
             </div>
 
             <div id="info-sub-view">

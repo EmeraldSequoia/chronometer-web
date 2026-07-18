@@ -15885,7 +15885,7 @@
     } else {
       el.style.display = "none";
     }
-    registerHotkey("f", () => {
+    registerHotkey("p", () => {
       const params = new URLSearchParams(window.location.search);
       const isVisible = el.style.display !== "none";
       if (isVisible) {

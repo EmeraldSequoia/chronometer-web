@@ -19857,7 +19857,7 @@ return {${names2.join(",")}};`;
     } else {
       el.style.display = "none";
     }
-    registerHotkey("f", () => {
+    registerHotkey("p", () => {
       const params = new URLSearchParams(window.location.search);
       const isVisible = el.style.display !== "none";
       if (isVisible) {
@@ -20058,6 +20058,60 @@ return {${names2.join(",")}};`;
     registerHotkey("o", () => go("observatory.html"));
     registerHotkey("c", () => go("index.html"));
     registerHotkey("a", () => go("all.html"));
+  }
+
+  // src/shared/fullscreen.ts
+  function initFullscreenToggle(onChange) {
+    const btn = document.getElementById("fullscreen-btn");
+    if (!btn) return;
+    const doc = document;
+    const docEl = document.documentElement;
+    const realAvailable = !!(document.fullscreenEnabled || doc.webkitFullscreenEnabled || doc.mozFullScreenEnabled || doc.msFullscreenEnabled);
+    const applyState = (active) => {
+      document.body.classList.toggle("is-fullscreen", active);
+      onChange?.();
+    };
+    if (realAvailable) {
+      const onFsChange = () => {
+        const fsEl = doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement;
+        applyState(!!fsEl);
+      };
+      document.addEventListener("fullscreenchange", onFsChange);
+      document.addEventListener("webkitfullscreenchange", onFsChange);
+      btn.addEventListener("click", () => {
+        const fsEl = doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement;
+        if (fsEl) {
+          if (doc.exitFullscreen) {
+            doc.exitFullscreen();
+          } else if (doc.webkitExitFullscreen) {
+            doc.webkitExitFullscreen();
+          } else if (doc.mozCancelFullScreen) {
+            doc.mozCancelFullScreen();
+          } else if (doc.msExitFullscreen) {
+            doc.msExitFullscreen();
+          }
+        } else {
+          if (docEl.requestFullscreen) {
+            docEl.requestFullscreen();
+          } else if (docEl.webkitRequestFullscreen) {
+            docEl.webkitRequestFullscreen();
+          } else if (docEl.mozRequestFullScreen) {
+            docEl.mozRequestFullScreen();
+          } else if (docEl.msRequestFullscreen) {
+            docEl.msRequestFullscreen();
+          }
+        }
+      });
+    } else {
+      btn.addEventListener("click", () => {
+        applyState(!document.body.classList.contains("is-fullscreen"));
+      });
+      window.addEventListener("keydown", (ev) => {
+        if (ev.key === "Escape" && document.body.classList.contains("is-fullscreen")) {
+          applyState(false);
+        }
+      });
+    }
   }
 
   // src/shared/share-button.ts
@@ -22442,7 +22496,7 @@ return {${names2.join(",")}};`;
       return `canvas/bitmap est TOTAL ${MB(total)}MB: faces ${MB(facesB)} \xB7 static caches ${MB(staticB)} \xB7 images ${MB(imagesB)} \xB7 src blobs ${MB(srcBlobB)} \xB7 shadows ${MB(shadowB)} \xB7 wedge cache ${MB(rc.wedgeCache)} \xB7 wheel cache ${MB(rc.wheelCache)} \xB7 hand cache ${MB(rc.handCache)} \xB7 analemma ${MB(analemmaB)} \xB7 terra ring ${MB(terraB)} \xB7 cutout temp ${MB(rc.cutoutTemp)} \xB7 face buffers ${MB(buffersB)} \xB7 shared canvas ${MB(sharedB)}${jsHeap}`;
     }
     function _buildStamp() {
-      return true ? "2.0.48" : "dev";
+      return true ? "2.0.50" : "dev";
     }
     function _browserShort() {
       const ua = navigator.userAgent;
@@ -23563,41 +23617,9 @@ return {${names2.join(",")}};`;
       registerHotkey("t", () => document.getElementById("time-bar-label")?.click());
       registerHotkey("n", () => document.getElementById("time-bar-now")?.click());
       registerHotkey("l", () => document.getElementById("set-location-btn")?.click());
+      registerHotkey("f", () => document.getElementById("fullscreen-btn")?.click());
     }
-    const fullscreenBtn = document.getElementById("fullscreen-btn");
-    if (fullscreenBtn) {
-      const isFullscreenSupported = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled || document.mozFullScreenEnabled || document.msFullscreenEnabled);
-      if (!isFullscreenSupported) {
-        fullscreenBtn.style.display = "none";
-      } else {
-        fullscreenBtn.addEventListener("click", () => {
-          const doc = document;
-          const docEl = document.documentElement;
-          const fullscreenElement = doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement;
-          if (fullscreenElement) {
-            if (doc.exitFullscreen) {
-              doc.exitFullscreen();
-            } else if (doc.webkitExitFullscreen) {
-              doc.webkitExitFullscreen();
-            } else if (doc.mozCancelFullScreen) {
-              doc.mozCancelFullScreen();
-            } else if (doc.msExitFullscreen) {
-              doc.msExitFullscreen();
-            }
-          } else {
-            if (docEl.requestFullscreen) {
-              docEl.requestFullscreen();
-            } else if (docEl.webkitRequestFullscreen) {
-              docEl.webkitRequestFullscreen();
-            } else if (docEl.mozRequestFullScreen) {
-              docEl.mozRequestFullScreen();
-            } else if (docEl.msRequestFullscreen) {
-              docEl.msRequestFullscreen();
-            }
-          }
-        });
-      }
-    }
+    initFullscreenToggle(() => triggerManualResize());
     function tickTimeBarClock() {
       if (timeController.isRealTime) {
         timeUI?.updateTimeUI();

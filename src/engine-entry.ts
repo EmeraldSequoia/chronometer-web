@@ -57,6 +57,7 @@ import { createFpsIndicator } from './shared/fps-indicator.js';
 import { initHelpPopover, openGeneralHelpTopic } from './shared/help-popover.js';
 import { registerHotkey } from './shared/hotkeys.js';
 import { initAppNavLinks, registerAppNavHotkeys } from './shared/app-nav.js';
+import { initFullscreenToggle } from './shared/fullscreen.js';
 import { initShareButton } from './shared/share-button.js';
 import { loadCityData, prefetchCityData, releaseCityData, searchCities, findClosestCity, isCityDataLoaded, loadError } from './shared/city-search.js';
 import { showStorageWarning } from './shared/incoming-settings-dialog.js';
@@ -2849,49 +2850,13 @@ async function main() {
         registerHotkey('t', () => document.getElementById('time-bar-label')?.click());
         registerHotkey('n', () => document.getElementById('time-bar-now')?.click());
         registerHotkey('l', () => document.getElementById('set-location-btn')?.click());
+        registerHotkey('f', () => document.getElementById('fullscreen-btn')?.click());
     }
 
     // --- Fullscreen toggle button ---
-    const fullscreenBtn = document.getElementById('fullscreen-btn');
-    if (fullscreenBtn) {
-        const isFullscreenSupported = !!(
-            document.fullscreenEnabled ||
-            (document as any).webkitFullscreenEnabled ||
-            (document as any).mozFullScreenEnabled ||
-            (document as any).msFullscreenEnabled
-        );
-        if (!isFullscreenSupported) {
-            fullscreenBtn.style.display = 'none';
-        } else {
-            fullscreenBtn.addEventListener('click', () => {
-                const doc = document as any;
-                const docEl = document.documentElement as any;
-                const fullscreenElement = doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement;
-
-                if (fullscreenElement) {
-                    if (doc.exitFullscreen) {
-                        doc.exitFullscreen();
-                    } else if (doc.webkitExitFullscreen) {
-                        doc.webkitExitFullscreen();
-                    } else if (doc.mozCancelFullScreen) {
-                        doc.mozCancelFullScreen();
-                    } else if (doc.msExitFullscreen) {
-                        doc.msExitFullscreen();
-                    }
-                } else {
-                    if (docEl.requestFullscreen) {
-                        docEl.requestFullscreen();
-                    } else if (docEl.webkitRequestFullscreen) {
-                        docEl.webkitRequestFullscreen();
-                    } else if (docEl.mozRequestFullScreen) {
-                        docEl.mozRequestFullScreen();
-                    } else if (docEl.msRequestFullscreen) {
-                        docEl.msRequestFullscreen();
-                    }
-                }
-            });
-        }
-    }
+    // The grid must re-measure when the is-fullscreen class hides/shows the
+    // bottom panels without a viewport change (the faux-fullscreen path).
+    initFullscreenToggle(() => triggerManualResize());
 
 
     // =========================================================================
