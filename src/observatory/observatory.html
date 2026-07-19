@@ -94,6 +94,7 @@
          dropped the chrome — hide the DOM header/footer to match, giving the
          dial the full surface (A1/A6/short-Awide). */
       body.obs-chrome-dropped #obs-header,
+      body.obs-chrome-dropped #obs-footer-row,
       body.obs-chrome-dropped #time-bar,
       body.obs-chrome-dropped #observatory-controls,
       body.obs-chrome-dropped #noon-icon,
@@ -127,6 +128,7 @@
       body.is-fullscreen #inspector-link,
       body.is-fullscreen #obs-header-actions #info-btn,
       body.is-fullscreen #obs-header-actions #share-btn,
+      body.is-fullscreen #obs-footer-row,
       body.is-fullscreen #time-bar,
       body.is-fullscreen #observatory-controls,
       body.is-fullscreen #noon-icon,
@@ -134,13 +136,11 @@
           display: none !important;
       }
 
-      /* Location controls — right end of the footer row */
+      /* Location controls — right part of the bottom chrome row. Positioning
+         and z-index come from the #obs-footer-row flex parent. */
       #observatory-controls {
-          position: fixed;
-          bottom: env(safe-area-inset-bottom);
-          right: calc(12px + env(safe-area-inset-right));
           height: var(--obs-footer-h);
-          z-index: 11;
+          flex: 0 0 auto;
           display: flex;
           gap: 8px;
           align-items: center;
@@ -177,14 +177,14 @@
       /* ── Noon-on-top control (iteration 3): a footer-centre icon that raises
          the Midnight/Noon pill as an on-demand overlay (§6 C2). Pill appearance
          matches Chronometer's Vienna noon toggle (face-template.html). ── */
-      /* The noon-on-top access icon — a small half-filled disc centred in the
-         footer row. Tapping it raises the Midnight/Noon pill overlay below. The
-         entry shifts it left in A5 (the dial overlaps the footer centre). */
+      /* The noon-on-top access icon — a small half-filled disc that flows in the
+         #obs-footer-row flex row (centred between the time controls and location
+         via space-between; wraps with them on narrow phones). Tapping it raises
+         the Midnight/Noon pill overlay. When the dial reaches into the footer
+         (A5), positionNoonIcon() adds .pinned to lift it out of the row and pin
+         it right of the time-controller contents so it isn't lost under the dial. */
       #noon-icon {
-          position: fixed;
-          bottom: env(safe-area-inset-bottom);
-          left: 50%;
-          transform: translateX(-50%);
+          flex: 0 0 auto;
           height: var(--obs-footer-h);
           width: 32px;
           z-index: 11;
@@ -197,6 +197,11 @@
           cursor: pointer;
           color: rgba(150, 160, 200, 0.85);
           transition: color 0.15s;
+      }
+      #noon-icon.pinned {
+          position: fixed;
+          bottom: env(safe-area-inset-bottom);
+          /* left set inline by positionNoonIcon */
       }
 
       #noon-icon:hover {
@@ -650,16 +655,44 @@
       /* ── Time controller injection ──────────────────── */
       {{TIME_CSS}}
 
-      /* Override time-bar styling for Observatory: it forms the LEFT part of
-         the single bottom chrome row (location controls are the right part). */
-      #time-bar {
+      /* ── Bottom chrome row: the time-controller (left) and location controls
+         (right) as flex children. wrap-reverse keeps the time line pinned at the
+         bottom (its usual spot) and lets the location line float ABOVE it when
+         the two don't fit on one line — e.g. on narrow phones once the red time
+         offset widens the left group. The row is transparent and floats over the
+         dial/starfield (the canvas reserves only --obs-footer-h; a wrapped
+         second line overlaps the dial's bottom edge, which is fine for this rare,
+         transient state). ─────────────────────────────────────────────────── */
+      #obs-footer-row {
           position: fixed;
           bottom: env(safe-area-inset-bottom);
           left: 0;
           right: 0;
-          height: var(--obs-footer-h);
-          z-index: 10;
+          min-height: var(--obs-footer-h);
+          z-index: 11;
+          display: flex;
+          flex-wrap: wrap-reverse;
+          align-items: center;
+          justify-content: space-between;
+          column-gap: 16px;
+          row-gap: 2px;
           padding: 0 calc(12px + env(safe-area-inset-right)) 0 calc(12px + env(safe-area-inset-left));
+          /* Transparent gaps pass presses through to the dial; children re-enable. */
+          pointer-events: none;
+      }
+      #obs-footer-row > * {
+          pointer-events: auto;
+      }
+
+      /* Override time-bar styling for Observatory: the LEFT part of the bottom
+         chrome row (#obs-footer-row). min-width:0 lets it shrink before forcing
+         a wrap; the row supplies the outer padding. */
+      #time-bar {
+          position: static;
+          height: var(--obs-footer-h);
+          min-width: 0;
+          flex: 0 1 auto;
+          padding: 0;
           justify-content: flex-start;
           /* No band background/border by design — the footer is just its
              controls floating over the dial/starfield. (border-top: none cancels
@@ -828,20 +861,8 @@
       </div>
     </div>
 
-    <!-- Minimal overlay controls -->
-    <div id="observatory-controls">
-      <span id="location-name">Detecting…</span>
-      <button id="set-location-btn">Set Location</button>
-    </div>
-
-    <!-- Noon-on-top: footer-centre icon (half-filled disc) raises the pill
-         overlay on tap (wiring in setupNoonToggle, observatory-entry.ts). -->
-    <button id="noon-icon" title="Midnight / Noon on top" aria-label="Midnight or Noon on top">
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/>
-        <path d="M12 3.9 A8.1 8.1 0 0 0 12 20.1 Z" fill="currentColor"/>
-      </svg>
-    </button>
+    <!-- Noon-on-top pill overlay, raised on tap of the footer noon disc (which
+         lives in #obs-footer-row below). Wiring in setupNoonToggle. -->
     <div id="noon-toggle">
       <button class="noon-pill" data-mode="midnight">Midnight on top</button>
       <button class="noon-pill" data-mode="noon">Noon on top</button>
@@ -849,7 +870,25 @@
 
     {{LOCATION_DIALOG}}
 
-    {{TIME_CONTROLLER}}
+    <!-- Bottom chrome: ONE wrapping row shared by the time-controller (left), the
+         noon-on-top disc (centre) and the location controls (right). On narrow
+         phones — e.g. when the red time offset widens the left group — they wrap
+         onto separate lines instead of overlapping (see #obs-footer-row CSS). -->
+    <div id="obs-footer-row">
+      {{TIME_CONTROLLER}}
+      <!-- Noon-on-top: footer disc (half-filled) raises the pill overlay on tap. -->
+      <button id="noon-icon" title="Midnight / Noon on top" aria-label="Midnight or Noon on top">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/>
+          <path d="M12 3.9 A8.1 8.1 0 0 0 12 20.1 Z" fill="currentColor"/>
+        </svg>
+      </button>
+      <!-- Minimal overlay controls -->
+      <div id="observatory-controls">
+        <span id="location-name">Detecting…</span>
+        <button id="set-location-btn">Set Location</button>
+      </div>
+    </div>
 
     <script src="observatory-engine.js"></script>
   </body>

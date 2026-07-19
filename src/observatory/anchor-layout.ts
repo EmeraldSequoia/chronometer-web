@@ -914,7 +914,8 @@ function shiftLayout(L: LayoutParams, dx: number, dy: number): void {
 
 /** Chrome + safe-area insets for the iteration-3 layout. */
 export interface ObsChrome {
-    /** Reserved footer-row height (single row; 0 when chrome is dropped). */
+    /** Reserved footer-row height (measured; grows when the row wraps to two
+     *  lines on narrow phones; 0 when chrome is dropped). */
     footerH: number;
     /** Reserved header-row height (Observatory · ℹ · share). */
     headerH: number;

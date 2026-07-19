@@ -21420,6 +21420,13 @@
     }
   }
   var FOOTER_H = 32;
+  function measuredFooterH() {
+    const row = document.getElementById("obs-footer-row");
+    if (!row) return FOOTER_H;
+    const h = Math.round(row.getBoundingClientRect().height);
+    return h > 0 ? Math.max(FOOTER_H, h) : FOOTER_H;
+  }
+  var lastFooterH = FOOTER_H;
   var HEADER_H = 32;
   var insetProbe = null;
   function readSafeInsets() {
@@ -21438,9 +21445,12 @@
   }
   function chromeParams() {
     if (document.body.classList.contains("is-fullscreen")) {
+      lastFooterH = 0;
       return { footerH: 0, headerH: 0, ...readSafeInsets() };
     }
-    return { footerH: FOOTER_H, headerH: HEADER_H, ...readSafeInsets() };
+    const footerH = measuredFooterH();
+    lastFooterH = footerH;
+    return { footerH, headerH: HEADER_H, ...readSafeInsets() };
   }
   function resizeCanvas() {
     const dpr = devicePixelRatio || 1;
@@ -21468,12 +21478,13 @@
   }
   var needsStaticRedraw = true;
   var resizeTimer = null;
-  var ro = new ResizeObserver(() => {
+  function scheduleResize() {
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       resizeCanvas();
     }, 100);
-  });
+  }
+  var ro = new ResizeObserver(scheduleResize);
   function drawFrame() {
     const dpr = devicePixelRatio || 1;
     const w = canvas.width;
@@ -21746,7 +21757,7 @@
   function positionNoonIcon() {
     const icon = document.getElementById("noon-icon");
     if (!icon || !layout) return;
-    const footerTop = window.innerHeight - readSafeInsets().insetBottom - FOOTER_H;
+    const footerTop = window.innerHeight - readSafeInsets().insetBottom - lastFooterH;
     const dialInFooter = layout.mainCY + layout.mainR > footerTop;
     if (dialInFooter) {
       let rightEdge = 0;
@@ -21754,11 +21765,11 @@
         const r = document.getElementById(id)?.getBoundingClientRect();
         if (r && r.width > 0) rightEdge = Math.max(rightEdge, r.right);
       }
+      icon.classList.add("pinned");
       icon.style.left = `${rightEdge + 12}px`;
-      icon.style.transform = "none";
     } else {
-      icon.style.left = "50%";
-      icon.style.transform = "translateX(-50%)";
+      icon.classList.remove("pinned");
+      icon.style.left = "";
     }
   }
   function setupNoonToggle() {
@@ -21996,6 +22007,10 @@
     if (urlState.fps) document.body.classList.add("has-fps");
     initCanvas();
     ro.observe(document.documentElement);
+    const footerRowEl = document.getElementById("obs-footer-row");
+    if (footerRowEl) ro.observe(footerRowEl);
+    window.addEventListener("resize", scheduleResize);
+    window.addEventListener("orientationchange", scheduleResize);
     updateDynamicCompositeIcon(["thumb-observatory.png"], "#000000");
     setupLocationDialog();
     setupNoonToggle();
@@ -22062,7 +22077,7 @@
     });
     timeController.onTick = () => {
       rebuildEnv();
-      positionNoonIcon();
+      queueMicrotask(positionNoonIcon);
     };
     env.variables.set("noonOnTop", noonOnTop ? 1 : 0);
     env.variables.set("dialPlanet", selectedPlanet);
@@ -22087,7 +22102,10 @@
     if (urlState.tc) {
       timeUI?.showPopover();
     }
-    requestAnimationFrame(() => positionNoonIcon());
+    requestAnimationFrame(() => {
+      positionNoonIcon();
+      if (measuredFooterH() !== lastFooterH) resizeCanvas();
+    });
     console.log("[Observatory] Initialized \u2014 lat:", lat, "lon:", lon, "tz:", locationTimezone);
     fpsIndicator = createFpsIndicator(urlState.fps);
     Promise.all([waitForImages(), waitForPlanetImages(), waitForBackgroundImage()]).then(() => {

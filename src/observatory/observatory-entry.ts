@@ -230,11 +230,31 @@ function onCanvasClick(ev: MouseEvent): void {
 }
 
 /**
- * Height of the bottom chrome row (time-controller button + location).
- * Mirrored into the CSS variable --obs-footer-h at startup so the DOM row and
- * the canvas layout reserve the same band.
+ * Height of a SINGLE bottom-chrome line (time-controller / noon / location).
+ * Mirrored into the CSS variable --obs-footer-h at startup so the DOM controls
+ * and the canvas layout share the same per-line band height. The actual footer
+ * *reservation* is the measured row height (see measuredFooterH), which is taller
+ * when the row wraps to two lines on narrow phones.
  */
 const FOOTER_H = 32;
+
+/**
+ * Reserved bottom-chrome height for the canvas layout: the live height of the
+ * #obs-footer-row flex row. It equals FOOTER_H on one line and grows (≈2×) when
+ * the row wraps on narrow phones, so the dial is always sized to sit ABOVE the
+ * footer rather than under a wrapped second line. Floored at FOOTER_H so a
+ * hidden/zero-height row (chrome dropped) still reserves a sane band.
+ */
+function measuredFooterH(): number {
+    const row = document.getElementById('obs-footer-row');
+    if (!row) return FOOTER_H;
+    const h = Math.round(row.getBoundingClientRect().height);
+    return h > 0 ? Math.max(FOOTER_H, h) : FOOTER_H;
+}
+
+/** Footer height last fed to computeLayout — lets a tick cheaply detect a wrap
+ *  (the offset appearing can flip the row 1↔2 lines at boundary widths). */
+let lastFooterH = FOOTER_H;
 
 /**
  * Height of the top chrome row (the iteration-3 header band: "Observatory" left,
@@ -276,9 +296,12 @@ function chromeParams(): ObsChrome {
     // Fullscreen (real or faux) hides the header/footer chrome, so the dial
     // reclaims both bands; only the safe-area insets still apply.
     if (document.body.classList.contains('is-fullscreen')) {
+        lastFooterH = 0;
         return { footerH: 0, headerH: 0, ...readSafeInsets() };
     }
-    return { footerH: FOOTER_H, headerH: HEADER_H, ...readSafeInsets() };
+    const footerH = measuredFooterH();
+    lastFooterH = footerH;
+    return { footerH, headerH: HEADER_H, ...readSafeInsets() };
 }
 
 function resizeCanvas(): void {
@@ -321,14 +344,22 @@ function resizeCanvas(): void {
 
 let needsStaticRedraw = true;
 
-// Debounced resize handler
+// Debounced relayout — coalesces viewport resizes, orientation changes, and
+// footer-row wraps into a single resizeCanvas() (which re-reserves the footer
+// band, see measuredFooterH).
 let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-const ro = new ResizeObserver(() => {
+function scheduleResize(): void {
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
         resizeCanvas();
     }, 100);
-});
+}
+// Observe the viewport (canvas must resize) AND the footer row: on rotation the
+// row can re-wrap to a different height slightly after the viewport settles, and
+// a documentElement-only observer measures the footer before that reflow lands,
+// leaving the dial reserving the old (single-row) band until the next reload.
+// Observing the row itself re-fires once its height actually changes.
+const ro = new ResizeObserver(scheduleResize);
 
 /**
  * Draw the current frame.
@@ -793,15 +824,18 @@ function setupLocationDialog(): void {
  * on the next frame.
  */
 /**
- * Position the footer's noon-toggle icon. Normally centred; when the main dial
- * reaches into the footer row (e.g. A5), the centred icon would sit under the
- * dial, so it moves to the right of the time-controller button (and the red
- * offset label / Now button, when shown).
+ * Position the footer's noon-toggle icon. It normally flows inside the footer
+ * flex row (#obs-footer-row) — centred between the time controls and location,
+ * and wrapping with them on narrow phones, so it never overlaps the red offset /
+ * Now button (whose width changes as the offset grows). Only when the main dial
+ * reaches into the footer (e.g. A5) do we pull it OUT of the row (.pinned) and
+ * pin it to the right of the time-controller contents, so it isn't lost under
+ * the dial.
  */
 function positionNoonIcon(): void {
     const icon = document.getElementById('noon-icon');
     if (!icon || !layout) return;
-    const footerTop = window.innerHeight - readSafeInsets().insetBottom - FOOTER_H;
+    const footerTop = window.innerHeight - readSafeInsets().insetBottom - lastFooterH;
     const dialInFooter = layout.mainCY + layout.mainR > footerTop;
     if (dialInFooter) {
         // Rightmost edge of the time-bar's left-aligned contents (hidden
@@ -811,11 +845,11 @@ function positionNoonIcon(): void {
             const r = document.getElementById(id)?.getBoundingClientRect();
             if (r && r.width > 0) rightEdge = Math.max(rightEdge, r.right);
         }
+        icon.classList.add('pinned');
         icon.style.left = `${rightEdge + 12}px`;
-        icon.style.transform = 'none';
     } else {
-        icon.style.left = '50%';
-        icon.style.transform = 'translateX(-50%)';
+        icon.classList.remove('pinned');
+        icon.style.left = '';
     }
 }
 
@@ -1196,6 +1230,13 @@ function init(): void {
 
     initCanvas();
     ro.observe(document.documentElement);
+    const footerRowEl = document.getElementById('obs-footer-row');
+    if (footerRowEl) ro.observe(footerRowEl);
+    // Belt-and-suspenders for rotation: some engines don't re-fire a
+    // documentElement ResizeObserver on orientation change, so also relayout on
+    // the classic window events.
+    window.addEventListener('resize', scheduleResize);
+    window.addEventListener('orientationchange', scheduleResize);
     updateDynamicCompositeIcon(['thumb-observatory.png'], '#000000');
     setupLocationDialog();
     setupNoonToggle();
@@ -1271,9 +1312,21 @@ function init(): void {
     // across both continuous advance and discrete jumps — which is why the time
     // controls need no transition callbacks of their own (see below).
     // Also re-place the footer noon icon: a transport change shows/hides the red
-    // offset label + Now button, changing where the icon must sit when the dial
-    // reaches into the footer (A5). onTick fires on every transition + tick.
-    timeController.onTick = () => { rebuildEnv(); positionNoonIcon(); };
+    // offset label + Now button, changing where the icon must sit (to the right
+    // of those contents, or when the dial reaches into the footer in A5). onTick
+    // fires on every transition + tick. Defer to a microtask: the transport
+    // handlers reveal the offset/Now via updateTimeUI() *after* firing onTick, so
+    // positioning synchronously here would measure the stale, pre-offset row.
+    timeController.onTick = () => {
+        rebuildEnv();
+        // The transport handlers reveal the offset/Now via updateTimeUI() *after*
+        // firing onTick, so defer re-placing the noon disc against the settled row.
+        // A footer wrap/unwrap that this causes (1↔2 lines, possible at boundary
+        // widths when the offset appears) re-reserves the dial band via the
+        // ResizeObserver on #obs-footer-row — no per-tick relayout here (keeps
+        // scrubbing cheap).
+        queueMicrotask(positionNoonIcon);
+    };
 
     // Initialize Observatory value system
     env.variables.set('noonOnTop', noonOnTop ? 1 : 0);
@@ -1317,8 +1370,13 @@ function init(): void {
     }
 
     // Place the noon icon once the time bar has laid out its contents (the
-    // offset label / Now button appear when ?t/?off seed an overridden time).
-    requestAnimationFrame(() => positionNoonIcon());
+    // offset label / Now button appear when ?t/?off seed an overridden time),
+    // and re-reserve the footer band in case the row wrapped to two lines once
+    // its final width/content settled.
+    requestAnimationFrame(() => {
+        positionNoonIcon();
+        if (measuredFooterH() !== lastFooterH) resizeCanvas();
+    });
 
     console.log('[Observatory] Initialized — lat:', lat, 'lon:', lon, 'tz:', locationTimezone);
 
