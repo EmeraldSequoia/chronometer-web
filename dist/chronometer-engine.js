@@ -19831,6 +19831,260 @@ return {${names2.join(",")}};`;
     }, env, perfNow));
   }
 
+  // src/shared/chrome-layout.ts
+  var CHROME_GAP_PX = 2;
+  var BTN_GAP = 8;
+  var EDGE_MARGIN = 16;
+  function rectsClear(a, b, gap) {
+    return a.right + gap <= b.left || b.right + gap <= a.left || a.bottom + gap <= b.top || b.bottom + gap <= a.top;
+  }
+  function blockedDyCircle(c, rect, gap) {
+    const R = c.r + gap;
+    const dx = Math.max(rect.left - c.cx, c.cx - rect.right, 0);
+    if (dx >= R) return null;
+    const vy = Math.sqrt(R * R - dx * dx);
+    return [rect.top - vy - c.cy, rect.bottom + vy - c.cy];
+  }
+  function blockedDyRect(target, chrome, gap) {
+    if (target.left - gap >= chrome.right || target.right + gap <= chrome.left) return null;
+    return [chrome.top - gap - target.bottom, chrome.bottom + gap - target.top];
+  }
+  function minClearDy(avoid, chrome, gap) {
+    const blocked = [];
+    for (const r of chrome) {
+      for (const c of avoid.circles) {
+        const iv = blockedDyCircle(c, r, gap);
+        if (iv && iv[1] > 0) blocked.push(iv);
+      }
+      for (const t of avoid.rects) {
+        const iv = blockedDyRect(t, r, gap);
+        if (iv && iv[1] > 0) blocked.push(iv);
+      }
+    }
+    blocked.sort((a, b) => a[0] - b[0]);
+    let dy = 0;
+    for (const [lo, hi] of blocked) {
+      if (lo <= dy && dy < hi) dy = hi;
+    }
+    return dy;
+  }
+  function splitOrder(n, preferred) {
+    const p = Math.max(0, Math.min(n, preferred));
+    const order = [p];
+    for (let d = 1; d <= n; d++) {
+      if (p + d <= n) order.push(p + d);
+      if (p - d >= 0) order.push(p - d);
+    }
+    return order;
+  }
+  function placeGroup(group, split, viewportW, btnGap, edgeMargin) {
+    const placed = [];
+    const rowArm = group.items.slice(0, split);
+    const colArm = group.items.slice(split);
+    if (group.rowOrder) {
+      const rank = new Map(group.rowOrder.map((id, i) => [id, i]));
+      rowArm.sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
+    }
+    const toPlaced = (it, edgeOffset, top2) => {
+      if (group.corner === "tl") {
+        return {
+          id: it.id,
+          top: top2,
+          left: edgeOffset,
+          rect: { left: edgeOffset, top: top2, right: edgeOffset + it.w, bottom: top2 + it.h }
+        };
+      }
+      const right = viewportW - edgeOffset;
+      return {
+        id: it.id,
+        top: top2,
+        right: edgeOffset,
+        rect: { left: right - it.w, top: top2, right, bottom: top2 + it.h }
+      };
+    };
+    let inset = edgeMargin;
+    for (const it of rowArm) {
+      placed.push(toPlaced(it, Math.round(inset), edgeMargin));
+      inset += it.w + btnGap;
+    }
+    let top = edgeMargin + (rowArm.length > 0 ? rowArm[0].h + btnGap : 0);
+    for (const it of colArm) {
+      placed.push(toPlaced(it, edgeMargin, Math.round(top)));
+      top += it.h + btnGap;
+    }
+    return placed;
+  }
+  function layoutChrome(groups, avoid, opts) {
+    const gap = opts.gap ?? CHROME_GAP_PX;
+    const btnGap = opts.btnGap ?? BTN_GAP;
+    const edgeMargin = opts.edgeMargin ?? EDGE_MARGIN;
+    if (groups.every((g) => g.items.length === 0)) {
+      return { placed: [], dy: 0, feasible: true, comboKey: "none" };
+    }
+    const orders = groups.map((g) => splitOrder(g.items.length, g.defaultSplit));
+    let combos = [[]];
+    for (const ord of orders) {
+      combos = combos.flatMap((prefix) => ord.map((_, i) => [...prefix, i]));
+    }
+    combos.sort((a, b) => {
+      const sum = (x) => x.reduce((s, v) => s + v, 0);
+      const d = sum(a) - sum(b);
+      if (d !== 0) return d;
+      const m = Math.max(...a) - Math.max(...b);
+      if (m !== 0) return m;
+      for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] - b[i];
+      return 0;
+    });
+    const evaluate = (splits) => {
+      const perGroup = groups.map((g, gi) => placeGroup(g, splits[gi], opts.viewportW, btnGap, edgeMargin));
+      for (let i = 0; i < perGroup.length; i++) {
+        for (let j = i + 1; j < perGroup.length; j++) {
+          for (const a of perGroup[i]) {
+            for (const b of perGroup[j]) {
+              if (!rectsClear(a.rect, b.rect, gap)) return null;
+            }
+          }
+        }
+      }
+      const placed = perGroup.flat();
+      const dy = minClearDy(avoid, placed.map((p) => p.rect), gap);
+      const comboKey = groups.map((g, gi) => `${g.corner}${splits[gi]}`).join(".");
+      return { placed, dy, comboKey };
+    };
+    let best = null;
+    for (let rank = 0; rank < combos.length; rank++) {
+      const splits = combos[rank].map((oi, gi) => orders[gi][oi]);
+      const cand = evaluate(splits);
+      if (!cand) continue;
+      if (cand.dy === 0) {
+        return { placed: cand.placed, dy: 0, feasible: true, comboKey: cand.comboKey };
+      }
+      if (!best || cand.dy < best.dy) best = { ...cand, prefRank: rank };
+    }
+    if (!best) {
+      const perGroup = groups.map((g) => placeGroup(g, 0, opts.viewportW, btnGap, edgeMargin));
+      const placed = perGroup.flat();
+      const dy = minClearDy(avoid, placed.map((p) => p.rect), gap);
+      const comboKey = groups.map((g) => `${g.corner}0`).join(".") + "!";
+      return { placed, dy, feasible: dy <= opts.maxDy, comboKey };
+    }
+    return {
+      placed: best.placed,
+      dy: best.dy,
+      feasible: best.dy <= opts.maxDy,
+      comboKey: best.comboKey
+    };
+  }
+
+  // src/watch/grid-layout.ts
+  var GAP_PX = 12;
+  var PADDING_PX = 12;
+  function optimizeGrid(count, containerW, containerH, gap, padding, maxSize = Infinity) {
+    if (count <= 0) return { cols: 1, rows: 1, size: 0 };
+    let bestCols = 1, bestRows = count, bestSize = 0;
+    for (let c = 1; c <= count; c++) {
+      const r = Math.ceil(count / c);
+      const usableW = containerW - 2 * padding - gap * (c - 1);
+      const usableH = containerH - 2 * padding - gap * (r - 1);
+      const size = Math.min(Math.floor(Math.min(usableW / c, usableH / r)), maxSize);
+      const isBetter = size > bestSize;
+      const isTie = size === bestSize && c + r < bestCols + bestRows;
+      if (isBetter || isTie) {
+        bestSize = size;
+        bestCols = c;
+        bestRows = r;
+      }
+    }
+    return { cols: bestCols, rows: bestRows, size: bestSize };
+  }
+  function computeFaceRects(count, cols, rows, size, W, H, gap, dy = 0) {
+    const cellStep = size + gap;
+    const remainder = count - cols * (rows - 1);
+    const canNestle = rows > 1 && remainder !== cols && (cols - remainder) % 2 === 1;
+    const nestledStep = canNestle ? cellStep * Math.sqrt(3) / 2 : cellStep;
+    const gridW = cols * size + (cols - 1) * gap;
+    const lastRowY = rows === 1 ? 0 : nestledStep + (rows - 2) * cellStep;
+    const totalH = lastRowY + size;
+    const offsetX = (W - gridW) / 2;
+    const offsetY = (H - totalH) / 2 + dy;
+    const cells = [];
+    for (let i = 0; i < count; i++) {
+      let row, colIdx, itemsInRow;
+      if (i < remainder) {
+        row = 0;
+        colIdx = i;
+        itemsInRow = remainder;
+      } else {
+        const j = i - remainder;
+        row = 1 + Math.floor(j / cols);
+        colIdx = j % cols;
+        itemsInRow = cols;
+      }
+      const rowW = itemsInRow * size + (itemsInRow - 1) * gap;
+      const rowOffsetX = (gridW - rowW) / 2;
+      const x = offsetX + rowOffsetX + colIdx * cellStep;
+      const rowY = row === 0 ? 0 : nestledStep + (row - 1) * cellStep;
+      const y = offsetY + rowY;
+      cells.push({ x, y, size });
+    }
+    return { cells, gridW, totalH };
+  }
+  function layoutGridWithChrome(count, W, H, gridOrigin, groups, viewportW, opts = {}) {
+    const gap = opts.gap ?? GAP_PX;
+    const padding = opts.padding ?? PADDING_PX;
+    const chromeGap = opts.chromeGap ?? CHROME_GAP_PX;
+    const evaluate = (sizeCap) => {
+      const og = optimizeGrid(count, W, H, gap, padding, sizeCap);
+      if (og.size <= 0) return null;
+      const placement = computeFaceRects(count, og.cols, og.rows, og.size, W, H, gap, 0);
+      const maxDy = Math.max(0, (H - placement.totalH) / 2 - chromeGap);
+      const circles = placement.cells.map((c) => ({
+        cx: gridOrigin.x + c.x + c.size / 2,
+        cy: gridOrigin.y + c.y + c.size / 2,
+        r: c.size / 2
+      }));
+      const chrome = layoutChrome(groups, { circles, rects: [] }, {
+        viewportW,
+        maxDy,
+        gap: chromeGap,
+        btnGap: opts.btnGap ?? BTN_GAP,
+        edgeMargin: opts.edgeMargin ?? EDGE_MARGIN
+      });
+      return { cols: og.cols, rows: og.rows, size: og.size, maxDy, chrome };
+    };
+    const finish = (p, shrunk) => {
+      const dy = Math.min(p.chrome.dy, p.maxDy);
+      const placement = computeFaceRects(count, p.cols, p.rows, p.size, W, H, gap, dy);
+      return {
+        size: p.size,
+        cols: p.cols,
+        rows: p.rows,
+        cells: placement.cells,
+        dy,
+        chrome: p.chrome,
+        shrunk,
+        feasible: p.chrome.feasible
+      };
+    };
+    const base = evaluate(Infinity);
+    if (!base) return null;
+    if (base.chrome.feasible) return finish(base, false);
+    let lo = 1, hi = base.size - 1;
+    let best = null;
+    while (lo <= hi) {
+      const mid = lo + hi >> 1;
+      const probe = evaluate(mid);
+      if (probe && probe.chrome.feasible) {
+        best = probe;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    if (best) return finish(best, true);
+    return finish(base, false);
+  }
+
   // src/shared/hotkeys.ts
   var handlers = /* @__PURE__ */ new Map();
   var listenerInstalled = false;
@@ -21812,24 +22066,6 @@ return {${names2.join(",")}};`;
       );
     });
   }
-  function optimizeGrid(count, containerW, containerH, gap, padding) {
-    if (count <= 0) return { cols: 1, rows: 1, size: 0 };
-    let bestCols = 1, bestRows = count, bestSize = 0;
-    for (let c = 1; c <= count; c++) {
-      const r = Math.ceil(count / c);
-      const usableW = containerW - 2 * padding - gap * (c - 1);
-      const usableH = containerH - 2 * padding - gap * (r - 1);
-      const size = Math.floor(Math.min(usableW / c, usableH / r));
-      const isBetter = size > bestSize;
-      const isTie = size === bestSize && c + r < bestCols + bestRows;
-      if (isBetter || isTie) {
-        bestSize = size;
-        bestCols = c;
-        bestRows = r;
-      }
-    }
-    return { cols: bestCols, rows: bestRows, size: bestSize };
-  }
   async function loadImagesFromFaceData(imageMap) {
     const result = /* @__PURE__ */ new Map();
     const entries = Object.entries(imageMap);
@@ -22221,7 +22457,6 @@ return {${names2.join(",")}};`;
       }
       return void 0;
     }
-    let cols = 1, rows = 1;
     const faces = [];
     function restoreKyotoState(face) {
       if (!face.watch.wadokei) return;
@@ -22530,7 +22765,7 @@ return {${names2.join(",")}};`;
       return `canvas/bitmap est TOTAL ${MB(total)}MB: faces ${MB(facesB)} \xB7 static caches ${MB(staticB)} \xB7 images ${MB(imagesB)} \xB7 src blobs ${MB(srcBlobB)} \xB7 shadows ${MB(shadowB)} \xB7 wedge cache ${MB(rc.wedgeCache)} \xB7 wheel cache ${MB(rc.wheelCache)} \xB7 hand cache ${MB(rc.handCache)} \xB7 analemma ${MB(analemmaB)} \xB7 terra ring ${MB(terraB)} \xB7 cutout temp ${MB(rc.cutoutTemp)} \xB7 face buffers ${MB(buffersB)} \xB7 shared canvas ${MB(sharedB)}${jsHeap}`;
     }
     function _buildStamp() {
-      return true ? "2.0.52" : "dev";
+      return true ? "2.0.54" : "dev";
     }
     function _browserShort() {
       const ua = navigator.userAgent;
@@ -23037,56 +23272,101 @@ return {${names2.join(",")}};`;
         startScheduler();
       }
     });
-    const GAP_PX = 12;
-    const PADDING_PX = 12;
     let resizeDebounceTimer = null;
     let lastContainerW = 0;
     let lastContainerH = 0;
+    let lastLayoutKey = "";
+    const LEFT_CHROME_IDS = ["back-link", "all-faces-link", "selected-faces-link", "edit-picks-link"];
+    const RIGHT_CHROME_IDS = ["fullscreen-btn", "info-btn", "face-name", "share-btn", "observatory-link", "inspector-link"];
+    const RIGHT_ROW_ARM_IDS = /* @__PURE__ */ new Set(["fullscreen-btn", "info-btn", "face-name"]);
+    function visibleChromeItems(ids) {
+      const items = [];
+      for (const id of ids) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) continue;
+        items.push({ id, w: r.width, h: r.height });
+      }
+      return items;
+    }
+    function measureChromeGroups() {
+      const left = visibleChromeItems(LEFT_CHROME_IDS);
+      const right = visibleChromeItems(RIGHT_CHROME_IDS);
+      return [
+        { corner: "tl", items: left, defaultSplit: left.length },
+        {
+          corner: "tr",
+          items: right,
+          defaultSplit: right.filter((i) => RIGHT_ROW_ARM_IDS.has(i.id)).length,
+          // When share (or an app link) is pressed into the row, it
+          // slots in beside the corner rather than outboard of the
+          // face name, so it stays on the side users expect.
+          rowOrder: ["fullscreen-btn", "share-btn", "info-btn", "face-name", "observatory-link", "inspector-link"]
+        }
+      ];
+    }
+    function applyChromePositions(chrome) {
+      for (const p of chrome.placed) {
+        const el = document.getElementById(p.id);
+        if (!el) continue;
+        el.style.top = `${p.top}px`;
+        if (p.left !== void 0) el.style.left = `${p.left}px`;
+        if (p.right !== void 0) el.style.right = `${p.right}px`;
+      }
+    }
+    function clearChromePositions() {
+      for (const id of [...LEFT_CHROME_IDS, ...RIGHT_CHROME_IDS]) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        el.style.removeProperty("top");
+        el.style.removeProperty("left");
+        el.style.removeProperty("right");
+      }
+    }
     function onGridResize(W, H) {
       lastContainerW = W;
       lastContainerH = H;
-      const result = optimizeGrid(faces.length, W, H, GAP_PX, PADDING_PX);
-      if (result.size <= 0) return;
-      const size = result.size;
+      const chromeActive = !isEmbedMode && !document.body.classList.contains("is-fullscreen");
+      if (!chromeActive) clearChromePositions();
+      const groups = chromeActive ? measureChromeGroups() : [];
+      const gridRect = grid.getBoundingClientRect();
+      const layout = layoutGridWithChrome(
+        faces.length,
+        W,
+        H,
+        { x: gridRect.left, y: gridRect.top },
+        groups,
+        document.documentElement.clientWidth
+      );
+      if (!layout) return;
+      const size = layout.size;
       const dpr = effectiveDpr();
       const newPhys = Math.round(size * dpr);
-      if (newPhys === faces[0]?.canvas.width) return;
-      cols = result.cols;
-      rows = result.rows;
-      {
-        const cellStep = size + GAP_PX;
-        const remainder = faces.length - cols * (rows - 1);
-        const canNestle = rows > 1 && remainder !== cols && (cols - remainder) % 2 === 1;
-        const nestledStep = canNestle ? cellStep * Math.sqrt(3) / 2 : cellStep;
-        const gridW = cols * size + (cols - 1) * GAP_PX;
-        const lastRowY = rows === 1 ? 0 : nestledStep + (rows - 2) * cellStep;
-        const totalH = lastRowY + size;
-        const offsetX = (W - gridW) / 2;
-        const offsetY = (H - totalH) / 2;
-        for (let i = 0; i < faces.length; i++) {
-          let row, colIdx, itemsInRow;
-          if (i < remainder) {
-            row = 0;
-            colIdx = i;
-            itemsInRow = remainder;
-          } else {
-            const j = i - remainder;
-            row = 1 + Math.floor(j / cols);
-            colIdx = j % cols;
-            itemsInRow = cols;
-          }
-          const rowW = itemsInRow * size + (itemsInRow - 1) * GAP_PX;
-          const rowOffsetX = (gridW - rowW) / 2;
-          const x = offsetX + rowOffsetX + colIdx * cellStep;
-          const rowY = row === 0 ? 0 : nestledStep + (row - 1) * cellStep;
-          const y = offsetY + rowY;
-          const cell = faces[i].canvas.parentElement;
-          cell.style.position = "absolute";
-          cell.style.left = `${x}px`;
-          cell.style.top = `${y}px`;
-          cell.style.width = `${size}px`;
-          cell.style.height = `${size}px`;
-        }
+      const layoutKey = [
+        newPhys,
+        W,
+        H,
+        layout.chrome.comboKey,
+        layout.dy.toFixed(1),
+        groups.map((g) => g.items.map((i) => `${i.id}:${Math.round(i.w)}`).join(",")).join(";")
+      ].join("|");
+      if (layoutKey === lastLayoutKey) return;
+      lastLayoutKey = layoutKey;
+      const sizeChanged = newPhys !== faces[0]?.canvas.width;
+      for (let i = 0; i < faces.length; i++) {
+        const c = layout.cells[i];
+        const cell = faces[i].canvas.parentElement;
+        cell.style.position = "absolute";
+        cell.style.left = `${c.x}px`;
+        cell.style.top = `${c.y}px`;
+        cell.style.width = `${c.size}px`;
+        cell.style.height = `${c.size}px`;
+      }
+      if (chromeActive) applyChromePositions(layout.chrome);
+      if (!sizeChanged) {
+        startScheduler();
+        return;
       }
       for (const face of faces) {
         applySize(face, size);

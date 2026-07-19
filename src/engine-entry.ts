@@ -50,6 +50,8 @@ import type { AnalemmaState } from './watch/analemma.js';
 import { expandAnalemma } from './watch/analemma.js';
 import { evalAttr } from './watch/watch-env.js';
 import { TimeController, TICK_INTERVAL_MS, displaySecondsPerTick } from './shared/time-controller.js';
+import { layoutGridWithChrome } from './watch/grid-layout.js';
+import type { ChromeItem, ChromeLayoutResult, CornerGroup } from './shared/chrome-layout.js';
 
 import { initNavigationLinks, updateNavigationLinks, locationSourceOf } from './shared/url-state.js';
 import type { LocationSource } from './shared/url-state.js';
@@ -231,40 +233,8 @@ function requestBrowserLocation(timeoutMs?: number): Promise<GeoResult> {
 }
 
 // ============================================================================
-// Grid layout maths
-/**
- * Find the (cols, rows) layout that maximizes face size for the given
- * container dimensions.  Tries every valid column count from 1..count
- * and picks the one producing the largest cells.  When two candidates
- * tie on size, prefer the one with smaller rows+cols (more balanced).
- */
-function optimizeGrid(
-    count: number,
-    containerW: number, containerH: number,
-    gap: number, padding: number,
-): { cols: number; rows: number; size: number } {
-    if (count <= 0) return { cols: 1, rows: 1, size: 0 };
-
-    let bestCols = 1, bestRows = count, bestSize = 0;
-
-    for (let c = 1; c <= count; c++) {
-        const r = Math.ceil(count / c);
-        const usableW = containerW - 2 * padding - gap * (c - 1);
-        const usableH = containerH - 2 * padding - gap * (r - 1);
-        const size = Math.floor(Math.min(usableW / c, usableH / r));
-        // Prefer larger size; break ties with smaller rows+cols (more balanced)
-        const isBetter = size > bestSize;
-        const isTie = size === bestSize && (c + r) < (bestCols + bestRows);
-        if (isBetter || isTie) {
-            bestSize = size;
-            bestCols = c;
-            bestRows = r;
-        }
-    }
-
-    return { cols: bestCols, rows: bestRows, size: bestSize };
-}
-
+// Grid layout maths: see watch/grid-layout.ts (optimizeGrid + cell placement
+// + corner-chrome avoidance are pure functions there, shared with the tests).
 // ============================================================================
 // Image loading from FaceData
 // ============================================================================
@@ -825,8 +795,6 @@ async function main() {
     }
 
     // --- Build the DOM: one cell + canvas per face ---
-    // cols/rows are recomputed on every resize via optimizeGrid
-    let cols = 1, rows = 1;
 
     const faces: FaceInstance[] = [];
 
@@ -2018,30 +1986,129 @@ async function main() {
     // Resize handling
     // =========================================================================
 
-    const GAP_PX = 12;
-    const PADDING_PX = 12;
-
     let resizeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
     let lastContainerW = 0;
     let lastContainerH = 0;
+    let lastLayoutKey = '';
+
+    // Corner chrome that participates in grid layout, in canonical order.
+    // The right group's preferred shape is an L: fullscreen + info (+ face
+    // name) along the top edge, the rest in a column below fullscreen.
+    const LEFT_CHROME_IDS = ['back-link', 'all-faces-link', 'selected-faces-link', 'edit-picks-link'];
+    const RIGHT_CHROME_IDS = ['fullscreen-btn', 'info-btn', 'face-name', 'share-btn', 'observatory-link', 'inspector-link'];
+    const RIGHT_ROW_ARM_IDS = new Set(['fullscreen-btn', 'info-btn', 'face-name']);
+
+    function visibleChromeItems(ids: string[]): ChromeItem[] {
+        const items: ChromeItem[] = [];
+        for (const id of ids) {
+            const el = document.getElementById(id);
+            if (!el) continue;
+            // Hidden chrome (per-page body classes, all display:none) measures
+            // 0x0, so no space is ever held for buttons this view doesn't show.
+            const r = el.getBoundingClientRect();
+            if (r.width <= 0 || r.height <= 0) continue;
+            items.push({ id, w: r.width, h: r.height });
+        }
+        return items;
+    }
+
+    function measureChromeGroups(): CornerGroup[] {
+        const left = visibleChromeItems(LEFT_CHROME_IDS);
+        const right = visibleChromeItems(RIGHT_CHROME_IDS);
+        return [
+            { corner: 'tl', items: left, defaultSplit: left.length },
+            {
+                corner: 'tr', items: right,
+                defaultSplit: right.filter(i => RIGHT_ROW_ARM_IDS.has(i.id)).length,
+                // When share (or an app link) is pressed into the row, it
+                // slots in beside the corner rather than outboard of the
+                // face name, so it stays on the side users expect.
+                rowOrder: ['fullscreen-btn', 'share-btn', 'info-btn', 'face-name', 'observatory-link', 'inspector-link'],
+            },
+        ];
+    }
+
+    function applyChromePositions(chrome: ChromeLayoutResult): void {
+        for (const p of chrome.placed) {
+            const el = document.getElementById(p.id);
+            if (!el) continue;
+            el.style.top = `${p.top}px`;
+            if (p.left !== undefined) el.style.left = `${p.left}px`;
+            if (p.right !== undefined) el.style.right = `${p.right}px`;
+        }
+    }
+
+    /** Drop inline chrome positions so stylesheet rules win again (the
+     *  fullscreen rules position #fullscreen-btn without !important). */
+    function clearChromePositions(): void {
+        for (const id of [...LEFT_CHROME_IDS, ...RIGHT_CHROME_IDS]) {
+            const el = document.getElementById(id);
+            if (!el) continue;
+            el.style.removeProperty('top');
+            el.style.removeProperty('left');
+            el.style.removeProperty('right');
+        }
+    }
 
     function onGridResize(W: number, H: number) {
         lastContainerW = W;
         lastContainerH = H;
 
-        const result = optimizeGrid(faces.length, W, H, GAP_PX, PADDING_PX);
-        if (result.size <= 0) return;
+        // The top buttons participate in layout: pick a row/column/L shape
+        // per corner that clears the optimally-laid-out faces, translating
+        // the grid down (or, as a last resort, shrinking it) when no shape
+        // fits. Fullscreen and embed views have no participating chrome.
+        // (The time-controller popover stays a pure overlay — ghosted while
+        // scrubbing — and never reshapes the grid.)
+        const chromeActive = !isEmbedMode && !document.body.classList.contains('is-fullscreen');
+        if (!chromeActive) clearChromePositions();
+        const groups = chromeActive ? measureChromeGroups() : [];
 
-        const size = result.size;
+        const gridRect = grid.getBoundingClientRect();
+        const layout = layoutGridWithChrome(
+            faces.length, W, H,
+            { x: gridRect.left, y: gridRect.top },
+            groups,
+            document.documentElement.clientWidth,
+        );
+        if (!layout) return;
 
-        // The time-controller popover no longer reshapes the grid: it is a
-        // pure overlay (ghosted while scrubbing and on actuating taps), so
-        // faces always use the centered layout below at full size.
-
+        const size = layout.size;
         const dpr = effectiveDpr();
         const newPhys = Math.round(size * dpr);
-        // Skip if the face size hasn't changed (layout is a pure function of it).
-        if (newPhys === faces[0]?.canvas.width) return;
+
+        // Skip only when nothing observable changed. Face size, container
+        // size, chrome configuration, and grid translate all feed the key: a
+        // width-only resize must still re-center the cells even though the
+        // face size is unchanged (the old size-only guard missed that).
+        const layoutKey = [
+            newPhys, W, H, layout.chrome.comboKey, layout.dy.toFixed(1),
+            groups.map(g => g.items.map(i => `${i.id}:${Math.round(i.w)}`).join(',')).join(';'),
+        ].join('|');
+        if (layoutKey === lastLayoutKey) return;
+        lastLayoutKey = layoutKey;
+
+        const sizeChanged = newPhys !== faces[0]?.canvas.width;
+
+        for (let i = 0; i < faces.length; i++) {
+            const c = layout.cells[i];
+            const cell = faces[i].canvas.parentElement as HTMLElement;
+            cell.style.position = 'absolute';
+            cell.style.left = `${c.x}px`;
+            cell.style.top = `${c.y}px`;
+            cell.style.width = `${c.size}px`;
+            cell.style.height = `${c.size}px`;
+        }
+
+        if (chromeActive) applyChromePositions(layout.chrome);
+
+        if (!sizeChanged) {
+            // Position-only move (chrome reconfigured or grid translated):
+            // canvases keep their pixels, so no cache work — just kick a
+            // frame so the onecanvas ablation resyncs its offsets.
+            startScheduler();
+            return;
+        }
 
         // Deliberately NOT stopScheduler() here. The render loop keeps running
         // across the (async, per-face) cache rebuild below: a face whose cache we
@@ -2054,68 +2121,6 @@ async function main() {
         // ~100–350ms for the full grid (measured), so faces resolve to the new
         // values within a few hundred ms; the startScheduler() at the end is now
         // just a prompt-render kick, not a restart-from-stopped.
-
-        cols = result.cols;
-        rows = result.rows;
-
-        {
-            const cellStep = size + GAP_PX; // center-to-center distance
-
-            // Position each face cell absolutely.
-            // The first (incomplete) row goes at the top.
-            const remainder = faces.length - cols * (rows - 1); // items in short top row
-
-            // Nestling: when (cols - remainder) is odd, the short row's faces
-            // are offset by half a cellStep from the full rows.  Round faces
-            // can nestle into those gaps, reducing the vertical spacing so that
-            // the diagonal edge-to-edge distance equals GAP_PX.
-            const canNestle = rows > 1 && remainder !== cols && (cols - remainder) % 2 === 1;
-            const nestledStep = canNestle ? cellStep * Math.sqrt(3) / 2 : cellStep;
-
-            // Total grid dimensions (nestled first gap, normal for rest)
-            const gridW = cols * size + (cols - 1) * GAP_PX;
-            // Simpler: row 0 at y=0, row 1 at y=nestledStep, row k>1 at y=nestledStep+(k-1)*cellStep
-            // Total height = last_row_y + size
-            const lastRowY = rows === 1 ? 0 : nestledStep + (rows - 2) * cellStep;
-            const totalH = lastRowY + size;
-
-            // Offset to center the grid in the container
-            const offsetX = (W - gridW) / 2;
-            const offsetY = (H - totalH) / 2;
-
-            for (let i = 0; i < faces.length; i++) {
-                let row: number, colIdx: number, itemsInRow: number;
-
-                if (i < remainder) {
-                    // Short top row
-                    row = 0;
-                    colIdx = i;
-                    itemsInRow = remainder;
-                } else {
-                    // Full rows below
-                    const j = i - remainder;
-                    row = 1 + Math.floor(j / cols);
-                    colIdx = j % cols;
-                    itemsInRow = cols;
-                }
-
-                // Center incomplete rows: extra offset for short rows
-                const rowW = itemsInRow * size + (itemsInRow - 1) * GAP_PX;
-                const rowOffsetX = (gridW - rowW) / 2;
-
-                const x = offsetX + rowOffsetX + colIdx * cellStep;
-                // Row 0 at y=0, row 1 at y=nestledStep, row 2+ at y=nestledStep+(row-1)*cellStep
-                const rowY = row === 0 ? 0 : nestledStep + (row - 1) * cellStep;
-                const y = offsetY + rowY;
-
-                const cell = faces[i].canvas.parentElement as HTMLElement;
-                cell.style.position = 'absolute';
-                cell.style.left = `${x}px`;
-                cell.style.top = `${y}px`;
-                cell.style.width = `${size}px`;
-                cell.style.height = `${size}px`;
-            }
-        }
 
         for (const face of faces) {
             applySize(face, size);

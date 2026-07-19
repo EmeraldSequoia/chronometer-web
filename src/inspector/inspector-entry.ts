@@ -29,6 +29,7 @@ import { findClosestCity, prefetchCityData, loadCityData, releaseCityData, isCit
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
 import { showStorageWarning } from '../shared/incoming-settings-dialog.js';
 import { CATALOG, tagIsAngular, tagIsDiscrete, type CatalogCell, type Tag } from './catalog.js';
+import { layoutChrome, type ChromeItem, type Rect } from '../shared/chrome-layout.js';
 
 // ============================================================================
 // Initialization
@@ -841,12 +842,102 @@ registerHotkey('t', () => document.getElementById('time-bar-label')?.click());
 registerHotkey('n', () => document.getElementById('time-bar-now')?.click());
 registerHotkey('l', () => document.getElementById('set-location-btn')?.click());
 
+// --- Corner-chrome layout: keep the fixed top-right buttons off the header ---
+// Same engine as the Chronometer face pages (shared/chrome-layout.ts): try
+// row / L / column shapes for the button group against the centered header
+// text; when nothing clears in place, push the whole pinned column down by
+// the minimum that does (the catalog just loses that height and scrolls).
+// Text boxes are measured with Ranges — the time display's innerHTML is
+// rewritten every frame, so wrapper spans would not survive — and the
+// full-width <p> blocks would register as colliding even where their
+// centered text doesn't.
+
+const CHROME_IDS = ['share-btn', 'info-btn', 'observatory-link', 'chronometer-link'];
+const CHROME_EDGE_MARGIN = 12; // matches the page's authored top/right insets
+let appliedChromeDy = 0;
+
+function chromeAvoidRect(el: Element | null, whole: boolean): Rect | null {
+    if (!el) return null;
+    let r: DOMRect;
+    if (whole) {
+        r = el.getBoundingClientRect();
+    } else {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        r = range.getBoundingClientRect();
+    }
+    if (r.width <= 0 || r.height <= 0) return null;
+    // Un-apply the current push-down so the engine sees baseline positions.
+    return { left: r.left, top: r.top - appliedChromeDy, right: r.right, bottom: r.bottom - appliedChromeDy };
+}
+
+function layoutTopChrome(): void {
+    const items: ChromeItem[] = [];
+    for (const id of CHROME_IDS) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) continue;
+        items.push({ id, w: r.width, h: r.height });
+    }
+
+    const rects: Rect[] = [];
+    for (const el of [
+        document.querySelector('.app-title'),
+        timeDisplay, dateDisplay,
+        document.getElementById('tz-display'),
+        document.getElementById('time-bar'),
+    ]) {
+        const r = chromeAvoidRect(el, false);
+        if (r) rects.push(r);
+    }
+    const cat = chromeAvoidRect(document.getElementById('catalog'), true);
+    if (cat) rects.push(cat);
+
+    const result = layoutChrome(
+        [{ corner: 'tr', items, defaultSplit: items.length }],
+        { circles: [], rects },
+        {
+            viewportW: document.documentElement.clientWidth,
+            maxDy: Number.POSITIVE_INFINITY,
+            edgeMargin: CHROME_EDGE_MARGIN,
+        },
+    );
+
+    for (const p of result.placed) {
+        const el = document.getElementById(p.id);
+        if (!el) continue;
+        el.style.top = `${p.top}px`;
+        if (p.right !== undefined) el.style.right = `${p.right}px`;
+    }
+
+    const dy = Math.ceil(result.dy);
+    if (dy !== appliedChromeDy) {
+        appliedChromeDy = dy;
+        const pinned = document.querySelector<HTMLElement>('.pinned-top');
+        if (pinned) pinned.style.paddingTop = dy > 0 ? `${dy}px` : '';
+    }
+}
+
+let chromeResizeTimer: ReturnType<typeof setTimeout> | null = null;
+window.addEventListener('resize', () => {
+    if (chromeResizeTimer !== null) clearTimeout(chromeResizeTimer);
+    chromeResizeTimer = setTimeout(() => {
+        chromeResizeTimer = null;
+        layoutTopChrome();
+    }, 150);
+});
+
 // Initial build + start
 buildCatalog();
 updateTimeDisplay();
 renderBrowserTime();
 timeUI?.updateTimeUI();
 scheduleFrame();
+// First chrome pass after the initial paint, and again once the webfonts
+// land (the time display's measured width changes with the real font).
+requestAnimationFrame(() => layoutTopChrome());
+document.fonts?.ready.then(() => layoutTopChrome());
 
 // Backstop timezone re-resolution: if startup fell back to the browser zone
 // because the city DB wasn't loaded (a direct link with lat/lon but no tz),

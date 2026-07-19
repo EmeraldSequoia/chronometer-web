@@ -17251,6 +17251,151 @@
     ...PLANETS.map((p) => planetGroup(p.name, p.n))
   ];
 
+  // src/shared/chrome-layout.ts
+  var CHROME_GAP_PX = 2;
+  var BTN_GAP = 8;
+  var EDGE_MARGIN = 16;
+  function rectsClear(a, b, gap) {
+    return a.right + gap <= b.left || b.right + gap <= a.left || a.bottom + gap <= b.top || b.bottom + gap <= a.top;
+  }
+  function blockedDyCircle(c, rect, gap) {
+    const R = c.r + gap;
+    const dx = Math.max(rect.left - c.cx, c.cx - rect.right, 0);
+    if (dx >= R) return null;
+    const vy = Math.sqrt(R * R - dx * dx);
+    return [rect.top - vy - c.cy, rect.bottom + vy - c.cy];
+  }
+  function blockedDyRect(target, chrome, gap) {
+    if (target.left - gap >= chrome.right || target.right + gap <= chrome.left) return null;
+    return [chrome.top - gap - target.bottom, chrome.bottom + gap - target.top];
+  }
+  function minClearDy(avoid, chrome, gap) {
+    const blocked = [];
+    for (const r of chrome) {
+      for (const c of avoid.circles) {
+        const iv = blockedDyCircle(c, r, gap);
+        if (iv && iv[1] > 0) blocked.push(iv);
+      }
+      for (const t of avoid.rects) {
+        const iv = blockedDyRect(t, r, gap);
+        if (iv && iv[1] > 0) blocked.push(iv);
+      }
+    }
+    blocked.sort((a, b) => a[0] - b[0]);
+    let dy = 0;
+    for (const [lo, hi] of blocked) {
+      if (lo <= dy && dy < hi) dy = hi;
+    }
+    return dy;
+  }
+  function splitOrder(n, preferred) {
+    const p = Math.max(0, Math.min(n, preferred));
+    const order = [p];
+    for (let d = 1; d <= n; d++) {
+      if (p + d <= n) order.push(p + d);
+      if (p - d >= 0) order.push(p - d);
+    }
+    return order;
+  }
+  function placeGroup(group, split, viewportW, btnGap, edgeMargin) {
+    const placed = [];
+    const rowArm = group.items.slice(0, split);
+    const colArm = group.items.slice(split);
+    if (group.rowOrder) {
+      const rank = new Map(group.rowOrder.map((id, i) => [id, i]));
+      rowArm.sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
+    }
+    const toPlaced = (it, edgeOffset, top2) => {
+      if (group.corner === "tl") {
+        return {
+          id: it.id,
+          top: top2,
+          left: edgeOffset,
+          rect: { left: edgeOffset, top: top2, right: edgeOffset + it.w, bottom: top2 + it.h }
+        };
+      }
+      const right = viewportW - edgeOffset;
+      return {
+        id: it.id,
+        top: top2,
+        right: edgeOffset,
+        rect: { left: right - it.w, top: top2, right, bottom: top2 + it.h }
+      };
+    };
+    let inset = edgeMargin;
+    for (const it of rowArm) {
+      placed.push(toPlaced(it, Math.round(inset), edgeMargin));
+      inset += it.w + btnGap;
+    }
+    let top = edgeMargin + (rowArm.length > 0 ? rowArm[0].h + btnGap : 0);
+    for (const it of colArm) {
+      placed.push(toPlaced(it, edgeMargin, Math.round(top)));
+      top += it.h + btnGap;
+    }
+    return placed;
+  }
+  function layoutChrome(groups, avoid, opts) {
+    const gap = opts.gap ?? CHROME_GAP_PX;
+    const btnGap = opts.btnGap ?? BTN_GAP;
+    const edgeMargin = opts.edgeMargin ?? EDGE_MARGIN;
+    if (groups.every((g) => g.items.length === 0)) {
+      return { placed: [], dy: 0, feasible: true, comboKey: "none" };
+    }
+    const orders = groups.map((g) => splitOrder(g.items.length, g.defaultSplit));
+    let combos = [[]];
+    for (const ord of orders) {
+      combos = combos.flatMap((prefix) => ord.map((_, i) => [...prefix, i]));
+    }
+    combos.sort((a, b) => {
+      const sum = (x) => x.reduce((s, v) => s + v, 0);
+      const d = sum(a) - sum(b);
+      if (d !== 0) return d;
+      const m = Math.max(...a) - Math.max(...b);
+      if (m !== 0) return m;
+      for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] - b[i];
+      return 0;
+    });
+    const evaluate = (splits) => {
+      const perGroup = groups.map((g, gi) => placeGroup(g, splits[gi], opts.viewportW, btnGap, edgeMargin));
+      for (let i = 0; i < perGroup.length; i++) {
+        for (let j = i + 1; j < perGroup.length; j++) {
+          for (const a of perGroup[i]) {
+            for (const b of perGroup[j]) {
+              if (!rectsClear(a.rect, b.rect, gap)) return null;
+            }
+          }
+        }
+      }
+      const placed = perGroup.flat();
+      const dy = minClearDy(avoid, placed.map((p) => p.rect), gap);
+      const comboKey = groups.map((g, gi) => `${g.corner}${splits[gi]}`).join(".");
+      return { placed, dy, comboKey };
+    };
+    let best = null;
+    for (let rank = 0; rank < combos.length; rank++) {
+      const splits = combos[rank].map((oi, gi) => orders[gi][oi]);
+      const cand = evaluate(splits);
+      if (!cand) continue;
+      if (cand.dy === 0) {
+        return { placed: cand.placed, dy: 0, feasible: true, comboKey: cand.comboKey };
+      }
+      if (!best || cand.dy < best.dy) best = { ...cand, prefRank: rank };
+    }
+    if (!best) {
+      const perGroup = groups.map((g) => placeGroup(g, 0, opts.viewportW, btnGap, edgeMargin));
+      const placed = perGroup.flat();
+      const dy = minClearDy(avoid, placed.map((p) => p.rect), gap);
+      const comboKey = groups.map((g) => `${g.corner}0`).join(".") + "!";
+      return { placed, dy, feasible: dy <= opts.maxDy, comboKey };
+    }
+    return {
+      placed: best.placed,
+      dy: best.dy,
+      feasible: best.dy <= opts.maxDy,
+      comboKey: best.comboKey
+    };
+  }
+
   // src/inspector/inspector-entry.ts
   var timeDisplay = document.getElementById("time-display");
   var dateDisplay = document.getElementById("date-display");
@@ -17899,11 +18044,81 @@
   registerHotkey("t", () => document.getElementById("time-bar-label")?.click());
   registerHotkey("n", () => document.getElementById("time-bar-now")?.click());
   registerHotkey("l", () => document.getElementById("set-location-btn")?.click());
+  var CHROME_IDS = ["share-btn", "info-btn", "observatory-link", "chronometer-link"];
+  var CHROME_EDGE_MARGIN = 12;
+  var appliedChromeDy = 0;
+  function chromeAvoidRect(el, whole) {
+    if (!el) return null;
+    let r;
+    if (whole) {
+      r = el.getBoundingClientRect();
+    } else {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      r = range.getBoundingClientRect();
+    }
+    if (r.width <= 0 || r.height <= 0) return null;
+    return { left: r.left, top: r.top - appliedChromeDy, right: r.right, bottom: r.bottom - appliedChromeDy };
+  }
+  function layoutTopChrome() {
+    const items = [];
+    for (const id of CHROME_IDS) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      items.push({ id, w: r.width, h: r.height });
+    }
+    const rects = [];
+    for (const el of [
+      document.querySelector(".app-title"),
+      timeDisplay,
+      dateDisplay,
+      document.getElementById("tz-display"),
+      document.getElementById("time-bar")
+    ]) {
+      const r = chromeAvoidRect(el, false);
+      if (r) rects.push(r);
+    }
+    const cat = chromeAvoidRect(document.getElementById("catalog"), true);
+    if (cat) rects.push(cat);
+    const result = layoutChrome(
+      [{ corner: "tr", items, defaultSplit: items.length }],
+      { circles: [], rects },
+      {
+        viewportW: document.documentElement.clientWidth,
+        maxDy: Number.POSITIVE_INFINITY,
+        edgeMargin: CHROME_EDGE_MARGIN
+      }
+    );
+    for (const p of result.placed) {
+      const el = document.getElementById(p.id);
+      if (!el) continue;
+      el.style.top = `${p.top}px`;
+      if (p.right !== void 0) el.style.right = `${p.right}px`;
+    }
+    const dy = Math.ceil(result.dy);
+    if (dy !== appliedChromeDy) {
+      appliedChromeDy = dy;
+      const pinned = document.querySelector(".pinned-top");
+      if (pinned) pinned.style.paddingTop = dy > 0 ? `${dy}px` : "";
+    }
+  }
+  var chromeResizeTimer = null;
+  window.addEventListener("resize", () => {
+    if (chromeResizeTimer !== null) clearTimeout(chromeResizeTimer);
+    chromeResizeTimer = setTimeout(() => {
+      chromeResizeTimer = null;
+      layoutTopChrome();
+    }, 150);
+  });
   buildCatalog();
   updateTimeDisplay();
   renderBrowserTime();
   timeUI?.updateTimeUI();
   scheduleFrame();
+  requestAnimationFrame(() => layoutTopChrome());
+  document.fonts?.ready.then(() => layoutTopChrome());
   if (tzNeedsResolution) {
     resolveTimezoneFromDb(lat, lon).then((resolved) => {
       tzNeedsResolution = false;

@@ -601,8 +601,12 @@
           fill: #5ca0d3;
       }
 
+      /* Default top-right shape (the runtime layout in watch/grid-layout.ts
+         starts from the same L and only deviates under overlap pressure):
+         fullscreen + info + face name along the top edge, then share and the
+         app links in a column under fullscreen. */
       #info-btn {
-          right: 16px;
+          right: 60px;
           cursor: pointer;
           border: none;
           font-size: 18px;
@@ -628,7 +632,6 @@
 
       #fullscreen-btn {
           right: 16px;
-          top: 104px;
           cursor: pointer;
           border: none;
           padding: 0;
@@ -641,14 +644,14 @@
       }
 
       /* Cross-app links (Observatory / Inspector) continue the right-edge
-         stack below fullscreen; hrefs are wired by shared/app-nav.ts.
+         column below share; hrefs are wired by shared/app-nav.ts.
          Both show their colored app-icon look — deliberately breaking the
          monochrome style, since these switch apps (discoverability).
          Inspector's colors match its card on the index page. */
       #observatory-link {
           position: absolute;
           right: 16px;
-          top: 148px;
+          top: 104px;
           display: block;
           width: 36px;
           height: 36px;
@@ -671,7 +674,7 @@
       #inspector-link {
           position: absolute;
           right: 16px;
-          top: 192px;
+          top: 148px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -726,15 +729,18 @@
           display: none !important;
       }
 
-      /* The exit button takes the top-right corner slot vacated by ℹ. */
+      /* The exit button holds the top-right corner. !important so a stale
+         inline position from the runtime chrome layout can never move it
+         (the layout pass clears inline positions on entering fullscreen). */
       body.is-fullscreen #fullscreen-btn {
-          top: 16px;
+          top: 16px !important;
+          right: 16px !important;
       }
 
       #face-name {
           position: absolute;
           top: 16px;
-          right: 60px;
+          right: 104px;
           height: 36px;
           display: flex;
           align-items: center;
@@ -763,10 +769,15 @@
           fill: currentColor;
       }
 
-      /* Hide nav elements on the all-faces page */
+      /* Hide nav elements on the all-faces page; close the row gap the
+         hidden link leaves (the runtime layout compacts the same way). */
       body.is-all-faces #all-faces-link,
       body.is-all-faces #face-name {
           display: none;
+      }
+
+      body.is-all-faces #selected-faces-link {
+          left: 60px;
       }
 
       /* Hide nav elements on the selected-faces page */
@@ -775,12 +786,13 @@
           display: none;
       }
 
-      /* Edit Picks link — only visible on selected.html */
+      /* Edit Picks link — only visible on selected.html, where it compacts
+         into the top row after back + all-faces (selected-faces is hidden). */
       #edit-picks-link {
           display: none;
           position: absolute;
-          top: 60px;
-          left: 16px;
+          top: 16px;
+          left: 104px;
           width: 36px;
           height: 36px;
           border-radius: 50%;
@@ -1961,7 +1973,7 @@
               <div id="help-content">
                 <!-- Populated from help-template on first info click -->
               </div>
-              <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.52</div>
+              <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.54</div>
             </div>
 
             <div id="info-sub-view">
