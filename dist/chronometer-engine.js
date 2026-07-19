@@ -18403,6 +18403,40 @@ return {${names2.join(",")}};`;
     if (old && old !== sharedPlaceholder) old.close();
   }
 
+  // src/shared/wake-triggers.ts
+  var WAKE_DRIFT_MS = 500;
+  var WAKE_GAP_MS = 5e3;
+  var CATCH_UP_DEBOUNCE_MS = 2e3;
+  function installWakeTriggers(opts) {
+    let lastCatchUpPerfMs = -Infinity;
+    let lastWallMs = Date.now();
+    let lastPerfMs = performance.now();
+    function fire(reason) {
+      if (!opts.isEligible()) return;
+      if (performance.now() - lastCatchUpPerfMs < CATCH_UP_DEBOUNCE_MS) return;
+      lastCatchUpPerfMs = performance.now();
+      console.log(`[wake] catch-up (${reason})`);
+      opts.catchUp();
+    }
+    setInterval(() => {
+      const wallMs = Date.now();
+      const perfMs = performance.now();
+      const wallDelta = wallMs - lastWallMs;
+      const drift = wallDelta - (perfMs - lastPerfMs);
+      lastWallMs = wallMs;
+      lastPerfMs = perfMs;
+      if (document.visibilityState === "visible" && (Math.abs(drift) > WAKE_DRIFT_MS || wallDelta > WAKE_GAP_MS)) {
+        fire(`clock gap: ${Math.round(wallDelta)}ms wall, ${Math.round(drift)}ms drift`);
+      }
+    }, 1e3);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") fire("tab became visible");
+    });
+    window.addEventListener("pageshow", (e) => {
+      if (e.persisted) fire("bfcache restore");
+    });
+  }
+
   // src/shared/time-controller.ts
   var RATE_OPTIONS = [
     { label: "10\xD7", unit: "second" },
@@ -22496,7 +22530,7 @@ return {${names2.join(",")}};`;
       return `canvas/bitmap est TOTAL ${MB(total)}MB: faces ${MB(facesB)} \xB7 static caches ${MB(staticB)} \xB7 images ${MB(imagesB)} \xB7 src blobs ${MB(srcBlobB)} \xB7 shadows ${MB(shadowB)} \xB7 wedge cache ${MB(rc.wedgeCache)} \xB7 wheel cache ${MB(rc.wheelCache)} \xB7 hand cache ${MB(rc.handCache)} \xB7 analemma ${MB(analemmaB)} \xB7 terra ring ${MB(terraB)} \xB7 cutout temp ${MB(rc.cutoutTemp)} \xB7 face buffers ${MB(buffersB)} \xB7 shared canvas ${MB(sharedB)}${jsHeap}`;
     }
     function _buildStamp() {
-      return true ? "2.0.50" : "dev";
+      return true ? "2.0.52" : "dev";
     }
     function _browserShort() {
       const ua = navigator.userAgent;
@@ -22990,6 +23024,19 @@ return {${names2.join(",")}};`;
       handleDstTransition();
       scheduleDstRebuild();
     }, 1e3);
+    installWakeTriggers({
+      // Only wall-anchored 1×/−1× goes stale across a gap: quantized playback
+      // is self-anchored (display advances per rendered tick, so a gap merely
+      // pauses it) and a stopped clock is frozen at its set time.
+      isEligible: () => !timeController.isStopped && !timeController.needsContinuousRender,
+      catchUp: () => {
+        rebuildEnvironments();
+        finishAllAnimations();
+        resetAllSchedules();
+        stopScheduler();
+        startScheduler();
+      }
+    });
     const GAP_PX = 12;
     const PADDING_PX = 12;
     let resizeDebounceTimer = null;

@@ -44,6 +44,7 @@ import { initEclipseView, drawEclipseView } from './eclipse-view.js';
 
 import { type ObsValueName, buildObsValues } from './obs-values.js';
 import { Updater, makeOverridableGetNow, timingContextForFrame } from '../shared/updater.js';
+import { installWakeTriggers } from '../shared/wake-triggers.js';
 import { createFpsIndicator, type FpsIndicator } from '../shared/fps-indicator.js';
 
 // ============================================================================
@@ -518,6 +519,34 @@ function tick(): void {
         rafId = requestAnimationFrame(tick);
     }
 }
+
+// ============================================================================
+// Sleep/wake & tab-return catch-up
+// ============================================================================
+// Resync to the current display time after a gap (tab return, system wake,
+// clock change) — see shared/wake-triggers.ts for why the triggers exist and
+// how the thresholds were chosen. The kick is the same sequence the Keep/
+// Revert and location-change paths use: rebuild the env (recomputing
+// tzDeltaMs — the gap may have crossed a DST transition), settle in-flight
+// animations, reset schedules so every value re-evaluates at the current
+// display time, and wake the parked loop.
+installWakeTriggers({
+    // Only wall-anchored 1×/−1× goes stale across a gap: quantized playback is
+    // self-anchored (a gap merely pauses it), a stopped clock is frozen, and
+    // during drag/confirm display time is held — the release path calls
+    // updater.reset() itself.
+    isEligible: () => updater !== null
+        && dragState === 'idle'
+        && !timeController.isStopped
+        && !timeController.needsContinuousRender,
+    catchUp: () => {
+        rebuildEnv();
+        updater!.finish();
+        updater!.reset();
+        timeUI?.updateTimezoneDisplay();
+        scheduleFrame();
+    },
+});
 
 // ============================================================================
 // Location dialog

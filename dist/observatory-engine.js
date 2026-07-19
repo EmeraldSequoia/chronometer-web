@@ -21206,6 +21206,40 @@
     drawRingMarker(ctx2, ringDesNode, cx, cy, mid, nodeRA, 0, RING_SIZE.desNode * s);
   }
 
+  // src/shared/wake-triggers.ts
+  var WAKE_DRIFT_MS = 500;
+  var WAKE_GAP_MS = 5e3;
+  var CATCH_UP_DEBOUNCE_MS = 2e3;
+  function installWakeTriggers(opts) {
+    let lastCatchUpPerfMs = -Infinity;
+    let lastWallMs = Date.now();
+    let lastPerfMs = performance.now();
+    function fire(reason) {
+      if (!opts.isEligible()) return;
+      if (performance.now() - lastCatchUpPerfMs < CATCH_UP_DEBOUNCE_MS) return;
+      lastCatchUpPerfMs = performance.now();
+      console.log(`[wake] catch-up (${reason})`);
+      opts.catchUp();
+    }
+    setInterval(() => {
+      const wallMs = Date.now();
+      const perfMs = performance.now();
+      const wallDelta = wallMs - lastWallMs;
+      const drift = wallDelta - (perfMs - lastPerfMs);
+      lastWallMs = wallMs;
+      lastPerfMs = perfMs;
+      if (document.visibilityState === "visible" && (Math.abs(drift) > WAKE_DRIFT_MS || wallDelta > WAKE_GAP_MS)) {
+        fire(`clock gap: ${Math.round(wallDelta)}ms wall, ${Math.round(drift)}ms drift`);
+      }
+    }, 1e3);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") fire("tab became visible");
+    });
+    window.addEventListener("pageshow", (e) => {
+      if (e.persisted) fire("bfcache restore");
+    });
+  }
+
   // src/shared/fps-indicator.ts
   var FPS_WATCHDOG_MS = 1e3;
   var TARGET_FRAME_MS = 1e3 / 60;
@@ -21534,6 +21568,20 @@
       rafId = requestAnimationFrame(tick);
     }
   }
+  installWakeTriggers({
+    // Only wall-anchored 1×/−1× goes stale across a gap: quantized playback is
+    // self-anchored (a gap merely pauses it), a stopped clock is frozen, and
+    // during drag/confirm display time is held — the release path calls
+    // updater.reset() itself.
+    isEligible: () => updater !== null && dragState === "idle" && !timeController.isStopped && !timeController.needsContinuousRender,
+    catchUp: () => {
+      rebuildEnv();
+      updater.finish();
+      updater.reset();
+      timeUI?.updateTimezoneDisplay();
+      scheduleFrame();
+    }
+  });
   function updateLocationDisplay() {
     const nameEl = document.getElementById("location-name");
     if (!nameEl) return;

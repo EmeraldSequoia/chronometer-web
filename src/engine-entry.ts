@@ -37,6 +37,7 @@ import { buildStaticBlockCaches, renderFrame, BEZEL_THICKNESS_XML, setPartProfil
 import type { LoadedImage } from './watch/image-loader.js';
 import { makeReDecodableImage, decodeLoadedImageForScale } from './watch/image-loader.js';
 import { SCHEDULER_LOOKAHEAD_MS } from './shared/animation.js';
+import { installWakeTriggers } from './shared/wake-triggers.js';
 import { Updater, makeOverridableGetNow, timingContextForFrame, tickProfile, resetTickProfile, setTickProfiling, type WithDisplayTime } from './shared/updater.js';
 import { astroProfile, resetAstroProfile, setAstroProfiling, envTzStateStale } from './shared/astro-env.js';
 import { buildHandValues } from './watch/hand-values.js';
@@ -1985,6 +1986,33 @@ async function main() {
         // Reschedule DST timer for the new browser TZ
         scheduleDstRebuild();
     }, 1000);
+
+    // =========================================================================
+    // Sleep/wake & tab-return catch-up
+    // =========================================================================
+    // Resync every face to the current display time after a gap (tab return,
+    // system wake, clock change) — see shared/wake-triggers.ts for why the
+    // triggers exist and how the thresholds were chosen. The kick mirrors the
+    // Now-click sequence: settle in-flight animations, then reset schedules so
+    // each on-beat value takes the "respond instantly" path — one eval at the
+    // current display time, a quick settle sweep, and the beat cadence re-arms
+    // from fresh state.
+    installWakeTriggers({
+        // Only wall-anchored 1×/−1× goes stale across a gap: quantized playback
+        // is self-anchored (display advances per rendered tick, so a gap merely
+        // pauses it) and a stopped clock is frozen at its set time.
+        isEligible: () => !timeController.isStopped && !timeController.needsContinuousRender,
+        catchUp: () => {
+            // The gap may have crossed a DST transition while the precise DST
+            // timer was itself suspended — re-check now (O(1) when tz state is
+            // unchanged) and reschedule that timer from the current display time.
+            rebuildEnvironments();
+            finishAllAnimations();
+            resetAllSchedules();
+            stopScheduler();
+            startScheduler();
+        },
+    });
 
     // =========================================================================
     // Resize handling
