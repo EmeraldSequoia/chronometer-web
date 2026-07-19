@@ -780,6 +780,9 @@ function scheduleFrame(): void {
     if (rafId === null) rafId = requestAnimationFrame(tick);
 }
 
+/** One-shot: fires the load-progress bar's __appReady handoff on first paint. */
+let firstFramePainted = false;
+
 function tick(): void {
     rafId = null;
     inTick = true;
@@ -797,6 +800,13 @@ function tick(): void {
     renderCatalog();
     renderBrowserTime();
     timeUI?.updateTimeUI();
+
+    // First-frame handoff to the load-progress bar (planning §4g): the catalog
+    // is now rendered, so the bootstrap can drop its "Initializing…" overlay.
+    if (!firstFramePainted) {
+        firstFramePainted = true;
+        (window as { __appReady?: () => void }).__appReady?.();
+    }
 
     timeController.clampDisplayTime();
     timeController.endFrame();

@@ -266,6 +266,33 @@ get_help_file() {
   fi
 }
 
+# Emit the per-page bundle manifest + the shared load-progress bootstrap
+# partial (planning/2026-07-19-load-progress-bar.md). Prints to stdout.
+#   Args: APP_LABEL  BUNDLE_FILE...   (bundle files in EXECUTION order:
+#   faces first, engine last). Sizes are UNCOMPRESSED on-disk bytes — the
+#   fetch-progress denominator must match the decompressed ReadableStream.
+emit_loader_block() {
+  local app="$1"; shift
+  local files_json="" f bytes first=1
+  for f in "$@"; do
+    bytes=$(wc -c < "$DIST/$f" | tr -d ' ')
+    if [ $first -eq 1 ]; then first=0; else files_json="${files_json},"; fi
+    files_json="${files_json}{\"src\":\"$f\",\"bytes\":$bytes}"
+  done
+  printf '<script>window.__BUNDLES__={"app":"%s","files":[%s]};</script>\n' "$app" "$files_json"
+  cat "$SRC/partials/loader-bootstrap.html"
+}
+
+# Replace the (first) line containing the <!--LOADER--> marker in file $1 with
+# the contents of block file $2. Leaves the file untouched if no marker.
+splice_loader() {
+  local target="$1" block="$2"
+  awk -v B="$block" '
+    index($0, "<!--LOADER-->") { while ((getline line < B) > 0) print line; close(B); next }
+    { print }
+  ' "$target" > "$target.tmp" && mv "$target.tmp" "$target"
+}
+
 # Per-face HTML
 for face in "${FACES[@]}"; do
   TITLE=$(get_title "$face")
@@ -336,6 +363,9 @@ if [ ! -f "$SRC/help/inspector.html" ]; then
   exit 1
 fi
 inject_partials "$SRC/help/inspector.html" "Inspector" < "$SRC/inspector/inspector.html" > "$DIST/inspector.html"
+emit_loader_block "inspector" "inspector-engine.js" > "$DIST/.loader.html"
+splice_loader "$DIST/inspector.html" "$DIST/.loader.html"
+rm -f "$DIST/.loader.html"
 echo "  → inspector.html"
 
 # observatory.html — Observatory app page (with location dialog + help injection)
@@ -344,6 +374,9 @@ if [ ! -f "$SRC/help/observatory.html" ]; then
   exit 1
 fi
 inject_partials "$SRC/help/observatory.html" "Observatory" < "$SRC/observatory/observatory.html" > "$DIST/observatory.html"
+emit_loader_block "observatory" "observatory-engine.js" > "$DIST/.loader.html"
+splice_loader "$DIST/observatory.html" "$DIST/.loader.html"
+rm -f "$DIST/.loader.html"
 echo "  → observatory.html"
 
 # help.html — general help topics page (simple copy)

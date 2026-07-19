@@ -21542,6 +21542,7 @@
     }
     if (rafId === null) rafId = requestAnimationFrame(tick);
   }
+  var firstFramePainted = false;
   function tick() {
     rafId = null;
     inTick = true;
@@ -21570,6 +21571,10 @@
       animating = updater.anyAnimating();
     }
     drawFrame();
+    if (!firstFramePainted) {
+      firstFramePainted = true;
+      window.__appReady?.();
+    }
     timeUI?.updateTimeUI();
     timeController.endFrame();
     const continuous = (!timeController.isStopped || animating) && (dragState === "idle" || animating);

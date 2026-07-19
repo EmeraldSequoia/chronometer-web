@@ -18001,6 +18001,7 @@
     }
     if (rafId === null) rafId = requestAnimationFrame(tick);
   }
+  var firstFramePainted = false;
   function tick() {
     rafId = null;
     inTick = true;
@@ -18014,6 +18015,10 @@
     renderCatalog();
     renderBrowserTime();
     timeUI?.updateTimeUI();
+    if (!firstFramePainted) {
+      firstFramePainted = true;
+      window.__appReady?.();
+    }
     timeController.clampDisplayTime();
     timeController.endFrame();
     const continuous = !timeController.isStopped || updater.anyAnimating();
