@@ -1271,6 +1271,9 @@ async function main() {
         return ua.slice(0, 40);
     }
 
+    /** One-shot: fires the load-progress bar's __appReady handoff on first paint. */
+    let firstFramePainted = false;
+
     function frame() {
         rafId = null;
         _frameCounter++;
@@ -1775,6 +1778,14 @@ async function main() {
                     _dsDraws = 0; _dsFrames = 0; _dsLastReport = now;
                 }
             }
+        }
+
+        // First-frame handoff to the load-progress bar (planning §4g): all
+        // enabled faces have drawn (images preload before the scheduler starts),
+        // so the bootstrap can drop its "Initializing…" overlay.
+        if (!firstFramePainted) {
+            firstFramePainted = true;
+            (window as { __appReady?: () => void }).__appReady?.();
         }
 
         // Decide whether to keep the RAF loop running

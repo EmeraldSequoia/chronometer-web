@@ -111,15 +111,19 @@
   function injectPlain() {
     var files = (bundles && bundles.files) || [];
     removeBar();                              // no bar on this path
-    (function next(i) {
-      if (i >= files.length) return;
+    // Append all bundles at once with async=false: the browser fetches them in
+    // parallel and executes them in insertion order (the "ordered async=false"
+    // rule), matching the old static <script> tags. Chaining on onload would
+    // serialize the reads — a needless slowdown on file:// with many bundles
+    // (all.html loads 17). A failed load is skipped and the rest still run, so
+    // no onerror plumbing is needed; the browser logs it and the app surfaces
+    // its own missing-face error, exactly as with static tags.
+    for (var i = 0; i < files.length; i++) {
       var s = document.createElement('script');
       s.src = files[i].src;
-      s.async = false;                        // preserve execution order
-      s.onload = function () { next(i + 1); };
-      s.onerror = function () { next(i + 1); }; // let the app surface its own error
+      s.async = false;                        // parallel fetch, ordered execute
       document.body.appendChild(s);
-    })(0);
+    }
   }
 
   if (!canUseFetchPath()) { injectPlain(); return; }

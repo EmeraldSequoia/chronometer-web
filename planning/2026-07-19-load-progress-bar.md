@@ -195,9 +195,14 @@ Why not the obvious alternatives:
 
 ### 4e. `file://` and error fallback
 
-A single `injectPlain(files)` helper creates ordered `<script src>` elements
-(`async = false`) — no fetch, no bar. Used when `canUseFetchPath()` is false
-**and** as the `catch` for any unexpected bootstrap failure. This is the same
+A single `injectPlain(files)` helper appends **all** `<script src>` elements at
+once with `async = false` — no fetch, no bar. `async=false` on
+dynamically-inserted scripts makes the browser fetch them in parallel and
+execute them in insertion order (the "ordered async=false" rule), matching the
+old static tags. (Do **not** chain on `onload` — that serializes the reads and
+was a measurable `file://` slowdown on the 17-bundle all.html.) Used when
+`canUseFetchPath()` is false **and** as the `catch` for any unexpected
+bootstrap failure. This is the same
 mechanism city-search already relies on for its `file://` data path, so it's
 well-trodden. Note: because we're removing the static `{{SCRIPTS}}` tags, the
 `file://` path now goes through injection too, so it must be tested (Steve
@@ -327,24 +332,37 @@ reverted) without dragging the rest.
 > commit's work until Steve says to proceed. Each pause includes a short "what
 > to verify" note (the relevant slice of §11).
 
-- **Commit 1 — mechanism + single-bundle pages (observatory, inspector).**
-  Introduces the whole apparatus: the `loader-bootstrap` partial (bar UI,
-  fetch/progress, blob execution, error/stall/retry, `file://` injection
-  fallback), the `build.sh` manifest emission, the template placeholder swap,
-  and the `__appReady` hook in all three entries. Applies it to the two
-  single-bundle pages — no ordering or concurrency subtlety, and it banks the
-  biggest single win (observatory, 5.8 MB) up front. Fully working on its own.
-- **Commit 2 — single-face pages** (`{face}.html`: engine + one face). Adds
-  only the two-bundle "faces first, engine last" ordering (§5) on top of
-  commit 1. Small, low-risk delta.
-- **Commit 3 — `all.html` / `selected.html`** (17 bundles). Adds the
-  execute-and-release / concurrency-cap memory handling from §4c. This is the
-  most complex and memory-sensitive change; isolating it keeps commits 1–2
-  clean and makes a bisect trivial if the phone memory floor regresses.
+Revised seam (2026-07-19): the original commit 2/3 split fell along "face
+pages vs all/selected," but those three share `face-template.html`, so the
+page-conversion is really one unit. The real orthogonal seam is
+page-conversion vs the many-bundle memory optimization (a bootstrap-only
+change). So:
 
-If a smaller first commit is preferred, commit 1 could be split again into
-"infrastructure + observatory" then "inspector," but the two are so similar
-that one commit is the natural unit.
+- **Commit 1 — mechanism + single-bundle pages (observatory, inspector).**
+  ✅ **done (build 2.0.67).** Introduces the whole apparatus: the
+  `loader-bootstrap` partial (bar UI, fetch/progress, blob execution,
+  error/stall/retry, `file://` injection fallback), the `build.sh` manifest
+  emission, the template placeholder swap, and the `__appReady` hook in the
+  observatory + inspector entries. Banks the biggest single win (observatory,
+  5.5 MB) up front.
+- **Commit 2 — all engine-based pages** (`{face}.html`, `all.html`,
+  `selected.html`) + the engine `__appReady` hook. ✅ **built (2.0.69).**
+  Converts everything sharing `face-template.html`: the two-bundle
+  "faces first, engine last" ordering (§5) and the 17-bundle `all.html`/
+  `selected.html`, which the existing bootstrap already handles (parallel
+  fetch, ordered execute). **Also folds in the `file://` parallel-injection
+  fix** (§4e): `injectPlain` now appends all bundles at once with
+  `async=false` instead of chaining on `onload`, so the `file://` path
+  fetches in parallel and executes in order — matching the old static tags.
+  Without it, commit 2 would regress `file://` all.html from ~parallel to
+  serial 17-bundle loads (Steve caught this: 2–3 s vs 1 s). Kept in commit 2
+  so the commit never ships the regression.
+- **Commit 3 — bootstrap memory optimization.** Adds the execute-and-release /
+  concurrency cap from §4c to `loader-bootstrap.html` — a pure bootstrap
+  change, no page wiring — so the 17-bundle `all.html` doesn't hold ~18 MB of
+  decompressed bodies resident before executing (http path only). Isolated and
+  bisectable, which is the whole reason to keep it separate; lands before
+  deploy so no user sees the un-optimized intermediate.
 
 ## 9. Rejected alternatives
 

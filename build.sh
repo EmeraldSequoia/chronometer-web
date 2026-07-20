@@ -293,11 +293,12 @@ splice_loader() {
   ' "$target" > "$target.tmp" && mv "$target.tmp" "$target"
 }
 
-# Per-face HTML
+# Per-face HTML. The <!--LOADER--> marker (in face-template.html) is replaced
+# post-inject with the bundle manifest + load-progress bootstrap. Manifest order
+# is EXECUTION order: the face module first (it pushes to window.ChronometerFaces),
+# the engine last (its main() runs on execute and reads that array).
 for face in "${FACES[@]}"; do
   TITLE=$(get_title "$face")
-  SCRIPTS='    <script src="chronometer-engine.js"><\/script>\
-    <script src="face-'"$face"'.js"><\/script>'
   ICON="thumb-${face}.png"
   # Use city-dialog partial injection for faces with city customization
   WORLD_TIME_RING=$(node -e "const fs = require('fs'); console.log(JSON.parse(fs.readFileSync('./src/faces/generated/metadata.json', 'utf8'))['$face'].worldTimeRing)")
@@ -309,18 +310,19 @@ for face in "${FACES[@]}"; do
   fi
   HELP_FILE=$(get_help_file "$face")
   sed -e "s|{{TITLE}}|$TITLE|g" \
-      -e "s|{{SCRIPTS}}|$SCRIPTS|g" \
       -e "s|{{ICON}}|$ICON|g" \
       "$SRC/face-template.html" | $INJECTOR "$HELP_FILE" > "$DIST/$face.html"
+  emit_loader_block "chronometer" "face-$face.js" "chronometer-engine.js" > "$DIST/.loader.html"
+  splice_loader "$DIST/$face.html" "$DIST/.loader.html"
+  rm -f "$DIST/.loader.html"
   echo "  → $face.html"
 done
 
-# all.html / selected.html — loads all faces
-ALL_SCRIPTS='    <script src="chronometer-engine.js"><\/script>'
-for face in "${FACES[@]}"; do
-  ALL_SCRIPTS="${ALL_SCRIPTS}\\
-    <script src=\"face-${face}.js\"><\/script>"
-done
+# all.html / selected.html — loads all faces. Bundle list is EXECUTION order:
+# every face module first, the engine last (see per-face note above).
+ALL_BUNDLES=()
+for face in "${FACES[@]}"; do ALL_BUNDLES+=("face-$face.js"); done
+ALL_BUNDLES+=("chronometer-engine.js")
 
 # Generate combined help file for multi-face pages
 COMBINED_HELP="$DIST/.combined-help.html"
@@ -336,16 +338,20 @@ for face in "${FACES[@]}"; do
 done
 
 sed -e "s|{{TITLE}}|All Faces|g" \
-    -e "s|{{SCRIPTS}}|$ALL_SCRIPTS|g" \
     -e "s|{{ICON}}|thumb-all-faces.png|g" \
     "$SRC/face-template.html" | inject_partials "$COMBINED_HELP" > "$DIST/all.html"
+emit_loader_block "chronometer" "${ALL_BUNDLES[@]}" > "$DIST/.loader.html"
+splice_loader "$DIST/all.html" "$DIST/.loader.html"
+rm -f "$DIST/.loader.html"
 echo "  → all.html"
 
 # selected.html — loads all faces; engine filters by picks param
 sed -e "s|{{TITLE}}|Selected Faces|g" \
-    -e "s|{{SCRIPTS}}|$ALL_SCRIPTS|g" \
     -e "s|{{ICON}}|thumb-all-faces.png|g" \
     "$SRC/face-template.html" | inject_partials "$COMBINED_HELP" > "$DIST/selected.html"
+emit_loader_block "chronometer" "${ALL_BUNDLES[@]}" > "$DIST/.loader.html"
+splice_loader "$DIST/selected.html" "$DIST/.loader.html"
+rm -f "$DIST/.loader.html"
 echo "  → selected.html"
 
 # index.html — process with partial injection (includes combined help)

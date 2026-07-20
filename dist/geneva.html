@@ -1973,7 +1973,7 @@
               <div id="help-content">
                 <!-- Populated from help-template on first info click -->
               </div>
-              <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.67</div>
+              <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.69</div>
             </div>
 
             <div id="info-sub-view">
@@ -2727,8 +2727,221 @@
 
 
     </div>
-        <script src="chronometer-engine.js"></script>
-    <script src="face-geneva.js"></script>
+<script>window.__BUNDLES__={"app":"chronometer","files":[{"src":"face-geneva.js","bytes":1398579},{"src":"chronometer-engine.js","bytes":1697900}]};</script>
+<!-- ============================================================================
+     Load-progress bootstrap (Tier 2). Injected by build.sh at the loader
+     marker, immediately AFTER a generated
+        <script>window.__BUNDLES__ = { app, files:[{src,bytes}, …] };</script>
+     manifest line (files in EXECUTION order: faces first, engine last).
+
+       http(s): fetch each bundle with a streaming reader, drive the bar, then
+                blob-execute in manifest order. Single download, no server-cache
+                dependency, no CSP-meta blocker.
+       file://: fetch() of local files is blocked and there is no latency to
+                hide — plain ordered <script> injection, NO bar. First-class
+                path (offline / server-gone), must equal the old static tags.
+
+     Denominator is the manifest's UNCOMPRESSED byte sizes: the ReadableStream
+     yields decompressed bytes, so this stays correct whether or not the server
+     gzips/brotlis (Content-Length would be the compressed size — do not use it).
+
+     See planning/2026-07-19-load-progress-bar.md (§4, §4g).
+     ============================================================================ -->
+<style>
+  #load-progress {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      pointer-events: none;              /* only the retry button opts back in */
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      color: #99a;
+  }
+  #load-progress .lp-track {
+      width: min(280px, 60vw);
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(255, 255, 255, 0.12);
+      overflow: hidden;
+  }
+  #load-progress .lp-fill {
+      height: 100%;
+      width: 100%;
+      border-radius: 2px;
+      background: #5ca0d3;
+      transform: scaleX(0);
+      transform-origin: left center;
+      transition: transform 0.15s linear;
+  }
+  #load-progress .lp-label {
+      font-size: 13px;
+      letter-spacing: 0.3px;
+  }
+  #load-progress .lp-retry {
+      display: none;
+      pointer-events: auto;
+      cursor: pointer;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid #445;
+      color: #bcd;
+      font: inherit;
+      font-size: 13px;
+      padding: 5px 16px;
+      border-radius: 6px;
+  }
+  #load-progress.lp-error .lp-fill { background: #d35c5c; transform: scaleX(1); }
+  #load-progress.lp-error .lp-label { color: #e0a0a0; }
+  #load-progress.lp-error .lp-retry { display: inline-block; }
+</style>
+<div id="load-progress" role="progressbar" aria-label="Loading">
+  <div class="lp-track"><div class="lp-fill"></div></div>
+  <div class="lp-label">Loading…</div>
+  <button type="button" class="lp-retry">Retry</button>
+</div>
+<script>
+(function () {
+  var bundles = window.__BUNDLES__;
+  var host = document.getElementById('load-progress');
+  var fill = host && host.querySelector('.lp-fill');
+  var label = host && host.querySelector('.lp-label');
+  var retry = host && host.querySelector('.lp-retry');
+
+  function setFill(frac) {
+    if (fill) fill.style.transform = 'scaleX(' + Math.max(0, Math.min(1, frac)) + ')';
+  }
+  function setLabel(t) { if (label) label.textContent = t; }
+
+  var barRemoved = false, backstop = 0;
+  function removeBar() {
+    if (barRemoved) return;
+    barRemoved = true;
+    if (backstop) clearTimeout(backstop);
+    if (host && host.parentNode) host.parentNode.removeChild(host);
+    try { delete window.__appReady; } catch (e) { window.__appReady = undefined; }
+  }
+  // Defined BEFORE any bundle executes: each entry calls window.__appReady()
+  // after its first frame paints (planning §4g). The backstop (set once the
+  // download completes) guarantees the bar can never strand if that call is
+  // missed (e.g. a runtime throw in the engine).
+  window.__appReady = removeBar;
+
+  if (retry) retry.addEventListener('click', function () { location.reload(); });
+
+  // ---- file:// (and any non-fetch environment): plain ordered injection ------
+  function canUseFetchPath() {
+    return location.protocol !== 'file:'
+        && typeof fetch === 'function'
+        && typeof ReadableStream === 'function'
+        && !!(bundles && bundles.files && bundles.files.length);
+  }
+  function injectPlain() {
+    var files = (bundles && bundles.files) || [];
+    removeBar();                              // no bar on this path
+    // Append all bundles at once with async=false: the browser fetches them in
+    // parallel and executes them in insertion order (the "ordered async=false"
+    // rule), matching the old static <script> tags. Chaining on onload would
+    // serialize the reads — a needless slowdown on file:// with many bundles
+    // (all.html loads 17). A failed load is skipped and the rest still run, so
+    // no onerror plumbing is needed; the browser logs it and the app surfaces
+    // its own missing-face error, exactly as with static tags.
+    for (var i = 0; i < files.length; i++) {
+      var s = document.createElement('script');
+      s.src = files[i].src;
+      s.async = false;                        // parallel fetch, ordered execute
+      document.body.appendChild(s);
+    }
+  }
+
+  if (!canUseFetchPath()) { injectPlain(); return; }
+
+  // ---- http(s): fetch with progress, then blob-execute in order --------------
+  var files = bundles.files;
+  var total = 0;
+  for (var i = 0; i < files.length; i++) total += (files[i].bytes || 0);
+  if (!total) total = 1;
+  var received = 0, lastReceived = 0, noProgressTicks = 0, stallTimer = 0, finished = false;
+
+  function onChunk(n) {
+    received += n;
+    setFill(received / total);
+    setLabel('Loading… ' + Math.min(100, Math.round(received / total * 100)) + '%');
+  }
+
+  function fetchBundle(file) {
+    return fetch(file.src).then(function (resp) {
+      if (!resp.ok) throw new Error('HTTP ' + resp.status + ' for ' + file.src);
+      var reader = resp.body.getReader();
+      var chunks = [];
+      return (function pump() {
+        return reader.read().then(function (r) {
+          if (r.done) return chunks;
+          chunks.push(r.value);
+          onChunk(r.value.length);
+          return pump();
+        });
+      })().then(function () {
+        var size = 0, j;
+        for (j = 0; j < chunks.length; j++) size += chunks[j].length;
+        var out = new Uint8Array(size), off = 0;
+        for (j = 0; j < chunks.length; j++) { out.set(chunks[j], off); off += chunks[j].length; }
+        return out;
+      });
+    });
+  }
+
+  function executeBlob(bytes) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(new Blob([bytes], { type: 'text/javascript' }));
+      var s = document.createElement('script');
+      s.src = url;
+      s.async = false;
+      s.onload = function () { URL.revokeObjectURL(url); resolve(); };
+      s.onerror = function () { URL.revokeObjectURL(url); reject(new Error('exec failed: ' + files.length)); };
+      document.body.appendChild(s);
+    });
+  }
+
+  function showError(err) {
+    finished = true;
+    if (stallTimer) clearInterval(stallTimer);
+    if (window.console) console.error('[load]', err);
+    if (host) host.className = 'lp-error';   // keeps the id; only toggles class
+    setLabel('Download interrupted');
+  }
+
+  // Stall detector: ~8 s with no new bytes → hint (does not error). onChunk
+  // overwrites the label with the live % the moment progress resumes.
+  stallTimer = setInterval(function () {
+    if (finished) return;
+    if (received === lastReceived) {
+      if (++noProgressTicks >= 4) setLabel('Connection may be stalled…');
+    } else {
+      noProgressTicks = 0;
+    }
+    lastReceived = received;
+  }, 2000);
+
+  Promise.all(files.map(fetchBundle)).then(function (bodies) {
+    finished = true;
+    if (stallTimer) clearInterval(stallTimer);
+    setFill(1);
+    setLabel('Initializing…');
+    // Execute in manifest order (faces first, engine last). Sequential awaits
+    // guarantee order regardless of async flags.
+    var chain = Promise.resolve();
+    bodies.forEach(function (b) { chain = chain.then(function () { return executeBlob(b); }); });
+    return chain;
+  }).then(function () {
+    // Hand off to the app's first-frame __appReady(); backstop so a missed call
+    // (e.g. engine runtime throw) can't leave the overlay up forever.
+    backstop = setTimeout(removeBar, 10000);
+  }).catch(showError);
+})();
+</script>
     <!-- Link preservation now handled by url-state.ts via initNavigationLinks() -->
   </body>
 </html>
