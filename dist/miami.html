@@ -1973,7 +1973,7 @@
               <div id="help-content">
                 <!-- Populated from help-template on first info click -->
               </div>
-              <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.69</div>
+              <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.70</div>
             </div>
 
             <div id="info-sub-view">
@@ -2862,16 +2862,44 @@ represents daytime) is reproduced on all the rings.
     lastReceived = received;
   }, 2000);
 
-  Promise.all(files.map(fetchBundle)).then(function (bodies) {
+  // Memory-bounded load for the many-bundle case (all.html fetches 17). The
+  // LAST bundle (the engine) must execute after every other; the earlier
+  // bundles (faces) only push to window.ChronometerFaces, so they are
+  // order-independent and safe to execute-and-release as each arrives — rather
+  // than holding all ~18 MB of decompressed bodies resident until the end
+  // (planning §4c). A small fetch pool caps how many raw bodies are in flight
+  // at once. (The face DATA still accumulates in ChronometerFaces until the
+  // engine consumes + deletes it — inherent to booting all faces together;
+  // this bounds only the raw buffers held on top of that.)
+  var MAX_IN_FLIGHT = 6;
+  var lastIdx = files.length - 1;
+  var engineBytes = null;
+  var nextIdx = 0;
+
+  function worker() {
+    if (nextIdx >= files.length) return Promise.resolve();
+    var idx = nextIdx++;
+    return fetchBundle(files[idx]).then(function (bytes) {
+      if (idx === lastIdx) {          // the engine: hold it for the very end
+        engineBytes = bytes;
+        return worker();
+      }
+      // Execute this face, drop its buffer, then fetch the next: at most
+      // MAX_IN_FLIGHT raw bodies are ever resident. Awaiting every face's
+      // execution before the engine runs (below) keeps the engine strictly
+      // last; async=false also orders any concurrent face executions.
+      return executeBlob(bytes).then(worker);
+    });
+  }
+
+  var pool = [];
+  for (var w = 0; w < Math.min(MAX_IN_FLIGHT, files.length); w++) pool.push(worker());
+  Promise.all(pool).then(function () {
     finished = true;
     if (stallTimer) clearInterval(stallTimer);
     setFill(1);
     setLabel('Initializing…');
-    // Execute in manifest order (faces first, engine last). Sequential awaits
-    // guarantee order regardless of async flags.
-    var chain = Promise.resolve();
-    bodies.forEach(function (b) { chain = chain.then(function () { return executeBlob(b); }); });
-    return chain;
+    return engineBytes ? executeBlob(engineBytes) : undefined;   // engine last
   }).then(function () {
     // Hand off to the app's first-frame __appReady(); backstop so a missed call
     // (e.g. engine runtime throw) can't leave the overlay up forever.

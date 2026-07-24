@@ -155,14 +155,19 @@ reader in a loop, adding each chunk's `.length` to a shared `received`
 counter and repainting the bar as `received / total`. Fetch **in parallel**
 (browser caps ~6/origin) for speed; the counter is shared across streams.
 
-`all.html` wrinkle (§8 phase 2): 17 parallel multi-MB streams hold ~18 MB of
-decompressed JS text in memory before execution — non-trivial on the phone
-memory floor this project already tracks. Mitigations, in order of preference:
-(a) execute-and-release each face as its stream finishes (faces are
-order-independent, §5), holding only the engine back until all faces have run;
-(b) cap concurrency (e.g. 6) so at most N bodies are resident at once. This is
-`all.html`-only (commit 3, §8); the single/double-bundle pages sidestep it
-entirely.
+`all.html` wrinkle: fetching all 17 streams and holding them until execution
+would keep ~18 MB of decompressed JS text resident at once — non-trivial on the
+phone memory floor this project already tracks. **Implemented in commit 3**
+(both mitigations combined): a worker pool caps in-flight fetches at
+`MAX_IN_FLIGHT = 6`, and each face is **executed-and-released** as its stream
+finishes (faces are order-independent — they only push to `ChronometerFaces`,
+§5), so at most ~6 raw bodies are resident instead of all 17. The engine (the
+manifest's last entry) is held back and executed once every face has run,
+keeping it strictly last. Single/double-bundle pages (observatory, inspector,
+`{face}.html`) fall through the same code with 1–2 bundles and no behavior
+change. (The face *data* still accumulates in `ChronometerFaces` until the
+engine consumes + deletes it — inherent to booting all faces together; this
+bounds only the raw buffers held on top of it.)
 
 ### 4d. Executing the fetched code
 
@@ -357,12 +362,16 @@ change). So:
   Without it, commit 2 would regress `file://` all.html from ~parallel to
   serial 17-bundle loads (Steve caught this: 2–3 s vs 1 s). Kept in commit 2
   so the commit never ships the regression.
-- **Commit 3 — bootstrap memory optimization.** Adds the execute-and-release /
-  concurrency cap from §4c to `loader-bootstrap.html` — a pure bootstrap
-  change, no page wiring — so the 17-bundle `all.html` doesn't hold ~18 MB of
-  decompressed bodies resident before executing (http path only). Isolated and
-  bisectable, which is the whole reason to keep it separate; lands before
-  deploy so no user sees the un-optimized intermediate.
+- **Commit 3 — bootstrap memory optimization.** ✅ **built (2.0.70).** Replaces
+  the http path's "fetch all → hold all → execute all" with a concurrency-capped
+  (`MAX_IN_FLIGHT = 6`) worker pool that **executes-and-releases** each face as
+  it arrives and holds only the engine (last bundle) back to run at the end
+  (§4c). A pure `loader-bootstrap.html` change, no page wiring. Bounds the raw
+  decompressed buffers resident at once to ~6 instead of all 17 (~18 MB); the
+  face DATA still accumulates in `ChronometerFaces` until the engine consumes +
+  deletes it, which is inherent. Lands before deploy so no user sees the
+  un-optimized intermediate. (Peak-memory delta is Steve's to confirm on a real
+  device via the `[mem]` ledger — the pane can't measure a transient load spike.)
 
 ## 9. Rejected alternatives
 
