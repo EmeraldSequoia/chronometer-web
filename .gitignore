@@ -10,6 +10,7 @@ package-lock.json
 .DS_Store
 scripts/geonames-data/*.txt
 scripts/geonames-data/*.zip
+scripts/extra-cities-temp.js
 # Test snapshots (regenerate with: CAPTURE=1 npm test)
 src/__tests__/snapshots/
 src/faces/generated/

@@ -5,21 +5,51 @@
  * Input files (in scripts/geonames-data/):
  *   - cities1000.txt        — main city data
  *   - admin1CodesASCII.txt  — state/province name lookup
+ *   - admin2Codes.txt       — county/district name lookup (disambiguation)
  *   - alternateNamesV2.txt  — IATA airport codes
  *   - allCountries.txt      — airport coordinates (for airports not in cities1000)
+ *
+ * Additional input:
+ *   - src/extra-cities.ts   — user-defined custom cities merged into the database
  *
  * Output:
  *   - src/cities-data.js    — compact JS module with city + airport data
  */
 
-import { readFileSync, writeFileSync, createReadStream } from 'fs';
+import { readFileSync, writeFileSync, createReadStream, existsSync, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { createInterface } from 'readline';
+import esbuild from 'esbuild';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, 'geonames-data');
 const OUT_FILE = join(__dirname, '..', 'src', 'cities-data.js');
+const EXTRA_SRC = join(__dirname, '..', 'src', 'extra-cities.ts');
+
+// ---------------------------------------------------------------------------
+// Preflight: all inputs must exist (no silent fallbacks)
+// ---------------------------------------------------------------------------
+
+if (!existsSync(EXTRA_SRC)) {
+    console.error(`ERROR: ${EXTRA_SRC} not found — it is a required input.`);
+    process.exit(1);
+}
+
+const REQUIRED_DATA_FILES = [
+    'cities1000.txt',
+    'admin1CodesASCII.txt',
+    'admin2Codes.txt',
+    'alternateNamesV2.txt',
+    'allCountries.txt',
+];
+const missingFiles = REQUIRED_DATA_FILES.filter(f => !existsSync(join(DATA_DIR, f)));
+if (missingFiles.length > 0) {
+    console.error(`ERROR: missing GeoNames data files in ${DATA_DIR}:`);
+    for (const f of missingFiles) console.error(`  - ${f}`);
+    console.error('Download from https://download.geonames.org/export/dump/');
+    process.exit(1);
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -126,6 +156,77 @@ for (const line of readTSV('cities1000.txt')) {
     cityById.set(geonameid, city);
 }
 console.log(`  ${cities.length} cities loaded`);
+
+// ---------------------------------------------------------------------------
+// 2b. Extra cities (src/extra-cities.ts)
+// ---------------------------------------------------------------------------
+
+console.log('=== Phase 2b: Extra cities ===');
+
+const EXTRA_TEMP = join(__dirname, 'extra-cities-temp.js');
+let extraCities;
+try {
+    esbuild.buildSync({
+        entryPoints: [EXTRA_SRC],
+        outfile: EXTRA_TEMP,
+        format: 'esm',
+        platform: 'node',
+    });
+    ({ extraCities } = await import(pathToFileURL(EXTRA_TEMP).href));
+} finally {
+    if (existsSync(EXTRA_TEMP)) unlinkSync(EXTRA_TEMP);
+}
+
+function failExtra(i, name, msg) {
+    console.error(`ERROR: src/extra-cities.ts entry ${i} (${JSON.stringify(name)}): ${msg}`);
+    process.exit(1);
+}
+
+for (let i = 0; i < extraCities.length; i++) {
+    const e = extraCities[i];
+    if (typeof e.name !== 'string' || !e.name || e.name.includes('\n')) {
+        failExtra(i, e.name, 'name must be a non-empty string without newlines');
+    }
+    if (!(e.latitude >= -90 && e.latitude <= 90)) {
+        failExtra(i, e.name, `latitude out of range: ${e.latitude}`);
+    }
+    if (!(e.longitude >= -180 && e.longitude <= 180)) {
+        failExtra(i, e.name, `longitude out of range: ${e.longitude}`);
+    }
+    try {
+        new Intl.DateTimeFormat('en-US', { timeZone: e.olsonTimezone });
+    } catch {
+        failExtra(i, e.name, `unknown olsonTimezone: ${JSON.stringify(e.olsonTimezone)}`);
+    }
+    if (!/^[A-Z]{2}$/.test(e.countryCode)) {
+        failExtra(i, e.name, `countryCode must be two uppercase letters: ${JSON.stringify(e.countryCode)}`);
+    }
+    for (const field of ['admin1Name', 'admin2Name']) {
+        if (e[field] !== undefined && (typeof e[field] !== 'string' || e[field].includes('\n'))) {
+            failExtra(i, e.name, `${field} must be a string without newlines`);
+        }
+    }
+    if (!Number.isInteger(e.population) || e.population < 0) {
+        failExtra(i, e.name, `population must be a non-negative integer: ${e.population}`);
+    }
+
+    const lat = Math.round(e.latitude * 1000) / 1000;
+    const lon = Math.round(e.longitude * 1000) / 1000;
+    cities.push({
+        geonameid: `extra-${toASCII(e.name)}-${lat}-${lon}`,
+        name: e.name,
+        asciiname: toASCII(e.name),
+        alternatenames: '',
+        lat,
+        lon,
+        countryCode: e.countryCode,
+        admin1Name: e.admin1Name ?? '',
+        admin2Name: e.admin2Name ?? '',
+        population: e.population,
+        timezone: e.olsonTimezone,
+    });
+}
+console.log(`  ${extraCities.length} extra cities appended`);
 
 // ---------------------------------------------------------------------------
 // 3. Detect duplicates needing admin2 disambiguation
