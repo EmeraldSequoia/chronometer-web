@@ -22765,7 +22765,7 @@ return {${names2.join(",")}};`;
       return `canvas/bitmap est TOTAL ${MB(total)}MB: faces ${MB(facesB)} \xB7 static caches ${MB(staticB)} \xB7 images ${MB(imagesB)} \xB7 src blobs ${MB(srcBlobB)} \xB7 shadows ${MB(shadowB)} \xB7 wedge cache ${MB(rc.wedgeCache)} \xB7 wheel cache ${MB(rc.wheelCache)} \xB7 hand cache ${MB(rc.handCache)} \xB7 analemma ${MB(analemmaB)} \xB7 terra ring ${MB(terraB)} \xB7 cutout temp ${MB(rc.cutoutTemp)} \xB7 face buffers ${MB(buffersB)} \xB7 shared canvas ${MB(sharedB)}${jsHeap}`;
     }
     function _buildStamp() {
-      return true ? "2.0.70" : "dev";
+      return true ? "2.0.71" : "dev";
     }
     function _browserShort() {
       const ua = navigator.userAgent;
