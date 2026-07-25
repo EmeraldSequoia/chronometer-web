@@ -277,7 +277,10 @@ emit_loader_block() {
   for f in "$@"; do
     bytes=$(wc -c < "$DIST/$f" | tr -d ' ')
     if [ $first -eq 1 ]; then first=0; else files_json="${files_json},"; fi
-    files_json="${files_json}{\"src\":\"$f\",\"bytes\":$bytes}"
+    # ?v= cache-buster: ties each HTML to its exact matching bundles, so a
+    # deploy can never pair new HTML with a stale cached engine (the cause of
+    # the 2026-07-24 lingering-bar bug). The file:// path strips the query.
+    files_json="${files_json}{\"src\":\"$f?v=$NEW_VERSION\",\"bytes\":$bytes}"
   done
   printf '<script>window.__BUNDLES__={"app":"%s","files":[%s]};</script>\n' "$app" "$files_json"
   cat "$SRC/partials/loader-bootstrap.html"

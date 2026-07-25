@@ -148,6 +148,30 @@ centered element:
 The bootstrap owns the fill width and the label. It removes itself on the
 first-frame signal (§4g), with a backstop timeout so it can never strand.
 
+> **Field bug, diagnosed and hardened (2026-07-24, builds 2.0.72–73):**
+> Steve saw the bar linger 5–10 s over a *fully running* app (second hand
+> animating). Root cause — **deploy cache skew**: new HTML + a stale cached
+> pre-loader engine (no `__appReady` call in it), so the hook never fired and
+> the 10 s backstop was what cleared the bar. The animating second hand was
+> the tell: a running *new* engine cannot leave the bar up (the hook sits
+> unconditionally in the frame loop), so only a hookless old bundle fits.
+> Plausibility confirmed by production headers (nginx proxy cache HIT, no
+> Cache-Control on assets); unreproducible once caches converged. A second,
+> environmental route to the same symptom (first rAF tick stalled while
+> `setInterval`/DOM UI looks alive) was reproduced in the VM pane but is not
+> what Steve saw.
+>
+> Hardening (2.0.73): **`?v=<version>` cache-buster** on every manifest src
+> (build.sh) so HTML and bundles can never skew — the `file://` path strips
+> the query (no HTTP cache there); **byte-size tripwire** — fetched size vs
+> manifest size, `console.warn` on mismatch names the stale/truncated bundle;
+> permanent one-line diagnostics `[load] all bundles executed at Nms` /
+> `[load] bar removed by hook|backstop at Nms` (silent on `file://`). The
+> interim 3 s backstop (2.0.72) was **reverted to 10 s at Steve's request**:
+> with skew eliminated it should never fire, and when it does the long,
+> obvious linger plus the logs make it a debuggable signal rather than a
+> papered-over one.
+
 ### 4c. Fetch + progress accounting
 
 For each file in the manifest, `fetch(src)`, then read `response.body`'s

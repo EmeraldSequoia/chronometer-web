@@ -1973,7 +1973,7 @@
               <div id="help-content">
                 <!-- Populated from help-template on first info click -->
               </div>
-              <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.71</div>
+              <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.73</div>
             </div>
 
             <div id="info-sub-view">
@@ -2650,7 +2650,7 @@ for the current day.
 
 
     </div>
-<script>window.__BUNDLES__={"app":"chronometer","files":[{"src":"face-haleakala.js","bytes":286948},{"src":"chronometer-engine.js","bytes":1697900}]};</script>
+<script>window.__BUNDLES__={"app":"chronometer","files":[{"src":"face-haleakala.js?v=2.0.73","bytes":286948},{"src":"chronometer-engine.js?v=2.0.73","bytes":1697900}]};</script>
 <!-- ============================================================================
      Load-progress bootstrap (Tier 2). Injected by build.sh at the loader
      marker, immediately AFTER a generated
@@ -2739,12 +2739,20 @@ for the current day.
   function setLabel(t) { if (label) label.textContent = t; }
 
   var barRemoved = false, backstop = 0;
-  function removeBar() {
+  function removeBar(source) {
     if (barRemoved) return;
     barRemoved = true;
     if (backstop) clearTimeout(backstop);
     if (host && host.parentNode) host.parentNode.removeChild(host);
     try { delete window.__appReady; } catch (e) { window.__appReady = undefined; }
+    // One diagnostic line: which path cleared the bar and when. 'backstop'
+    // means the app's first-frame __appReady never landed (stalled/throttled
+    // rAF, or a boot throw) — if you see it, that's the interesting case.
+    // Silent on the file:// path ('file'), where the bar never showed.
+    if (source !== 'file' && window.console) {
+      console.log('[load] bar removed by ' + (source || 'hook')
+        + ' at ' + Math.round(performance.now()) + 'ms');
+    }
   }
   // Defined BEFORE any bundle executes: each entry calls window.__appReady()
   // after its first frame paints (planning §4g). The backstop (set once the
@@ -2763,7 +2771,7 @@ for the current day.
   }
   function injectPlain() {
     var files = (bundles && bundles.files) || [];
-    removeBar();                              // no bar on this path
+    removeBar('file');                        // no bar on this path (and no log)
     // Append all bundles at once with async=false: the browser fetches them in
     // parallel and executes them in insertion order (the "ordered async=false"
     // rule), matching the old static <script> tags. Chaining on onload would
@@ -2773,7 +2781,9 @@ for the current day.
     // its own missing-face error, exactly as with static tags.
     for (var i = 0; i < files.length; i++) {
       var s = document.createElement('script');
-      s.src = files[i].src;
+      // Strip the ?v= cache-buster: file:// has no HTTP cache to skew, and
+      // query strings on file URLs are gratuitous risk across browsers.
+      s.src = files[i].src.replace(/\?.*$/, '');
       s.async = false;                        // parallel fetch, ordered execute
       document.body.appendChild(s);
     }
@@ -2811,6 +2821,14 @@ for the current day.
         for (j = 0; j < chunks.length; j++) size += chunks[j].length;
         var out = new Uint8Array(size), off = 0;
         for (j = 0; j < chunks.length; j++) { out.set(chunks[j], off); off += chunks[j].length; }
+        // Skew tripwire: the manifest was written by the same build that
+        // produced the bundle, so any size difference means a stale cache
+        // (or truncation) — the failure mode behind the 2026-07-24 bug.
+        if (file.bytes && out.length !== file.bytes && window.console) {
+          console.warn('[load] ' + file.src + ': got ' + out.length
+            + ' bytes, manifest says ' + file.bytes
+            + ' — possible stale cache or truncated download');
+        }
         return out;
       });
     });
@@ -2887,9 +2905,16 @@ for the current day.
     setLabel('Initializing…');
     return engineBytes ? executeBlob(engineBytes) : undefined;   // engine last
   }).then(function () {
-    // Hand off to the app's first-frame __appReady(); backstop so a missed call
-    // (e.g. engine runtime throw) can't leave the overlay up forever.
-    backstop = setTimeout(removeBar, 10000);
+    // Hand off to the app's first-frame __appReady(). The 10s backstop should
+    // NEVER fire: the ?v= cache-buster guarantees the executed bundles match
+    // this HTML, so the hook is always present. It exists only so a genuine
+    // boot failure can't strand the overlay forever — and it's deliberately
+    // long so that when it does fire, the lingering bar is obvious and gets
+    // investigated (the '[load] removed by backstop' line + the size-mismatch
+    // warning above identify the cause) rather than quietly papered over.
+    if (window.console) console.log('[load] all bundles executed at '
+      + Math.round(performance.now()) + 'ms');
+    backstop = setTimeout(function () { removeBar('backstop'); }, 10000);
   }).catch(showError);
 })();
 </script>
