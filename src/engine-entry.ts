@@ -2260,9 +2260,10 @@ async function main() {
         // Pre-fill with current values (always, for manual invocation)
         lpLatInput.value = (lat !== 0 || lon !== 0) ? lat.toFixed(3) : '';
         lpLonInput.value = (lat !== 0 || lon !== 0) ? lon.toFixed(3) : '';
-        // Clear city search and autofocus
+        // Clear city search, stale browser-location status, and autofocus
         if (lpCityInput) { lpCityInput.value = ''; }
         if (lpCityResults) { lpCityResults.innerHTML = ''; }
+        if (lpBrowserError) { lpBrowserError.style.display = 'none'; }
         // Autofocus the search input after dialog renders
         setTimeout(() => lpCityInput?.focus(), 50);
 
@@ -2497,6 +2498,7 @@ async function main() {
         }
         lpUseBrowser.textContent = 'Cancel request';
         if (lpBrowserError) {
+            lpBrowserError.classList.remove('lp-success');
             lpBrowserError.classList.add('lp-waiting');
             lpBrowserError.textContent = 'Waiting for the browser to report a location…';
             lpBrowserError.style.display = '';
@@ -2510,6 +2512,14 @@ async function main() {
                 // immediately (no 0,0 flash) and can skip the DB while stationary.
                 const derived = isCityDataLoaded() ? (findClosestCity(fixLat, fixLon)?.shortLabel ?? null) : null;
                 setState({ bloc: true, lsrc: 'browser', lat: fixLat, lon: fixLon, city: derived, tz: locationTimezone || null });
+                // Explicit confirmation: a stationary refresh changes nothing
+                // else visible, and success-by-silence reads as failure.
+                if (lpBrowserError) {
+                    lpBrowserError.classList.remove('lp-waiting');
+                    lpBrowserError.classList.add('lp-success');
+                    lpBrowserError.textContent = 'Refreshed browser location.';
+                    lpBrowserError.style.display = '';
+                }
             },
             onDenied: () => {
                 endGeoWait();

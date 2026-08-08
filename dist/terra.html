@@ -285,6 +285,12 @@
             color: #99a;
         }
 
+        /* Success confirmation after a fix lands — otherwise a stationary
+           refresh is indistinguishable from a silent failure. */
+        #location-prompt #lp-browser-error.lp-success {
+            color: #a0c9a0;
+        }
+
         #location-prompt .lp-manual-section {
             margin-top: 12px;
             border-top: 1px solid #2a2a3e;
@@ -2364,7 +2370,7 @@
               <div id="help-content">
                 <!-- Populated from help-template on first info click -->
               </div>
-              <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.86</div>
+              <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.87</div>
             </div>
 
             <div id="info-sub-view">
@@ -3306,7 +3312,7 @@
 
 
     </div>
-<script>window.__BUNDLES__={"app":"chronometer","files":[{"src":"face-terra.js?v=2.0.86","bytes":1892356},{"src":"chronometer-engine.js?v=2.0.86","bytes":1702318}]};</script>
+<script>window.__BUNDLES__={"app":"chronometer","files":[{"src":"face-terra.js?v=2.0.87","bytes":1892356},{"src":"chronometer-engine.js?v=2.0.87","bytes":1702734}]};</script>
 <!-- ============================================================================
      Load-progress bootstrap (Tier 2). Injected by build.sh at the loader
      marker, immediately AFTER a generated

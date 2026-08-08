@@ -487,6 +487,12 @@
             color: #99a;
         }
 
+        /* Success confirmation after a fix lands — otherwise a stationary
+           refresh is indistinguishable from a silent failure. */
+        #location-prompt #lp-browser-error.lp-success {
+            color: #a0c9a0;
+        }
+
         #location-prompt .lp-manual-section {
             margin-top: 12px;
             border-top: 1px solid #2a2a3e;
@@ -1101,7 +1107,7 @@
               <summary>General Help Topics</summary>
               <iframe id="general-help-iframe"></iframe>
             </details>
-            <div id="version-label" style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.86</div>
+            <div id="version-label" style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.87</div>
           </div>
 
           <div id="info-sub-view">

@@ -2,6 +2,18 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "dist-fresh50",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8853",
+        "--directory",
+        "dist"
+      ],
+      "port": 8853
+    },
+    {
       "name": "dist-fresh49",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

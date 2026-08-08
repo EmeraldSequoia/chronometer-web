@@ -105,6 +105,8 @@ let needsPrompt = false;  // true when showing prompt at startup (no URL locatio
 
 function showPrompt(geoDenied: boolean) {
     locationPrompt.style.display = '';
+    // Clear any stale browser-location status from a prior open.
+    if (lpBrowserError) { lpBrowserError.style.display = 'none'; }
     if (geoDenied) {
         (lpUseBrowser as HTMLButtonElement).disabled = true;
         lpUseBrowser.dataset.tooltip = isFileProtocol
@@ -243,6 +245,7 @@ lpUseBrowser.addEventListener('click', () => {
     }
     lpUseBrowser.textContent = 'Cancel request';
     if (lpBrowserError) {
+        lpBrowserError.classList.remove('lp-success');
         lpBrowserError.classList.add('lp-waiting');
         lpBrowserError.textContent = 'Waiting for the browser to report a location…';
         lpBrowserError.style.display = '';
@@ -256,6 +259,14 @@ lpUseBrowser.addEventListener('click', () => {
             // the next load's fetch writes lsrc: 'browser' with the fix.
             setState({ bloc: true, lsrc: null, lat: null, lon: null, city: null });
             updateLinks();
+            // Explicit confirmation: a stationary refresh changes nothing
+            // else visible, and success-by-silence reads as failure.
+            if (lpBrowserError) {
+                lpBrowserError.classList.remove('lp-waiting');
+                lpBrowserError.classList.add('lp-success');
+                lpBrowserError.textContent = 'Refreshed browser location.';
+                lpBrowserError.style.display = '';
+            }
         },
         onDenied: () => {
             endGeoWait();

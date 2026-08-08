@@ -14794,6 +14794,7 @@
       }
       lpUseBrowser.textContent = "Cancel request";
       if (lpBrowserError) {
+        lpBrowserError.classList.remove("lp-success");
         lpBrowserError.classList.add("lp-waiting");
         lpBrowserError.textContent = "Waiting for the browser to report a location\u2026";
         lpBrowserError.style.display = "";
@@ -14803,6 +14804,12 @@
           endGeoWait();
           geoPermission = "granted";
           applyLocation(fixLat, fixLon, "", "", "browser");
+          if (lpBrowserError) {
+            lpBrowserError.classList.remove("lp-waiting");
+            lpBrowserError.classList.add("lp-success");
+            lpBrowserError.textContent = "Refreshed browser location.";
+            lpBrowserError.style.display = "";
+          }
         },
         onDenied: () => {
           endGeoWait();

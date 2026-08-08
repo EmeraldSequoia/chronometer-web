@@ -1539,6 +1539,9 @@
   var needsPrompt = false;
   function showPrompt(geoDenied) {
     locationPrompt.style.display = "";
+    if (lpBrowserError) {
+      lpBrowserError.style.display = "none";
+    }
     if (geoDenied) {
       lpUseBrowser.disabled = true;
       lpUseBrowser.dataset.tooltip = isFileProtocol2 ? "Not all browsers support location access from file:// URLs" : "Browser location was not granted \u2014 check your browser settings to allow it";
@@ -1640,6 +1643,7 @@
     }
     lpUseBrowser.textContent = "Cancel request";
     if (lpBrowserError) {
+      lpBrowserError.classList.remove("lp-success");
       lpBrowserError.classList.add("lp-waiting");
       lpBrowserError.textContent = "Waiting for the browser to report a location\u2026";
       lpBrowserError.style.display = "";
@@ -1650,6 +1654,12 @@
         applyLocation(fixLat, fixLon, "", "", "browser", false);
         setState({ bloc: true, lsrc: null, lat: null, lon: null, city: null });
         updateLinks();
+        if (lpBrowserError) {
+          lpBrowserError.classList.remove("lp-waiting");
+          lpBrowserError.classList.add("lp-success");
+          lpBrowserError.textContent = "Refreshed browser location.";
+          lpBrowserError.style.display = "";
+        }
       },
       onDenied: () => {
         endGeoWait();
