@@ -22252,7 +22252,9 @@
     if (footerRowEl) ro.observe(footerRowEl);
     window.addEventListener("resize", scheduleResize);
     window.addEventListener("orientationchange", scheduleResize);
-    updateDynamicCompositeIcon(["thumb-observatory.png"], "#000000");
+    if (location.protocol !== "file:") {
+      updateDynamicCompositeIcon(["thumb-observatory.png"], "#000000");
+    }
     setupLocationDialog();
     setupNoonToggle();
     setupMapDrag();

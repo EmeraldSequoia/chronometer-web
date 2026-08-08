@@ -1270,7 +1270,13 @@ function init(): void {
     // the classic window events.
     window.addEventListener('resize', scheduleResize);
     window.addEventListener('orientationchange', scheduleResize);
-    updateDynamicCompositeIcon(['thumb-observatory.png'], '#000000');
+    // file://: the path-loaded thumb taints the canvas (toDataURL throws), and
+    // the static <link> tags already show the same circle-clipped PNG. The
+    // composite only adds the opaque black backing needed for the home-screen
+    // icon, which has no file:// equivalent.
+    if (location.protocol !== 'file:') {
+        updateDynamicCompositeIcon(['thumb-observatory.png'], '#000000');
+    }
     setupLocationDialog();
     setupNoonToggle();
     setupMapDrag();
