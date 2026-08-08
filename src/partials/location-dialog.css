@@ -153,6 +153,11 @@
             gap: 8px;
         }
 
+        #location-prompt #lp-browser-error {
+            color: #e0a0a0;
+            font-size: 12px;
+        }
+
         #location-prompt .lp-manual-section {
             margin-top: 12px;
             border-top: 1px solid #2a2a3e;

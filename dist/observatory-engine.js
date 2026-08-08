@@ -14474,11 +14474,16 @@
       const options = {};
       if (timeoutMs != null) options.timeout = timeoutMs;
       navigator.geolocation.getCurrentPosition(
-        (pos) => resolve({ status: "success", lat: pos.coords.latitude, lon: pos.coords.longitude }),
+        (pos) => {
+          console.log(`[Geolocation] fix: ${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)} (\xB1${Math.round(pos.coords.accuracy)}m)`);
+          resolve({ status: "success", lat: pos.coords.latitude, lon: pos.coords.longitude });
+        },
         (err) => {
-          if (err.code === err.PERMISSION_DENIED) resolve({ status: "denied" });
-          else if (err.code === err.TIMEOUT) resolve({ status: "timeout" });
-          else resolve({ status: "unavailable" });
+          const codeName = err.code === err.PERMISSION_DENIED ? "PERMISSION_DENIED" : err.code === err.TIMEOUT ? "TIMEOUT" : "POSITION_UNAVAILABLE";
+          console.warn(`[Geolocation] getCurrentPosition failed: ${codeName} \u2014 ${err.message}`);
+          if (err.code === err.PERMISSION_DENIED) resolve({ status: "denied", message: err.message });
+          else if (err.code === err.TIMEOUT) resolve({ status: "timeout", message: err.message });
+          else resolve({ status: "unavailable", message: err.message });
         },
         options
       );
@@ -14550,6 +14555,7 @@
     const lpFullContent = document.getElementById("lp-full-content");
     const lpLocating = document.getElementById("lp-locating");
     const lpLocatingManual = document.getElementById("lp-locating-manual");
+    const lpBrowserError = document.getElementById("lp-browser-error");
     const isFileProtocol2 = window.location.protocol === "file:";
     let currentLat = config.initialLat ?? 0;
     let currentLon = config.initialLon ?? 0;
@@ -14627,6 +14633,7 @@
       updateMapPreview(newLat, newLon);
       lpDialogFooter.classList.add("visible");
       needsPrompt2 = false;
+      if (lpBrowserError) lpBrowserError.style.display = "none";
     }
     function showLocating() {
       locating = true;
@@ -14655,6 +14662,9 @@
       }
       if (lpCityResults) {
         lpCityResults.innerHTML = "";
+      }
+      if (lpBrowserError) {
+        lpBrowserError.style.display = "none";
       }
       setTimeout(() => lpCityInput?.focus(), 50);
       const hasLocation = currentLat !== 0 || currentLon !== 0;
@@ -14712,6 +14722,7 @@
     });
     lpUseBrowser.addEventListener("click", async () => {
       lpUseBrowser.textContent = "Requesting\u2026";
+      if (lpBrowserError) lpBrowserError.style.display = "none";
       const result = await requestBrowserLocation();
       if (result.status === "success") {
         lpUseBrowser.textContent = browserBtnLabel;
@@ -14725,6 +14736,13 @@
         btn.dataset.tooltip = isFileProtocol2 ? "Not all browsers support location access from file:// URLs" : "Browser location was not granted \u2014 check your browser settings to allow it";
       } else {
         lpUseBrowser.textContent = browserBtnLabel;
+        if (lpBrowserError) {
+          const base = result.status === "timeout" ? "The browser timed out without reporting a location" : "The browser could not determine your location";
+          const code = result.status === "timeout" ? "TIMEOUT" : "POSITION_UNAVAILABLE";
+          const detail = result.message ? `${code}: ${result.message}` : code;
+          lpBrowserError.textContent = `${base} (${detail}).`;
+          lpBrowserError.style.display = "";
+        }
       }
     });
     locationPrompt.querySelector(".lp-backdrop").addEventListener("click", () => {

@@ -274,6 +274,11 @@
             gap: 8px;
         }
 
+        #location-prompt #lp-browser-error {
+            color: #e0a0a0;
+            font-size: 12px;
+        }
+
         #location-prompt .lp-manual-section {
             margin-top: 12px;
             border-top: 1px solid #2a2a3e;
@@ -2353,7 +2358,7 @@
               <div id="help-content">
                 <!-- Populated from help-template on first info click -->
               </div>
-              <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.81</div>
+              <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.85</div>
             </div>
 
             <div id="info-sub-view">
@@ -3201,6 +3206,7 @@
       <button class="lp-btn" id="lp-use-browser">
         Use device location via browser
       </button>
+      <div id="lp-browser-error" style="display: none"></div>
     </div>
     <div class="lp-manual-section">
       <div class="lp-search-label">Manual coordinates</div>
@@ -3294,7 +3300,7 @@
 
 
     </div>
-<script>window.__BUNDLES__={"app":"chronometer","files":[{"src":"face-terra.js?v=2.0.81","bytes":1892356},{"src":"chronometer-engine.js?v=2.0.81","bytes":1697900}]};</script>
+<script>window.__BUNDLES__={"app":"chronometer","files":[{"src":"face-terra.js?v=2.0.85","bytes":1892356},{"src":"chronometer-engine.js?v=2.0.85","bytes":1698331}]};</script>
 <!-- ============================================================================
      Load-progress bootstrap (Tier 2). Injected by build.sh at the loader
      marker, immediately AFTER a generated

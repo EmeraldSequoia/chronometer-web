@@ -27,9 +27,9 @@ import type { LocationSource } from './url-state.js';
 
 export type GeoResult =
     | { status: 'success'; lat: number; lon: number }
-    | { status: 'denied' }
-    | { status: 'timeout' }
-    | { status: 'unavailable' };
+    | { status: 'denied'; message?: string }
+    | { status: 'timeout'; message?: string }
+    | { status: 'unavailable'; message?: string };
 
 /** A LocationSource (persistable provenance), or 'none' while no location is set. */
 export type LocationSourceType = LocationSource | 'none';
@@ -119,11 +119,17 @@ export function requestBrowserLocation(timeoutMs?: number): Promise<GeoResult> {
         const options: PositionOptions = {};
         if (timeoutMs != null) options.timeout = timeoutMs;
         navigator.geolocation.getCurrentPosition(
-            (pos) => resolve({ status: 'success', lat: pos.coords.latitude, lon: pos.coords.longitude }),
+            (pos) => {
+                console.log(`[Geolocation] fix: ${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)} (±${Math.round(pos.coords.accuracy)}m)`);
+                resolve({ status: 'success', lat: pos.coords.latitude, lon: pos.coords.longitude });
+            },
             (err) => {
-                if (err.code === err.PERMISSION_DENIED) resolve({ status: 'denied' });
-                else if (err.code === err.TIMEOUT) resolve({ status: 'timeout' });
-                else resolve({ status: 'unavailable' });
+                const codeName = err.code === err.PERMISSION_DENIED ? 'PERMISSION_DENIED'
+                    : err.code === err.TIMEOUT ? 'TIMEOUT' : 'POSITION_UNAVAILABLE';
+                console.warn(`[Geolocation] getCurrentPosition failed: ${codeName} — ${err.message}`);
+                if (err.code === err.PERMISSION_DENIED) resolve({ status: 'denied', message: err.message });
+                else if (err.code === err.TIMEOUT) resolve({ status: 'timeout', message: err.message });
+                else resolve({ status: 'unavailable', message: err.message });
             },
             options,
         );
@@ -206,6 +212,8 @@ export function initLocationDialog(config: LocationDialogConfig): LocationDialog
     const lpFullContent = document.getElementById('lp-full-content')!;
     const lpLocating = document.getElementById('lp-locating')!;
     const lpLocatingManual = document.getElementById('lp-locating-manual')!;
+    // Nullable: tolerates a stale cached page served with this newer script.
+    const lpBrowserError = document.getElementById('lp-browser-error');
 
     const isFileProtocol = window.location.protocol === 'file:';
 
@@ -312,6 +320,7 @@ export function initLocationDialog(config: LocationDialogConfig): LocationDialog
         updateMapPreview(newLat, newLon);
         lpDialogFooter.classList.add('visible');
         needsPrompt = false;
+        if (lpBrowserError) lpBrowserError.style.display = 'none';
     }
 
     // --- Show / dismiss ---
@@ -351,9 +360,10 @@ export function initLocationDialog(config: LocationDialogConfig): LocationDialog
         lpLatInput.value = (currentLat !== 0 || currentLon !== 0) ? currentLat.toFixed(3) : '';
         lpLonInput.value = (currentLat !== 0 || currentLon !== 0) ? currentLon.toFixed(3) : '';
 
-        // Clear city search and autofocus
+        // Clear city search, stale browser-location error, and autofocus
         if (lpCityInput) { lpCityInput.value = ''; }
         if (lpCityResults) { lpCityResults.innerHTML = ''; }
+        if (lpBrowserError) { lpBrowserError.style.display = 'none'; }
         setTimeout(() => lpCityInput?.focus(), 50);
 
         // Show status or no-location placeholder
@@ -432,6 +442,7 @@ export function initLocationDialog(config: LocationDialogConfig): LocationDialog
     // "Use browser location"
     lpUseBrowser.addEventListener('click', async () => {
         lpUseBrowser.textContent = 'Requesting…';
+        if (lpBrowserError) lpBrowserError.style.display = 'none';
         const result = await requestBrowserLocation();
         if (result.status === 'success') {
             lpUseBrowser.textContent = browserBtnLabel;
@@ -447,6 +458,15 @@ export function initLocationDialog(config: LocationDialogConfig): LocationDialog
                 : 'Browser location was not granted — check your browser settings to allow it';
         } else {
             lpUseBrowser.textContent = browserBtnLabel;
+            if (lpBrowserError) {
+                const base = result.status === 'timeout'
+                    ? 'The browser timed out without reporting a location'
+                    : 'The browser could not determine your location';
+                const code = result.status === 'timeout' ? 'TIMEOUT' : 'POSITION_UNAVAILABLE';
+                const detail = result.message ? `${code}: ${result.message}` : code;
+                lpBrowserError.textContent = `${base} (${detail}).`;
+                lpBrowserError.style.display = '';
+            }
         }
     });
 

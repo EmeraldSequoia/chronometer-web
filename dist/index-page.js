@@ -1447,8 +1447,13 @@
       const options = {};
       if (timeoutMs != null) options.timeout = timeoutMs;
       navigator.geolocation.getCurrentPosition(
-        (pos) => resolve({ status: "success", lat: pos.coords.latitude, lon: pos.coords.longitude }),
+        (pos) => {
+          console.log(`[Geolocation] fix: ${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)} (\xB1${Math.round(pos.coords.accuracy)}m)`);
+          resolve({ status: "success", lat: pos.coords.latitude, lon: pos.coords.longitude });
+        },
         (err) => {
+          const codeName = err.code === err.PERMISSION_DENIED ? "PERMISSION_DENIED" : err.code === err.TIMEOUT ? "TIMEOUT" : "POSITION_UNAVAILABLE";
+          console.warn(`[Geolocation] getCurrentPosition failed: ${codeName} \u2014 ${err.message}`);
           if (err.code === err.PERMISSION_DENIED) resolve({ status: "denied" });
           else if (err.code === err.TIMEOUT) resolve({ status: "timeout" });
           else resolve({ status: "unavailable" });
