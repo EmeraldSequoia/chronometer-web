@@ -1414,6 +1414,73 @@
     section.open = true;
   }
 
+  // src/shared/geolocation.ts
+  var BLOC_REFRESH_STALE_MS = 15 * 60 * 1e3;
+  function geoErrorName(err) {
+    return err.code === err.PERMISSION_DENIED ? "PERMISSION_DENIED" : err.code === err.TIMEOUT ? "TIMEOUT" : "POSITION_UNAVAILABLE";
+  }
+  function logFix(pos) {
+    console.log(`[Geolocation] fix: ${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)} (\xB1${Math.round(pos.coords.accuracy)}m)`);
+  }
+  function requestBrowserLocation(timeoutMs) {
+    if (!navigator.geolocation) return Promise.resolve({ status: "unavailable" });
+    return new Promise((resolve) => {
+      const options = {};
+      if (timeoutMs != null) options.timeout = timeoutMs;
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          logFix(pos);
+          resolve({ status: "success", lat: pos.coords.latitude, lon: pos.coords.longitude });
+        },
+        (err) => {
+          console.warn(`[Geolocation] getCurrentPosition failed: ${geoErrorName(err)} \u2014 ${err.message}`);
+          if (err.code === err.PERMISSION_DENIED) resolve({ status: "denied", message: err.message });
+          else if (err.code === err.TIMEOUT) resolve({ status: "timeout", message: err.message });
+          else resolve({ status: "unavailable", message: err.message });
+        },
+        options
+      );
+    });
+  }
+  function watchBrowserLocation(handlers2) {
+    if (!navigator.geolocation) {
+      handlers2.onDenied("Geolocation is not supported by this browser");
+      return () => {
+      };
+    }
+    let watchId = null;
+    let lastLogged = "";
+    const clear = () => {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+      }
+    };
+    watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        if (watchId === null) return;
+        logFix(pos);
+        clear();
+        handlers2.onFix(pos.coords.latitude, pos.coords.longitude);
+      },
+      (err) => {
+        if (watchId === null) return;
+        const line = `${geoErrorName(err)} \u2014 ${err.message}`;
+        if (line !== lastLogged) {
+          lastLogged = line;
+          console.warn(`[Geolocation] watchPosition error: ${line}`);
+        }
+        if (err.code === err.PERMISSION_DENIED) {
+          clear();
+          handlers2.onDenied(err.message);
+        } else {
+          handlers2.onStatus?.(geoErrorName(err), err.message);
+        }
+      }
+    );
+    return clear;
+  }
+
   // src/index-page.ts
   initAppState({ app: "index" });
   var isFileProtocol2 = window.location.protocol === "file:";
@@ -1441,32 +1508,12 @@
       if (descEl) descEl.textContent = hasPicks ? "View your chosen faces" : "Choose and order your favorite faces";
     }
   }
-  function requestBrowserLocation(timeoutMs) {
-    if (!navigator.geolocation) return Promise.resolve({ status: "unavailable" });
-    return new Promise((resolve) => {
-      const options = {};
-      if (timeoutMs != null) options.timeout = timeoutMs;
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          console.log(`[Geolocation] fix: ${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)} (\xB1${Math.round(pos.coords.accuracy)}m)`);
-          resolve({ status: "success", lat: pos.coords.latitude, lon: pos.coords.longitude });
-        },
-        (err) => {
-          const codeName = err.code === err.PERMISSION_DENIED ? "PERMISSION_DENIED" : err.code === err.TIMEOUT ? "TIMEOUT" : "POSITION_UNAVAILABLE";
-          console.warn(`[Geolocation] getCurrentPosition failed: ${codeName} \u2014 ${err.message}`);
-          if (err.code === err.PERMISSION_DENIED) resolve({ status: "denied" });
-          else if (err.code === err.TIMEOUT) resolve({ status: "timeout" });
-          else resolve({ status: "unavailable" });
-        },
-        options
-      );
-    });
-  }
   var locationPrompt = document.getElementById("location-prompt");
   var lpLatInput = document.getElementById("lp-lat");
   var lpLonInput = document.getElementById("lp-lon");
   var lpUseCoords = document.getElementById("lp-use-coords");
   var lpUseBrowser = document.getElementById("lp-use-browser");
+  var lpBrowserError = document.getElementById("lp-browser-error");
   var lpCityInput = document.getElementById("lp-city-input");
   var lpCityResults = document.getElementById("lp-city-results");
   var lpGlobe = document.getElementById("lp-globe");
@@ -1515,6 +1562,7 @@
     lpDialogFooter.classList.toggle("visible", hasLocation);
   }
   function hidePrompt() {
+    cancelGeoWait();
     locationPrompt.style.display = "none";
   }
   function buildLocationNameHTML() {
@@ -1573,22 +1621,51 @@
     if (isNaN(newLat) || isNaN(newLon)) return;
     applyLocation(newLat, newLon, "", "", "manual", true);
   });
-  lpUseBrowser.addEventListener("click", async () => {
-    lpUseBrowser.textContent = "Requesting\u2026";
-    const result = await requestBrowserLocation();
-    if (result.status === "success") {
-      lpUseBrowser.textContent = browserBtnLabel;
-      applyLocation(result.lat, result.lon, "", "", "browser", false);
-      setState({ bloc: true, lsrc: null, lat: null, lon: null, city: null });
-      updateLinks();
-    } else if (result.status === "denied") {
-      const btn = lpUseBrowser;
-      btn.disabled = true;
-      btn.textContent = browserBtnLabel + " (unavailable)";
-      btn.dataset.tooltip = isFileProtocol2 ? "Not all browsers support location access from file:// URLs" : "Browser location was not granted \u2014 check your browser settings to allow it";
-    } else {
-      lpUseBrowser.textContent = browserBtnLabel;
+  var geoWatchCancel = null;
+  function endGeoWait() {
+    geoWatchCancel = null;
+    lpUseBrowser.textContent = browserBtnLabel;
+    if (lpBrowserError) lpBrowserError.style.display = "none";
+  }
+  function cancelGeoWait() {
+    if (!geoWatchCancel) return;
+    const cancel = geoWatchCancel;
+    endGeoWait();
+    cancel();
+  }
+  lpUseBrowser.addEventListener("click", () => {
+    if (geoWatchCancel) {
+      cancelGeoWait();
+      return;
     }
+    lpUseBrowser.textContent = "Cancel request";
+    if (lpBrowserError) {
+      lpBrowserError.classList.add("lp-waiting");
+      lpBrowserError.textContent = "Waiting for the browser to report a location\u2026";
+      lpBrowserError.style.display = "";
+    }
+    geoWatchCancel = watchBrowserLocation({
+      onFix: (fixLat, fixLon) => {
+        endGeoWait();
+        applyLocation(fixLat, fixLon, "", "", "browser", false);
+        setState({ bloc: true, lsrc: null, lat: null, lon: null, city: null });
+        updateLinks();
+      },
+      onDenied: () => {
+        endGeoWait();
+        const btn = lpUseBrowser;
+        btn.disabled = true;
+        btn.textContent = browserBtnLabel + " (unavailable)";
+        btn.dataset.tooltip = isFileProtocol2 ? "Not all browsers support location access from file:// URLs" : "Browser location was not granted \u2014 check your browser settings to allow it";
+      },
+      onStatus: (codeName, message) => {
+        if (lpBrowserError) {
+          const detail = message ? `${codeName}: ${message}` : codeName;
+          lpBrowserError.textContent = `Still trying \u2014 the browser hasn't reported a location yet (${detail}).`;
+          lpBrowserError.style.display = "";
+        }
+      }
+    });
   });
   locationPrompt.querySelector(".lp-backdrop").addEventListener("click", () => {
     if (hasLocation) hidePrompt();

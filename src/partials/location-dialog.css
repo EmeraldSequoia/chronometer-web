@@ -158,6 +158,12 @@
             font-size: 12px;
         }
 
+        /* In-progress (non-terminal) status while the indefinite wait runs —
+           neutral, not alarming: the request is still working. */
+        #location-prompt #lp-browser-error.lp-waiting {
+            color: #99a;
+        }
+
         #location-prompt .lp-manual-section {
             margin-top: 12px;
             border-top: 1px solid #2a2a3e;

@@ -18,6 +18,7 @@ import { locationSourceOf } from '../shared/url-state.js';
 import { resolveTimezone } from '../shared/tz-resolve.js';
 import { findClosestCity, findLargestCityNear, prefetchCityData, loadCityData, releaseCityData, isCityDataLoaded } from '../shared/city-search.js';
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
+import { systemTimezone, BLOC_REFRESH_STALE_MS } from '../shared/geolocation.js';
 import { showStorageWarning } from '../shared/incoming-settings-dialog.js';
 import { TimeController } from '../shared/time-controller.js';
 import { initTimeControls, flushTimeState } from '../shared/time-controls-ui.js';
@@ -113,6 +114,16 @@ function notifyBlocRefreshFailed(): void {
     blocRefreshNoticeShown = true;
     showStorageWarning('Could not retrieve location from browser — falling back to last known location.');
 }
+
+// Wake-triggered bloc refresh bookkeeping. The anchor is the last *attempt*
+// (not just success): it throttles re-prompts in browsers that ask per
+// session, capping prompts at one per BLOC_REFRESH_STALE_MS even if the user
+// keeps ignoring them. A system-timezone change (travel with OS auto-tz on)
+// bypasses the staleness check entirely.
+let lastBlocAttemptMs = 0;
+let lastKnownSystemTz = systemTimezone();
+/** Set by setupLocationDialog; null until the dialog exists. */
+let refreshBlocLocation: (() => void) | null = null;
 
 // Prefetch the city DB in the background (held as a ~7.5 MB compressed blob,
 // parsed on demand) so opening the location dialog is instant even on flaky
@@ -595,6 +606,22 @@ installWakeTriggers({
         timeUI?.updateTimezoneDisplay();
         scheduleFrame();
     },
+    // Location staleness check, independent of the time resync above: in bloc
+    // ("follow the device") mode, a wake/tab-return after travel is the
+    // moment the displayed location goes wrong. Re-check when the last
+    // attempt is stale or the OS timezone changed (direct travel evidence —
+    // bypasses staleness). May prompt in ask-per-session browsers: bloc mode
+    // is explicit consent to follow the device, and per-site "Allow" is the
+    // browser-level opt-out for anyone tired of the asks.
+    onWake: (reason) => {
+        if (!refreshBlocLocation || !getState().bloc) return;
+        const tz = systemTimezone();
+        const tzChanged = tz !== '' && tz !== lastKnownSystemTz;
+        if (tzChanged) lastKnownSystemTz = tz;
+        if (!tzChanged && Date.now() - lastBlocAttemptMs < BLOC_REFRESH_STALE_MS) return;
+        console.log(`[Geolocation] wake location refresh (${reason}${tzChanged ? '; system tz changed' : ''})`);
+        refreshBlocLocation();
+    },
 });
 
 // ============================================================================
@@ -694,6 +721,7 @@ function setupLocationDialog(): void {
             needsPrompt = false;
 
             if (info.sourceType === 'browser') {
+                lastBlocAttemptMs = Date.now();   // fresh fix — reset the wake-refresh clock
                 // Persist bloc intent *with* the fix, so a reload seeds the
                 // display (no 0,0 flash) and can skip the DB while stationary.
                 const derived = isCityDataLoaded() ? findClosestCity(info.lat, info.lon)?.shortLabel : null;
@@ -726,6 +754,40 @@ function setupLocationDialog(): void {
             locationDialog.show();
         }
 
+        // Quiet bloc refresh: the display already shows a location (stored
+        // seed or a prior fix), so re-check in the background — no "locating"
+        // panel. Tint the location name yellow while the fix is in flight.
+        // Only update if the new fix moved beyond the reuse threshold; a
+        // failed/denied refresh keeps the seed and shows a one-time notice
+        // (the seed may be stale), via notifyBlocRefreshFailed. Runs at
+        // startup (seeded bloc) and again on wake/tab-return once the last
+        // attempt has gone stale — the web's stand-in for the iOS app's
+        // periodic location-service checks.
+        const dialog = locationDialog;
+        refreshBlocLocation = () => {
+            lastBlocAttemptMs = Date.now();
+            const blocNameEl = document.getElementById('location-name');
+            if (blocNameEl) blocNameEl.style.color = LOCATING_TINT;
+            requestBrowserLocation(10000).then(result => {
+                if (result.status !== 'success') { notifyBlocRefreshFailed(); return; }
+                if (haversineKm(lat, lon, result.lat, result.lon) <= 16) return;  // stationary
+                const tz = resolveTimezone(result.lat, result.lon, null);
+                lat = result.lat;
+                lon = result.lon;
+                locationTimezone = tz;
+                // Moved: the stored city name is stale — clear it so
+                // updateLocationDisplay reverse-geocodes the new spot; reseed.
+                if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat, lon, city: null, tz });
+                dialog.updateState(lat, lon, 'browser', '', '');
+                updater?.reset();
+                rebuildEnv();
+                updateLocationDisplay();
+                timeUI?.updateTimezoneDisplay();
+            }).catch(() => notifyBlocRefreshFailed()).finally(() => {
+                if (blocNameEl) blocNameEl.style.color = '';
+            });
+        };
+
         // Handle bloc=1: request browser location on startup.
         //
         // Timing: only show the compact "locating…" panel if the request is still
@@ -757,6 +819,7 @@ function setupLocationDialog(): void {
                 }
             };
 
+            lastBlocAttemptMs = Date.now();
             requestBrowserLocation(10000).then(result => {
                 if (result.status === 'success') {
                     afterMinVisible(() => {
@@ -796,32 +859,7 @@ function setupLocationDialog(): void {
                 }
             });
         } else if (urlState.bloc && hasUrlLocation) {
-            // Seeded bloc: the display already shows the stored last-known
-            // location, so refresh quietly in the background — no "locating"
-            // panel. Tint the location name yellow while the fix is in flight.
-            // Only update if the new fix moved beyond the reuse threshold; a
-            // failed/denied refresh keeps the seed and shows a one-time notice
-            // (the seed may be stale), via notifyBlocRefreshFailed.
-            const blocNameEl = document.getElementById('location-name');
-            if (blocNameEl) blocNameEl.style.color = LOCATING_TINT;
-            requestBrowserLocation(10000).then(result => {
-                if (result.status !== 'success') { notifyBlocRefreshFailed(); return; }
-                if (haversineKm(lat, lon, result.lat, result.lon) <= 16) return;  // stationary
-                const tz = resolveTimezone(result.lat, result.lon, null);
-                lat = result.lat;
-                lon = result.lon;
-                locationTimezone = tz;
-                // Moved: the stored city name is stale — clear it so
-                // updateLocationDisplay reverse-geocodes the new spot; reseed.
-                if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat, lon, city: null, tz });
-                locationDialog.updateState(lat, lon, 'browser', '', '');
-                updater?.reset();
-                rebuildEnv();
-                updateLocationDisplay();
-                timeUI?.updateTimezoneDisplay();
-            }).catch(() => notifyBlocRefreshFailed()).finally(() => {
-                if (blocNameEl) blocNameEl.style.color = '';
-            });
+            refreshBlocLocation();
         }
     }
 }

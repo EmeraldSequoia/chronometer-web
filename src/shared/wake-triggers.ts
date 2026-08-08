@@ -61,18 +61,32 @@ export interface WakeTriggerOptions {
      * settle/reset value schedules, and kick the render loop.
      */
     catchUp: () => void;
+    /**
+     * Optional non-time wake hook, debounced like catchUp but independent of
+     * isEligible (which describes time-resync eligibility only — a stopped
+     * clock still wants its location checked). Used for concerns that go
+     * stale across a gap regardless of clock state, e.g. the bloc-mode
+     * location staleness check.
+     */
+    onWake?: (reason: string) => void;
 }
 
 /** Install the two wake triggers (idempotent per call site; call once at init). */
 export function installWakeTriggers(opts: WakeTriggerOptions): void {
     let lastCatchUpPerfMs = -Infinity;
+    let lastOnWakePerfMs = -Infinity;
     let lastWallMs = Date.now();
     let lastPerfMs = performance.now();
 
     function fire(reason: string): void {
+        const nowPerf = performance.now();
+        if (nowPerf - lastOnWakePerfMs >= CATCH_UP_DEBOUNCE_MS) {
+            lastOnWakePerfMs = nowPerf;
+            opts.onWake?.(reason);
+        }
         if (!opts.isEligible()) return;
-        if (performance.now() - lastCatchUpPerfMs < CATCH_UP_DEBOUNCE_MS) return;
-        lastCatchUpPerfMs = performance.now();
+        if (nowPerf - lastCatchUpPerfMs < CATCH_UP_DEBOUNCE_MS) return;
+        lastCatchUpPerfMs = nowPerf;
         console.log(`[wake] catch-up (${reason})`);
         opts.catchUp();
     }

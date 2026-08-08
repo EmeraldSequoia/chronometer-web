@@ -14467,7 +14467,21 @@
     return Promise.all(promises).then((results) => results.some((ok) => ok));
   }
 
-  // src/shared/location-dialog.ts
+  // src/shared/geolocation.ts
+  var BLOC_REFRESH_STALE_MS = 15 * 60 * 1e3;
+  function systemTimezone() {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+    } catch {
+      return "";
+    }
+  }
+  function geoErrorName(err) {
+    return err.code === err.PERMISSION_DENIED ? "PERMISSION_DENIED" : err.code === err.TIMEOUT ? "TIMEOUT" : "POSITION_UNAVAILABLE";
+  }
+  function logFix(pos) {
+    console.log(`[Geolocation] fix: ${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)} (\xB1${Math.round(pos.coords.accuracy)}m)`);
+  }
   function requestBrowserLocation(timeoutMs) {
     if (!navigator.geolocation) return Promise.resolve({ status: "unavailable" });
     return new Promise((resolve) => {
@@ -14475,12 +14489,11 @@
       if (timeoutMs != null) options.timeout = timeoutMs;
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          console.log(`[Geolocation] fix: ${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)} (\xB1${Math.round(pos.coords.accuracy)}m)`);
+          logFix(pos);
           resolve({ status: "success", lat: pos.coords.latitude, lon: pos.coords.longitude });
         },
         (err) => {
-          const codeName = err.code === err.PERMISSION_DENIED ? "PERMISSION_DENIED" : err.code === err.TIMEOUT ? "TIMEOUT" : "POSITION_UNAVAILABLE";
-          console.warn(`[Geolocation] getCurrentPosition failed: ${codeName} \u2014 ${err.message}`);
+          console.warn(`[Geolocation] getCurrentPosition failed: ${geoErrorName(err)} \u2014 ${err.message}`);
           if (err.code === err.PERMISSION_DENIED) resolve({ status: "denied", message: err.message });
           else if (err.code === err.TIMEOUT) resolve({ status: "timeout", message: err.message });
           else resolve({ status: "unavailable", message: err.message });
@@ -14489,6 +14502,46 @@
       );
     });
   }
+  function watchBrowserLocation(handlers2) {
+    if (!navigator.geolocation) {
+      handlers2.onDenied("Geolocation is not supported by this browser");
+      return () => {
+      };
+    }
+    let watchId = null;
+    let lastLogged = "";
+    const clear = () => {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+      }
+    };
+    watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        if (watchId === null) return;
+        logFix(pos);
+        clear();
+        handlers2.onFix(pos.coords.latitude, pos.coords.longitude);
+      },
+      (err) => {
+        if (watchId === null) return;
+        const line = `${geoErrorName(err)} \u2014 ${err.message}`;
+        if (line !== lastLogged) {
+          lastLogged = line;
+          console.warn(`[Geolocation] watchPosition error: ${line}`);
+        }
+        if (err.code === err.PERMISSION_DENIED) {
+          clear();
+          handlers2.onDenied(err.message);
+        } else {
+          handlers2.onStatus?.(geoErrorName(err), err.message);
+        }
+      }
+    );
+    return clear;
+  }
+
+  // src/shared/location-dialog.ts
   function useImperial() {
     const locale = navigator.language || "en-US";
     const region = locale.split("-")[1]?.toUpperCase() || "";
@@ -14566,6 +14619,7 @@
     let geoPermission = config.geoPermission ?? "unknown";
     let locating = false;
     const browserBtnLabel = lpUseBrowser.textContent || "Use device location via browser";
+    let geoWatchCancel = null;
     function buildLocationNameHTML() {
       if (locationSourceType === "city" && locationFullLabel) {
         return `${locationFullLabel} <span class="lp-loc-source">(from cities database)</span>`;
@@ -14644,6 +14698,7 @@
       config.onShow?.();
     }
     function showDialog() {
+      cancelGeoWait();
       locating = false;
       lpLocating.style.display = "none";
       lpFullContent.style.display = "";
@@ -14706,6 +14761,7 @@
       lpLonInput.oninput = validateCoordInputs;
     }
     function dismissDialog() {
+      cancelGeoWait();
       locating = false;
       locationPrompt.style.display = "none";
       releaseCityData();
@@ -14720,30 +14776,50 @@
       if (isNaN(newLat) || isNaN(newLon)) return;
       applyLocation(newLat, newLon, "", "", "manual");
     });
-    lpUseBrowser.addEventListener("click", async () => {
-      lpUseBrowser.textContent = "Requesting\u2026";
+    function endGeoWait() {
+      geoWatchCancel = null;
+      lpUseBrowser.textContent = browserBtnLabel;
       if (lpBrowserError) lpBrowserError.style.display = "none";
-      const result = await requestBrowserLocation();
-      if (result.status === "success") {
-        lpUseBrowser.textContent = browserBtnLabel;
-        geoPermission = "granted";
-        applyLocation(result.lat, result.lon, "", "", "browser");
-      } else if (result.status === "denied") {
-        geoPermission = "denied";
-        const btn = lpUseBrowser;
-        btn.disabled = true;
-        btn.textContent = browserBtnLabel + " (unavailable)";
-        btn.dataset.tooltip = isFileProtocol2 ? "Not all browsers support location access from file:// URLs" : "Browser location was not granted \u2014 check your browser settings to allow it";
-      } else {
-        lpUseBrowser.textContent = browserBtnLabel;
-        if (lpBrowserError) {
-          const base = result.status === "timeout" ? "The browser timed out without reporting a location" : "The browser could not determine your location";
-          const code = result.status === "timeout" ? "TIMEOUT" : "POSITION_UNAVAILABLE";
-          const detail = result.message ? `${code}: ${result.message}` : code;
-          lpBrowserError.textContent = `${base} (${detail}).`;
-          lpBrowserError.style.display = "";
-        }
+    }
+    function cancelGeoWait() {
+      if (!geoWatchCancel) return;
+      const cancel = geoWatchCancel;
+      endGeoWait();
+      cancel();
+    }
+    lpUseBrowser.addEventListener("click", () => {
+      if (geoWatchCancel) {
+        cancelGeoWait();
+        return;
       }
+      lpUseBrowser.textContent = "Cancel request";
+      if (lpBrowserError) {
+        lpBrowserError.classList.add("lp-waiting");
+        lpBrowserError.textContent = "Waiting for the browser to report a location\u2026";
+        lpBrowserError.style.display = "";
+      }
+      geoWatchCancel = watchBrowserLocation({
+        onFix: (fixLat, fixLon) => {
+          endGeoWait();
+          geoPermission = "granted";
+          applyLocation(fixLat, fixLon, "", "", "browser");
+        },
+        onDenied: () => {
+          endGeoWait();
+          geoPermission = "denied";
+          const btn = lpUseBrowser;
+          btn.disabled = true;
+          btn.textContent = browserBtnLabel + " (unavailable)";
+          btn.dataset.tooltip = isFileProtocol2 ? "Not all browsers support location access from file:// URLs" : "Browser location was not granted \u2014 check your browser settings to allow it";
+        },
+        onStatus: (codeName, message) => {
+          if (lpBrowserError) {
+            const detail = message ? `${codeName}: ${message}` : codeName;
+            lpBrowserError.textContent = `Still trying \u2014 the browser hasn't reported a location yet (${detail}).`;
+            lpBrowserError.style.display = "";
+          }
+        }
+      });
     });
     locationPrompt.querySelector(".lp-backdrop").addEventListener("click", () => {
       if (canDismiss()) dismissDialog();
@@ -21453,12 +21529,18 @@
   var CATCH_UP_DEBOUNCE_MS = 2e3;
   function installWakeTriggers(opts) {
     let lastCatchUpPerfMs = -Infinity;
+    let lastOnWakePerfMs = -Infinity;
     let lastWallMs = Date.now();
     let lastPerfMs = performance.now();
     function fire(reason) {
+      const nowPerf = performance.now();
+      if (nowPerf - lastOnWakePerfMs >= CATCH_UP_DEBOUNCE_MS) {
+        lastOnWakePerfMs = nowPerf;
+        opts.onWake?.(reason);
+      }
       if (!opts.isEligible()) return;
-      if (performance.now() - lastCatchUpPerfMs < CATCH_UP_DEBOUNCE_MS) return;
-      lastCatchUpPerfMs = performance.now();
+      if (nowPerf - lastCatchUpPerfMs < CATCH_UP_DEBOUNCE_MS) return;
+      lastCatchUpPerfMs = nowPerf;
       console.log(`[wake] catch-up (${reason})`);
       opts.catchUp();
     }
@@ -21598,6 +21680,9 @@
     blocRefreshNoticeShown = true;
     showStorageWarning("Could not retrieve location from browser \u2014 falling back to last known location.");
   }
+  var lastBlocAttemptMs = 0;
+  var lastKnownSystemTz = systemTimezone();
+  var refreshBlocLocation = null;
   if (!navigator.connection?.saveData) prefetchCityData();
   if (urlState.off !== null && !isNaN(urlState.off)) {
     timeController.setOffset(urlState.off);
@@ -21842,6 +21927,22 @@
       updater.reset();
       timeUI?.updateTimezoneDisplay();
       scheduleFrame();
+    },
+    // Location staleness check, independent of the time resync above: in bloc
+    // ("follow the device") mode, a wake/tab-return after travel is the
+    // moment the displayed location goes wrong. Re-check when the last
+    // attempt is stale or the OS timezone changed (direct travel evidence —
+    // bypasses staleness). May prompt in ask-per-session browsers: bloc mode
+    // is explicit consent to follow the device, and per-site "Allow" is the
+    // browser-level opt-out for anyone tired of the asks.
+    onWake: (reason) => {
+      if (!refreshBlocLocation || !getState().bloc) return;
+      const tz = systemTimezone();
+      const tzChanged = tz !== "" && tz !== lastKnownSystemTz;
+      if (tzChanged) lastKnownSystemTz = tz;
+      if (!tzChanged && Date.now() - lastBlocAttemptMs < BLOC_REFRESH_STALE_MS) return;
+      console.log(`[Geolocation] wake location refresh (${reason}${tzChanged ? "; system tz changed" : ""})`);
+      refreshBlocLocation();
     }
   });
   function updateLocationDisplay() {
@@ -21911,6 +22012,7 @@
         locationTimezone = info.timezone;
         needsPrompt = false;
         if (info.sourceType === "browser") {
+          lastBlocAttemptMs = Date.now();
           const derived = isCityDataLoaded() ? findClosestCity(info.lat, info.lon)?.shortLabel : null;
           setState({ bloc: true, lsrc: "browser", lat: info.lat, lon: info.lon, city: derived ?? null, tz: info.timezone || null });
         } else {
@@ -21933,6 +22035,31 @@
       if (needsPrompt) {
         locationDialog.show();
       }
+      const dialog = locationDialog;
+      refreshBlocLocation = () => {
+        lastBlocAttemptMs = Date.now();
+        const blocNameEl = document.getElementById("location-name");
+        if (blocNameEl) blocNameEl.style.color = LOCATING_TINT;
+        requestBrowserLocation(1e4).then((result) => {
+          if (result.status !== "success") {
+            notifyBlocRefreshFailed();
+            return;
+          }
+          if (haversineKm2(lat, lon, result.lat, result.lon) <= 16) return;
+          const tz = resolveTimezone(result.lat, result.lon, null);
+          lat = result.lat;
+          lon = result.lon;
+          locationTimezone = tz;
+          if (isPersistentMode()) setState({ bloc: true, lsrc: "browser", lat, lon, city: null, tz });
+          dialog.updateState(lat, lon, "browser", "", "");
+          updater?.reset();
+          rebuildEnv();
+          updateLocationDisplay();
+          timeUI?.updateTimezoneDisplay();
+        }).catch(() => notifyBlocRefreshFailed()).finally(() => {
+          if (blocNameEl) blocNameEl.style.color = "";
+        });
+      };
       if (urlState.bloc && !hasUrlLocation) {
         const LOCATING_SHOW_DELAY_MS = 1e3;
         const LOCATING_MIN_VISIBLE_MS = 2e3;
@@ -21953,6 +22080,7 @@
             else apply();
           }
         };
+        lastBlocAttemptMs = Date.now();
         requestBrowserLocation(1e4).then((result) => {
           if (result.status === "success") {
             afterMinVisible(() => {
@@ -21981,27 +22109,7 @@
           }
         });
       } else if (urlState.bloc && hasUrlLocation) {
-        const blocNameEl = document.getElementById("location-name");
-        if (blocNameEl) blocNameEl.style.color = LOCATING_TINT;
-        requestBrowserLocation(1e4).then((result) => {
-          if (result.status !== "success") {
-            notifyBlocRefreshFailed();
-            return;
-          }
-          if (haversineKm2(lat, lon, result.lat, result.lon) <= 16) return;
-          const tz = resolveTimezone(result.lat, result.lon, null);
-          lat = result.lat;
-          lon = result.lon;
-          locationTimezone = tz;
-          if (isPersistentMode()) setState({ bloc: true, lsrc: "browser", lat, lon, city: null, tz });
-          locationDialog.updateState(lat, lon, "browser", "", "");
-          updater?.reset();
-          rebuildEnv();
-          updateLocationDisplay();
-          timeUI?.updateTimezoneDisplay();
-        }).catch(() => notifyBlocRefreshFailed()).finally(() => {
-          if (blocNameEl) blocNameEl.style.color = "";
-        });
+        refreshBlocLocation();
       }
     }
   }

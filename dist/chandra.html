@@ -279,6 +279,12 @@
             font-size: 12px;
         }
 
+        /* In-progress (non-terminal) status while the indefinite wait runs —
+           neutral, not alarming: the request is still working. */
+        #location-prompt #lp-browser-error.lp-waiting {
+            color: #99a;
+        }
+
         #location-prompt .lp-manual-section {
             margin-top: 12px;
             border-top: 1px solid #2a2a3e;
@@ -1978,7 +1984,7 @@
               <div id="help-content">
                 <!-- Populated from help-template on first info click -->
               </div>
-              <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.85</div>
+              <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.86</div>
             </div>
 
             <div id="info-sub-view">
@@ -2661,7 +2667,7 @@ local horizon. The Moon's image is shown ignoring
 
 
     </div>
-<script>window.__BUNDLES__={"app":"chronometer","files":[{"src":"face-chandra.js?v=2.0.85","bytes":612753},{"src":"chronometer-engine.js?v=2.0.85","bytes":1698331}]};</script>
+<script>window.__BUNDLES__={"app":"chronometer","files":[{"src":"face-chandra.js?v=2.0.86","bytes":612753},{"src":"chronometer-engine.js?v=2.0.86","bytes":1702318}]};</script>
 <!-- ============================================================================
      Load-progress bootstrap (Tier 2). Injected by build.sh at the loader
      marker, immediately AFTER a generated

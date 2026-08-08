@@ -18,6 +18,7 @@ import type { LocationSource } from './shared/url-state.js';
 import { registerHotkey } from './shared/hotkeys.js';
 import { initAppNavLinks, registerAppNavHotkeys } from './shared/app-nav.js';
 import { openGeneralHelpTopic } from './shared/help-popover.js';
+import { requestBrowserLocation, watchBrowserLocation } from './shared/geolocation.js';
 
 // Select the state backend before any getState()/setState() call.
 initAppState({ app: 'index' });
@@ -67,39 +68,6 @@ function updateLinks() {
 }
 
 // ============================================================================
-// Geolocation
-// ============================================================================
-
-type GeoResult =
-    | { status: 'success'; lat: number; lon: number }
-    | { status: 'denied' }
-    | { status: 'timeout' }
-    | { status: 'unavailable' };
-
-function requestBrowserLocation(timeoutMs?: number): Promise<GeoResult> {
-    if (!navigator.geolocation) return Promise.resolve({ status: 'unavailable' });
-    return new Promise((resolve) => {
-        const options: PositionOptions = {};
-        if (timeoutMs != null) options.timeout = timeoutMs;
-        navigator.geolocation.getCurrentPosition(
-            (pos) => {
-                console.log(`[Geolocation] fix: ${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)} (±${Math.round(pos.coords.accuracy)}m)`);
-                resolve({ status: 'success', lat: pos.coords.latitude, lon: pos.coords.longitude });
-            },
-            (err) => {
-                const codeName = err.code === err.PERMISSION_DENIED ? 'PERMISSION_DENIED'
-                    : err.code === err.TIMEOUT ? 'TIMEOUT' : 'POSITION_UNAVAILABLE';
-                console.warn(`[Geolocation] getCurrentPosition failed: ${codeName} — ${err.message}`);
-                if (err.code === err.PERMISSION_DENIED) resolve({ status: 'denied' });
-                else if (err.code === err.TIMEOUT) resolve({ status: 'timeout' });
-                else resolve({ status: 'unavailable' });
-            },
-            options,
-        );
-    });
-}
-
-// ============================================================================
 // Location dialog
 // ============================================================================
 
@@ -108,6 +76,8 @@ const lpLatInput = document.getElementById('lp-lat') as HTMLInputElement;
 const lpLonInput = document.getElementById('lp-lon') as HTMLInputElement;
 const lpUseCoords = document.getElementById('lp-use-coords')!;
 const lpUseBrowser = document.getElementById('lp-use-browser')!;
+// Nullable: tolerates a stale cached page served with this newer script.
+const lpBrowserError = document.getElementById('lp-browser-error');
 const lpCityInput = document.getElementById('lp-city-input') as HTMLInputElement;
 const lpCityResults = document.getElementById('lp-city-results')!;
 const lpGlobe = document.getElementById('lp-globe') as HTMLCanvasElement;
@@ -165,6 +135,9 @@ function showPrompt(geoDenied: boolean) {
 }
 
 function hidePrompt() {
+    // A dismissed dialog must not leave a watch running that could apply a
+    // location out of nowhere later. (Hoisted: defined with the button wiring.)
+    cancelGeoWait();
     locationPrompt.style.display = 'none';
 }
 
@@ -244,28 +217,63 @@ lpUseCoords.addEventListener('click', () => {
     applyLocation(newLat, newLon, '', '', 'manual', true);
 });
 
-lpUseBrowser.addEventListener('click', async () => {
-    lpUseBrowser.textContent = 'Requesting…';
-    const result = await requestBrowserLocation();  // no timeout — wait indefinitely
-    if (result.status === 'success') {
-        lpUseBrowser.textContent = browserBtnLabel;
-        applyLocation(result.lat, result.lon, '', '', 'browser', false);
-        // Write bloc=1 and clear lat/lon/city so next reload asks browser again.
-        // lsrc: null — with lat/lon cleared there is no stored fix to describe;
-        // the next load's fetch writes lsrc: 'browser' with the fix.
-        setState({ bloc: true, lsrc: null, lat: null, lon: null, city: null });
-        updateLinks();
-    } else if (result.status === 'denied') {
-        // User denied — disable the button
-        const btn = lpUseBrowser as HTMLButtonElement;
-        btn.disabled = true;
-        btn.textContent = browserBtnLabel + ' (unavailable)';
-        btn.dataset.tooltip = isFileProtocol
-            ? 'Not all browsers support location access from file:// URLs'
-            : 'Browser location was not granted — check your browser settings to allow it';
-    } else {
-        lpUseBrowser.textContent = browserBtnLabel;
+// Indefinite wait (see shared/geolocation.ts): the OS location service keeps
+// trying for as long as the watch stays open, so rather than impose a
+// deadline the button becomes Cancel and the status line explains any
+// transient failures while the wait continues.
+let geoWatchCancel: (() => void) | null = null;
+
+function endGeoWait(): void {
+    geoWatchCancel = null;
+    lpUseBrowser.textContent = browserBtnLabel;
+    if (lpBrowserError) lpBrowserError.style.display = 'none';
+}
+
+function cancelGeoWait(): void {
+    if (!geoWatchCancel) return;
+    const cancel = geoWatchCancel;
+    endGeoWait();
+    cancel();
+}
+
+lpUseBrowser.addEventListener('click', () => {
+    if (geoWatchCancel) {    // second click = Cancel
+        cancelGeoWait();
+        return;
     }
+    lpUseBrowser.textContent = 'Cancel request';
+    if (lpBrowserError) {
+        lpBrowserError.classList.add('lp-waiting');
+        lpBrowserError.textContent = 'Waiting for the browser to report a location…';
+        lpBrowserError.style.display = '';
+    }
+    geoWatchCancel = watchBrowserLocation({
+        onFix: (fixLat, fixLon) => {
+            endGeoWait();
+            applyLocation(fixLat, fixLon, '', '', 'browser', false);
+            // Write bloc=1 and clear lat/lon/city so next reload asks browser again.
+            // lsrc: null — with lat/lon cleared there is no stored fix to describe;
+            // the next load's fetch writes lsrc: 'browser' with the fix.
+            setState({ bloc: true, lsrc: null, lat: null, lon: null, city: null });
+            updateLinks();
+        },
+        onDenied: () => {
+            endGeoWait();
+            const btn = lpUseBrowser as HTMLButtonElement;
+            btn.disabled = true;
+            btn.textContent = browserBtnLabel + ' (unavailable)';
+            btn.dataset.tooltip = isFileProtocol
+                ? 'Not all browsers support location access from file:// URLs'
+                : 'Browser location was not granted — check your browser settings to allow it';
+        },
+        onStatus: (codeName, message) => {
+            if (lpBrowserError) {
+                const detail = message ? `${codeName}: ${message}` : codeName;
+                lpBrowserError.textContent = `Still trying — the browser hasn't reported a location yet (${detail}).`;
+                lpBrowserError.style.display = '';
+            }
+        },
+    });
 });
 
 // Close prompt when clicking backdrop (only if we have a location)

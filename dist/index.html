@@ -481,6 +481,12 @@
             font-size: 12px;
         }
 
+        /* In-progress (non-terminal) status while the indefinite wait runs —
+           neutral, not alarming: the request is still working. */
+        #location-prompt #lp-browser-error.lp-waiting {
+            color: #99a;
+        }
+
         #location-prompt .lp-manual-section {
             margin-top: 12px;
             border-top: 1px solid #2a2a3e;
@@ -1095,7 +1101,7 @@
               <summary>General Help Topics</summary>
               <iframe id="general-help-iframe"></iframe>
             </details>
-            <div id="version-label" style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.85</div>
+            <div id="version-label" style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v2.0.86</div>
           </div>
 
           <div id="info-sub-view">

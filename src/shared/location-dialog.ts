@@ -20,16 +20,16 @@ import type { CityResult } from './city-search.js';
 import { renderGlobe, loadOSMTile } from './mini-map.js';
 import { resolveTimezone } from './tz-resolve.js';
 import type { LocationSource } from './url-state.js';
+import { watchBrowserLocation } from './geolocation.js';
+
+// Re-export the geolocation helpers under their historical home so existing
+// consumers (Observatory/Inspector startup paths) keep importing from here.
+export { requestBrowserLocation } from './geolocation.js';
+export type { GeoResult } from './geolocation.js';
 
 // ============================================================================
 // Types
 // ============================================================================
-
-export type GeoResult =
-    | { status: 'success'; lat: number; lon: number }
-    | { status: 'denied'; message?: string }
-    | { status: 'timeout'; message?: string }
-    | { status: 'unavailable'; message?: string };
 
 /** A LocationSource (persistable provenance), or 'none' while no location is set. */
 export type LocationSourceType = LocationSource | 'none';
@@ -102,38 +102,6 @@ export interface LocationDialogAPI {
     setGeoPermission: (state: 'granted' | 'denied' | 'prompt' | 'unknown') => void;
     /** Set whether the dialog acts as a required prompt (can't be dismissed without selecting). */
     setNeedsPrompt: (needs: boolean) => void;
-}
-
-// ============================================================================
-// Geolocation
-// ============================================================================
-
-/**
- * Request the device location via the browser geolocation API.
- * @param timeoutMs  If provided, give up after this many ms.
- *                   If omitted, wait indefinitely for user response.
- */
-export function requestBrowserLocation(timeoutMs?: number): Promise<GeoResult> {
-    if (!navigator.geolocation) return Promise.resolve({ status: 'unavailable' });
-    return new Promise((resolve) => {
-        const options: PositionOptions = {};
-        if (timeoutMs != null) options.timeout = timeoutMs;
-        navigator.geolocation.getCurrentPosition(
-            (pos) => {
-                console.log(`[Geolocation] fix: ${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)} (±${Math.round(pos.coords.accuracy)}m)`);
-                resolve({ status: 'success', lat: pos.coords.latitude, lon: pos.coords.longitude });
-            },
-            (err) => {
-                const codeName = err.code === err.PERMISSION_DENIED ? 'PERMISSION_DENIED'
-                    : err.code === err.TIMEOUT ? 'TIMEOUT' : 'POSITION_UNAVAILABLE';
-                console.warn(`[Geolocation] getCurrentPosition failed: ${codeName} — ${err.message}`);
-                if (err.code === err.PERMISSION_DENIED) resolve({ status: 'denied', message: err.message });
-                else if (err.code === err.TIMEOUT) resolve({ status: 'timeout', message: err.message });
-                else resolve({ status: 'unavailable', message: err.message });
-            },
-            options,
-        );
-    });
 }
 
 // ============================================================================
@@ -228,6 +196,8 @@ export function initLocationDialog(config: LocationDialogConfig): LocationDialog
     /** True while the compact "locating" panel is shown (waiting for browser geolocation). */
     let locating = false;
     const browserBtnLabel = (lpUseBrowser as HTMLButtonElement).textContent || 'Use device location via browser';
+    /** Cancel handle for an in-flight indefinite browser-location wait. */
+    let geoWatchCancel: (() => void) | null = null;
 
     // The city DB is loaded lazily: prefetched by the app entry (gated on
     // save-data) and parsed on demand when the dialog opens (showDialog) or a
@@ -340,6 +310,9 @@ export function initLocationDialog(config: LocationDialogConfig): LocationDialog
     }
 
     function showDialog() {
+        // Fresh presentation: an in-flight browser-location wait would fight
+        // the button/label reset below, so cancel it first.
+        cancelGeoWait();
         // Leaving (or never entering) the compact locating panel → show full dialog.
         locating = false;
         lpLocating.style.display = 'none';
@@ -415,6 +388,9 @@ export function initLocationDialog(config: LocationDialogConfig): LocationDialog
     }
 
     function dismissDialog() {
+        // A dismissed dialog must not leave a watch running that could apply
+        // a location out of nowhere later.
+        cancelGeoWait();
         locating = false;
         locationPrompt.style.display = 'none';
         // Parse-then-drop: free the ~22 MB parsed form now that search is done.
@@ -439,35 +415,58 @@ export function initLocationDialog(config: LocationDialogConfig): LocationDialog
         applyLocation(newLat, newLon, '', '', 'manual');
     });
 
-    // "Use browser location"
-    lpUseBrowser.addEventListener('click', async () => {
-        lpUseBrowser.textContent = 'Requesting…';
+    // "Use browser location" — indefinite wait (see geolocation.ts): the OS
+    // location service keeps trying for as long as the watch stays open, so
+    // rather than impose a deadline the button becomes Cancel and the status
+    // line explains any transient failures while the wait continues.
+    function endGeoWait(): void {
+        geoWatchCancel = null;
+        lpUseBrowser.textContent = browserBtnLabel;
         if (lpBrowserError) lpBrowserError.style.display = 'none';
-        const result = await requestBrowserLocation();
-        if (result.status === 'success') {
-            lpUseBrowser.textContent = browserBtnLabel;
-            geoPermission = 'granted';
-            applyLocation(result.lat, result.lon, '', '', 'browser');
-        } else if (result.status === 'denied') {
-            geoPermission = 'denied';
-            const btn = lpUseBrowser as HTMLButtonElement;
-            btn.disabled = true;
-            btn.textContent = browserBtnLabel + ' (unavailable)';
-            btn.dataset.tooltip = isFileProtocol
-                ? 'Not all browsers support location access from file:// URLs'
-                : 'Browser location was not granted — check your browser settings to allow it';
-        } else {
-            lpUseBrowser.textContent = browserBtnLabel;
-            if (lpBrowserError) {
-                const base = result.status === 'timeout'
-                    ? 'The browser timed out without reporting a location'
-                    : 'The browser could not determine your location';
-                const code = result.status === 'timeout' ? 'TIMEOUT' : 'POSITION_UNAVAILABLE';
-                const detail = result.message ? `${code}: ${result.message}` : code;
-                lpBrowserError.textContent = `${base} (${detail}).`;
-                lpBrowserError.style.display = '';
-            }
+    }
+
+    function cancelGeoWait(): void {
+        if (!geoWatchCancel) return;
+        const cancel = geoWatchCancel;
+        endGeoWait();
+        cancel();
+    }
+
+    lpUseBrowser.addEventListener('click', () => {
+        if (geoWatchCancel) {    // second click = Cancel
+            cancelGeoWait();
+            return;
         }
+        lpUseBrowser.textContent = 'Cancel request';
+        if (lpBrowserError) {
+            lpBrowserError.classList.add('lp-waiting');
+            lpBrowserError.textContent = 'Waiting for the browser to report a location…';
+            lpBrowserError.style.display = '';
+        }
+        geoWatchCancel = watchBrowserLocation({
+            onFix: (fixLat, fixLon) => {
+                endGeoWait();
+                geoPermission = 'granted';
+                applyLocation(fixLat, fixLon, '', '', 'browser');
+            },
+            onDenied: () => {
+                endGeoWait();
+                geoPermission = 'denied';
+                const btn = lpUseBrowser as HTMLButtonElement;
+                btn.disabled = true;
+                btn.textContent = browserBtnLabel + ' (unavailable)';
+                btn.dataset.tooltip = isFileProtocol
+                    ? 'Not all browsers support location access from file:// URLs'
+                    : 'Browser location was not granted — check your browser settings to allow it';
+            },
+            onStatus: (codeName, message) => {
+                if (lpBrowserError) {
+                    const detail = message ? `${codeName}: ${message}` : codeName;
+                    lpBrowserError.textContent = `Still trying — the browser hasn't reported a location yet (${detail}).`;
+                    lpBrowserError.style.display = '';
+                }
+            },
+        });
     });
 
     // Backdrop click

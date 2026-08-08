@@ -38,6 +38,7 @@ import type { LoadedImage } from './watch/image-loader.js';
 import { makeReDecodableImage, decodeLoadedImageForScale } from './watch/image-loader.js';
 import { SCHEDULER_LOOKAHEAD_MS } from './shared/animation.js';
 import { installWakeTriggers } from './shared/wake-triggers.js';
+import { requestBrowserLocation, watchBrowserLocation, systemTimezone, BLOC_REFRESH_STALE_MS } from './shared/geolocation.js';
 import { Updater, makeOverridableGetNow, timingContextForFrame, tickProfile, resetTickProfile, setTickProfiling, type WithDisplayTime } from './shared/updater.js';
 import { astroProfile, resetAstroProfile, setAstroProfiling, envTzStateStale } from './shared/astro-env.js';
 import { buildHandValues } from './watch/hand-values.js';
@@ -195,17 +196,6 @@ function faceNameToSlug(name: string): string {
 const DEMO_LAT = 37.3349;   // Apple Park, Cupertino
 const DEMO_LON = -122.0090;
 
-type GeoResult =
-    | { status: 'success'; lat: number; lon: number }
-    | { status: 'denied' }
-    | { status: 'timeout' }
-    | { status: 'unavailable' };
-
-/**
- * Request the device location via the browser geolocation API.
- * @param timeoutMs  If provided, give up after this many ms (TIMEOUT).
- *                   If omitted, wait indefinitely for user response.
- */
 // A seeded-bloc refresh failure may mean we're showing a stale last-known
 // location — tell the user once per session via the shared dismissible toast.
 let blocRefreshNoticeShown = false;
@@ -215,28 +205,13 @@ function notifyBlocRefreshFailed(): void {
     showStorageWarning('Could not retrieve location from browser — falling back to last known location.');
 }
 
-function requestBrowserLocation(timeoutMs?: number): Promise<GeoResult> {
-    if (!navigator.geolocation) return Promise.resolve({ status: 'unavailable' });
-    return new Promise((resolve) => {
-        const options: PositionOptions = {};
-        if (timeoutMs != null) options.timeout = timeoutMs;
-        navigator.geolocation.getCurrentPosition(
-            (pos) => {
-                console.log(`[Geolocation] fix: ${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)} (±${Math.round(pos.coords.accuracy)}m)`);
-                resolve({ status: 'success', lat: pos.coords.latitude, lon: pos.coords.longitude });
-            },
-            (err) => {
-                const codeName = err.code === err.PERMISSION_DENIED ? 'PERMISSION_DENIED'
-                    : err.code === err.TIMEOUT ? 'TIMEOUT' : 'POSITION_UNAVAILABLE';
-                console.warn(`[Geolocation] getCurrentPosition failed: ${codeName} — ${err.message}`);
-                if (err.code === err.PERMISSION_DENIED) resolve({ status: 'denied' });
-                else if (err.code === err.TIMEOUT) resolve({ status: 'timeout' });
-                else resolve({ status: 'unavailable' });
-            },
-            options,
-        );
-    });
-}
+// Wake-triggered bloc refresh bookkeeping (see shared/geolocation.ts). The
+// anchor is the last *attempt* (not just success): it throttles re-prompts in
+// browsers that ask per session. A system-timezone change bypasses staleness.
+let lastBlocAttemptMs = 0;
+let lastKnownSystemTz = systemTimezone();
+/** Assigned in main() once the location plumbing exists. */
+let refreshBlocLocation: (() => void) | null = null;
 
 // ============================================================================
 // Grid layout maths: see watch/grid-layout.ts (optimizeGrid + cell placement
@@ -360,6 +335,8 @@ async function main() {
     const lpLonInput = document.getElementById('lp-lon') as HTMLInputElement;
     const lpUseCoords = document.getElementById('lp-use-coords')!;
     const lpUseBrowser = document.getElementById('lp-use-browser')!;
+    // Nullable: tolerates a stale cached page served with this newer script.
+    const lpBrowserError = document.getElementById('lp-browser-error');
 
     const lpCityInput = document.getElementById('lp-city-input') as HTMLInputElement;
     const lpCityResults = document.getElementById('lp-city-results')!;
@@ -458,6 +435,7 @@ async function main() {
         }
     } else if (urlState.bloc) {
         // bloc=1 set — ask browser for location with 10s timeout
+        lastBlocAttemptMs = Date.now();
         const result = await requestBrowserLocation(10000);
         if (result.status === 'success') {
             lat = result.lat; lon = result.lon;
@@ -1987,6 +1965,22 @@ async function main() {
         // is self-anchored (display advances per rendered tick, so a gap merely
         // pauses it) and a stopped clock is frozen at its set time.
         isEligible: () => !timeController.isStopped && !timeController.needsContinuousRender,
+        // Location staleness check, independent of the time resync: in bloc
+        // ("follow the device") mode, a wake/tab-return after travel is the
+        // moment the displayed location goes wrong. Re-check when the last
+        // attempt is stale or the OS timezone changed (direct travel evidence
+        // — bypasses staleness). May prompt in ask-per-session browsers: bloc
+        // mode is explicit consent to follow the device, and per-site "Allow"
+        // is the browser-level opt-out for anyone tired of the asks.
+        onWake: (reason) => {
+            if (!refreshBlocLocation || isEmbedMode || !getState().bloc) return;
+            const tz = systemTimezone();
+            const tzChanged = tz !== '' && tz !== lastKnownSystemTz;
+            if (tzChanged) lastKnownSystemTz = tz;
+            if (!tzChanged && Date.now() - lastBlocAttemptMs < BLOC_REFRESH_STALE_MS) return;
+            console.log(`[Geolocation] wake location refresh (${reason}${tzChanged ? '; system tz changed' : ''})`);
+            refreshBlocLocation();
+        },
         catchUp: () => {
             // The gap may have crossed a DST transition while the precise DST
             // timer was itself suspended — re-check now (O(1) when tz state is
@@ -2325,6 +2319,10 @@ async function main() {
     }
 
     function dismissLocationPrompt() {
+        // A dismissed dialog must not leave a watch running that could apply
+        // a location out of nowhere later. (Hoisted: defined with the browser
+        // button wiring below.)
+        cancelGeoWait();
         locationPrompt.style.display = 'none';
         grid.classList.remove('blurred');
     }
@@ -2472,30 +2470,66 @@ async function main() {
         applyLocation(newLat, newLon, '', '', 'manual', true);
     });
 
-    // "Use browser location" button in prompt
-    lpUseBrowser.addEventListener('click', async () => {
-        lpUseBrowser.textContent = 'Requesting…';
-        const result = await requestBrowserLocation();  // no timeout — wait indefinitely
-        if (result.status === 'success') {
-            lpUseBrowser.textContent = browserBtnLabel;
-            applyLocation(result.lat, result.lon, '', '', 'browser', false, null);
-            // Persist bloc intent *with* the fix as a seed, so a reload shows it
-            // immediately (no 0,0 flash) and can skip the DB while stationary.
-            const derived = isCityDataLoaded() ? (findClosestCity(result.lat, result.lon)?.shortLabel ?? null) : null;
-            setState({ bloc: true, lsrc: 'browser', lat: result.lat, lon: result.lon, city: derived, tz: locationTimezone || null });
-        } else if (result.status === 'denied') {
-            // User denied — disable the button
-            geoPermission = 'denied';
-            const btn = lpUseBrowser as HTMLButtonElement;
-            btn.disabled = true;
-            btn.textContent = browserBtnLabel + ' (unavailable)';
-            const isFileUrl = window.location.protocol === 'file:';
-            btn.dataset.tooltip = isFileUrl
-                ? 'Not all browsers support location access from file:// URLs'
-                : 'Browser location was not granted — check your browser settings to allow it';
-        } else {
-            lpUseBrowser.textContent = browserBtnLabel;
+    // "Use browser location" button in prompt — indefinite wait (see
+    // shared/geolocation.ts): the OS location service keeps trying for as
+    // long as the watch stays open, so rather than impose a deadline the
+    // button becomes Cancel and the status line explains any transient
+    // failures while the wait continues.
+    let geoWatchCancel: (() => void) | null = null;
+
+    function endGeoWait(): void {
+        geoWatchCancel = null;
+        lpUseBrowser.textContent = browserBtnLabel;
+        if (lpBrowserError) lpBrowserError.style.display = 'none';
+    }
+
+    function cancelGeoWait(): void {
+        if (!geoWatchCancel) return;
+        const cancel = geoWatchCancel;
+        endGeoWait();
+        cancel();
+    }
+
+    lpUseBrowser.addEventListener('click', () => {
+        if (geoWatchCancel) {    // second click = Cancel
+            cancelGeoWait();
+            return;
         }
+        lpUseBrowser.textContent = 'Cancel request';
+        if (lpBrowserError) {
+            lpBrowserError.classList.add('lp-waiting');
+            lpBrowserError.textContent = 'Waiting for the browser to report a location…';
+            lpBrowserError.style.display = '';
+        }
+        geoWatchCancel = watchBrowserLocation({
+            onFix: (fixLat, fixLon) => {
+                endGeoWait();
+                lastBlocAttemptMs = Date.now();   // fresh fix — reset the wake-refresh clock
+                applyLocation(fixLat, fixLon, '', '', 'browser', false, null);
+                // Persist bloc intent *with* the fix as a seed, so a reload shows it
+                // immediately (no 0,0 flash) and can skip the DB while stationary.
+                const derived = isCityDataLoaded() ? (findClosestCity(fixLat, fixLon)?.shortLabel ?? null) : null;
+                setState({ bloc: true, lsrc: 'browser', lat: fixLat, lon: fixLon, city: derived, tz: locationTimezone || null });
+            },
+            onDenied: () => {
+                endGeoWait();
+                geoPermission = 'denied';
+                const btn = lpUseBrowser as HTMLButtonElement;
+                btn.disabled = true;
+                btn.textContent = browserBtnLabel + ' (unavailable)';
+                const isFileUrl = window.location.protocol === 'file:';
+                btn.dataset.tooltip = isFileUrl
+                    ? 'Not all browsers support location access from file:// URLs'
+                    : 'Browser location was not granted — check your browser settings to allow it';
+            },
+            onStatus: (codeName, message) => {
+                if (lpBrowserError) {
+                    const detail = message ? `${codeName}: ${message}` : codeName;
+                    lpBrowserError.textContent = `Still trying — the browser hasn't reported a location yet (${detail}).`;
+                    lpBrowserError.style.display = '';
+                }
+            },
+        });
     });
 
     // "Set location" button on the location bar
@@ -3888,10 +3922,14 @@ async function main() {
         showLocationPrompt(true);  // with blur
     }
 
-    // Seeded bloc: the display already shows the stored last-known location.
-    // Refresh geolocation quietly in the background and update only if we've
-    // moved beyond the reuse threshold; a failed/denied refresh keeps the seed.
-    if (needsBlocRefresh) {
+    // Quiet bloc refresh: the display already shows the stored last-known
+    // location. Refresh geolocation quietly in the background and update only
+    // if we've moved beyond the reuse threshold; a failed/denied refresh
+    // keeps the seed. Runs at startup (seeded bloc) and again on wake/
+    // tab-return once the last attempt has gone stale — the web's stand-in
+    // for the iOS app's periodic location-service checks.
+    refreshBlocLocation = () => {
+        lastBlocAttemptMs = Date.now();
         // Tint the location name yellow while the background fix is in flight; a
         // failed/denied refresh keeps the (valid) seed — genuine "no location" /
         // "DB unavailable" errors surface elsewhere.
@@ -3907,6 +3945,9 @@ async function main() {
         }).catch(() => notifyBlocRefreshFailed()).finally(() => {
             if (sourceLabel) sourceLabel.style.color = '';
         });
+    };
+    if (needsBlocRefresh) {
+        refreshBlocLocation();
     }
 }
 
