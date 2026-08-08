@@ -1112,7 +1112,7 @@ function startDragAt(ev: PointerEvent, x: number, y: number): void {
 
     // Fresh magnifier smoothing state; hide the mouse cursor for the drag —
     // it is redundant with the crosshair and covers map pixels.
-    resetDragMagnifier(newLat, newLon);
+    resetDragMagnifier(newLat, newLon, ev.pointerType === 'touch');
     canvas.style.cursor = 'none';
 
     canvas.setPointerCapture(ev.pointerId);

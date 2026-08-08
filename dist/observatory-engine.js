@@ -20629,8 +20629,10 @@
   }
   var MAG_SPAN_DEG = 10;
   var MAG_MAX_DIAM = 140;
+  var MAG_BAND_FRAC = 0.3;
   var MAG_EDGE = 4;
   var MAG_GAP = 16;
+  var MAG_GAP_TOUCH = 44;
   var MAG_TAU = 60;
   var MAG_MAX_LABELS = 6;
   var MAG_LABEL_SEP = 26;
@@ -20641,14 +20643,16 @@
   var magSide = 0;
   var magPosInit = false;
   var magActive = false;
+  var magTouch = false;
   var magLastT = 0;
   var magDebug = { x: 0, y: 0, r: 0, ex: 0, ey: 0, ew: 0, eh: 0 };
-  function resetDragMagnifier(lat2, lon2) {
+  function resetDragMagnifier(lat2, lon2, isTouch = false) {
     magLat = lat2;
     magLon = lon2;
     magSide = 0;
     magPosInit = false;
     magActive = true;
+    magTouch = isTouch;
     magLastT = performance.now();
   }
   function drawDragMagnifier(ctx2, L, renderLat, renderLon, homeLat, homeLon) {
@@ -20656,11 +20660,11 @@
     const ey = L.earthCY - L.earthH / 2;
     const bw = L.earthW;
     const bh = L.earthH;
-    const d = Math.min(MAG_MAX_DIAM, bh - 2 * MAG_EDGE);
+    const d = Math.min(MAG_MAX_DIAM, bh - 2 * MAG_EDGE, MAG_BAND_FRAC * bw);
     if (d < 40) return;
     const r = d / 2;
     const t = performance.now();
-    if (!magActive) resetDragMagnifier(renderLat, renderLon);
+    if (!magActive) resetDragMagnifier(renderLat, renderLon, magTouch);
     const k = 1 - Math.exp(-(t - magLastT) / MAG_TAU);
     magLastT = t;
     let dLon = renderLon - magLon;
@@ -20677,10 +20681,11 @@
     const ay = ey + (90 - renderLat) / 180 * bh;
     const minX = ex + r + MAG_EDGE, maxX = ex + bw - r - MAG_EDGE;
     const minY = ey + r + MAG_EDGE, maxY = ey + bh - r - MAG_EDGE;
+    const gap = magTouch ? MAG_GAP_TOUCH : MAG_GAP;
     if (magSide === 0) magSide = ax <= ex + bw / 2 ? 1 : -1;
-    let tx = ax + magSide * (r + MAG_GAP);
+    let tx = ax + magSide * (r + gap);
     if (tx < minX || tx > maxX) {
-      const flipped = ax - magSide * (r + MAG_GAP);
+      const flipped = ax - magSide * (r + gap);
       if (flipped >= minX && flipped <= maxX) {
         magSide = -magSide;
         tx = flipped;
@@ -20721,12 +20726,16 @@
       d,
       d
     );
-    const cities = citiesInWindow(wLat, wLon, half, half, MAG_MAX_LABELS * 2);
+    const maxLabels = Math.max(
+      1,
+      Math.round(MAG_MAX_LABELS * (d / MAG_MAX_DIAM) * (d / MAG_MAX_DIAM))
+    );
+    const cities = citiesInWindow(wLat, wLon, half, half, maxLabels * 2);
     ctx2.font = "10px Arial, sans-serif";
     let accepted = 0;
     const accX = [], accY = [];
     for (const c of cities) {
-      if (accepted >= MAG_MAX_LABELS) break;
+      if (accepted >= maxLabels) break;
       let relLon = c.lon - wLon;
       if (relLon > 180) relLon -= 360;
       else if (relLon < -180) relLon += 360;
@@ -22135,7 +22144,7 @@
     dragWasTimezoneLocked = ev.altKey;
     const { lat: newLat, lon: newLon } = computeDragLatLon(x, y, ev.shiftKey);
     applyTemporaryLocation(newLat, newLon, dragWasTimezoneLocked);
-    resetDragMagnifier(newLat, newLon);
+    resetDragMagnifier(newLat, newLon, ev.pointerType === "touch");
     canvas.style.cursor = "none";
     canvas.setPointerCapture(ev.pointerId);
     ev.preventDefault();

@@ -380,13 +380,21 @@ export function drawDragCrosshair(
 const MAG_SPAN_DEG = 10;
 /** Max bubble diameter, CSS px (shrinks to fit short bands). */
 const MAG_MAX_DIAM = 140;
+/** Max bubble diameter as a fraction of band width. Binds only when the band
+ *  is narrower than MAG_MAX_DIAM / MAG_BAND_FRAC ≈ 467 CSS px, so large
+ *  desktop layouts keep the full-size bubble by construction. */
+const MAG_BAND_FRAC = 0.30;
 /** Min gap between bubble edge and band edge, CSS px. */
 const MAG_EDGE = 4;
 /** Horizontal gap between the drag point and the bubble edge, CSS px. */
 const MAG_GAP = 16;
+/** MAG_GAP for touch drags: must clear the fingertip pad, which hides
+ *  anything within ~40 px of the touch point (cf. iOS's own loupe offset). */
+const MAG_GAP_TOUCH = 44;
 /** Time constant for content/position smoothing, ms. */
 const MAG_TAU = 60;
-/** Max city labels shown in the bubble. */
+/** Max city labels shown in a full-diameter bubble; smaller bubbles scale
+ *  this down by area (each label needs roughly constant px area). */
 const MAG_MAX_LABELS = 6;
 /** Min separation between accepted city dots, bubble px. */
 const MAG_LABEL_SEP = 26;
@@ -398,19 +406,23 @@ let magX = 0, magY = 0;
 let magSide = 0;
 let magPosInit = false;
 let magActive = false;
+/** True while the active drag is a touch drag (finger occlusion applies). */
+let magTouch = false;
 let magLastT = 0;
 
 /** Reused debug object exposed for headless bounds verification (no per-frame
  *  allocation). */
 const magDebug = { x: 0, y: 0, r: 0, ex: 0, ey: 0, ew: 0, eh: 0 };
 
-/** Reset magnifier smoothing state at drag start (fresh or resumed). */
-export function resetDragMagnifier(lat: number, lon: number): void {
+/** Reset magnifier smoothing state at drag start (fresh or resumed).
+ *  `isTouch` selects the finger-clearance gap for the whole drag. */
+export function resetDragMagnifier(lat: number, lon: number, isTouch: boolean = false): void {
     magLat = lat;
     magLon = lon;
     magSide = 0;
     magPosInit = false;
     magActive = true;
+    magTouch = isTouch;
     magLastT = performance.now();
 }
 
@@ -433,13 +445,13 @@ export function drawDragMagnifier(
     const bw = L.earthW;
     const bh = L.earthH;
 
-    const d = Math.min(MAG_MAX_DIAM, bh - 2 * MAG_EDGE);
+    const d = Math.min(MAG_MAX_DIAM, bh - 2 * MAG_EDGE, MAG_BAND_FRAC * bw);
     if (d < 40) return;  // degenerate band — no room for a useful bubble
     const r = d / 2;
 
     // --- Smoothing (display-only; the drag itself is unsmoothed) ---
     const t = performance.now();
-    if (!magActive) resetDragMagnifier(renderLat, renderLon);
+    if (!magActive) resetDragMagnifier(renderLat, renderLon, magTouch);
     const k = 1 - Math.exp(-(t - magLastT) / MAG_TAU);
     magLastT = t;
 
@@ -460,12 +472,13 @@ export function drawDragMagnifier(
     const minX = ex + r + MAG_EDGE, maxX = ex + bw - r - MAG_EDGE;
     const minY = ey + r + MAG_EDGE, maxY = ey + bh - r - MAG_EDGE;
 
+    const gap = magTouch ? MAG_GAP_TOUCH : MAG_GAP;
     if (magSide === 0) magSide = ax <= ex + bw / 2 ? 1 : -1;
-    let tx = ax + magSide * (r + MAG_GAP);
+    let tx = ax + magSide * (r + gap);
     if (tx < minX || tx > maxX) {
         // Current side no longer fits — flip only if the other side does
         // (geometric hysteresis: flips happen near band edges, not center).
-        const flipped = ax - magSide * (r + MAG_GAP);
+        const flipped = ax - magSide * (r + gap);
         if (flipped >= minX && flipped <= maxX) {
             magSide = -magSide;
             tx = flipped;
@@ -508,13 +521,17 @@ export function drawDragMagnifier(
         px - r, py - r, d, d);
 
     // City dots + labels: top-K by population in the window, then greedy
-    // px-distance dedupe so dense metro labels don't pile up.
-    const cities = citiesInWindow(wLat, wLon, half, half, MAG_MAX_LABELS * 2);
+    // px-distance dedupe so dense metro labels don't pile up. Capacity scales
+    // with bubble area — each label needs roughly constant px area — anchored
+    // so a full-diameter bubble keeps MAG_MAX_LABELS.
+    const maxLabels = Math.max(1,
+        Math.round(MAG_MAX_LABELS * (d / MAG_MAX_DIAM) * (d / MAG_MAX_DIAM)));
+    const cities = citiesInWindow(wLat, wLon, half, half, maxLabels * 2);
     ctx.font = '10px Arial, sans-serif';
     let accepted = 0;
     const accX: number[] = [], accY: number[] = [];
     for (const c of cities) {
-        if (accepted >= MAG_MAX_LABELS) break;
+        if (accepted >= maxLabels) break;
         let relLon = c.lon - wLon;
         if (relLon > 180) relLon -= 360; else if (relLon < -180) relLon += 360;
         const cx = px + relLon * pxPerDeg;
