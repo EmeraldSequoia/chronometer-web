@@ -35,7 +35,7 @@ import { getMainDialCache, invalidateMainDialCache, waitForImages } from './main
 import { drawPlanetHands, waitForPlanetImages } from './planet-hands.js';
 import { drawRiseSetRings, invalidateRingCache } from './ring-view.js';
 import { drawClockHands, drawSubdialHands } from './hand-views.js';
-import { initEarthView, drawEarthView, isInsideEarthMap, earthPixelToLatLon, drawDragCrosshair } from './earth-view.js';
+import { initEarthView, drawEarthView, isInsideEarthMap, earthPixelToLatLon, drawDragCrosshair, drawDragMagnifier, resetDragMagnifier, endDragMagnifier, drawObserverDot } from './earth-view.js';
 import { initMoonView, drawMoonView } from './moon-view.js';
 import { getPeripheralDialsCache, invalidatePeripheralDialsCache } from './peripheral-dials.js';
 import { drawPeripheralHands, cycleSelectablePlanet } from './peripheral-hands.js';
@@ -459,7 +459,15 @@ function drawFrame(): void {
         // During drag or while confirming, pin the observer dot at the saved
         // (home) location and show the crosshair at the rendered position.
         if (dragState === 'dragging' || dragState === 'confirming') {
-            drawEarthView(ctx, L, updater, lat, lon, getNow, savedLat, savedLon);
+            // While dragging, the band is drawn WITHOUT the home dot so the
+            // magnifier can blit clean pixels (a blitted dot or hairline
+            // magnifies into a fat smear); dot and hairlines draw after.
+            const dragging = dragState === 'dragging';
+            drawEarthView(ctx, L, updater, lat, lon, getNow, savedLat, savedLon, dragging);
+            if (dragging) {
+                drawDragMagnifier(ctx, L, lat, lon, savedLat, savedLon);
+                drawObserverDot(ctx, L, savedLat, savedLon);
+            }
             // Crosshair at the rendered (temporary) location.
             drawDragCrosshair(ctx, L, lat, lon);
         } else {
@@ -1041,6 +1049,8 @@ function setupMapDrag(): void {
         if (dragState !== 'dragging') return;
         canvas.releasePointerCapture(ev.pointerId);
         suppressNextClick = true;  // suppress the synthetic click after pointerup
+        endDragMagnifier();
+        canvas.style.cursor = '';  // restore (idle pointermove re-applies crosshair)
 
         const tzLabel = document.getElementById('map-drag-tz-label');
         const tzCheckbox = document.getElementById('map-drag-tz-checkbox') as HTMLInputElement;
@@ -1100,6 +1110,11 @@ function startDragAt(ev: PointerEvent, x: number, y: number): void {
     const { lat: newLat, lon: newLon } = computeDragLatLon(x, y, ev.shiftKey);
     applyTemporaryLocation(newLat, newLon, dragWasTimezoneLocked);
 
+    // Fresh magnifier smoothing state; hide the mouse cursor for the drag —
+    // it is redundant with the crosshair and covers map pixels.
+    resetDragMagnifier(newLat, newLon);
+    canvas.style.cursor = 'none';
+
     canvas.setPointerCapture(ev.pointerId);
     ev.preventDefault();  // prevent text selection / default touch behavior
 }
@@ -1139,6 +1154,14 @@ function showKeepLocationDialog(): void {
     // Trigger reflow before adding visible class for transition.
     void overlay.offsetHeight;
     overlay.classList.add('visible');
+
+    // The lift that opened this dialog may have committed a stray text
+    // selection (iOS long-press gesture end). Clear it deferred — the commit
+    // lands asynchronously after touchend, so an immediate clear races it.
+    setTimeout(() => {
+        const sel = document.getSelection();
+        if (sel && !sel.isCollapsed) sel.removeAllRanges();
+    }, 100);
 
     // Keyboard handler: Enter = Keep, Escape = Revert.
     const onKey = (e: KeyboardEvent) => {

@@ -37,6 +37,12 @@
           position: fixed;
           top: 0;
           left: 0;
+          /* No text-selection semantics on the canvas: suppresses the iOS
+             long-press loupe + silent-selection gestures (the drag magnifier
+             replaces the loupe; see planning/2026-07-25-map-pointing-*). */
+          -webkit-user-select: none;
+          user-select: none;
+          -webkit-touch-callout: none;
       }
 
       /* ── Bottom chrome: ONE row shared by the time-controller button (left)
@@ -569,6 +575,11 @@
           opacity: 0;
           transition: opacity 0.2s ease;
           pointer-events: none;
+          /* Not selectable: iOS commits a word-selection at drag-lift, and
+             this full-screen overlay is what the lift point hit-tests to —
+             selectable pill text would get selected and eat the next tap. */
+          user-select: none;
+          -webkit-user-select: none;
       }
 
       .map-drag-confirm.visible {

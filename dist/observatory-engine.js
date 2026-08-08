@@ -14274,6 +14274,24 @@
       distanceDeg: Math.sqrt(bestDist)
     };
   }
+  function citiesInWindow(lat2, lon2, halfLatDeg, halfLonDeg, limit = 8) {
+    if (!loaded || N === 0) return [];
+    const out = [];
+    for (let i = 0; i < N && out.length < limit; i++) {
+      const dLat = Math.abs(cLat[i] / 1e3 - lat2);
+      if (dLat > halfLatDeg) continue;
+      let dLon = Math.abs(cLon[i] / 1e3 - lon2);
+      if (dLon > 180) dLon = 360 - dLon;
+      if (dLon > halfLonDeg) continue;
+      out.push({
+        lat: cLat[i] / 1e3,
+        lon: cLon[i] / 1e3,
+        name: rowStr(names, nameOff, i),
+        pop: cPop[i]
+      });
+    }
+    return out;
+  }
   function findLargestCityNear(lat2, lon2, radiusDeg) {
     if (!loaded || N === 0) return null;
     const cosLat = Math.cos(lat2 * Math.PI / 180);
@@ -20609,7 +20627,193 @@
     ctx2.stroke();
     ctx2.restore();
   }
-  function drawEarthView(ctx2, L, u, observerLat, observerLon, getNow2, dotOverrideLat, dotOverrideLon) {
+  var MAG_SPAN_DEG = 10;
+  var MAG_MAX_DIAM = 140;
+  var MAG_EDGE = 4;
+  var MAG_GAP = 16;
+  var MAG_TAU = 60;
+  var MAG_MAX_LABELS = 6;
+  var MAG_LABEL_SEP = 26;
+  var magLat = 0;
+  var magLon = 0;
+  var magX = 0;
+  var magY = 0;
+  var magSide = 0;
+  var magPosInit = false;
+  var magActive = false;
+  var magLastT = 0;
+  var magDebug = { x: 0, y: 0, r: 0, ex: 0, ey: 0, ew: 0, eh: 0 };
+  function resetDragMagnifier(lat2, lon2) {
+    magLat = lat2;
+    magLon = lon2;
+    magSide = 0;
+    magPosInit = false;
+    magActive = true;
+    magLastT = performance.now();
+  }
+  function drawDragMagnifier(ctx2, L, renderLat, renderLon, homeLat, homeLon) {
+    const ex = L.earthCX - L.earthW / 2;
+    const ey = L.earthCY - L.earthH / 2;
+    const bw = L.earthW;
+    const bh = L.earthH;
+    const d = Math.min(MAG_MAX_DIAM, bh - 2 * MAG_EDGE);
+    if (d < 40) return;
+    const r = d / 2;
+    const t = performance.now();
+    if (!magActive) resetDragMagnifier(renderLat, renderLon);
+    const k = 1 - Math.exp(-(t - magLastT) / MAG_TAU);
+    magLastT = t;
+    let dLon = renderLon - magLon;
+    if (dLon > 180) dLon -= 360;
+    else if (dLon < -180) dLon += 360;
+    magLon += dLon * k;
+    if (magLon > 180) magLon -= 360;
+    else if (magLon < -180) magLon += 360;
+    magLat += (renderLat - magLat) * k;
+    const half = MAG_SPAN_DEG / 2;
+    const wLon = Math.max(-180 + half, Math.min(180 - half, magLon));
+    const wLat = Math.max(-90 + half, Math.min(90 - half, magLat));
+    const ax = ex + (renderLon + 180) / 360 * bw;
+    const ay = ey + (90 - renderLat) / 180 * bh;
+    const minX = ex + r + MAG_EDGE, maxX = ex + bw - r - MAG_EDGE;
+    const minY = ey + r + MAG_EDGE, maxY = ey + bh - r - MAG_EDGE;
+    if (magSide === 0) magSide = ax <= ex + bw / 2 ? 1 : -1;
+    let tx = ax + magSide * (r + MAG_GAP);
+    if (tx < minX || tx > maxX) {
+      const flipped = ax - magSide * (r + MAG_GAP);
+      if (flipped >= minX && flipped <= maxX) {
+        magSide = -magSide;
+        tx = flipped;
+      }
+    }
+    tx = maxX >= minX ? Math.max(minX, Math.min(maxX, tx)) : ex + bw / 2;
+    let ty = maxY >= minY ? Math.max(minY, Math.min(maxY, ay)) : ey + bh / 2;
+    if (!magPosInit) {
+      magX = tx;
+      magY = ty;
+      magPosInit = true;
+    } else {
+      magX += (tx - magX) * k;
+      magY += (ty - magY) * k;
+    }
+    const px = maxX >= minX ? Math.max(minX, Math.min(maxX, magX)) : magX;
+    const py = maxY >= minY ? Math.max(minY, Math.min(maxY, magY)) : magY;
+    const pxPerDeg = d / MAG_SPAN_DEG;
+    const westLon = wLon - half;
+    const northLat = wLat + half;
+    ctx2.save();
+    ctx2.beginPath();
+    ctx2.arc(px, py, r, 0, Math.PI * 2);
+    ctx2.clip();
+    const dpr = L.dpr || 1;
+    const srcX = ex + (westLon + 180) / 360 * bw;
+    const srcY = ey + (90 - northLat) / 180 * bh;
+    const srcW = MAG_SPAN_DEG / 360 * bw;
+    const srcH = MAG_SPAN_DEG / 180 * bh;
+    ctx2.drawImage(
+      ctx2.canvas,
+      srcX * dpr,
+      srcY * dpr,
+      srcW * dpr,
+      srcH * dpr,
+      px - r,
+      py - r,
+      d,
+      d
+    );
+    const cities = citiesInWindow(wLat, wLon, half, half, MAG_MAX_LABELS * 2);
+    ctx2.font = "10px Arial, sans-serif";
+    let accepted = 0;
+    const accX = [], accY = [];
+    for (const c of cities) {
+      if (accepted >= MAG_MAX_LABELS) break;
+      let relLon = c.lon - wLon;
+      if (relLon > 180) relLon -= 360;
+      else if (relLon < -180) relLon += 360;
+      const cx = px + relLon * pxPerDeg;
+      const cy = py + (wLat - c.lat) * pxPerDeg;
+      let clash = false;
+      for (let i = 0; i < accepted; i++) {
+        const dx = cx - accX[i], dy = cy - accY[i];
+        if (dx * dx + dy * dy < MAG_LABEL_SEP * MAG_LABEL_SEP) {
+          clash = true;
+          break;
+        }
+      }
+      if (clash) continue;
+      accX[accepted] = cx;
+      accY[accepted] = cy;
+      accepted++;
+      ctx2.beginPath();
+      ctx2.arc(cx, cy, 2.5, 0, Math.PI * 2);
+      ctx2.fillStyle = "rgba(255, 255, 255, 0.95)";
+      ctx2.fill();
+      ctx2.strokeStyle = "rgba(0, 0, 0, 0.6)";
+      ctx2.lineWidth = 1;
+      ctx2.stroke();
+      const tw = ctx2.measureText(c.name).width;
+      const right = cx + 5 + tw <= px + r - 2 || cx <= px;
+      const lx = right ? cx + 5 : cx - 5 - tw;
+      ctx2.lineWidth = 3;
+      ctx2.strokeStyle = "rgba(0, 0, 0, 0.75)";
+      ctx2.strokeText(c.name, lx, cy + 3.5);
+      ctx2.fillStyle = "rgba(255, 255, 255, 0.95)";
+      ctx2.fillText(c.name, lx, cy + 3.5);
+    }
+    if (homeLat !== void 0 && homeLon !== void 0) {
+      let relHome = homeLon - wLon;
+      if (relHome > 180) relHome -= 360;
+      else if (relHome < -180) relHome += 360;
+      const hx = px + relHome * pxPerDeg;
+      const hy = py + (wLat - homeLat) * pxPerDeg;
+      if (Math.abs(hx - px) <= r + 4 && Math.abs(hy - py) <= r + 4) {
+        ctx2.beginPath();
+        ctx2.arc(hx, hy, 3.5, 0, Math.PI * 2);
+        ctx2.fillStyle = "#ff3333";
+        ctx2.fill();
+        ctx2.strokeStyle = "rgba(255, 255, 255, 0.8)";
+        ctx2.lineWidth = 1;
+        ctx2.stroke();
+      }
+    }
+    let chLon = renderLon - wLon;
+    if (chLon > 180) chLon -= 360;
+    else if (chLon < -180) chLon += 360;
+    const chX = px + chLon * pxPerDeg;
+    const chY = py + (wLat - renderLat) * pxPerDeg;
+    ctx2.strokeStyle = "rgba(255, 0, 0, 1.0)";
+    ctx2.lineWidth = 1;
+    ctx2.beginPath();
+    ctx2.moveTo(px - r, chY);
+    ctx2.lineTo(px + r, chY);
+    ctx2.moveTo(chX, py - r);
+    ctx2.lineTo(chX, py + r);
+    ctx2.stroke();
+    ctx2.restore();
+    ctx2.beginPath();
+    ctx2.arc(px, py, r + 1, 0, Math.PI * 2);
+    ctx2.strokeStyle = "rgba(0, 0, 0, 0.55)";
+    ctx2.lineWidth = 3;
+    ctx2.stroke();
+    ctx2.beginPath();
+    ctx2.arc(px, py, r, 0, Math.PI * 2);
+    ctx2.strokeStyle = "rgba(255, 255, 255, 0.45)";
+    ctx2.lineWidth = 1.5;
+    ctx2.stroke();
+    magDebug.x = px;
+    magDebug.y = py;
+    magDebug.r = r;
+    magDebug.ex = ex;
+    magDebug.ey = ey;
+    magDebug.ew = bw;
+    magDebug.eh = bh;
+    window._dragMag = magDebug;
+  }
+  function endDragMagnifier() {
+    magActive = false;
+    window._dragMag = null;
+  }
+  function drawEarthView(ctx2, L, u, observerLat, observerLon, getNow2, dotOverrideLat, dotOverrideLon, omitDot = false) {
     if (!imagesReady || !tableReady) return;
     const sslat = u.get("earthSslat").currentValue;
     const sslng = u.get("earthSslng").currentValue;
@@ -20659,10 +20863,20 @@
       dayMaskCtx.globalCompositeOperation = "source-over";
     }
     ctx2.drawImage(dayMaskCanvas, ex, ey, L.earthW, L.earthH);
-    const dotLat = dotOverrideLat ?? observerLat;
-    const dotLon = dotOverrideLon ?? observerLon;
+    ctx2.restore();
+    if (!omitDot) {
+      drawObserverDot(ctx2, L, dotOverrideLat ?? observerLat, dotOverrideLon ?? observerLon);
+    }
+  }
+  function drawObserverDot(ctx2, L, dotLat, dotLon) {
+    const ex = L.earthCX - L.earthW / 2;
+    const ey = L.earthCY - L.earthH / 2;
     const dotX = ex + (dotLon + 180) / 360 * L.earthW;
     const dotY = ey + (90 - dotLat) / 180 * L.earthH;
+    ctx2.save();
+    ctx2.beginPath();
+    ctx2.rect(ex, ey, L.earthW, L.earthH);
+    ctx2.clip();
     ctx2.fillStyle = "#ff3333";
     ctx2.beginPath();
     const dotR = Math.max(2, L.earthW * 8e-3);
@@ -21526,7 +21740,12 @@
     }
     if (updater) {
       if (dragState === "dragging" || dragState === "confirming") {
-        drawEarthView(ctx, L, updater, lat, lon, getNow, savedLat, savedLon);
+        const dragging = dragState === "dragging";
+        drawEarthView(ctx, L, updater, lat, lon, getNow, savedLat, savedLon, dragging);
+        if (dragging) {
+          drawDragMagnifier(ctx, L, lat, lon, savedLat, savedLon);
+          drawObserverDot(ctx, L, savedLat, savedLon);
+        }
         drawDragCrosshair(ctx, L, lat, lon);
       } else {
         drawEarthView(ctx, L, updater, lat, lon, getNow);
@@ -21889,6 +22108,8 @@
       if (dragState !== "dragging") return;
       canvas.releasePointerCapture(ev.pointerId);
       suppressNextClick = true;
+      endDragMagnifier();
+      canvas.style.cursor = "";
       const tzLabel = document.getElementById("map-drag-tz-label");
       const tzCheckbox = document.getElementById("map-drag-tz-checkbox");
       const dragEndedWithAlt = ev.altKey || dragWasTimezoneLocked;
@@ -21914,6 +22135,8 @@
     dragWasTimezoneLocked = ev.altKey;
     const { lat: newLat, lon: newLon } = computeDragLatLon(x, y, ev.shiftKey);
     applyTemporaryLocation(newLat, newLon, dragWasTimezoneLocked);
+    resetDragMagnifier(newLat, newLon);
+    canvas.style.cursor = "none";
     canvas.setPointerCapture(ev.pointerId);
     ev.preventDefault();
   }
@@ -21938,6 +22161,10 @@
     overlay.style.display = "";
     void overlay.offsetHeight;
     overlay.classList.add("visible");
+    setTimeout(() => {
+      const sel = document.getSelection();
+      if (sel && !sel.isCollapsed) sel.removeAllRanges();
+    }, 100);
     const onKey = (e) => {
       if (e.key === "Enter") {
         e.preventDefault();

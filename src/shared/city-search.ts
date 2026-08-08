@@ -509,6 +509,47 @@ export function findClosestCity(lat: number, lon: number): CityResult | null {
  *
  * Uses the same equirectangular distance approximation as `findClosestCity`.
  */
+/** Lightweight city row for map overlays (dots + labels). */
+export interface CityDot {
+    lat: number;
+    lon: number;
+    name: string;
+    pop: number;
+}
+
+/**
+ * Cities inside a lat/lon window centered at (lat, lon), most populous
+ * first, up to `limit`.
+ *
+ * Cities are stored sorted by population descending, so the first `limit`
+ * rows that fall inside the window are exactly the top-`limit` by
+ * population — early exit, no sort. Longitude wraps across the antimeridian.
+ * Returns [] if city data is not loaded (callers degrade gracefully).
+ */
+export function citiesInWindow(
+    lat: number, lon: number,
+    halfLatDeg: number, halfLonDeg: number,
+    limit: number = 8,
+): CityDot[] {
+    if (!loaded || N === 0) return [];
+
+    const out: CityDot[] = [];
+    for (let i = 0; i < N && out.length < limit; i++) {
+        const dLat = Math.abs(cLat[i] / 1000 - lat);
+        if (dLat > halfLatDeg) continue;
+        let dLon = Math.abs(cLon[i] / 1000 - lon);
+        if (dLon > 180) dLon = 360 - dLon;
+        if (dLon > halfLonDeg) continue;
+        out.push({
+            lat: cLat[i] / 1000,
+            lon: cLon[i] / 1000,
+            name: rowStr(names, nameOff, i),
+            pop: cPop[i],
+        });
+    }
+    return out;
+}
+
 export function findLargestCityNear(
     lat: number, lon: number, radiusDeg: number,
 ): CityResult | null {

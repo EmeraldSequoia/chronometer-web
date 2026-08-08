@@ -46,6 +46,7 @@ import nightDataUrl from '../shared/assets/blue-marble/night@4x.jpg';
 import type { LayoutParams } from './layout.js';
 import type { ObsValueName } from './obs-values.js';
 import type { Updater } from '../shared/updater.js';
+import { citiesInWindow } from '../shared/city-search.js';
 
 // ============================================================================
 // Table constants — must match generate-altitude-table.ts
@@ -357,6 +358,252 @@ export function drawDragCrosshair(
 }
 
 // ============================================================================
+// Drag magnifier
+// ============================================================================
+//
+// App-drawn replacement for the accidental iOS text-selection loupe (see
+// planning/2026-07-25-map-pointing-phase-1-magnifier.md). Drawn every tick
+// while drag-to-explore is active, after the earth view and crosshair.
+//
+// The bubble's base layer is a same-canvas blit of the already-rendered band
+// region, so it shows exactly what the band shows (monthly day image, night
+// shading, terminator). At bubble scale the blit is a color wash; the
+// information is carried by overlays drawn crisply on top: city dots/labels
+// and the crosshair.
+//
+// Hard constraint (decision A8): the bubble stays entirely inside the band
+// rect. Placement offsets sideways from the drag point (finger clearance),
+// flipping sides only when the current side no longer fits; both the shown
+// content and the bubble position are lerped so nothing teleports.
+
+/** Geographic span (degrees) shown across the bubble diameter. */
+const MAG_SPAN_DEG = 10;
+/** Max bubble diameter, CSS px (shrinks to fit short bands). */
+const MAG_MAX_DIAM = 140;
+/** Min gap between bubble edge and band edge, CSS px. */
+const MAG_EDGE = 4;
+/** Horizontal gap between the drag point and the bubble edge, CSS px. */
+const MAG_GAP = 16;
+/** Time constant for content/position smoothing, ms. */
+const MAG_TAU = 60;
+/** Max city labels shown in the bubble. */
+const MAG_MAX_LABELS = 6;
+/** Min separation between accepted city dots, bubble px. */
+const MAG_LABEL_SEP = 26;
+
+/** Smoothed content center (degrees) and bubble center (CSS px). */
+let magLat = 0, magLon = 0;
+let magX = 0, magY = 0;
+/** +1 = bubble right of the drag point, -1 = left, 0 = pick on first draw. */
+let magSide = 0;
+let magPosInit = false;
+let magActive = false;
+let magLastT = 0;
+
+/** Reused debug object exposed for headless bounds verification (no per-frame
+ *  allocation). */
+const magDebug = { x: 0, y: 0, r: 0, ex: 0, ey: 0, ew: 0, eh: 0 };
+
+/** Reset magnifier smoothing state at drag start (fresh or resumed). */
+export function resetDragMagnifier(lat: number, lon: number): void {
+    magLat = lat;
+    magLon = lon;
+    magSide = 0;
+    magPosInit = false;
+    magActive = true;
+    magLastT = performance.now();
+}
+
+/**
+ * Draw the drag magnifier bubble for the current drag position.
+ * Call after drawEarthView (with the observer dot omitted) and BEFORE
+ * drawDragCrosshair/drawObserverDot — the blit must not pick up either
+ * (magnified, a 1px hairline or 2px dot becomes a screen-filling smear).
+ * (renderLat, renderLon) is the applied drag location — the same value the
+ * drag applies to the environment. (homeLat, homeLon), if given, draws a
+ * crisp home marker inside the bubble at the saved location.
+ */
+export function drawDragMagnifier(
+    ctx: CanvasRenderingContext2D, L: LayoutParams,
+    renderLat: number, renderLon: number,
+    homeLat?: number, homeLon?: number,
+): void {
+    const ex = L.earthCX - L.earthW / 2;
+    const ey = L.earthCY - L.earthH / 2;
+    const bw = L.earthW;
+    const bh = L.earthH;
+
+    const d = Math.min(MAG_MAX_DIAM, bh - 2 * MAG_EDGE);
+    if (d < 40) return;  // degenerate band — no room for a useful bubble
+    const r = d / 2;
+
+    // --- Smoothing (display-only; the drag itself is unsmoothed) ---
+    const t = performance.now();
+    if (!magActive) resetDragMagnifier(renderLat, renderLon);
+    const k = 1 - Math.exp(-(t - magLastT) / MAG_TAU);
+    magLastT = t;
+
+    let dLon = renderLon - magLon;
+    if (dLon > 180) dLon -= 360; else if (dLon < -180) dLon += 360;
+    magLon += dLon * k;
+    if (magLon > 180) magLon -= 360; else if (magLon < -180) magLon += 360;
+    magLat += (renderLat - magLat) * k;
+
+    // --- Content window: clamped so the blit source stays inside the band ---
+    const half = MAG_SPAN_DEG / 2;
+    const wLon = Math.max(-180 + half, Math.min(180 - half, magLon));
+    const wLat = Math.max(-90 + half, Math.min(90 - half, magLat));
+
+    // --- Bubble placement: sideways from the drag point, always in-band ---
+    const ax = ex + (renderLon + 180) / 360 * bw;
+    const ay = ey + (90 - renderLat) / 180 * bh;
+    const minX = ex + r + MAG_EDGE, maxX = ex + bw - r - MAG_EDGE;
+    const minY = ey + r + MAG_EDGE, maxY = ey + bh - r - MAG_EDGE;
+
+    if (magSide === 0) magSide = ax <= ex + bw / 2 ? 1 : -1;
+    let tx = ax + magSide * (r + MAG_GAP);
+    if (tx < minX || tx > maxX) {
+        // Current side no longer fits — flip only if the other side does
+        // (geometric hysteresis: flips happen near band edges, not center).
+        const flipped = ax - magSide * (r + MAG_GAP);
+        if (flipped >= minX && flipped <= maxX) {
+            magSide = -magSide;
+            tx = flipped;
+        }
+    }
+    tx = maxX >= minX ? Math.max(minX, Math.min(maxX, tx)) : ex + bw / 2;
+    let ty = maxY >= minY ? Math.max(minY, Math.min(maxY, ay)) : ey + bh / 2;
+
+    if (!magPosInit) {
+        magX = tx; magY = ty;
+        magPosInit = true;
+    } else {
+        magX += (tx - magX) * k;
+        magY += (ty - magY) * k;
+    }
+    // The lerp target is always in-bounds but the lerp path could briefly
+    // round outside by a fraction — clamp the drawn position too (A8 is hard).
+    const px = maxX >= minX ? Math.max(minX, Math.min(maxX, magX)) : magX;
+    const py = maxY >= minY ? Math.max(minY, Math.min(maxY, magY)) : magY;
+
+    // --- Bubble-space mapping ---
+    const pxPerDeg = d / MAG_SPAN_DEG;
+    const westLon = wLon - half;
+    const northLat = wLat + half;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.clip();
+
+    // Base wash: blit the band's own rendered pixels for the window.
+    // Source coords are device px (drawImage sources ignore the transform).
+    const dpr = L.dpr || 1;
+    const srcX = ex + (westLon + 180) / 360 * bw;
+    const srcY = ey + (90 - northLat) / 180 * bh;
+    const srcW = MAG_SPAN_DEG / 360 * bw;
+    const srcH = MAG_SPAN_DEG / 180 * bh;
+    ctx.drawImage(ctx.canvas,
+        srcX * dpr, srcY * dpr, srcW * dpr, srcH * dpr,
+        px - r, py - r, d, d);
+
+    // City dots + labels: top-K by population in the window, then greedy
+    // px-distance dedupe so dense metro labels don't pile up.
+    const cities = citiesInWindow(wLat, wLon, half, half, MAG_MAX_LABELS * 2);
+    ctx.font = '10px Arial, sans-serif';
+    let accepted = 0;
+    const accX: number[] = [], accY: number[] = [];
+    for (const c of cities) {
+        if (accepted >= MAG_MAX_LABELS) break;
+        let relLon = c.lon - wLon;
+        if (relLon > 180) relLon -= 360; else if (relLon < -180) relLon += 360;
+        const cx = px + relLon * pxPerDeg;
+        const cy = py + (wLat - c.lat) * pxPerDeg;
+        let clash = false;
+        for (let i = 0; i < accepted; i++) {
+            const dx = cx - accX[i], dy = cy - accY[i];
+            if (dx * dx + dy * dy < MAG_LABEL_SEP * MAG_LABEL_SEP) { clash = true; break; }
+        }
+        if (clash) continue;
+        accX[accepted] = cx; accY[accepted] = cy;
+        accepted++;
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Label right of the dot; flip left when it would leave the bubble.
+        const tw = ctx.measureText(c.name).width;
+        const right = cx + 5 + tw <= px + r - 2 || cx <= px;
+        const lx = right ? cx + 5 : cx - 5 - tw;
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+        ctx.strokeText(c.name, lx, cy + 3.5);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+        ctx.fillText(c.name, lx, cy + 3.5);
+    }
+
+    // Home marker: the saved (pre-drag) location, magnified-crisp — red like
+    // the band's observer dot, distinct from the white city dots.
+    if (homeLat !== undefined && homeLon !== undefined) {
+        let relHome = homeLon - wLon;
+        if (relHome > 180) relHome -= 360; else if (relHome < -180) relHome += 360;
+        const hx = px + relHome * pxPerDeg;
+        const hy = py + (wLat - homeLat) * pxPerDeg;
+        if (Math.abs(hx - px) <= r + 4 && Math.abs(hy - py) <= r + 4) {
+            ctx.beginPath();
+            ctx.arc(hx, hy, 3.5, 0, Math.PI * 2);
+            ctx.fillStyle = '#ff3333';
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+    }
+
+    // Crosshair at the applied drag location (off-center when the window is
+    // clamped at a map edge/pole — the content pins, the crosshair tracks).
+    let chLon = renderLon - wLon;
+    if (chLon > 180) chLon -= 360; else if (chLon < -180) chLon += 360;
+    const chX = px + chLon * pxPerDeg;
+    const chY = py + (wLat - renderLat) * pxPerDeg;
+    ctx.strokeStyle = 'rgba(255, 0, 0, 1.0)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(px - r, chY); ctx.lineTo(px + r, chY);
+    ctx.moveTo(chX, py - r); ctx.lineTo(chX, py + r);
+    ctx.stroke();
+
+    ctx.restore();
+
+    // Border ring: dark halo + light rim, readable over any band content.
+    ctx.beginPath();
+    ctx.arc(px, py, r + 1, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    magDebug.x = px; magDebug.y = py; magDebug.r = r;
+    magDebug.ex = ex; magDebug.ey = ey; magDebug.ew = bw; magDebug.eh = bh;
+    (window as unknown as { _dragMag?: typeof magDebug })._dragMag = magDebug;
+}
+
+/** Deactivate the magnifier (drag ended). */
+export function endDragMagnifier(): void {
+    magActive = false;
+    (window as unknown as { _dragMag?: typeof magDebug | null })._dragMag = null;
+}
+
+// ============================================================================
 // Drawing
 // ============================================================================
 
@@ -374,6 +621,9 @@ export function drawDragCrosshair(
  * @param getNow          Time source (for month selection)
  * @param dotOverrideLat  If provided, draw the observer dot at this lat instead of observerLat
  * @param dotOverrideLon  If provided, draw the observer dot at this lon instead of observerLon
+ * @param omitDot         Skip the observer dot (drag-to-explore draws it
+ *                        separately, after the magnifier blit — a blitted dot
+ *                        magnifies into a screen-filling red blob)
  */
 export function drawEarthView(
     ctx: CanvasRenderingContext2D,
@@ -384,6 +634,7 @@ export function drawEarthView(
     getNow: () => Date,
     dotOverrideLat?: number,
     dotOverrideLon?: number,
+    omitDot: boolean = false,
 ): void {
     if (!imagesReady || !tableReady) return;
 
@@ -481,13 +732,30 @@ export function drawEarthView(
     // Draw the composited day-with-mask onto the main canvas (over the night)
     ctx.drawImage(dayMaskCanvas!, ex, ey, L.earthW, L.earthH);
 
+    ctx.restore();
+
     // ── 4. Observer dot ──
     // During drag-to-explore the dot stays at the saved (home) location,
     // passed via dotOverrideLat/Lon; otherwise it tracks the observer.
-    const dotLat = dotOverrideLat ?? observerLat;
-    const dotLon = dotOverrideLon ?? observerLon;
+    if (!omitDot) {
+        drawObserverDot(ctx, L, dotOverrideLat ?? observerLat, dotOverrideLon ?? observerLon);
+    }
+}
+
+/** Draw the red observer dot on the band, clipped to the band rect. */
+export function drawObserverDot(
+    ctx: CanvasRenderingContext2D, L: LayoutParams,
+    dotLat: number, dotLon: number,
+): void {
+    const ex = L.earthCX - L.earthW / 2;
+    const ey = L.earthCY - L.earthH / 2;
     const dotX = ex + (dotLon + 180) / 360 * L.earthW;
     const dotY = ey + (90 - dotLat) / 180 * L.earthH;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(ex, ey, L.earthW, L.earthH);
+    ctx.clip();
 
     ctx.fillStyle = '#ff3333';
     ctx.beginPath();

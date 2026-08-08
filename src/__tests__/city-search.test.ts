@@ -9,7 +9,7 @@
 // Full-database behavior parity (old array-of-arrays vs new columnar) was
 // validated separately by scripts/parity-cities.mjs during the v2 migration.
 import { describe, it, expect, beforeAll } from 'vitest';
-import { loadCityData, searchCities, findClosestCity, isCityDataLoaded } from '../shared/city-search.js';
+import { loadCityData, searchCities, findClosestCity, citiesInWindow, isCityDataLoaded } from '../shared/city-search.js';
 
 function packB64(arr: ArrayBufferView): string {
     return Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength).toString('base64');
@@ -103,5 +103,29 @@ describe('city-search (columnar v2)', () => {
         expect(c?.distanceDeg).toBeGreaterThanOrEqual(0);
         const c2 = findClosestCity(48.1, 11.6);
         expect(c2?.shortLabel).toBe('Munich');
+    });
+
+    it('citiesInWindow returns cities in the window, most populous first', () => {
+        // 2.5°-half window around the Bay Area: both San Jose and San
+        // Francisco, population order; Munich excluded.
+        const r = citiesInWindow(37.5, -122.0, 2.5, 2.5, 8);
+        expect(r.map(c => c.name)).toEqual(['San Jose', 'San Francisco']);
+        expect(r[0].pop).toBe(1000000);
+        // limit truncates at the top of the population order
+        expect(citiesInWindow(37.5, -122.0, 2.5, 2.5, 1).map(c => c.name))
+            .toEqual(['San Jose']);
+        // tight window excludes San Francisco (~0.5° away in lon)
+        expect(citiesInWindow(37.339, -121.895, 0.2, 0.2, 8).map(c => c.name))
+            .toEqual(['San Jose']);
+        // empty region
+        expect(citiesInWindow(0, 0, 2.5, 2.5, 8)).toEqual([]);
+    });
+
+    it('citiesInWindow wraps longitude across the antimeridian', () => {
+        // Window centered at lon 179 with a 60° half-span reaches Munich?
+        // No — Munich is at 11.6°E, ~167° away. But San Francisco at
+        // -122.4 is 58.6° east of +179 across the antimeridian → included.
+        const r = citiesInWindow(38, 179, 5, 60, 8);
+        expect(r.map(c => c.name)).toEqual(['San Jose', 'San Francisco']);
     });
 });
