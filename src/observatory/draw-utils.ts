@@ -58,7 +58,7 @@ export function textVisualCenterY(ctx: Ctx2D, _text: string): number {
  */
 const _fontHalfHeightCache = new Map<string, number>();
 
-function textVisualHalfHeight(ctx: Ctx2D): number {
+export function textVisualHalfHeight(ctx: Ctx2D): number {
     const font = ctx.font;
     let cached = _fontHalfHeightCache.get(font);
     if (cached !== undefined) return cached;

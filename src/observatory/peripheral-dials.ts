@@ -21,7 +21,7 @@
 
 import type { LayoutParams } from './layout.js';
 import { OUTER_DIAL_TITLE_RATIO } from './layout.js';
-import { drawArc, drawTicks, drawDialNumbersDemiRadial, drawDialNumbersUpright, drawText, textVisualCenterY } from './draw-utils.js';
+import { drawArc, drawTicks, drawDialNumbersDemiRadial, drawDialNumbersUpright, drawText, textVisualCenterY, textVisualHalfHeight } from './draw-utils.js';
 
 const TWO_PI = 2 * Math.PI;
 const HALF_PI = Math.PI / 2;
@@ -91,16 +91,37 @@ function drawAltitudeDial(ctx: Ctx2D, L: LayoutParams): void {
     // Half-annulus band fill (left half: clock π → 2π).
     drawArc(ctx, cx, cy, R, innerR, Math.PI, TWO_PI, FILL_15);
 
-    // Outline: outer + inner left half arcs, the horizontal baseline, and hub.
+    // Outline: outer + inner left half arcs, and hub.
     // Left half in canvas coords: from π/2 (bottom) CW through π (left) to 3π/2 (top).
     strokeArc(ctx, cx, cy, R, HALF_PI, 3 * HALF_PI, WHITE, lw);
     strokeArc(ctx, cx, cy, innerR, HALF_PI, 3 * HALF_PI, WHITE, lw);
+
+    const numFont = `${f}px Arial, sans-serif`;
+
+    // The 0° label is hand-placed at the horizon (9 o'clock), upright — at the
+    // demi-radial flip boundary an upright glyph reads best (cf. the EOT dial's
+    // hand-placed "15 –"). Its visual center sits on the same arc as its
+    // demi-radial neighbors, whose text centers are at radius − halfH
+    // (radial branch) / radius2 − halfH (flipped branch), i.e. R − f − halfH
+    // within 1px.
+    ctx.save();
+    ctx.font = numFont;
+    const halfH = textVisualHalfHeight(ctx);
+    const zeroHalfW = ctx.measureText('0').width / 2;
+    ctx.restore();
+    const zeroX = cx - (R - f - halfH);
+
+    // Horizon baseline (0° altitude): horizontal radius to the left, gapped
+    // around the "0" glyph (classic gauge-face treatment).
+    const gapPad = 2 * s;
     ctx.save();
     ctx.strokeStyle = WHITE_35;
     ctx.lineWidth = lw;
     ctx.beginPath();
     ctx.moveTo(cx, cy);
-    ctx.lineTo(cx - R, cy);       // horizontal radius to the left (0° altitude)
+    ctx.lineTo(zeroX + zeroHalfW + gapPad, cy);
+    ctx.moveTo(zeroX - zeroHalfW - gapPad, cy);
+    ctx.lineTo(cx - R, cy);
     ctx.stroke();
     ctx.restore();
     drawHub(ctx, cx, cy, f - 1, lw);
@@ -111,10 +132,10 @@ function drawAltitudeDial(ctx: Ctx2D, L: LayoutParams): void {
     drawTicks(ctx, cx, cy, 72, R - f / 4 - 1, R, 1 * s, LIGHT_GRAY, Math.PI, TWO_PI);
 
     // Demi-radial numbers: 90 (top) … −90 (bottom) … up the left side. The 0°
-    // slot (9 o'clock) is blank — the horizon baseline itself marks it (the iOS
-    // original drew a '-' there, which rendered as a stray radial tick).
+    // slot stays blank here — the upright "0" below fills it.
     const labels = '90,,,,,,-90,-60,-30,,30,60'.split(',');
-    drawDialNumbersDemiRadial(ctx, cx, cy, labels, `${f}px Arial, sans-serif`, WHITE, R - f, R - f + 1);
+    drawDialNumbersDemiRadial(ctx, cx, cy, labels, numFont, WHITE, R - f, R - f + 1);
+    drawText(ctx, '0', zeroX, cy, numFont, WHITE);
 
     // "Altitude" title, centered in the lower radial gap (hub → −90), mirroring
     // the body-name label drawn above by the hands layer. Title font scales with

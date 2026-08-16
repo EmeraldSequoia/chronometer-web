@@ -21101,11 +21101,21 @@
     drawArc(ctx2, cx, cy, R, innerR, Math.PI, TWO_PI10, FILL_15);
     strokeArc(ctx2, cx, cy, R, HALF_PI4, 3 * HALF_PI4, WHITE, lw);
     strokeArc(ctx2, cx, cy, innerR, HALF_PI4, 3 * HALF_PI4, WHITE, lw);
+    const numFont = `${f}px Arial, sans-serif`;
+    ctx2.save();
+    ctx2.font = numFont;
+    const halfH = textVisualHalfHeight(ctx2);
+    const zeroHalfW = ctx2.measureText("0").width / 2;
+    ctx2.restore();
+    const zeroX = cx - (R - f - halfH);
+    const gapPad = 2 * s;
     ctx2.save();
     ctx2.strokeStyle = WHITE_35;
     ctx2.lineWidth = lw;
     ctx2.beginPath();
     ctx2.moveTo(cx, cy);
+    ctx2.lineTo(zeroX + zeroHalfW + gapPad, cy);
+    ctx2.moveTo(zeroX - zeroHalfW - gapPad, cy);
     ctx2.lineTo(cx - R, cy);
     ctx2.stroke();
     ctx2.restore();
@@ -21114,7 +21124,8 @@
     drawTicks(ctx2, cx, cy, 36, R - f / 2 - 1, R, 1 * s, LIGHT_GRAY, Math.PI, TWO_PI10);
     drawTicks(ctx2, cx, cy, 72, R - f / 4 - 1, R, 1 * s, LIGHT_GRAY, Math.PI, TWO_PI10);
     const labels = "90,,,,,,-90,-60,-30,,30,60".split(",");
-    drawDialNumbersDemiRadial(ctx2, cx, cy, labels, `${f}px Arial, sans-serif`, WHITE, R - f, R - f + 1);
+    drawDialNumbersDemiRadial(ctx2, cx, cy, labels, numFont, WHITE, R - f, R - f + 1);
+    drawText(ctx2, "0", zeroX, cy, numFont, WHITE);
     const labelR = (R - f - 1) / 2;
     drawText(ctx2, "Altitude", cx, cy + labelR, `${OUTER_DIAL_TITLE_RATIO * R}px Arial, sans-serif`, WHITE);
   }
