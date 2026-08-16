@@ -669,7 +669,7 @@ const MEAN_TROPICAL_YEAR_SECONDS = 365.2421897 * 86400;
  */
 const SEASON_TARGETS: { longitude: number; color: string }[] = [
     { longitude: 0,              color: '#22aa22' },  // Vernal equinox — green
-    { longitude: Math.PI / 2,    color: '#ddcc00' },  // Summer solstice — yellow
+    { longitude: Math.PI / 2,    color: '#cc2222' },  // Summer solstice — red
     { longitude: Math.PI,        color: '#ee7722' },  // Autumnal equinox — orange
     { longitude: 3 * Math.PI / 2, color: '#2266cc' }, // Winter solstice — blue
 ];

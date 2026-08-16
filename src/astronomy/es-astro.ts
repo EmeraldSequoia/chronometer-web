@@ -1116,26 +1116,38 @@ export function solarLongitudeCrossingTime(
     return di;
 }
 
-/** Vernal equinox (apparent λ☉ = 0) on or before the given instant. */
+/**
+ * Vernal equinox (apparent λ☉ = 0) on or before the given instant.
+ *
+ * When the first crossing lands after `dateInterval`, the correction re-seeds a
+ * year back from *that crossing* rather than from `dateInterval`. Seeding from
+ * `dateInterval` is ambiguous when it falls near the autumnal equinox — λ☉ ≈ π
+ * is equidistant from the bracketing λ☉ = 0 crossings, so the search picks one
+ * arbitrarily and can skip a whole year.
+ */
 export function vernalEquinoxOnOrBefore(
     dateInterval: number,
     cache: AstroCache | null,
 ): number {
     let ve = solarLongitudeCrossingTime(0, dateInterval, cache);
     if (ve > dateInterval) {
-        ve = solarLongitudeCrossingTime(0, dateInterval - MEAN_TROPICAL_YEAR_SECONDS, cache);
+        ve = solarLongitudeCrossingTime(0, ve - MEAN_TROPICAL_YEAR_SECONDS, cache);
     }
     return ve;
 }
 
-/** Vernal equinox (apparent λ☉ = 0) strictly after the given instant. */
+/**
+ * Vernal equinox (apparent λ☉ = 0) strictly after the given instant.
+ * Re-seeds from the found crossing, not from `dateInterval` — see
+ * `vernalEquinoxOnOrBefore` for why.
+ */
 export function vernalEquinoxAfter(
     dateInterval: number,
     cache: AstroCache | null,
 ): number {
     let ve = solarLongitudeCrossingTime(0, dateInterval, cache);
     if (ve <= dateInterval) {
-        ve = solarLongitudeCrossingTime(0, dateInterval + MEAN_TROPICAL_YEAR_SECONDS, cache);
+        ve = solarLongitudeCrossingTime(0, ve + MEAN_TROPICAL_YEAR_SECONDS, cache);
     }
     return ve;
 }

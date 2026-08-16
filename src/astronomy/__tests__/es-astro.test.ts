@@ -469,6 +469,34 @@ describe('Solar longitude crossings (equinoxes / solstices)', () => {
         expect(lenDays).toBeLessThan(365.5);
     });
 
+    // Regression: near the autumnal equinox λ☉ ≈ π is equidistant from the two
+    // bracketing λ☉ = 0 crossings, so a search seeded there can land on either.
+    // The bracketing helpers must still return adjacent equinoxes (one year
+    // apart), not skip a year — which would halve fractionOfVernalEquinoxYear.
+    test('bracketing helpers span exactly one year at every point in the year', () => {
+        const ve = solarLongitudeCrossingTime(0, appleEpoch(new Date('2024-03-20T12:00:00Z')), null);
+        const year = 365.2422 * 86400;
+        for (let k = 0; k < 48; k++) {
+            const t = ve + (k / 48) * year;
+            const prev = vernalEquinoxOnOrBefore(t, null);
+            const next = vernalEquinoxAfter(t, null);
+            expect(prev).toBeLessThanOrEqual(t);
+            expect(next).toBeGreaterThan(t);
+            const lenDays = (next - prev) / 86400;
+            expect(lenDays).toBeGreaterThan(365.0);
+            expect(lenDays).toBeLessThan(365.5);
+        }
+    });
+
+    test('fractionOfVernalEquinoxYear tracks elapsed time across the year', () => {
+        const ve = solarLongitudeCrossingTime(0, appleEpoch(new Date('2024-03-20T12:00:00Z')), null);
+        const year = vernalEquinoxAfter(ve, null) - ve;
+        for (let k = 1; k < 24; k++) {
+            const frac = k / 24;
+            expect(fractionOfVernalEquinoxYear(ve + frac * year, null)).toBeCloseTo(frac, 6);
+        }
+    });
+
     test('fractionOfVernalEquinoxYear: 0 at equinox, monotonic, wraps to ~1', () => {
         const ve = solarLongitudeCrossingTime(0, appleEpoch(new Date('2025-03-20T12:00:00Z')), null);
         // Just after the equinox → fraction ≈ 0.

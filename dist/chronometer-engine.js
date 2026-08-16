@@ -10613,14 +10613,14 @@ return {${names2.join(",")}};`;
   function vernalEquinoxOnOrBefore(dateInterval, cache) {
     let ve = solarLongitudeCrossingTime(0, dateInterval, cache);
     if (ve > dateInterval) {
-      ve = solarLongitudeCrossingTime(0, dateInterval - MEAN_TROPICAL_YEAR_SECONDS, cache);
+      ve = solarLongitudeCrossingTime(0, ve - MEAN_TROPICAL_YEAR_SECONDS, cache);
     }
     return ve;
   }
   function vernalEquinoxAfter(dateInterval, cache) {
     let ve = solarLongitudeCrossingTime(0, dateInterval, cache);
     if (ve <= dateInterval) {
-      ve = solarLongitudeCrossingTime(0, dateInterval + MEAN_TROPICAL_YEAR_SECONDS, cache);
+      ve = solarLongitudeCrossingTime(0, ve + MEAN_TROPICAL_YEAR_SECONDS, cache);
     }
     return ve;
   }
@@ -14929,8 +14929,8 @@ return {${names2.join(",")}};`;
   var SEASON_TARGETS = [
     { longitude: 0, color: "#22aa22" },
     // Vernal equinox — green
-    { longitude: Math.PI / 2, color: "#ddcc00" },
-    // Summer solstice — yellow
+    { longitude: Math.PI / 2, color: "#cc2222" },
+    // Summer solstice — red
     { longitude: Math.PI, color: "#ee7722" },
     // Autumnal equinox — orange
     { longitude: 3 * Math.PI / 2, color: "#2266cc" }
@@ -22834,7 +22834,7 @@ return {${names2.join(",")}};`;
       return `canvas/bitmap est TOTAL ${MB(total)}MB: faces ${MB(facesB)} \xB7 static caches ${MB(staticB)} \xB7 images ${MB(imagesB)} \xB7 src blobs ${MB(srcBlobB)} \xB7 shadows ${MB(shadowB)} \xB7 wedge cache ${MB(rc.wedgeCache)} \xB7 wheel cache ${MB(rc.wheelCache)} \xB7 hand cache ${MB(rc.handCache)} \xB7 analemma ${MB(analemmaB)} \xB7 terra ring ${MB(terraB)} \xB7 cutout temp ${MB(rc.cutoutTemp)} \xB7 face buffers ${MB(buffersB)} \xB7 shared canvas ${MB(sharedB)}${jsHeap}`;
     }
     function _buildStamp() {
-      return true ? "2.0.87" : "dev";
+      return true ? "2.0.89" : "dev";
     }
     function _browserShort() {
       const ua = navigator.userAgent;
