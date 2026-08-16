@@ -30,6 +30,7 @@ type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
 // ── Colors (iOS) ──────────────────────────────────────────────────────────
 const WHITE = 'rgba(255,255,255,1)';
+const WHITE_35 = 'rgba(255,255,255,0.35)';       // dim accent, ~azimuth crosshair intensity
 const FILL_15 = 'rgba(255,255,255,0.15)';
 const FILL_10 = 'rgba(255,255,255,0.10)';
 const LIGHT_GRAY = 'rgba(170,170,170,1)';        // UIColor lightGrayColor
@@ -95,7 +96,7 @@ function drawAltitudeDial(ctx: Ctx2D, L: LayoutParams): void {
     strokeArc(ctx, cx, cy, R, HALF_PI, 3 * HALF_PI, WHITE, lw);
     strokeArc(ctx, cx, cy, innerR, HALF_PI, 3 * HALF_PI, WHITE, lw);
     ctx.save();
-    ctx.strokeStyle = WHITE;
+    ctx.strokeStyle = WHITE_35;
     ctx.lineWidth = lw;
     ctx.beginPath();
     ctx.moveTo(cx, cy);
@@ -109,8 +110,10 @@ function drawAltitudeDial(ctx: Ctx2D, L: LayoutParams): void {
     drawTicks(ctx, cx, cy, 36, R - f / 2 - 1, R, 1 * s, LIGHT_GRAY, Math.PI, TWO_PI);
     drawTicks(ctx, cx, cy, 72, R - f / 4 - 1, R, 1 * s, LIGHT_GRAY, Math.PI, TWO_PI);
 
-    // Demi-radial numbers: 90 (top) … −90 (bottom) … up the left side.
-    const labels = '90,,,,,,-90,-60,-30,-,30,60'.split(',');
+    // Demi-radial numbers: 90 (top) … −90 (bottom) … up the left side. The 0°
+    // slot (9 o'clock) is blank — the horizon baseline itself marks it (the iOS
+    // original drew a '-' there, which rendered as a stray radial tick).
+    const labels = '90,,,,,,-90,-60,-30,,30,60'.split(',');
     drawDialNumbersDemiRadial(ctx, cx, cy, labels, `${f}px Arial, sans-serif`, WHITE, R - f, R - f + 1);
 
     // "Altitude" title, centered in the lower radial gap (hub → −90), mirroring

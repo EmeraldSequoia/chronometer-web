@@ -21058,6 +21058,7 @@
   var TWO_PI10 = 2 * Math.PI;
   var HALF_PI4 = Math.PI / 2;
   var WHITE = "rgba(255,255,255,1)";
+  var WHITE_35 = "rgba(255,255,255,0.35)";
   var FILL_15 = "rgba(255,255,255,0.15)";
   var FILL_10 = "rgba(255,255,255,0.10)";
   var LIGHT_GRAY = "rgba(170,170,170,1)";
@@ -21101,7 +21102,7 @@
     strokeArc(ctx2, cx, cy, R, HALF_PI4, 3 * HALF_PI4, WHITE, lw);
     strokeArc(ctx2, cx, cy, innerR, HALF_PI4, 3 * HALF_PI4, WHITE, lw);
     ctx2.save();
-    ctx2.strokeStyle = WHITE;
+    ctx2.strokeStyle = WHITE_35;
     ctx2.lineWidth = lw;
     ctx2.beginPath();
     ctx2.moveTo(cx, cy);
@@ -21112,7 +21113,7 @@
     drawTicks(ctx2, cx, cy, 12, innerR, R, 1 * s, LIGHT_GRAY, Math.PI, TWO_PI10);
     drawTicks(ctx2, cx, cy, 36, R - f / 2 - 1, R, 1 * s, LIGHT_GRAY, Math.PI, TWO_PI10);
     drawTicks(ctx2, cx, cy, 72, R - f / 4 - 1, R, 1 * s, LIGHT_GRAY, Math.PI, TWO_PI10);
-    const labels = "90,,,,,,-90,-60,-30,-,30,60".split(",");
+    const labels = "90,,,,,,-90,-60,-30,,30,60".split(",");
     drawDialNumbersDemiRadial(ctx2, cx, cy, labels, `${f}px Arial, sans-serif`, WHITE, R - f, R - f + 1);
     const labelR = (R - f - 1) / 2;
     drawText(ctx2, "Altitude", cx, cy + labelR, `${OUTER_DIAL_TITLE_RATIO * R}px Arial, sans-serif`, WHITE);
