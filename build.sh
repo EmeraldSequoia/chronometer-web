@@ -42,7 +42,8 @@ echo "=== Checking required source files ==="
 for required_file in \
     "$SRC/cities-data.js" \
     "$SRC/observatory/data/altitude-table.bin" \
-    "$SRC/astronomy/es-leap-second.ts"; do
+    "$SRC/astronomy/es-leap-second.ts" \
+    "$SRC/help/eclipse-data.json"; do
   if [ ! -f "$required_file" ]; then
     echo "ERROR: Required file missing: $required_file" >&2
     echo "This file should be present from git clone." >&2
@@ -51,6 +52,15 @@ for required_file in \
   fi
 done
 echo "  ✓ All required source files present"
+
+# eclipse-data.json is inlined verbatim into eclipse-table.html's
+# <script type="application/json"> block; content that could close the block
+# or open a comment must never reach the page. The scraper and vitest both
+# assert this too — this is the last line of defense at the injection point.
+if grep -qiE '</script|<!--' src/help/eclipse-data.json; then
+  echo "ERROR: src/help/eclipse-data.json contains markup unsafe to inline (</script or <!--)" >&2
+  exit 1
+fi
 
 echo "=== Checking leap-second table freshness ==="
 # src/astronomy/es-leap-second.ts is generated from the IERS leap-seconds.list,
@@ -109,6 +119,11 @@ echo "=== Building index page script ==="
 $ESBUILD "$SRC/index-page.ts" --bundle $COMMON_FLAGS \
   --outfile="$DIST/index-page.js"
 echo "  → index-page.js"
+
+echo "=== Building eclipse table page script ==="
+$ESBUILD "$SRC/eclipse-table-page.ts" --bundle $COMMON_FLAGS \
+  --outfile="$DIST/eclipse-table-page.js"
+echo "  → eclipse-table-page.js"
 
 echo "=== Building pick page script ==="
 $ESBUILD "$SRC/pick-page.ts" --bundle $LOADER_FLAGS $COMMON_FLAGS \
@@ -198,7 +213,12 @@ inject_partials() {
         while ((getline line < (P"/help-subview.css")) > 0) print line; close(P"/help-subview.css");
         s=$0; sub(/.*\{\{ *HELP_SUBVIEW_CSS *\}\}/, "", s); print s; next
     }
-    /\{\{ *VERSION *\}\}/ { 
+    /\{\{ *ECLIPSE_DATA *\}\}/ {
+        s=$0; sub(/\{\{ *ECLIPSE_DATA *\}\}.*/, "", s); printf "%s", s;
+        while ((getline line < "src/help/eclipse-data.json") > 0) print line; close("src/help/eclipse-data.json");
+        s=$0; sub(/.*\{\{ *ECLIPSE_DATA *\}\}/, "", s); print s; next
+    }
+    /\{\{ *VERSION *\}\}/ {
         gsub(/\{\{ *VERSION *\}\}/, VERSION); print; next
     }
     { print }
@@ -427,6 +447,12 @@ echo "  → support.html"
 # disclaimer.html — legal disclaimer
 inject_partials < "$SRC/disclaimer.html" > "$DIST/disclaimer.html"
 echo "  → disclaimer.html"
+
+# eclipse-table.html — eclipse list with app deep links; the committed
+# eclipse-data.json is inlined into its <script type="application/json"> block
+# so the page renders offline / on file:// with no fetch.
+inject_partials < "$SRC/eclipse-table.html" > "$DIST/eclipse-table.html"
+echo "  → eclipse-table.html"
 
 # cities-data.js — city database for location picker.
 # file:// loads the <script> form; http(s) fetches the compressed JSON blob.

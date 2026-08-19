@@ -1,0 +1,1732 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- No <base target="_blank"> here (unlike help.html): it would hijack the
+         internal #today / show-all anchors. External links opt in per-link. -->
+    <title>Emerald Eclipses</title>
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+    <link rel="icon" type="image/png" href="apple-touch-icon.png" />
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #1e1e32;
+        color: #bbc;
+        font-family:
+          "Segoe UI",
+          system-ui,
+          -apple-system,
+          sans-serif;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+      .help-page {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 24px 20px 48px;
+      }
+      a {
+        color: #8af;
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      h1 {
+        font-size: 22px;
+        color: #dde;
+        margin: 8px 0 12px;
+      }
+      .back-link {
+        font-size: 13px;
+      }
+      p {
+        margin: 10px 0;
+      }
+      .ek-legend {
+        margin: 14px 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 18px;
+        align-items: center;
+        font-size: 13px;
+      }
+      .ek-legend span {
+        white-space: nowrap;
+      }
+      .ek-source {
+        font-size: 12.5px;
+        color: #99a;
+        border-left: 3px solid #3a3a5e;
+        padding-left: 10px;
+      }
+      .ek-controls {
+        margin: 14px 0 6px;
+        font-size: 13px;
+      }
+      #ek-stale,
+      .ek-ranout {
+        background: #3a2f1e;
+        border: 1px solid #6a552a;
+        color: #dcb;
+        border-radius: 6px;
+        padding: 8px 12px;
+        margin: 12px 0;
+      }
+      .ek-globe {
+        width: 48px;
+        height: 48px;
+        flex: 0 0 48px;
+        border-radius: 50%;
+        background-color: #232338;
+        background-size: cover;
+      }
+      .ek-icon {
+        width: 20px;
+        height: 20px;
+        flex: 0 0 20px;
+      }
+      .ek-legend .ek-icon {
+        vertical-align: -4px;
+        margin: 0 3px 0 0;
+      }
+      details.ek-year {
+        border: 1px solid #3a3a5e;
+        border-radius: 8px;
+        margin: 8px 0;
+        background: #232338;
+      }
+      details.ek-year > summary {
+        cursor: pointer;
+        padding: 8px 12px;
+        color: #dde;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      details.ek-year > summary:hover {
+        background: #2a2a44;
+      }
+      details.ek-year > summary b {
+        font-size: 15px;
+      }
+      .ek-minis {
+        vertical-align: -3px;
+        margin-left: 6px;
+        opacity: 0.85;
+      }
+      .ek-cards {
+        border-top: 1px solid #3a3a5e;
+      }
+      .ek-card {
+        display: flex;
+        gap: 10px;
+        padding: 9px 12px;
+        border-bottom: 1px solid #2c2c46;
+        align-items: center;
+      }
+      .ek-card:last-child {
+        border-bottom: none;
+      }
+      .ek-past {
+        opacity: 0.72;
+      }
+      .ek-main {
+        flex: 1 1 240px;
+        min-width: 0;
+      }
+      .ek-when b {
+        color: #dde;
+        font-variant-numeric: tabular-nums;
+      }
+      .ek-time {
+        color: #99a;
+        font-variant-numeric: tabular-nums;
+        margin-left: 6px;
+      }
+      .ek-desc {
+        margin-top: 1px;
+      }
+      .ek-where {
+        color: #889;
+        font-size: 12.5px;
+        font-variant-numeric: tabular-nums;
+      }
+      .ek-links {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        font-size: 13px;
+        text-align: right;
+        margin-left: auto;
+        flex: 0 0 auto;
+      }
+      .ek-extlink {
+        width: 10px;
+        height: 10px;
+        margin-left: 4px;
+        vertical-align: baseline;
+      }
+      .ek-today {
+        scroll-margin-top: 12px;
+        background: #1e3a2f;
+        border: 1px solid #2a6a4a;
+        color: #bdc;
+        border-radius: 6px;
+        text-align: center;
+        padding: 6px 10px;
+        margin: 10px 12px;
+        font-size: 13px;
+      }
+      .ek-error {
+        background: #402028;
+        border: 1px solid #804048;
+        border-radius: 6px;
+        padding: 10px 14px;
+        margin: 12px 0;
+      }
+      .ek-version {
+        text-align: center;
+        margin-top: 24px;
+        color: #667;
+        font-size: 11px;
+      }
+      @media (max-width: 480px) {
+        .ek-links {
+          flex-direction: row;
+          gap: 12px;
+          margin-left: 30px;
+          text-align: left;
+          flex-basis: 100%;
+        }
+        .ek-card {
+          flex-wrap: wrap;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Icon geometry for the six eclipse kinds. Color language: #f2e407 is
+         the Sun (Mauna Kea's sunColor), #d96a1a the eclipsed Moon (umbra hue
+         from the simulator's earthShadow.png, pushed toward orange per
+         Steve), #7e7e93 the sunlit Moon (deliberately darker than the #bbc
+         body text it sits beside), flat #4a6b96 the corona, and #1e1e32 dark
+         parts the Moon silhouette in front of the Sun. -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <defs>
+        <symbol id="ek-partial-solar" viewBox="0 0 24 24">
+          <circle cx="10.5" cy="13" r="8" fill="#f2e407" />
+          <circle cx="17.5" cy="7.5" r="7.5" fill="#1e1e32" />
+        </symbol>
+        <symbol id="ek-annular-solar" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="7" fill="none" stroke="#f2e407" stroke-width="4" />
+        </symbol>
+        <!-- Totality styled after the simulator's totalEclipse.png: black
+             disc inside a flat elongated steel-blue corona (hue sampled from
+             the PNG, #2e3f53 family). One tilted ellipse: gradients read tiny
+             at 20 px, and two crossed ellipses union into a near-circle. -->
+        <symbol id="ek-total-solar" viewBox="0 0 24 24">
+          <ellipse cx="12" cy="12" rx="11.9" ry="8.0" fill="#4a6b96" transform="rotate(-20 12 12)" />
+          <circle cx="12" cy="12" r="5.4" fill="#000005" />
+          <circle cx="12" cy="12" r="5.4" fill="none" stroke="#a9c0dc" stroke-width="0.7" opacity="0.85" />
+        </symbol>
+        <!-- Hybrid: annular ring wearing a faint corona — total mid-path,
+             annular at the ends. -->
+        <symbol id="ek-hybrid-solar" viewBox="0 0 24 24">
+          <ellipse cx="12" cy="12" rx="11.5" ry="8.6" fill="#4a6b96" opacity="0.5" transform="rotate(-20 12 12)" />
+          <circle cx="12" cy="12" r="6.6" fill="#1e1e32" stroke="#f2e407" stroke-width="2.4" />
+        </symbol>
+        <symbol id="ek-total-lunar" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="8" fill="#d96a1a" />
+          <circle cx="12" cy="12" r="8" fill="none" stroke="#7e7e93" stroke-width="0.8" opacity="0.5" />
+        </symbol>
+        <symbol id="ek-partial-lunar" viewBox="0 0 24 24">
+          <clipPath id="ek-clip-partial-lunar"><circle cx="13" cy="12" r="8" /></clipPath>
+          <circle cx="13" cy="12" r="8" fill="#7e7e93" />
+          <circle cx="3" cy="12" r="9.5" fill="#d96a1a" clip-path="url(#ek-clip-partial-lunar)" />
+        </symbol>
+      </defs>
+    </svg>
+
+    <div class="help-page">
+      <div class="ek-nav"><a class="back-link" href="help.html">&larr; General help</a></div>
+      <h1>Eclipse Table</h1>
+
+      <p>
+        Every solar and lunar eclipse from <span id="ek-span">2011 through 2041</span> &mdash;
+        <span id="ek-counts">solar and lunar eclipses</span>, listed by the moment of
+        <b>maximum eclipse</b> in UTC. The location is where the eclipse is greatest: for a solar
+        eclipse that point sees the deepest coverage of the Sun (for partial eclipses it always
+        falls at sunrise or sunset along the day/night line); for a lunar eclipse it is where the
+        Moon is straight overhead &mdash; the whole night side of Earth sees a lunar eclipse.
+        Penumbral lunar eclipses are omitted: the shading is barely perceptible by eye.
+      </p>
+      <p>
+        The <b>Observatory</b> link opens that instant and place in the Observatory, with its
+        eclipse simulator active; the <b>Chronometer</b> link opens the Basel, Venezia, and Selene
+        watch faces there (Venezia showing the Sun for solar eclipses, the Moon for lunar ones).
+        Both arrive with time frozen at maximum &mdash; press play to watch the eclipse unfold.
+        <b>Details</b> opens the eclipse&rsquo;s page on EclipseWise.
+      </p>
+
+      <div class="ek-legend">
+        <span><svg class="ek-icon" aria-hidden="true"><use href="#ek-partial-solar" /></svg><a href="https://en.wikipedia.org/wiki/Solar_eclipse" target="_blank" rel="noopener">Partial solar</a></span>
+        <span><svg class="ek-icon" aria-hidden="true"><use href="#ek-annular-solar" /></svg><a href="https://en.wikipedia.org/wiki/Solar_eclipse" target="_blank" rel="noopener">Annular solar</a></span>
+        <span><svg class="ek-icon" aria-hidden="true"><use href="#ek-total-solar" /></svg><a href="https://en.wikipedia.org/wiki/Solar_eclipse" target="_blank" rel="noopener">Total solar</a></span>
+        <span><svg class="ek-icon" aria-hidden="true"><use href="#ek-hybrid-solar" /></svg><a href="https://en.wikipedia.org/wiki/Hybrid_solar_eclipse" target="_blank" rel="noopener">Hybrid solar</a></span>
+        <span><svg class="ek-icon" aria-hidden="true"><use href="#ek-partial-lunar" /></svg><a href="https://en.wikipedia.org/wiki/Lunar_eclipse" target="_blank" rel="noopener">Partial lunar</a></span>
+        <span><svg class="ek-icon" aria-hidden="true"><use href="#ek-total-lunar" /></svg><a href="https://en.wikipedia.org/wiki/Lunar_eclipse" target="_blank" rel="noopener">Total lunar</a></span>
+      </div>
+
+      <p class="ek-source">
+        Eclipse Predictions by Fred Espenak, NASA&rsquo;s GSFC &mdash; scraped from the
+        <a href="https://eclipse.gsfc.nasa.gov/solar.html" target="_blank" rel="noopener">NASA GSFC eclipse site</a>
+        (the astronomer behind
+        <a href="https://mreclipse.com" target="_blank" rel="noopener">MrEclipse.com</a> and
+        <a href="https://www.eclipsewise.com" target="_blank" rel="noopener">EclipseWise.com</a>),
+        with positions refined from the published Besselian elements. Table generated
+        <span id="ek-generated">recently</span>; to extend it, run
+        <code>scripts/scrape-eclipses.mjs</code>.
+      </p>
+
+      <div class="ek-controls">
+        <a href="#today">Jump to today</a> &middot;
+        <a href="#" id="ek-expand">Show all years</a>
+      </div>
+      <div id="ek-stale" hidden></div>
+
+      <noscript>
+        <p class="ek-error">
+          The eclipse list needs JavaScript to render (it computes the UTC times and deep links
+          from the embedded data at view time, so they stay correct as time handling improves).
+        </p>
+      </noscript>
+
+      <div id="eclipse-list"></div>
+
+      <script type="application/json" id="eclipse-data">
+{
+ "meta": {
+  "generator": "scripts/scrape-eclipses.mjs",
+  "generated": "2026-08-19",
+  "startYear": 2011,
+  "endYear": 2041,
+  "acknowledgment": "Eclipse Predictions by Fred Espenak, NASA's GSFC",
+  "sources": [
+   "https://eclipse.gsfc.nasa.gov/SEcat5/SE2001-2100.html",
+   "https://eclipse.gsfc.nasa.gov/LEcat5/LE2001-2100.html",
+   "https://eclipse.gsfc.nasa.gov/SEsearch/SEdata.php",
+   "https://eclipse.gsfc.nasa.gov/SEdecade/SEdecade2011.html",
+   "https://eclipse.gsfc.nasa.gov/LEdecade/LEdecade2011.html",
+   "https://eclipse.gsfc.nasa.gov/SEdecade/SEdecade2021.html",
+   "https://eclipse.gsfc.nasa.gov/LEdecade/LEdecade2021.html",
+   "https://eclipse.gsfc.nasa.gov/SEdecade/SEdecade2031.html",
+   "https://eclipse.gsfc.nasa.gov/LEdecade/LEdecade2031.html",
+   "https://eclipse.gsfc.nasa.gov/SEdecade/SEdecade2041.html",
+   "https://eclipse.gsfc.nasa.gov/LEdecade/LEdecade2041.html"
+  ],
+  "note": "Penumbral lunar eclipses are omitted. tdMs is the TT (TDT) instant of greatest eclipse; derive UT at run time with the engine's ΔT (es-time convertETtoUT) — NASA's published UT labels bake in frozen ΔT predictions of assorted vintages, kept per row as nasaDeltaT for provenance. Solar positions are Besselian greatest-eclipse reductions from SEdata.php elements, emitted with the engine's ΔT and validated against NASA's path pages (0.5') and printed circumstances (0.25°); lunar positions are catalog values rounded to whole degrees. Region text is NASA's own, with lowercase compass abbreviations spelled out (\"c US\" to \"central US\") and stray punctuation tidied; capitalised forms are left alone because they are names, not directions (\"S. Africa\" is the country).",
+  "counts": {
+   "total": 115,
+   "solar": 70,
+   "lunar": 45
+  }
+ },
+ "eclipses": [
+  {
+   "tdMs": 1294131102397,
+   "nasaDeltaT": 67.1,
+   "kind": "partial-solar",
+   "region": "Europe, Africa, central Asia",
+   "pathRegion": null,
+   "lat": 64.6769,
+   "lon": 20.8917,
+   "coordSource": "besselian",
+   "tz": "Europe/Stockholm",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2011Jan04Pprime.html"
+  },
+  {
+   "tdMs": 1306963038397,
+   "nasaDeltaT": 67.3,
+   "kind": "partial-solar",
+   "region": "eastern Asia, northern N. America, Iceland",
+   "pathRegion": null,
+   "lat": 67.7838,
+   "lon": 46.7484,
+   "coordSource": "besselian",
+   "tz": "Europe/Moscow",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2011Jun01Pprime.html"
+  },
+  {
+   "tdMs": 1308168823000,
+   "nasaDeltaT": 67,
+   "kind": "total-lunar",
+   "region": "S.America, Europe, Africa, Asia, Aus.",
+   "pathRegion": null,
+   "lat": -23,
+   "lon": 57,
+   "coordSource": "catalog",
+   "tz": "Indian/Reunion",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2011Jun15Tprime.html"
+  },
+  {
+   "tdMs": 1309509570297,
+   "nasaDeltaT": 67.3,
+   "kind": "partial-solar",
+   "region": "southern Indian Ocean",
+   "pathRegion": null,
+   "lat": -65.1699,
+   "lon": 28.6873,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT-2",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2011Jul01Pprime.html"
+  },
+  {
+   "tdMs": 1322202084458,
+   "nasaDeltaT": 67.5,
+   "kind": "partial-solar",
+   "region": "southern Africa, Antarctica, Tasmania, N.Z.",
+   "pathRegion": null,
+   "lat": -68.5767,
+   "lon": -82.5325,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT+6",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2011Nov25Pprime.html"
+  },
+  {
+   "tdMs": 1323527576000,
+   "nasaDeltaT": 68,
+   "kind": "total-lunar",
+   "region": "Europe, eastern Africa, Asia, Aus., Pacific, N.A.",
+   "pathRegion": null,
+   "lat": 23,
+   "lon": 140,
+   "coordSource": "catalog",
+   "tz": "Etc/GMT-9",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2011Dec10Tprime.html"
+  },
+  {
+   "tdMs": 1337558033599,
+   "nasaDeltaT": 67.7,
+   "kind": "annular-solar",
+   "region": "Asia, Pacific, N. America",
+   "pathRegion": "China, Japan, Pacific, western U.S.",
+   "lat": 49.0943,
+   "lon": 176.2711,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT-12",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2012May20Aprime.html"
+  },
+  {
+   "tdMs": 1338807860000,
+   "nasaDeltaT": 68,
+   "kind": "partial-lunar",
+   "region": "Asia, Aus., Pacific, Americas",
+   "pathRegion": null,
+   "lat": -22,
+   "lon": -166,
+   "coordSource": "catalog",
+   "tz": "Etc/GMT+11",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2012Jun04Pprime.html"
+  },
+  {
+   "tdMs": 1352844775165,
+   "nasaDeltaT": 67.9,
+   "kind": "total-solar",
+   "region": "Australia, N.Z., southern Pacific, southern S. America",
+   "pathRegion": "northern Australia, southern Pacific",
+   "lat": -39.9565,
+   "lon": -161.3354,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT+11",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2012Nov13Tprime.html"
+  },
+  {
+   "tdMs": 1366920518000,
+   "nasaDeltaT": 68,
+   "kind": "partial-lunar",
+   "region": "Europe, Africa, Asia, Aus.",
+   "pathRegion": null,
+   "lat": -14,
+   "lon": 57,
+   "coordSource": "catalog",
+   "tz": "Indian/Mauritius",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2013Apr25Pprime.html"
+  },
+  {
+   "tdMs": 1368145580271,
+   "nasaDeltaT": 68.2,
+   "kind": "annular-solar",
+   "region": "Australia, N.Z., central Pacific",
+   "pathRegion": "northern Australia, Solomon Is., central Pacific",
+   "lat": 2.2206,
+   "lon": 175.4665,
+   "coordSource": "besselian",
+   "tz": "Pacific/Tarawa",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2013May10Aprime.html"
+  },
+  {
+   "tdMs": 1383482856064,
+   "nasaDeltaT": 68.4,
+   "kind": "hybrid-solar",
+   "region": "eastern Americas, southern Europe, Africa",
+   "pathRegion": "Atlantic, central Africa",
+   "lat": 3.4906,
+   "lon": -11.6986,
+   "coordSource": "besselian",
+   "tz": "Africa/Monrovia",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2013Nov03Hprime.html"
+  },
+  {
+   "tdMs": 1397548008000,
+   "nasaDeltaT": 69,
+   "kind": "total-lunar",
+   "region": "Aus., Pacific, Americas",
+   "pathRegion": null,
+   "lat": -10,
+   "lon": -116,
+   "coordSource": "catalog",
+   "tz": "Etc/GMT+8",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2014Apr15Tprime.html"
+  },
+  {
+   "tdMs": 1398751472831,
+   "nasaDeltaT": 68.6,
+   "kind": "annular-solar",
+   "region": "southern Indian, Australia, Antarctica",
+   "pathRegion": "Antarctica",
+   "lat": -70.6972,
+   "lon": 131.1158,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT-9",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2014Apr29Aprime.html"
+  },
+  {
+   "tdMs": 1412765744000,
+   "nasaDeltaT": 69,
+   "kind": "total-lunar",
+   "region": "Asia, Aus., Pacific, Americas",
+   "pathRegion": null,
+   "lat": 6,
+   "lon": -167,
+   "coordSource": "catalog",
+   "tz": "Etc/GMT+11",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2014Oct08Tprime.html"
+  },
+  {
+   "tdMs": 1414100739209,
+   "nasaDeltaT": 68.9,
+   "kind": "partial-solar",
+   "region": "northern Pacific, N. America",
+   "pathRegion": null,
+   "lat": 71.2341,
+   "lon": -97.2893,
+   "coordSource": "besselian",
+   "tz": "America/Cambridge_Bay",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2014Oct23Pprime.html"
+  },
+  {
+   "tdMs": 1426844806814,
+   "nasaDeltaT": 69.1,
+   "kind": "total-solar",
+   "region": "Iceland, Europe, northern Africa, northern Asia",
+   "pathRegion": "northern Atlantic, Faeroe Is, Svalbard",
+   "lat": 64.4324,
+   "lon": -6.6501,
+   "coordSource": "besselian",
+   "tz": "Atlantic/Faroe",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2015Mar20Tprime.html"
+  },
+  {
+   "tdMs": 1428148884000,
+   "nasaDeltaT": 69,
+   "kind": "total-lunar",
+   "region": "Asia, Aus., Pacific, Americas",
+   "pathRegion": null,
+   "lat": -5,
+   "lon": -179,
+   "coordSource": "catalog",
+   "tz": "Pacific/Funafuti",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2015Apr04Tprime.html"
+  },
+  {
+   "tdMs": 1442127319178,
+   "nasaDeltaT": 69.3,
+   "kind": "partial-solar",
+   "region": "southern Africa, southern Indian, Antarctica",
+   "pathRegion": null,
+   "lat": -72.2033,
+   "lon": -2.2869,
+   "coordSource": "besselian",
+   "tz": "UTC",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2015Sep13Pprime.html"
+  },
+  {
+   "tdMs": 1443408497000,
+   "nasaDeltaT": 69,
+   "kind": "total-lunar",
+   "region": "eastern Pacific, Americas, Europe, Africa, western Asia",
+   "pathRegion": null,
+   "lat": 2,
+   "lon": -44,
+   "coordSource": "catalog",
+   "tz": "America/Fortaleza",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2015Sep28Tprime.html"
+  },
+  {
+   "tdMs": 1457488699452,
+   "nasaDeltaT": 69.6,
+   "kind": "total-solar",
+   "region": "eastern Asia, Australia, Pacific",
+   "pathRegion": "Sumatra, Borneo, Sulawesi, Pacific",
+   "lat": 10.1217,
+   "lon": 148.7939,
+   "coordSource": "besselian",
+   "tz": "Pacific/Chuuk",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2016Mar09Tprime.html"
+  },
+  {
+   "tdMs": 1472720882003,
+   "nasaDeltaT": 69.8,
+   "kind": "annular-solar",
+   "region": "Africa, Indian Ocean",
+   "pathRegion": "Atlantic, central Africa, Madagascar, Indian",
+   "lat": -10.6808,
+   "lon": 37.7613,
+   "coordSource": "besselian",
+   "tz": "Africa/Dar_es_Salaam",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2016Sep01Aprime.html"
+  },
+  {
+   "tdMs": 1488120872806,
+   "nasaDeltaT": 70,
+   "kind": "annular-solar",
+   "region": "southern S. America, Atlantic, Africa, Antarctica",
+   "pathRegion": "Pacific, Chile, Argentina, Atlantic, Africa",
+   "lat": -34.6797,
+   "lon": -31.1879,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT+2",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2017Feb26Aprime.html"
+  },
+  {
+   "tdMs": 1502130098000,
+   "nasaDeltaT": 70,
+   "kind": "partial-lunar",
+   "region": "Europe, Africa, Asia, Aus.",
+   "pathRegion": null,
+   "lat": -15,
+   "lon": 86,
+   "coordSource": "catalog",
+   "tz": "Etc/GMT-6",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2017Aug07Pprime.html"
+  },
+  {
+   "tdMs": 1503340000217,
+   "nasaDeltaT": 70.3,
+   "kind": "total-solar",
+   "region": "N. America, northern S. America",
+   "pathRegion": "northern Pacific, U.S., southern Atlantic",
+   "lat": 36.9664,
+   "lon": -87.6685,
+   "coordSource": "besselian",
+   "tz": "America/Chicago",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2017Aug21Tprime.html"
+  },
+  {
+   "tdMs": 1517405460000,
+   "nasaDeltaT": 71,
+   "kind": "total-lunar",
+   "region": "Asia, Aus., Pacific, western N.America",
+   "pathRegion": null,
+   "lat": 17,
+   "lon": 161,
+   "coordSource": "catalog",
+   "tz": "Etc/GMT-11",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2018Jan31Tprime.html"
+  },
+  {
+   "tdMs": 1518727953237,
+   "nasaDeltaT": 70.5,
+   "kind": "partial-solar",
+   "region": "Antarctica, southern S. America",
+   "pathRegion": null,
+   "lat": -71.0815,
+   "lon": 0.8363,
+   "coordSource": "besselian",
+   "tz": "UTC",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2018Feb15Pprime.html"
+  },
+  {
+   "tdMs": 1531450936126,
+   "nasaDeltaT": 70.8,
+   "kind": "partial-solar",
+   "region": "southern Australia",
+   "pathRegion": null,
+   "lat": -67.9253,
+   "lon": 127.4581,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT-8",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2018Jul13Pprime.html"
+  },
+  {
+   "tdMs": 1532722974000,
+   "nasaDeltaT": 71,
+   "kind": "total-lunar",
+   "region": "S.America, Europe, Africa, Asia, Aus.",
+   "pathRegion": null,
+   "lat": -19,
+   "lon": 56,
+   "coordSource": "catalog",
+   "tz": "Indian/Mauritius",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2018Jul27Tprime.html"
+  },
+  {
+   "tdMs": 1533980847901,
+   "nasaDeltaT": 70.8,
+   "kind": "partial-solar",
+   "region": "northern Europe, northeastern Asia",
+   "pathRegion": null,
+   "lat": 70.4292,
+   "lon": 174.6569,
+   "coordSource": "besselian",
+   "tz": "Asia/Anadyr",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2018Aug11Pprime.html"
+  },
+  {
+   "tdMs": 1546738957640,
+   "nasaDeltaT": 71,
+   "kind": "partial-solar",
+   "region": "northeastern Asia, northern Pacific",
+   "pathRegion": null,
+   "lat": 67.4352,
+   "lon": 153.5708,
+   "coordSource": "besselian",
+   "tz": "Asia/Magadan",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2019Jan06Pprime.html"
+  },
+  {
+   "tdMs": 1548047607000,
+   "nasaDeltaT": 71,
+   "kind": "total-lunar",
+   "region": "central Pacific, Americas, Europe, Africa",
+   "pathRegion": null,
+   "lat": 20,
+   "lon": -75,
+   "coordSource": "catalog",
+   "tz": "America/New_York",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2019Jan21Tprime.html"
+  },
+  {
+   "tdMs": 1562095447484,
+   "nasaDeltaT": 71.3,
+   "kind": "total-solar",
+   "region": "southern Pacific, S. America",
+   "pathRegion": "southern Pacific, Chile, Argentina",
+   "lat": -17.389,
+   "lon": -108.9996,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT+7",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2019Jul02Tprime.html"
+  },
+  {
+   "tdMs": 1563312715000,
+   "nasaDeltaT": 71,
+   "kind": "partial-lunar",
+   "region": "S.America, Europe, Africa, Asia, Aus.",
+   "pathRegion": null,
+   "lat": -22,
+   "lon": 39,
+   "coordSource": "catalog",
+   "tz": "Africa/Maputo",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2019Jul16Pprime.html"
+  },
+  {
+   "tdMs": 1577337533052,
+   "nasaDeltaT": 71.5,
+   "kind": "annular-solar",
+   "region": "Asia, Australia",
+   "pathRegion": "Saudi Arabia, India, Sumatra, Borneo",
+   "lat": 1.0089,
+   "lon": 102.2465,
+   "coordSource": "besselian",
+   "tz": "Asia/Jakarta",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2019Dec26Aprime.html"
+  },
+  {
+   "tdMs": 1592721675396,
+   "nasaDeltaT": 71.8,
+   "kind": "annular-solar",
+   "region": "Africa, southeastern Europe, Asia",
+   "pathRegion": "central Africa, southern Asia, China, Pacific",
+   "lat": 30.5197,
+   "lon": 79.6639,
+   "coordSource": "besselian",
+   "tz": "Asia/Kolkata",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2020Jun21Aprime.html"
+  },
+  {
+   "tdMs": 1607962479345,
+   "nasaDeltaT": 72.1,
+   "kind": "total-solar",
+   "region": "Pacific, southern S. America, Antarctica",
+   "pathRegion": "southern Pacific, Chile, Argentina, southern Atlantic",
+   "lat": -40.3356,
+   "lon": -67.9606,
+   "coordSource": "besselian",
+   "tz": "America/Argentina/Salta",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2020Dec14Tprime.html"
+  },
+  {
+   "tdMs": 1622027993000,
+   "nasaDeltaT": 72,
+   "kind": "total-lunar",
+   "region": "eastern Asia, Australia, Pacific, Americas",
+   "pathRegion": null,
+   "lat": -21,
+   "lon": -170,
+   "coordSource": "catalog",
+   "tz": "Pacific/Niue",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2021May26Tprime.html"
+  },
+  {
+   "tdMs": 1623321786657,
+   "nasaDeltaT": 72.3,
+   "kind": "annular-solar",
+   "region": "northern N. America, Europe, Asia",
+   "pathRegion": "northern Canada, Greenland, Russia",
+   "lat": 80.8149,
+   "lon": -66.7773,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT+4",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2021Jun10Aprime.html"
+  },
+  {
+   "tdMs": 1637312646000,
+   "nasaDeltaT": 73,
+   "kind": "partial-lunar",
+   "region": "Americas, northern Europe, eastern Asia, Australia, Pacific",
+   "pathRegion": null,
+   "lat": 19,
+   "lon": -139,
+   "coordSource": "catalog",
+   "tz": "Etc/GMT+9",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2021Nov19Pprime.html"
+  },
+  {
+   "tdMs": 1638603277846,
+   "nasaDeltaT": 72.6,
+   "kind": "total-solar",
+   "region": "Antarctica, S. Africa, southern Atlantic",
+   "pathRegion": "Antarctica",
+   "lat": -76.7765,
+   "lon": -46.2312,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT+3",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2021Dec04Tprime.html"
+  },
+  {
+   "tdMs": 1651351356498,
+   "nasaDeltaT": 72.8,
+   "kind": "partial-solar",
+   "region": "southeastern Pacific, southern S. America",
+   "pathRegion": null,
+   "lat": -62.2088,
+   "lon": -71.5486,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT+5",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2022Apr30Pprime.html"
+  },
+  {
+   "tdMs": 1652674362000,
+   "nasaDeltaT": 73,
+   "kind": "total-lunar",
+   "region": "Americas, Europe, Africa",
+   "pathRegion": null,
+   "lat": -19,
+   "lon": -64,
+   "coordSource": "catalog",
+   "tz": "America/La_Paz",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2022May16Tprime.html"
+  },
+  {
+   "tdMs": 1666695679995,
+   "nasaDeltaT": 73.1,
+   "kind": "partial-solar",
+   "region": "Europe, northeastern Africa, Mid East, western Asia",
+   "pathRegion": null,
+   "lat": 61.7688,
+   "lon": 77.2822,
+   "coordSource": "besselian",
+   "tz": "Asia/Yekaterinburg",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2022Oct25Pprime.html"
+  },
+  {
+   "tdMs": 1667905222000,
+   "nasaDeltaT": 73,
+   "kind": "total-lunar",
+   "region": "Asia, Australia, Pacific, Americas",
+   "pathRegion": null,
+   "lat": 17,
+   "lon": -169,
+   "coordSource": "catalog",
+   "tz": "Etc/GMT+11",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2022Nov08Tprime.html"
+  },
+  {
+   "tdMs": 1681964275947,
+   "nasaDeltaT": 73.4,
+   "kind": "hybrid-solar",
+   "region": "southeastern Asia, E. Indies, Australia, Philippines. N.Z.",
+   "pathRegion": "Indonesia, Australia, Papua New Guinea",
+   "lat": -9.5945,
+   "lon": 125.7723,
+   "coordSource": "besselian",
+   "tz": "Asia/Dili",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2023Apr20Hprime.html"
+  },
+  {
+   "tdMs": 1697306440573,
+   "nasaDeltaT": 73.7,
+   "kind": "annular-solar",
+   "region": "N. America, C. America, S. America",
+   "pathRegion": "western US, C. America, Colombia, Brazil",
+   "lat": 11.368,
+   "lon": -83.1109,
+   "coordSource": "besselian",
+   "tz": "America/Managua",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2023Oct14Aprime.html"
+  },
+  {
+   "tdMs": 1698524118000,
+   "nasaDeltaT": 74,
+   "kind": "partial-lunar",
+   "region": "eastern Americas, Europe, Africa, Asia, Australia",
+   "pathRegion": null,
+   "lat": 14,
+   "lon": 52,
+   "coordSource": "catalog",
+   "tz": "Asia/Aden",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2023Oct28Pprime.html"
+  },
+  {
+   "tdMs": 1712600309382,
+   "nasaDeltaT": 74,
+   "kind": "total-solar",
+   "region": "N. America, C. America",
+   "pathRegion": "Mexico, central US, eastern Canada",
+   "lat": 25.2895,
+   "lon": -104.1477,
+   "coordSource": "besselian",
+   "tz": "America/Monterrey",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2024Apr08Tprime.html"
+  },
+  {
+   "tdMs": 1726627525000,
+   "nasaDeltaT": 74,
+   "kind": "partial-lunar",
+   "region": "Americas, Europe, Africa",
+   "pathRegion": null,
+   "lat": -3,
+   "lon": -42,
+   "coordSource": "catalog",
+   "tz": "America/Fortaleza",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2024Sep18Pprime.html"
+  },
+  {
+   "tdMs": 1727894773285,
+   "nasaDeltaT": 74.3,
+   "kind": "annular-solar",
+   "region": "Pacific, southern S. America",
+   "pathRegion": "southern Chile, southern Argentina",
+   "lat": -21.9528,
+   "lon": -114.519,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT+8",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2024Oct02Aprime.html"
+  },
+  {
+   "tdMs": 1741935596000,
+   "nasaDeltaT": 75,
+   "kind": "total-lunar",
+   "region": "Pacific, Americas, western Europe, western Africa",
+   "pathRegion": null,
+   "lat": 3,
+   "lon": -102,
+   "coordSource": "catalog",
+   "tz": "Etc/GMT+7",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2025Mar14Tprime.html"
+  },
+  {
+   "tdMs": 1743245316021,
+   "nasaDeltaT": 74.5,
+   "kind": "partial-solar",
+   "region": "northwestern Africa, Europe, northern Russia",
+   "pathRegion": null,
+   "lat": 61.2537,
+   "lon": -77.2099,
+   "coordSource": "besselian",
+   "tz": "America/Toronto",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2025Mar29Pprime.html"
+  },
+  {
+   "tdMs": 1757268778000,
+   "nasaDeltaT": 75,
+   "kind": "total-lunar",
+   "region": "Europe, Africa, Asia, Australia",
+   "pathRegion": null,
+   "lat": -6,
+   "lon": 87,
+   "coordSource": "catalog",
+   "tz": "Etc/GMT-6",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2025Sep07Tprime.html"
+  },
+  {
+   "tdMs": 1758483784208,
+   "nasaDeltaT": 74.8,
+   "kind": "partial-solar",
+   "region": "southern Pacific, N.Z., Antarctica",
+   "pathRegion": null,
+   "lat": -61.0541,
+   "lon": 153.4084,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT-10",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2025Sep21Pprime.html"
+  },
+  {
+   "tdMs": 1771330385808,
+   "nasaDeltaT": 75.1,
+   "kind": "annular-solar",
+   "region": "southern Argentina & Chile, southern Africa, Antarctica",
+   "pathRegion": "Antarctica",
+   "lat": -64.7179,
+   "lon": 86.7265,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT-6",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2026Feb17Aprime.html"
+  },
+  {
+   "tdMs": 1772537692000,
+   "nasaDeltaT": 75,
+   "kind": "total-lunar",
+   "region": "eastern Asia, Australia, Pacific, Americas",
+   "pathRegion": null,
+   "lat": 6,
+   "lon": -171,
+   "coordSource": "catalog",
+   "tz": "Etc/GMT+11",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2026Mar03Tprime.html"
+  },
+  {
+   "tdMs": 1786556825731,
+   "nasaDeltaT": 75.4,
+   "kind": "total-solar",
+   "region": "northern N. America, western Africa, Europe",
+   "pathRegion": "Arctic, Greenland, Iceland, Spain",
+   "lat": 65.2234,
+   "lon": -25.2421,
+   "coordSource": "besselian",
+   "tz": "Atlantic/Reykjavik",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2026Aug12Tprime.html"
+  },
+  {
+   "tdMs": 1787890444000,
+   "nasaDeltaT": 75,
+   "kind": "partial-lunar",
+   "region": "eastern Pacific, Americas, Europe, Africa",
+   "pathRegion": null,
+   "lat": -9,
+   "lon": -63,
+   "coordSource": "catalog",
+   "tz": "America/Porto_Velho",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2026Aug28Pprime.html"
+  },
+  {
+   "tdMs": 1801929647745,
+   "nasaDeltaT": 75.7,
+   "kind": "annular-solar",
+   "region": "S. America, Antarctica, western & southern Africa",
+   "pathRegion": "Chile, Argentina, Atlantic",
+   "lat": -31.3025,
+   "lon": -48.4814,
+   "coordSource": "besselian",
+   "tz": "America/Sao_Paulo",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2027Feb06Aprime.html"
+  },
+  {
+   "tdMs": 1817201270153,
+   "nasaDeltaT": 76,
+   "kind": "total-solar",
+   "region": "Africa, Europe, Mid East, western & southern Asia",
+   "pathRegion": "Morocco, Spain, Algeria, Libya, Egypt, Saudi Arabia, Yemen, Somalia",
+   "lat": 25.5024,
+   "lon": 33.168,
+   "coordSource": "besselian",
+   "tz": "Africa/Cairo",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2027Aug02Tprime.html"
+  },
+  {
+   "tdMs": 1831263253000,
+   "nasaDeltaT": 76,
+   "kind": "partial-lunar",
+   "region": "Americas, Europe, Africa",
+   "pathRegion": null,
+   "lat": 23,
+   "lon": -61,
+   "coordSource": "catalog",
+   "tz": "Etc/GMT+4",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2028Jan12Pprime.html"
+  },
+  {
+   "tdMs": 1832512138760,
+   "nasaDeltaT": 76.3,
+   "kind": "annular-solar",
+   "region": "eastern N. America, C. & S. America, western Europe, northwestern Africa",
+   "pathRegion": "Ecuador, Peru, Brazil, Suriname, Spain, Portugal",
+   "lat": 2.9604,
+   "lon": -51.5743,
+   "coordSource": "besselian",
+   "tz": "America/Belem",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2028Jan26Aprime.html"
+  },
+  {
+   "tdMs": 1846520457000,
+   "nasaDeltaT": 77,
+   "kind": "partial-lunar",
+   "region": "Europe, Africa, Asia, Australia",
+   "pathRegion": null,
+   "lat": -23,
+   "lon": 86,
+   "coordSource": "catalog",
+   "tz": "Etc/GMT-6",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2028Jul06Pprime.html"
+  },
+  {
+   "tdMs": 1847847399540,
+   "nasaDeltaT": 76.6,
+   "kind": "total-solar",
+   "region": "SE Asia, E. Indies, Australia, N.Z.",
+   "pathRegion": "Australia, N. Z.",
+   "lat": -15.5791,
+   "lon": 126.6932,
+   "coordSource": "besselian",
+   "tz": "Australia/Perth",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2028Jul22Tprime.html"
+  },
+  {
+   "tdMs": 1861894395000,
+   "nasaDeltaT": 77,
+   "kind": "total-lunar",
+   "region": "Europe, Africa, Asia, Australia, Pacific",
+   "pathRegion": null,
+   "lat": 23,
+   "lon": 108,
+   "coordSource": "catalog",
+   "tz": "Asia/Shanghai",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2028Dec31Tprime.html"
+  },
+  {
+   "tdMs": 1863105227526,
+   "nasaDeltaT": 76.9,
+   "kind": "partial-solar",
+   "region": "N. America, C. America",
+   "pathRegion": null,
+   "lat": 63.7507,
+   "lon": -114.1283,
+   "coordSource": "besselian",
+   "tz": "America/Edmonton",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2029Jan14Pprime.html"
+  },
+  {
+   "tdMs": 1875931573057,
+   "nasaDeltaT": 77.2,
+   "kind": "partial-solar",
+   "region": "Arctic, Scandanavia, Alaska, northern Asia, northern Canada",
+   "pathRegion": null,
+   "lat": 66.7652,
+   "lon": -66.1704,
+   "coordSource": "besselian",
+   "tz": "America/Iqaluit",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2029Jun12Pprime.html"
+  },
+  {
+   "tdMs": 1877138602000,
+   "nasaDeltaT": 77,
+   "kind": "total-lunar",
+   "region": "Americas, Europe, Africa, Mid East",
+   "pathRegion": null,
+   "lat": -23,
+   "lon": -50,
+   "coordSource": "catalog",
+   "tz": "America/Sao_Paulo",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2029Jun26Tprime.html"
+  },
+  {
+   "tdMs": 1878478638936,
+   "nasaDeltaT": 77.2,
+   "kind": "partial-solar",
+   "region": "southern Chile, southern Argentina",
+   "pathRegion": null,
+   "lat": -64.2905,
+   "lon": -85.5665,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT+6",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2029Jul11Pprime.html"
+  },
+  {
+   "tdMs": 1891177437916,
+   "nasaDeltaT": 77.5,
+   "kind": "partial-solar",
+   "region": "southern Argentina, southern Chile, Antarctica",
+   "pathRegion": null,
+   "lat": -67.5139,
+   "lon": 135.61,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT-9",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2029Dec05Pprime.html"
+  },
+  {
+   "tdMs": 1892500992000,
+   "nasaDeltaT": 78,
+   "kind": "total-lunar",
+   "region": "Americas, Europe, Africa, Asia",
+   "pathRegion": null,
+   "lat": 23,
+   "lon": 19,
+   "coordSource": "catalog",
+   "tz": "Africa/Ndjamena",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2029Dec20Tprime.html"
+  },
+  {
+   "tdMs": 1906525752843,
+   "nasaDeltaT": 77.8,
+   "kind": "annular-solar",
+   "region": "Europe, northern Africa, Mid East, Asia, Arctic, Alaska",
+   "pathRegion": "Algeria, Tunisia, Greece, Turkey, Russia, northern China, Japan",
+   "lat": 56.5256,
+   "lon": 80.0495,
+   "coordSource": "besselian",
+   "tz": "Asia/Novosibirsk",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2030Jun01Aprime.html"
+  },
+  {
+   "tdMs": 1907778874000,
+   "nasaDeltaT": 78,
+   "kind": "partial-lunar",
+   "region": "Europe, Africa, Asia, Australia",
+   "pathRegion": null,
+   "lat": -23,
+   "lon": 82,
+   "coordSource": "catalog",
+   "tz": "Etc/GMT-5",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2030Jun15Pprime.html"
+  },
+  {
+   "tdMs": 1921819896871,
+   "nasaDeltaT": 78.1,
+   "kind": "total-solar",
+   "region": "southern Africa, southern Indian Oc., E. Indies, Australia, Antarctica",
+   "pathRegion": "Botswana, S. Africa, Australia",
+   "lat": -43.6098,
+   "lon": 71.216,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT-5",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2030Nov25Tprime.html"
+  },
+  {
+   "tdMs": 1937114164272,
+   "nasaDeltaT": 78.5,
+   "kind": "annular-solar",
+   "region": "Africa, southern Asia, E. Indies, Australia",
+   "pathRegion": "Angola, Congo, Zambia, Tanzania, southern India, Malaysia, Indonesia",
+   "lat": 8.9264,
+   "lon": 71.7156,
+   "coordSource": "besselian",
+   "tz": "Asia/Kolkata",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2031May21Aprime.html"
+  },
+  {
+   "tdMs": 1952456850660,
+   "nasaDeltaT": 78.8,
+   "kind": "hybrid-solar",
+   "region": "Pacific, southern US, C. America, northwestern S. America",
+   "pathRegion": "Pacific, Panama",
+   "lat": -0.6322,
+   "lon": -137.6561,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT+9",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2031Nov14Hprime.html"
+  },
+  {
+   "tdMs": 1966518891000,
+   "nasaDeltaT": 79,
+   "kind": "total-lunar",
+   "region": "eastern Africa, Asia, Australia, Pacific",
+   "pathRegion": null,
+   "lat": -14,
+   "lon": 131,
+   "coordSource": "catalog",
+   "tz": "Australia/Darwin",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2032Apr25Tprime.html"
+  },
+  {
+   "tdMs": 1967722002369,
+   "nasaDeltaT": 79.1,
+   "kind": "annular-solar",
+   "region": "southern S. America, southern Africa",
+   "pathRegion": "southern Atlantic",
+   "lat": -51.2615,
+   "lon": -7.0838,
+   "coordSource": "besselian",
+   "tz": "UTC",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2032May09Aprime.html"
+  },
+  {
+   "tdMs": 1981739020000,
+   "nasaDeltaT": 79,
+   "kind": "total-lunar",
+   "region": "Africa, Europe, Asia, Australia",
+   "pathRegion": null,
+   "lat": 10,
+   "lon": 71,
+   "coordSource": "catalog",
+   "tz": "Asia/Kolkata",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2032Oct18Tprime.html"
+  },
+  {
+   "tdMs": 1983072852865,
+   "nasaDeltaT": 79.5,
+   "kind": "partial-solar",
+   "region": "Asia",
+   "pathRegion": null,
+   "lat": 70.4715,
+   "lon": 132.4702,
+   "coordSource": "besselian",
+   "tz": "Asia/Vladivostok",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2032Nov03Pprime.html"
+  },
+  {
+   "tdMs": 1995818555697,
+   "nasaDeltaT": 79.7,
+   "kind": "total-solar",
+   "region": "N. America",
+   "pathRegion": "eastern Russia, Alaska",
+   "lat": 71.3156,
+   "lon": -155.8427,
+   "coordSource": "besselian",
+   "tz": "America/Anchorage",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2033Mar30Tprime.html"
+  },
+  {
+   "tdMs": 1997118831000,
+   "nasaDeltaT": 80,
+   "kind": "total-lunar",
+   "region": "Europe, Africa, Asia, Australia",
+   "pathRegion": null,
+   "lat": -9,
+   "lon": 72,
+   "coordSource": "catalog",
+   "tz": "Indian/Chagos",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2033Apr14Tprime.html"
+  },
+  {
+   "tdMs": 2011096471207,
+   "nasaDeltaT": 80.1,
+   "kind": "partial-solar",
+   "region": "southern S. America, Antarctica",
+   "pathRegion": null,
+   "lat": -72.2989,
+   "lon": -121.3259,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT+8",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2033Sep23Pprime.html"
+  },
+  {
+   "tdMs": 2012381783000,
+   "nasaDeltaT": 80,
+   "kind": "total-lunar",
+   "region": "Asia, Australia, Pacific, Americas",
+   "pathRegion": null,
+   "lat": 6,
+   "lon": -167,
+   "coordSource": "catalog",
+   "tz": "Etc/GMT+11",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2033Oct08Tprime.html"
+  },
+  {
+   "tdMs": 2026462725171,
+   "nasaDeltaT": 80.4,
+   "kind": "total-solar",
+   "region": "Africa, Europe, western Asia",
+   "pathRegion": "Nigeria, Cameroon, Chad, Sudan, Egypt, Saudi Arabia, Iran, Afghanistan, Pakistan, India, China",
+   "lat": 16.0557,
+   "lon": 22.2096,
+   "coordSource": "besselian",
+   "tz": "Africa/Ndjamena",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2034Mar20Tprime.html"
+  },
+  {
+   "tdMs": 2041690767514,
+   "nasaDeltaT": 80.7,
+   "kind": "annular-solar",
+   "region": "C. America, S. America",
+   "pathRegion": "Chile, Bolivia, Argentina, Paraguay, Brazil",
+   "lat": -18.242,
+   "lon": -72.6313,
+   "coordSource": "besselian",
+   "tz": "America/Lima",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2034Sep12Aprime.html"
+  },
+  {
+   "tdMs": 2043024457000,
+   "nasaDeltaT": 81,
+   "kind": "partial-lunar",
+   "region": "Americas, Europe, Africa",
+   "pathRegion": null,
+   "lat": 1,
+   "lon": -44,
+   "coordSource": "catalog",
+   "tz": "America/Fortaleza",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2034Sep28Pprime.html"
+  },
+  {
+   "tdMs": 2057094353558,
+   "nasaDeltaT": 81.1,
+   "kind": "annular-solar",
+   "region": "Australia, New Zealand, southern Pacific, Mexico, Antarctica",
+   "pathRegion": "New Zealand, Pacific",
+   "lat": -29.043,
+   "lon": -154.9749,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT+10",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2035Mar09Aprime.html"
+  },
+  {
+   "tdMs": 2071098735000,
+   "nasaDeltaT": 81,
+   "kind": "partial-lunar",
+   "region": "Americas, Europe, Africa, Mid East",
+   "pathRegion": null,
+   "lat": -12,
+   "lon": -17,
+   "coordSource": "catalog",
+   "tz": "Etc/GMT+1",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2035Aug19Pprime.html"
+  },
+  {
+   "tdMs": 2072311006317,
+   "nasaDeltaT": 81.4,
+   "kind": "total-solar",
+   "region": "eastern Asia, Pacific",
+   "pathRegion": "China, Korea, Japan, Pacific",
+   "lat": 29.0933,
+   "lon": 158.0084,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT-11",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2035Sep02Tprime.html"
+  },
+  {
+   "tdMs": 2086380786000,
+   "nasaDeltaT": 82,
+   "kind": "total-lunar",
+   "region": "Americas, Europe, Africa, Asia, western Australia",
+   "pathRegion": null,
+   "lat": 14,
+   "lon": 31,
+   "coordSource": "catalog",
+   "tz": "Africa/Khartoum",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2036Feb11Tprime.html"
+  },
+  {
+   "tdMs": 2087700408999,
+   "nasaDeltaT": 81.8,
+   "kind": "partial-solar",
+   "region": "Antarctica, southern Australia, New Zealand",
+   "pathRegion": null,
+   "lat": -71.7234,
+   "lon": -131.2823,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT+9",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2036Feb27Pprime.html"
+  },
+  {
+   "tdMs": 2100421926457,
+   "nasaDeltaT": 82.1,
+   "kind": "partial-solar",
+   "region": "southern Atlantic",
+   "pathRegion": null,
+   "lat": -68.8925,
+   "lon": 3.5913,
+   "coordSource": "besselian",
+   "tz": "UTC",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2036Jul23Pprime.html"
+  },
+  {
+   "tdMs": 2101690352000,
+   "nasaDeltaT": 82,
+   "kind": "total-lunar",
+   "region": "Americas, Europe, Africa, western Asia",
+   "pathRegion": null,
+   "lat": -16,
+   "lon": -41,
+   "coordSource": "catalog",
+   "tz": "America/Sao_Paulo",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2036Aug07Tprime.html"
+  },
+  {
+   "tdMs": 2102952345323,
+   "nasaDeltaT": 82.1,
+   "kind": "partial-solar",
+   "region": "Alaska, Canada, Arctic, western Europe, northwestern Africa",
+   "pathRegion": null,
+   "lat": 71.1859,
+   "lon": 47.1847,
+   "coordSource": "besselian",
+   "tz": "Europe/Moscow",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2036Aug21Pprime.html"
+  },
+  {
+   "tdMs": 2115712135089,
+   "nasaDeltaT": 82.4,
+   "kind": "partial-solar",
+   "region": "northern Africa, Europe, Mid East, western Asia",
+   "pathRegion": null,
+   "lat": 68.5274,
+   "lon": 20.8427,
+   "coordSource": "besselian",
+   "tz": "Europe/Stockholm",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2037Jan16Pprime.html"
+  },
+  {
+   "tdMs": 2117023298000,
+   "nasaDeltaT": 82,
+   "kind": "total-lunar",
+   "region": "eastern Europe, eastern Africa, Asia, Australia, Pacific, N.A.",
+   "pathRegion": null,
+   "lat": 18,
+   "lon": 153,
+   "coordSource": "catalog",
+   "tz": "Etc/GMT-10",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2037Jan31Tprime.html"
+  },
+  {
+   "tdMs": 2131065635855,
+   "nasaDeltaT": 82.8,
+   "kind": "total-solar",
+   "region": "E. Indies, Australia, Pacific",
+   "pathRegion": "Australia, New Zealand",
+   "lat": -24.7633,
+   "lon": 139.0477,
+   "coordSource": "besselian",
+   "tz": "Australia/Brisbane",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2037Jul13Tprime.html"
+  },
+  {
+   "tdMs": 2132280593000,
+   "nasaDeltaT": 83,
+   "kind": "partial-lunar",
+   "region": "Americas, Europe, Africa",
+   "pathRegion": null,
+   "lat": -20,
+   "lon": -60,
+   "coordSource": "catalog",
+   "tz": "America/Asuncion",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2037Jul27Pprime.html"
+  },
+  {
+   "tdMs": 2146312030920,
+   "nasaDeltaT": 83.2,
+   "kind": "annular-solar",
+   "region": "eastern N. America, northern S. America, Atlantic, Africa, Europe",
+   "pathRegion": "Cuba, Dom.Rep., Cote d'Ivoire, Ghana, Niger, Chad, Egypt",
+   "lat": 2.0942,
+   "lon": -25.472,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT+2",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2038Jan05Aprime.html"
+  },
+  {
+   "tdMs": 2161690374988,
+   "nasaDeltaT": 83.5,
+   "kind": "annular-solar",
+   "region": "N. & C. America, S. America, Africa, Europe, Mid East",
+   "pathRegion": "Colombia, Venezuela, Mauritania, Morocco, Mali, Niger, Chad, Sudan, Ethiopia, Kenya",
+   "lat": 25.424,
+   "lon": -21.9176,
+   "coordSource": "besselian",
+   "tz": "Atlantic/Canary",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2038Jul02Aprime.html"
+  },
+  {
+   "tdMs": 2176938009653,
+   "nasaDeltaT": 83.9,
+   "kind": "total-solar",
+   "region": "southeastern Asia, E. Indies, Australia, New Zealand, southern Pacific, Antarctica",
+   "pathRegion": "Australia, New Zealand, southern Pacific",
+   "lat": -40.2786,
+   "lon": 163.9232,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT-11",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2038Dec26Tprime.html"
+  },
+  {
+   "tdMs": 2190999265000,
+   "nasaDeltaT": 84,
+   "kind": "partial-lunar",
+   "region": "Europe, Africa, Asia, Australia",
+   "pathRegion": null,
+   "lat": -22,
+   "lon": 77,
+   "coordSource": "catalog",
+   "tz": "Etc/GMT-5",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2039Jun06Pprime.html"
+  },
+  {
+   "tdMs": 2192289173735,
+   "nasaDeltaT": 84.3,
+   "kind": "annular-solar",
+   "region": "N. America, western Europe",
+   "pathRegion": "Alaska, northern Canada, Norway, Sweden, Finland, Estonia, Russia",
+   "lat": 78.876,
+   "lon": -102.1368,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT+7",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2039Jun21Aprime.html"
+  },
+  {
+   "tdMs": 2206284988000,
+   "nasaDeltaT": 85,
+   "kind": "partial-lunar",
+   "region": "Europe, Africa, Asia, Australia, Pacific",
+   "pathRegion": null,
+   "lat": 21,
+   "lon": 104,
+   "coordSource": "catalog",
+   "tz": "Asia/Bangkok",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2039Nov30Pprime.html"
+  },
+  {
+   "tdMs": 2207579025892,
+   "nasaDeltaT": 84.6,
+   "kind": "total-solar",
+   "region": "southern S. America, Antarctica",
+   "pathRegion": "Antarctica",
+   "lat": -80.8574,
+   "lon": 172.7443,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT-12",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2039Dec15Tprime.html"
+  },
+  {
+   "tdMs": 2220320582081,
+   "nasaDeltaT": 84.9,
+   "kind": "partial-solar",
+   "region": "Australia, N.Z., Antarctica",
+   "pathRegion": null,
+   "lat": -62.8354,
+   "lon": 174.3077,
+   "coordSource": "besselian",
+   "tz": "Etc/GMT-12",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2040May11Pprime.html"
+  },
+  {
+   "tdMs": 2221645582000,
+   "nasaDeltaT": 85,
+   "kind": "total-lunar",
+   "region": "eastern Asia, Australia, Pacific, western Americas",
+   "pathRegion": null,
+   "lat": -21,
+   "lon": -177,
+   "coordSource": "catalog",
+   "tz": "Pacific/Tongatapu",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2040May26Tprime.html"
+  },
+  {
+   "tdMs": 2235668941960,
+   "nasaDeltaT": 85.3,
+   "kind": "partial-solar",
+   "region": "N. & C. America",
+   "pathRegion": null,
+   "lat": 62.2973,
+   "lon": -53.4893,
+   "coordSource": "besselian",
+   "tz": "America/Nuuk",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2040Nov04Pprime.html"
+  },
+  {
+   "tdMs": 2236878280000,
+   "nasaDeltaT": 85,
+   "kind": "total-lunar",
+   "region": "eastern Americas, Europe, Africa, Asia, Australia",
+   "pathRegion": null,
+   "lat": 20,
+   "lon": 70,
+   "coordSource": "catalog",
+   "tz": "Asia/Kolkata",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2040Nov18Tprime.html"
+  },
+  {
+   "tdMs": 2250935540791,
+   "nasaDeltaT": 85.7,
+   "kind": "total-solar",
+   "region": "Brazil, Africa, Mid East",
+   "pathRegion": "Angola, Congo, Uganda, Kenya, Somalia",
+   "lat": -9.6195,
+   "lon": 12.1608,
+   "coordSource": "besselian",
+   "tz": "Africa/Luanda",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2041Apr30Tprime.html"
+  },
+  {
+   "tdMs": 2252277783000,
+   "nasaDeltaT": 86,
+   "kind": "partial-lunar",
+   "region": "eastern Americas, Europe, Africa, western Asia",
+   "pathRegion": null,
+   "lat": -20,
+   "lon": -12,
+   "coordSource": "catalog",
+   "tz": "Etc/GMT+1",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2041May16Pprime.html"
+  },
+  {
+   "tdMs": 2266277781675,
+   "nasaDeltaT": 86.1,
+   "kind": "annular-solar",
+   "region": "eastern Asia, Pacific",
+   "pathRegion": "Mongolia, China, Korea, Japan, Pacific",
+   "lat": 9.9333,
+   "lon": 162.8302,
+   "coordSource": "besselian",
+   "tz": "Pacific/Majuro",
+   "url": "https://www.eclipsewise.com/solar/SEprime/2001-2100/SE2041Oct25Aprime.html"
+  },
+  {
+   "tdMs": 2267498105000,
+   "nasaDeltaT": 86,
+   "kind": "partial-lunar",
+   "region": "Americas, Europe, Africa",
+   "pathRegion": null,
+   "lat": 18,
+   "lon": -73,
+   "coordSource": "catalog",
+   "tz": "America/Port-au-Prince",
+   "url": "https://www.eclipsewise.com/lunar/LEprime/2001-2100/LE2041Nov08Pprime.html"
+  }
+ ]
+}
+
+      </script>
+      <script src="eclipse-table-page.js"></script>
+
+      <div class="ek-version">v2.0.93</div>
+    </div>
+  </body>
+</html>

@@ -1,7 +1,20 @@
 # Eclipse Table Page — plan
 
-**Status**: rev 3 (2026-08-16) — **commit 1 (scraper + data + tests) IMPLEMENTED,
-uncommitted, awaiting Steve**; commits 2–3 not started. Q1–Q8 resolved as
+**Status**: rev 5 (2026-08-19) — Steve's post-review tweak round applied:
+lunar icons re-hued to the simulator's umbra orange, total-solar icon
+restyled as the simulator's totality (black disc + asymmetric blue corona),
+app-neutral page title, per-card orthographic globe thumbnails (§6a), and
+phase 3 re-scoped with the standalone page as the primary bookmarkable entry
+(§11). Renderer suite 22 tests; full suite green. Previously rev 4 — **commits 1–2 IMPLEMENTED** (commit 1 landed
+as 5708e4b; commit 2 — page shell, renderer module, build wiring, 17-test
+renderer suite — is in the working tree, uncommitted, awaiting Steve).
+Phase 3 (help-system links + docs) not started. Verified live against the
+2.0.93 build: 115 cards in 31 year groups, marker-adjacent years open,
+auto-center on the today marker, mobile 375 px with no horizontal overflow,
+and a deep-link click-through landing the Observatory at Ólafsvík with time
+frozen at the 2026 Aug 12 maximum. Adversarially reviewed (22 findings, 15
+confirmed, all fixed or recorded — §11a); renderer suite now 20 tests, full
+suite 8681. Q1–Q8 resolved as
 recommended (§15); presentation redesigned per Steve's 0.1–0.4 questions (cards
 in per-year `<details>`, single JSON source, near-now emphasis). Phase-1
 implementation changed two things the plan had specified — both recorded in §3:
@@ -164,6 +177,11 @@ chronological mental model and complicates the marker), decade tabs and
 filter chrome (new paradigm, overkill for ~125 entries). A solar/lunar filter
 toggle stays in §16 as a future idea if the list feels long in practice.
 
+**Page title (2026-08-19)**: `Emerald Eclipses` — app-neutral per Steve (the
+page is linked from both apps and meant to be bookmarked); "Emerald Apps
+Eclipses" and "Eclipses — Emerald Sequoia" were the runners-up. One line in
+the shell to change if Steve prefers another.
+
 ## 5. Single source of truth — JSON in, rendered page out (0.3)
 
 Yes — and it's cleaner than rev 1's generated-rows partial, which had facts
@@ -225,6 +243,29 @@ Same facts as rev 1's columns, recomposed:
   (Details = EclipseWise, marked with the house `img.extlink` icon —
   `help/images/extlink.png` is already copied to dist).
 
+### 6a. Globe thumbnails (added 2026-08-19, Steve)
+
+Each card carries a 48 px orthographic Blue Marble globe centered on the
+maximum-eclipse point, reusing the location dialog's renderer
+([mini-map.ts](../src/shared/mini-map.ts) `renderGlobe`) verbatim — including
+its red center marker, which lands exactly on the greatest-eclipse point.
+Cost, measured: the page bundle grows 17.4 → 36.6 KB (the 360×180 Blue
+Marble data-URL + mini-map code); globes render lazily per year group — the
+groups open at load (~10 cards) render in a few ms each, closed groups hydrate
+on first open via a one-shot `toggle` listener. Renders go through **one
+shared scratch canvas** serialized by a promise queue and are stored as
+~18 KB PNG data-URLs on `background-image`, so no per-card canvas backing
+store survives (the [mem] discipline for 115 cards); fully expanding every
+year costs ~2 MB of image strings, only if asked for.
+
+Found on the way: `ensureTexture()` in mini-map.ts has a **latent
+concurrency bug** — a second concurrent caller reassigns the texture image's
+`onload`, orphaning the first caller's setup, so racing `renderGlobe` calls
+hang. The location dialog renders one globe at a time and can never hit it;
+this page's serialization avoids it by construction. Left unpatched here
+(out of scope); worth a one-line fix (cache the load promise) whenever
+mini-map is next touched.
+
 ## 7. Icons — inline SVG symbols (Q3 ✔)
 
 As rev 1, now as `<symbol>` defs in the static shell referenced by `<use>`
@@ -232,12 +273,23 @@ As rev 1, now as `<symbol>` defs in the static shell referenced by `<use>`
 conventions: hand-written 24×24, geometry in `currentColor`, hex accents only
 where color carries meaning (precedents: chrome buttons in
 [face-template.html:806](../src/face-template.html), noon-on-top half-disc at
-[observatory.html:891](../src/observatory/observatory.html)). Set: partial
-solar (sun with Moon bite), annular (bright ring, dark center), total solar
-(dark disc, corona ticks), **hybrid** (diagonal annular/total split — Q3 ✔;
-2013 Nov 3, 2023 Apr 20, 2031 Nov 14 in range), total lunar (disc filled
-`#B00000` — the existing red accent, and the right color for a blood moon),
-partial lunar (partially shadowed disc). Legend line links each kind name to
+[observatory.html:891](../src/observatory/observatory.html)). Set (as revised
+2026-08-19, second tweak round): color language — **#f2e407** is the Sun
+(Mauna Kea's `sunColor`, so partials read solar rather than lunar),
+**#d96a1a** the eclipsed Moon (umbra hue sampled from the simulator's
+earthShadow.png, pushed toward orange per Steve; earlier #B00000 → #cc4514),
+**#7e7e93** the sunlit Moon (a fixed grey, not `currentColor`: that was the
+#bbc body text color, so the lunar icons read as text-colored blobs beside
+the prose — now 2.1 contrast against the text, 3.87 against the card),
+**flat #4a6b96** the corona — gradients were tried and rejected: they make
+the icon read much smaller than its box at 20 px. Shapes: partial solar
+(yellow disc, Moon bite), annular (yellow ring), **total solar** = black
+disc + **one** tilted flat ellipse (aspect 1.49, after totalEclipse.png) +
+pale rim — two crossed ellipses were tried first and unioned into a
+near-circle; **hybrid** = faint corona behind a yellow annular ring (total mid-path, annular at the ends —
+Q3 ✔; 2013 Nov 3, 2023 Apr 20, 2031 Nov 14 in range); total lunar (#d96a1a
+disc), partial lunar (partially #d96a1a-shadowed disc). Card layout: kind
+icon and globe vertically centered so they align (align-items: center). Legend line links each kind name to
 Wikipedia ([Solar eclipse](https://en.wikipedia.org/wiki/Solar_eclipse) type
 anchors, [Lunar eclipse](https://en.wikipedia.org/wiki/Lunar_eclipse)).
 Dark-only (#1e1e32 ground); no light theme exists anywhere in src/.
@@ -441,11 +493,15 @@ dropped, the range truncated, path precision coarsened — all caught).
     `{{VERSION}}` is already handled inside inject_partials). Only
     `inject_partials` needs the token, but its `inject_partials_terra` twin
     must keep parsing.
-- **Links in** (general help = the single help.html iframed into every app's
-  ℹ popover, so one edit covers all apps):
+- **Links in — re-scoped 2026-08-19 (Steve): the standalone page is the
+  primary entry point.** Users should be able to bookmark
+  `eclipse-table.html` directly; the help system *points at* the page rather
+  than hosting the content in any form. Every link below goes straight to
+  the page:
   - [help.html](../src/help.html) `#eclipses` section: short pointer
     paragraph at the top of the section body (app-neutral wording — the
-    `app=` script text-swaps product names). help.html's own
+    `app=` script text-swaps product names), phrased as "the Eclipse Table
+    page" so bookmark-ability is discoverable. help.html's own
     `<base target="_blank">` makes it open a new tab from the popover and
     standalone. Known consequence: `app=inspector` drops `#eclipses`, so
     the Inspector's general help omits it — acceptable (dev tool).
@@ -459,10 +515,49 @@ dropped, the range truncated, path precision coarsened — all caught).
     (~line 272, by the 5-eclipses figure), and one-liners in
     [selene.html](../src/help/selene.html) and
     [chandra.html](../src/help/chandra.html) (Q8 ✔).
+  - Explicitly NOT: no `<details>` section of table content inside
+    help.html, no iframe embedding — the page is the single home.
 - **Docs**: page + regeneration procedure in
   [docs/help-system.md](../docs/help-system.md). file-categories.json needs
   no entry (committed generated file → git-tracked fallback category, same
   as cities-data.js).
+
+### 11a. Phase-2 adversarial review outcome (2026-08-19)
+
+Three-lens review (correctness / robustness / plan fidelity), each finding
+independently verified against the built page; 22 raised, 15 confirmed.
+Fixed immediately:
+
+- **Mini icons were shifted and clipped** in every collapsed year summary — a
+  sizeless `<use>` of a `<symbol>` instantiates at 100% of the minis viewport
+  and xMidYMid-shifts off its slot. Fixed with explicit width/height=24 per
+  instance; live-verified (all 115 icon boxes in their slots) and now pinned
+  by a unit test. The only genuinely *visual* bug found — jsdom cannot see
+  it, which is why the review renders the built page.
+- **Open-year set was calendar-derived (nowYear±1), not marker-derived** as
+  §8 specifies — ~19% of days per year (late Aug–Dec in 2026) would open a
+  fully-past year while next year's eclipses stayed collapsed. Now derived
+  from the marker's containing group ± one; a December-dated test pins it.
+  Consequence: the all-future edge case now opens the first *two* groups.
+- ranOut marker no longer promises eclipses "below"; scroll-guard covers
+  scrollbar drags (`pointerdown`); build.sh preflight rejects a data file
+  unsafe to inline; summaries get `user-select: none` (the iOS-loupe
+  lesson); icon svgs are `aria-hidden` (the text names the kind); the
+  tautological epoch test became a hardcoded pin; new tests tie every data
+  kind to a shell `<symbol>` and assert mini-icon content/geometry.
+
+Confirmed-but-accepted, recorded as decisions rather than changed:
+
+- **Legend links** go to the Wikipedia articles, not per-type section
+  anchors (§4 said "type anchors") — section anchors rot; articles don't.
+- **One 480 px media query** exists (links row reflow) — §4's "no
+  breakpoints" was overstated; the cards themselves still flex-wrap freely.
+- **Icon dark parts are painted `#1e1e32`, not masked** — deliberate: that
+  disc is the *Moon silhouette*, not a hole, so it staying page-dark over
+  the summary hover tint is the correct reading (reviewer read it as a
+  transparency bug; it isn't one).
+- **Back-link/extlink styling is page-local** rather than shared with
+  help.html — the page is deliberately self-contained; drift is cosmetic.
 
 ## 12. Explicitly not changing
 
