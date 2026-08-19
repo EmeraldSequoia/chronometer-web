@@ -1,6 +1,12 @@
 # Eclipse Table Page — plan
 
-**Status**: rev 5 (2026-08-19) — Steve's post-review tweak round applied:
+**Status**: IMPLEMENTED (2026-08-19) — all phases complete. Phases 1–2
+committed as a5dcd02; phase 3 (help-system wiring + "Understanding
+Eclipses" revision + regenerated Basel screenshots, per
+[2026-08-19-eclipse-table-phase3.md](2026-08-19-eclipse-table-phase3.md))
+is in the working tree awaiting Steve's two commits. The Eclipse Table
+effort closes with this phase.
+Previously: rev 5 (2026-08-19) — Steve's post-review tweak round applied:
 lunar icons re-hued to the simulator's umbra orange, total-solar icon
 restyled as the simulator's totality (black disc + asymmetric blue corona),
 app-neutral page title, per-card orthographic globe thumbnails (§6a), and
@@ -479,6 +485,12 @@ dropped, the range truncated, path precision coarsened — all caught).
   — without it, client rendering would be an untested dead zone.
 
 ## 11. Build & help-system wiring (Q8 ✔)
+
+> **Phase 3 detail plan (2026-08-19)**: the wiring below plus the
+> "Predicting → Understanding" revision of help.html's `#eclipses` section
+> is specified in
+> [2026-08-19-eclipse-table-phase3.md](2026-08-19-eclipse-table-phase3.md)
+> (awaiting Steve's Q1–Q5).
 
 - **build.sh**:
   - Add `src/help/eclipse-data.json` to the preflight required-files check

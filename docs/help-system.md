@@ -94,10 +94,10 @@ The general help content in `src/help.html` was ported from four sources:
 |---------|--------|-------------|
 | Complications | iOS XML `<!-- COMPLICATIONS -->` blocks via `.chronometer-ref/scripts/genHelp.pl` logic | Built table for 13 web faces; mapped iOS front/back sides to web face names |
 | Astronomical Accuracy | `.chronometer-ref/Help/AstroAccuracy.html` | Removed iPhone-specific language; updated "Geneva" → "Basel" where appropriate |
-| Predicting Eclipses | `.chronometer-ref/Help/Geneva/PredictingEclipses.html` | Changed all "Geneva" → "Basel"; replaced crown/pusher language with time controller |
+| Understanding Eclipses | `.chronometer-ref/Help/Geneva/PredictingEclipses.html` | Changed all "Geneva" → "Basel"; replaced crown/pusher language with time controller; retitled and re-centered on the Eclipse Table in 2026-08 (worked examples now reference table rows: 2041 Apr 30 solar, 2040 Nov 18 lunar) |
 | The Physics | `https://emeraldsequoia.com/h/mmm.html` | Inlined directly; no external dependency |
 
-Eclipse prediction images (8 files) were copied from `.chronometer-ref/Help/Geneva/` to `src/help/images/basel/`.
+The eclipses section's worked-example screenshots live in `src/help/images/basel/` (five Basel crops for the 2041 Apr 30 solar and 2040 Nov 18 lunar examples, regenerated from the web app in 2026-08, plus `eclipse.png`); the geneva-era originals copied from `.chronometer-ref/Help/Geneva/` were retired when the examples moved to those dates.
 
 ### Keyboard Shortcuts section
 
