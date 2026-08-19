@@ -143,3 +143,57 @@ describe('eclipse sentinel — end-to-end through the updater', () => {
         expect(gap).toBeLessThanOrEqual(3600 * 1000);
     });
 });
+
+describe('simulator discs are sized topocentrically', () => {
+    // eclSunDist/eclMoonDist feed the drawn disc radii. They must be
+    // topocentric, or the simulator draws a Moon too small to cover a Sun it
+    // has already labelled Total — an annulus at a total eclipse
+    // (planning/2026-08-16-topocentric-eclipse-sizes.md). Geocentrically the
+    // hybrids below give moon/sun ≈ 0.998–0.9998; topocentrically ≈ 1.014–1.016.
+    const AU_KM = 149600000.0;              // as eclipse-view.ts:80-82
+    const LUNAR_RADIUS_KM = 1737.10;
+    const SOLAR_RADIUS_KM = 695500;
+
+    /** Drive the real obs-values once and reproduce eclipse-view's disc radii. */
+    function discRadii(iso: string, latDeg: number, lonDeg: number) {
+        const base = () => new Date(iso);
+        const { getNow, withDisplayTime } = makeOverridableGetNow(base);
+        const env = createAstroEnvironment(latDeg, lonDeg, getNow);
+        env.variables.set('noonOnTop', 0);
+        env.variables.set('dialPlanet', 0);
+        const perfNow = performance.now();
+        const updater = buildObsValues(env, perfNow, getNow);
+        const ctx: TimingContext = { tickIntervalMs: null, displayDeltaSec: 0, direction: 1 };
+        updater.tick(env, perfNow, getNow, withDisplayTime, ctx);
+        const moonDist = updater.get('eclMoonDist').currentValue;
+        const sunDist = updater.get('eclSunDist').currentValue;
+        return {
+            moonR: Math.atan(LUNAR_RADIUS_KM / (moonDist * AU_KM)),   // eclipse-view.ts:233-234
+            sunR: Math.atan(SOLAR_RADIUS_KM / (sunDist * AU_KM)),
+            kind: Math.round(updater.get('eclKind').currentValue) as EclipseKind,
+        };
+    }
+
+    // NASA's greatest-eclipse instant and point for the two hybrids in
+    // src/help/eclipse-data.json; both are total there.
+    test.each([
+        ['2013-11-03 hybrid', '2013-11-03T12:46:29Z', 3.49, -11.6983],
+        ['2023-04-20 hybrid', '2023-04-20T04:16:45Z', -9.595, 125.78],
+    ])('%s: Moon disc covers the Sun with room to spare', (_label, iso, lat, lon) => {
+        const { moonR, sunR, kind } = discRadii(iso as string, lat as number, lon as number);
+        expect(kind).toBe(EclipseKind.TotalSolar);
+        // Not just `moonR > sunR`: geocentric distances leave 2013 covered by a
+        // hairline (1.0003) purely because the view's body radii differ a little
+        // from the ephemeris ones, and leave 2023 uncovered outright. The real
+        // topocentric margin at these near-overhead eclipses is ~1.5%.
+        expect(moonR / sunR).toBeGreaterThan(1.005);
+    });
+
+    test('2020-06-21 annular: Moon disc stays smaller than the Sun', () => {
+        // The correction must not flip an annular; its topocentric margin is
+        // small (moon/sun ≈ 0.994) but the sign is unambiguous.
+        const { moonR, sunR, kind } = discRadii('2020-06-21T06:40:06Z', 30.52, 79.665);
+        expect(kind).toBe(EclipseKind.AnnularSolar);
+        expect(moonR).toBeLessThan(sunR);
+    });
+});

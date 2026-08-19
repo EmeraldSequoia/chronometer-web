@@ -762,10 +762,21 @@ export function calculateEclipse(
         const moonTopo = topocentricParallax(moonRA, moonDecl, moonH, moonDistAU, observerLatitude, 0);
         const moonTopoRA = lst - moonTopo.Hprime;
 
+        // Size the discs at the *topocentric* distances: the separation above is
+        // topocentric, so the radii it is compared against must be too. The
+        // Moon's disc is up to 1.7% larger overhead than seen from the Earth's
+        // centre — precisely the margin that separates a total eclipse from an
+        // annular one, and geocentric radii misclassify hybrids as partial.
+        // (Diverges from iOS ECAstronomy.m:4227–4260; see docs/astronomy.md.)
+        const sunTopoDist = sunDistAU * sunTopo.distanceRatio;
+        const moonTopoDist = moonDistAU * moonTopo.distanceRatio;
+        const sunAngularSizeTopo = planetSizeAndParallax(ECPlanetNumber.Sun, sunTopoDist).angularSize;
+        const moonAngularSizeTopo = planetSizeAndParallax(ECPlanetNumber.Moon, moonTopoDist).angularSize;
+
         physicalSeparation = angularSeparation(sunTopoRA, sunTopo.declPrime, moonTopoRA, moonTopo.declPrime);
-        separationAtPartialEclipse = sunAngularSize / 2 + moonAngularSize / 2;
-        separationAtTotalEclipse = moonAngularSize / 2 - sunAngularSize / 2;
-        const separationAtAnnularEclipse = sunAngularSize / 2 - moonAngularSize / 2;
+        separationAtPartialEclipse = sunAngularSizeTopo / 2 + moonAngularSizeTopo / 2;
+        separationAtTotalEclipse = moonAngularSizeTopo / 2 - sunAngularSizeTopo / 2;
+        const separationAtAnnularEclipse = sunAngularSizeTopo / 2 - moonAngularSizeTopo / 2;
 
         // Check if Sun is above horizon
         const sunAlt = planetAltAz(ECPlanetNumber.Sun, dateInterval, observerLatitude, observerLongitude, true, true, cache);
@@ -1031,6 +1042,37 @@ export function planetGeocentricDistance(
     const U = julianCenturiesSince2000Epoch / 100;
     const pos = WB_planetApparentPosition(planetNumber, U, cache ?? undefined);
     return pos.geocentricDistance;
+}
+
+/**
+ * Get topocentric distance of a planet in AU — the distance from the observer
+ * rather than from the Earth's centre.
+ *
+ * Only meaningful for the Moon (up to 1.7% nearer overhead, i.e. a disc that
+ * much larger); for the Sun it is a 0.004% correction and for the planets it
+ * is nil. Use it where an *apparent size* is being drawn or compared against
+ * another apparent size — the eclipse simulator's discs, whose classification
+ * (calculateEclipse) is topocentric for the same reason.
+ */
+export function planetTopocentricDistance(
+    planetNumber: ECPlanetNumber,
+    dateInterval: number,
+    observerLatitude: number,
+    observerLongitude: number,
+    cache: AstroCache | null,
+): number {
+    const { julianCenturiesSince2000Epoch } =
+        julianCenturiesSince2000EpochForDateInterval(dateInterval, cache);
+    const U = julianCenturiesSince2000Epoch / 100;
+    const pos = WB_planetApparentPosition(planetNumber, U, cache ?? undefined);
+    const gst = convertUTToGSTP03(dateInterval, cache);
+    const lst = convertGSTtoLST(gst, observerLongitude);
+    const { distanceRatio } = topocentricParallax(
+        pos.apparentRightAscension, pos.apparentDeclination,
+        lst - pos.apparentRightAscension,
+        pos.geocentricDistance, observerLatitude, 0,
+    );
+    return pos.geocentricDistance * distanceRatio;
 }
 
 // ============================================================================

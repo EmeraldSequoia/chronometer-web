@@ -43,7 +43,8 @@ import {
     moonRelativePositionAngle, moonRelativeAngle as computeMoonRelativeAngle,
     moonElongation as computeMoonElongation,
     closestPhaseDayNumber, planetEclipticLongitude, planetEclipticLatitude,
-    planetGeocentricDistance, lunarAscendingNodeLongitude as computeLunarAscendingNode,
+    planetGeocentricDistance, planetTopocentricDistance,
+    lunarAscendingNodeLongitude as computeLunarAscendingNode,
     EOTSeconds,
     calculateEclipse, EclipseKind,
     localSiderealTime,
@@ -831,6 +832,13 @@ export function registerAstroFunctions(
     // distanceFromEarthOfPlanet(n): geocentric distance in AU
     functions.set('distanceFromEarthOfPlanet', (n: number) =>
         liveAstro((cache, di) => planetGeocentricDistance(n as ECPlanetNumber, di, cache)));
+    // distanceFromObserverOfPlanet(n): topocentric distance in AU — the same
+    // distance measured from the observer instead of the Earth's centre. Use it
+    // when the value drives an apparent *size*: the Moon is up to 1.7% nearer
+    // overhead, which is the total/annular margin of a solar eclipse.
+    functions.set('distanceFromObserverOfPlanet', (n: number) =>
+        liveAstro((cache, di) =>
+            planetTopocentricDistance(n as ECPlanetNumber, di, OBSERVER_LAT, OBSERVER_LON, cache)));
     // distanceFromSunOfPlanet(n): heliocentric distance (orbital radius) in AU.
     // Companion to distanceFromEarthOfPlanet; same WB series as HLongitude/HLatitude.
     functions.set('distanceFromSunOfPlanet', (n: number) =>

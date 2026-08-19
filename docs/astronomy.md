@@ -61,6 +61,35 @@ See [iOS Reference](ios-reference.md) for a complete file listing.
 5. Compute `northAngleForObject` (great circle course to celestial north pole)
 6. Final angle = `−northAngle − posAngle − π/2`, normalized to [0, 2π)
 
+### Solar Eclipse Thresholds Are Topocentric (deliberate iOS divergence)
+
+**2026-08-16.** `calculateEclipse`'s solar branch sizes the Sun and Moon discs
+at their **topocentric** distances — the geocentric distance times the Δ′/Δ
+ratio `topocentricParallax` now returns — and builds the
+partial/total/annular thresholds from those. The Observatory's eclipse
+simulator does the same, via the `distanceFromObserverOfPlanet` expression
+function behind `eclSunDist` / `eclMoonDist`.
+
+iOS `ECAstronomy.m:4227–4260` uses **geocentric** sizes there and needs the
+mirror change. This is not a port simplification (see
+[Development Rules §2](development-rules.md#2-never-simplify-ios-algorithms)):
+it is a correction to the shared algorithm, made here first.
+
+Why: the separation the thresholds are compared against was already
+topocentric, so the radii had to be too. The Moon's disc is up to 1.7% larger
+overhead than from the Earth's centre, which is exactly the margin between a
+total eclipse and an annular one — geocentrically the hybrid eclipses of
+2013 Nov 03 and 2023 Apr 20 classified as *partial*, and the simulator could
+draw a Moon too small to cover the Sun at an eclipse it had labelled total.
+`src/__tests__/eclipse-data.test.ts` replays 115 NASA eclipses (2011–2041) and
+now reproduces 114 exactly, hybrids asserted strictly; that test is the guard.
+
+Explicitly unchanged: the **lunar** branch (`umbralAngularRadius` is the
+classical geocentric shadow construction and reproduces all 45 NASA lunar
+eclipses) and `altitudeAtRiseSet` (geocentric diameter and parallax are
+correct for what it computes). See
+[planning/2026-08-16-topocentric-eclipse-sizes.md](../planning/2026-08-16-topocentric-eclipse-sizes.md).
+
 ### Astronomy Caching
 
 `astro-cache.ts` provides per-frame caching to avoid redundant calculations. Multiple hands that reference the same astronomy function (e.g., `sunAltitude()`) within one frame reuse the cached result.

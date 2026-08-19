@@ -757,6 +757,14 @@ The totality image is drawn at `moonPixelRadius / (68/316)` and the umbra image 
 `ppar·shadowRadius / (118/120)` (the image feature fractions from
 `EOClock.mm:2160-2161`).
 
+`eclSunDist` / `eclMoonDist` are **topocentric** distances
+(`distanceFromObserverOfPlanet`, not `distanceFromEarthOfPlanet`): the discs are
+drawn at the size the observer sees, and an overhead Moon is up to 1.7% nearer —
+enough to draw a hairline annulus at an eclipse `eclKind` calls total. It is the
+same correction `calculateEclipse` makes to classify the eclipse, so drawing and
+label agree by construction (see [astronomy.md](astronomy.md)). Both still
+interpolate `linear`: the ratio varies on the diurnal timescale.
+
 ### Coordinate note (Y-up → Y-down)
 
 `EOEclipseView` is a plain (Y-down) `UIView`, so the iOS pixel formulas — which

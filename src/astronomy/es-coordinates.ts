@@ -51,6 +51,14 @@ export function raAndDeclO(
  * @param distInAU - Distance to object (AU)
  * @param observerLatitude - Observer geodetic latitude (radians)
  * @param observerAltitude - Observer altitude above sea level (meters)
+ *
+ * `distanceRatio` is Δ′/Δ, the topocentric distance over the geocentric one:
+ * it falls out of the same A/B/C vector the declination correction uses. It is
+ * ≈1 for a body on the horizon and 1 − sin(horizontal parallax) at the zenith
+ * — for the Moon that is 0.9834, i.e. a disc 1.7% larger overhead than the
+ * geocentric size.
+ * Callers that compare angular diameters (solar eclipse thresholds, the EO
+ * eclipse simulator) need it; the position-only callers ignore it.
  */
 export function topocentricParallax(
     ra: number,
@@ -59,7 +67,7 @@ export function topocentricParallax(
     distInAU: number,
     observerLatitude: number,
     observerAltitude: number,
-): { Hprime: number; declPrime: number } {
+): { Hprime: number; declPrime: number; distanceRatio: number } {
     const bOverA = 0.99664719;
     const u = Math.atan(bOverA * Math.tan(observerLatitude));
     const delta = observerAltitude / 6378140;
@@ -75,7 +83,7 @@ export function topocentricParallax(
         Hprime += TWO_PI;
     }
     const declPrime = Math.asin(C / q);
-    return { Hprime, declPrime };
+    return { Hprime, declPrime, distanceRatio: q };
 }
 
 // ============================================================================

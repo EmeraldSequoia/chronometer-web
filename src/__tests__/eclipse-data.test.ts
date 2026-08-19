@@ -210,17 +210,22 @@ describe('eclipse-data.json — rows', () => {
 describe('eclipse-data.json — replayed through the app eclipse model', () => {
     /**
      * At the published instant and place of greatest eclipse, our own model
-     * should see the same eclipse NASA does. Two categories are legitimately
-     * ambiguous and assert the underlying geometry instead of the label:
+     * should see the same eclipse NASA does — 114 of the 115 rows exactly,
+     * including both hybrids, which are total at greatest eclipse.
      *
-     *  - hybrid: the Sun and Moon discs are the same apparent size, which is
-     *    exactly the annular/total boundary the classifier has to split;
-     *  - a non-central annular (no path page, so catalog coordinates): the
-     *    shadow axis misses the Earth entirely, and the whole-degree position
-     *    can sit off the narrow strip where the ring is actually visible.
+     * One category is exempt and asserts the underlying geometry instead of
+     * the label: a non-central annular (no path page, so whole-degree catalog
+     * coordinates, up to ~78 km off). Its shadow axis misses the Earth
+     * entirely, so the strip where the ring is actually visible is narrow and
+     * the published position need not be on it; the sole such row,
+     * 2014 Apr 29, misses annular by 2.5 arcsec — inside that coordinate
+     * uncertainty. For it, require the discs be concentric to within 0.02° —
+     * a tighter statement about the ephemeris than any kind label.
      *
-     * For those, require that the discs are concentric to within 0.02° — a
-     * tighter statement about the ephemeris than any kind label.
+     * Hybrids are asserted strictly (planning/2026-08-16-topocentric-eclipse-sizes.md):
+     * their discs match to a ten-thousandth of a degree geocentrically, so
+     * they only classify as total once the thresholds use topocentric disc
+     * sizes. This is the permanent guard on that fix — do not re-exempt them.
      */
     const CONCENTRIC_DEG = 0.02;
 
@@ -228,12 +233,15 @@ describe('eclipse-data.json — replayed through the app eclipse model', () => {
         'total-solar': EclipseKind.TotalSolar,
         'annular-solar': EclipseKind.AnnularSolar,
         'partial-solar': EclipseKind.PartialSolar,
+        // Hybrid = annular at the path's ends, total in its middle; NASA's
+        // greatest-eclipse point is in the middle.
+        'hybrid-solar': EclipseKind.TotalSolar,
         'total-lunar': EclipseKind.TotalLunar,
         'partial-lunar': EclipseKind.PartialLunar,
     };
 
     const isAmbiguous = (e: Eclipse): boolean =>
-        e.kind === 'hybrid-solar' || (e.kind === 'annular-solar' && e.coordSource === 'catalog');
+        e.kind === 'annular-solar' && e.coordSource === 'catalog';
 
     test('every row reproduces its kind (or its geometry, at the boundary)', () => {
         const failures: string[] = [];

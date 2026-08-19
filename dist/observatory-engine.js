@@ -9121,7 +9121,7 @@
       Hprime += TWO_PI;
     }
     const declPrime = Math.asin(C / q);
-    return { Hprime, declPrime };
+    return { Hprime, declPrime, distanceRatio: q };
   }
   function generalPrecessionSinceJ2000(julianCenturiesSince2000Epoch) {
     const t = julianCenturiesSince2000Epoch;
@@ -10122,10 +10122,14 @@
       const moonH = lst - moonRA;
       const moonTopo = topocentricParallax(moonRA, moonDecl, moonH, moonDistAU, observerLatitude, 0);
       const moonTopoRA = lst - moonTopo.Hprime;
+      const sunTopoDist = sunDistAU * sunTopo.distanceRatio;
+      const moonTopoDist = moonDistAU * moonTopo.distanceRatio;
+      const sunAngularSizeTopo = planetSizeAndParallax(0 /* Sun */, sunTopoDist).angularSize;
+      const moonAngularSizeTopo = planetSizeAndParallax(1 /* Moon */, moonTopoDist).angularSize;
       physicalSeparation = angularSeparation(sunTopoRA, sunTopo.declPrime, moonTopoRA, moonTopo.declPrime);
-      separationAtPartialEclipse = sunAngularSize / 2 + moonAngularSize / 2;
-      separationAtTotalEclipse = moonAngularSize / 2 - sunAngularSize / 2;
-      const separationAtAnnularEclipse = sunAngularSize / 2 - moonAngularSize / 2;
+      separationAtPartialEclipse = sunAngularSizeTopo / 2 + moonAngularSizeTopo / 2;
+      separationAtTotalEclipse = moonAngularSizeTopo / 2 - sunAngularSizeTopo / 2;
+      const separationAtAnnularEclipse = sunAngularSizeTopo / 2 - moonAngularSizeTopo / 2;
       const sunAlt = planetAltAz(0 /* Sun */, dateInterval, observerLatitude, observerLongitude, true, true, cache);
       const altAtRS = altitudeAtRiseSet(julianCenturiesSince2000Epoch, 0 /* Sun */, false, cache);
       if (sunAlt < altAtRS) {
@@ -10252,6 +10256,22 @@
     const U = julianCenturiesSince2000Epoch / 100;
     const pos = WB_planetApparentPosition(planetNumber, U, cache ?? void 0);
     return pos.geocentricDistance;
+  }
+  function planetTopocentricDistance(planetNumber, dateInterval, observerLatitude, observerLongitude, cache) {
+    const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(dateInterval, cache);
+    const U = julianCenturiesSince2000Epoch / 100;
+    const pos = WB_planetApparentPosition(planetNumber, U, cache ?? void 0);
+    const gst = convertUTToGSTP03(dateInterval, cache);
+    const lst = convertGSTtoLST(gst, observerLongitude);
+    const { distanceRatio } = topocentricParallax(
+      pos.apparentRightAscension,
+      pos.apparentDeclination,
+      lst - pos.apparentRightAscension,
+      pos.geocentricDistance,
+      observerLatitude,
+      0
+    );
+    return pos.geocentricDistance * distanceRatio;
   }
   function lunarAscendingNodeLongitude(dateInterval, cache) {
     const { julianCenturiesSince2000Epoch: T } = julianCenturiesSince2000EpochForDateInterval(dateInterval, cache);
@@ -11528,6 +11548,7 @@
     }));
     functions.set("ELatitudeOfPlanet", (n) => liveAstro((cache, di) => planetEclipticLatitude(n, di, cache)));
     functions.set("distanceFromEarthOfPlanet", (n) => liveAstro((cache, di) => planetGeocentricDistance(n, di, cache)));
+    functions.set("distanceFromObserverOfPlanet", (n) => liveAstro((cache, di) => planetTopocentricDistance(n, di, OBSERVER_LAT, OBSERVER_LON, cache)));
     functions.set("distanceFromSunOfPlanet", (n) => liveAstro((cache, di) => {
       const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(di, cache);
       return WB_planetHeliocentricRadius(n, julianCenturiesSince2000Epoch / 100, cache);
@@ -19856,8 +19877,13 @@
       { name: "eclSunAz", expr: `azimuthOfPlanet(${SUN})`, updateInterval: EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION },
       { name: "eclMoonAlt", expr: `altitudeOfPlanet(${MOON})`, updateInterval: EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION, linear: true },
       { name: "eclMoonAz", expr: `azimuthOfPlanet(${MOON})`, updateInterval: EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION },
-      { name: "eclSunDist", expr: `distanceFromEarthOfPlanet(${SUN})`, updateInterval: EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION, linear: true },
-      { name: "eclMoonDist", expr: `distanceFromEarthOfPlanet(${MOON})`, updateInterval: EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION, linear: true },
+      // Topocentric, not geocentric: these size the drawn discs, and the
+      // Moon's is up to 1.7% larger overhead — enough to turn a total eclipse
+      // into a drawn hairline annulus. Matches the classification in
+      // calculateEclipse by construction. (Both vary on the diurnal
+      // timescale, so they stay safe to interpolate `linear`.)
+      { name: "eclSunDist", expr: `distanceFromObserverOfPlanet(${SUN})`, updateInterval: EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION, linear: true },
+      { name: "eclMoonDist", expr: `distanceFromObserverOfPlanet(${MOON})`, updateInterval: EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION, linear: true },
       { name: "eclMoonRelAngle", expr: "moonRelativeAngle()", updateInterval: EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION },
       // Ring-hand RA markers (3) — angular (wrap at 2π)
       { name: "eclRingSunRA", expr: `RAOfPlanet(${SUN})`, updateInterval: EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION },

@@ -301,8 +301,13 @@ function buildValueDefs(): ObsValueDef[] {
         { name: 'eclSunAz',        expr: `azimuthOfPlanet(${SUN})`,             updateInterval: EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION },
         { name: 'eclMoonAlt',      expr: `altitudeOfPlanet(${MOON})`,           updateInterval: EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION, linear: true },
         { name: 'eclMoonAz',       expr: `azimuthOfPlanet(${MOON})`,            updateInterval: EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION },
-        { name: 'eclSunDist',      expr: `distanceFromEarthOfPlanet(${SUN})`,   updateInterval: EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION, linear: true },
-        { name: 'eclMoonDist',     expr: `distanceFromEarthOfPlanet(${MOON})`,  updateInterval: EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION, linear: true },
+        // Topocentric, not geocentric: these size the drawn discs, and the
+        // Moon's is up to 1.7% larger overhead — enough to turn a total eclipse
+        // into a drawn hairline annulus. Matches the classification in
+        // calculateEclipse by construction. (Both vary on the diurnal
+        // timescale, so they stay safe to interpolate `linear`.)
+        { name: 'eclSunDist',      expr: `distanceFromObserverOfPlanet(${SUN})`,   updateInterval: EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION, linear: true },
+        { name: 'eclMoonDist',     expr: `distanceFromObserverOfPlanet(${MOON})`,  updateInterval: EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION, linear: true },
         { name: 'eclMoonRelAngle', expr: 'moonRelativeAngle()',                 updateInterval: EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION },
         // Ring-hand RA markers (3) — angular (wrap at 2π)
         { name: 'eclRingSunRA',    expr: `RAOfPlanet(${SUN})`,                  updateInterval: EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION },
