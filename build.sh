@@ -41,7 +41,8 @@ echo "=== Checking required source files ==="
 # If missing, restore with: git checkout -- <file>
 for required_file in \
     "$SRC/cities-data.js" \
-    "$SRC/observatory/data/altitude-table.bin"; do
+    "$SRC/observatory/data/altitude-table.bin" \
+    "$SRC/astronomy/es-leap-second.ts"; do
   if [ ! -f "$required_file" ]; then
     echo "ERROR: Required file missing: $required_file" >&2
     echo "This file should be present from git clone." >&2
@@ -50,6 +51,29 @@ for required_file in \
   fi
 done
 echo "  ✓ All required source files present"
+
+echo "=== Checking leap-second table freshness ==="
+# src/astronomy/es-leap-second.ts is generated from the IERS leap-seconds.list,
+# which states its own expiry (the IERS announces leap seconds only ~6 months
+# ahead). Past that date the table may be missing a leap second, so ΔT could be
+# 1 s stale -- a warning, not an error: the build stays usable and the fix is a
+# one-line command.
+LEAP_FILE="$SRC/astronomy/es-leap-second.ts"
+LEAP_EXPIRY=$(grep -o 'LEAP-TABLE-EXPIRES [0-9][0-9-]*' "$LEAP_FILE" | awk '{print $2}')
+if [ -z "$LEAP_EXPIRY" ]; then
+  echo "ERROR: no LEAP-TABLE-EXPIRES line in $LEAP_FILE" >&2
+  echo "Regenerate with: node scripts/update-leap-seconds.mjs" >&2
+  exit 1
+fi
+TODAY=$(date -u +%Y-%m-%d)
+if [ "$TODAY" \> "$LEAP_EXPIRY" ]; then
+  echo "  ****************************************************************"
+  echo "  * WARNING: leap-second table expired $LEAP_EXPIRY"
+  echo "  * Run: node scripts/update-leap-seconds.mjs"
+  echo "  ****************************************************************"
+else
+  echo "  ✓ Leap-second table valid through $LEAP_EXPIRY"
+fi
 
 echo "=== Generating face data modules ==="
 node scripts/generate-face-modules.js
