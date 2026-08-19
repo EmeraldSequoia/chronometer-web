@@ -125,6 +125,13 @@ No new dependencies.
   tidied (the source has `Africa,, Asia`). Capitalised forms are deliberately
   **not** touched — `S. Africa` is the country, not a direction, and NASA
   uses both forms in a single row. `meta.note` records this.
+- **Pending amendment (2026-08-18)**: the time base will be re-anchored on
+  NASA's TT instants with UTC derived via the leap-second-exact conversion,
+  eliminating NASA's frozen ΔT vintages as an error source — spec and
+  rationale in the precision plan
+  ([2026-08-17 §3b](2026-08-17-eclipse-precision-and-verification.md)),
+  prerequisite [2026-08-18-leap-second-deltat.md](2026-08-18-leap-second-deltat.md).
+  Second-level `utcMs` shifts only; no page or schema impact.
 
 ## 4. Presentation — cards in per-year groups (0.1, 0.2, 0.4)
 
