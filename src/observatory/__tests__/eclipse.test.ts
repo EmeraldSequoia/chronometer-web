@@ -179,8 +179,9 @@ describe('simulator discs are sized topocentrically', () => {
         };
     }
 
-    // NASA's greatest-eclipse instant and point for the two hybrids in
-    // src/help/eclipse-data.json; both are total there.
+    // NASA's published greatest-eclipse UT and path-page point for the two
+    // hybrids of 2011–2041; both are total there. (Hardcoded fixtures —
+    // eclipse-data.json itself now stores TT instants and reduced positions.)
     test.each([
         ['2013-11-03 hybrid', '2013-11-03T12:46:29Z', 3.49, -11.6983],
         ['2023-04-20 hybrid', '2023-04-20T04:16:45Z', -9.595, 125.78],

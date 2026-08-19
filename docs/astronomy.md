@@ -129,9 +129,59 @@ did. And past `kECLeapTableValidUntilISO` nobody — including NASA — knows Δ
 the IERS announces leap seconds only about six months ahead, which is why the
 source file carries an expiry and build.sh warns once it passes. Our
 post-expiry extrapolation is deliberately lower than the raw polynomial NASA's
-eclipse catalogs assume (72.4 s vs 79 s for 2032), so replaying a *future*
-NASA instant now lands a few arcseconds off its maximum. See
-[planning/2026-08-18-leap-second-deltat.md](../planning/2026-08-18-leap-second-deltat.md).
+eclipse catalogs assume (72.4 s vs 79 s for 2032) — which is why
+`src/help/eclipse-data.json` stores the ΔT-independent TT instant (`tdMs`)
+rather than anyone's UT label, and consumers derive UT at run time through
+`convertETtoUT` (es-time.ts). See
+[planning/2026-08-18-leap-second-deltat.md](../planning/2026-08-18-leap-second-deltat.md)
+and [planning/2026-08-17-eclipse-precision-and-verification.md](../planning/2026-08-17-eclipse-precision-and-verification.md) §3b.
+
+### Measured Accuracy: Engine vs JPL Horizons
+
+**2026-08-18.** `scripts/verify-eclipse-horizons.mjs` (manual, never in
+build/CI — JPL asks for strictly sequential requests) measures the engine's
+topocentric Sun/Moon geometry against JPL Horizons at all 70 solar
+greatest-eclipse rows of `src/help/eclipse-data.json`: apparent-of-date,
+airless, at each row's site and derived-UT instant — the same frame
+`calculateEclipse` computes. Responses are cached in `scripts/horizons-cache/`
+(committed), so re-runs are offline and the report is byte-stable. Horizons is
+an authority independent of the Espenak/NASA canon the dataset is scraped
+from; the optional `--opale` flag adds IMCCE's INPOP19A as a third,
+independent-of-both computation.
+
+Measured, across 2011–2041:
+
+- **Sun−Moon separation** (the number the partial/annular/total thresholds
+  cut): inside the leap era (37 rows, 2011–2026) median |Δ| = 0.33″,
+  worst 0.86″ — the engine agrees with JPL to better than an arcsecond on
+  every row. At the stored TT instants and reduced coordinates, Horizons
+  itself sees the discs within 0.15″ of concentric for every leap-era
+  central row — independent confirmation of the dataset's positions and
+  instants.
+- **ΔT**: within the leap era the engine matches Horizons' EOP-derived
+  TDB−UT to **≤ 2 ms** on all 37 rows. The pilot's one outlier
+  (2026-08-12, −1.5″) was diagnosed as the old polynomial ΔT being +5.9 s
+  in 2026; with the leap-exact ΔT it collapsed to +0.76″, inside the band.
+- **Disc sizes**, compared through topocentric distances
+  (radius-convention-free — Horizons uses IAU 2015 nominal radii, the
+  engine 695 500/1737.10 km): Moon distance within 0.81 km (≤ 0.004″ of
+  disc diameter), Sun distance within 548 km (≤ 0.007″) — the truncation
+  level of the Willmann-Bell series.
+- **Past the leap table's expiry** (33 rows, 2027+) separations diverge up
+  to 5.1″ by 2041 — entirely the ΔT conventions: Horizons freezes TAI−UTC
+  at the last announced leap second while the engine extrapolates the
+  rejoined polynomial (+10.2 s difference by 2041), and the deltas track
+  the Moon's 0.56″/s angular rate times that difference. This is two
+  self-consistent predictions of an unknowable quantity, not a geometry
+  error; the leap-era rows are the geometry measurement.
+- **`--opale` triangulation** (IMCCE, INPOP19A — independent of Espenak
+  *and* JPL): the central leap-era rows' greatest-eclipse circumstances
+  agree with ours to median 0.21′ in position and 0.7 s in instant. Partial
+  rows spread to ~2′ (their GE point lives in the same flat valley the
+  scraper documents — see `greatestEclipseFromElements`) and predicted-era
+  instants to ~16 s (ΔT vintages again). Verification fixture only: OPALE's
+  terms require an LTE authorization before any number of theirs ships in
+  the app.
 
 ### Astronomy Caching
 

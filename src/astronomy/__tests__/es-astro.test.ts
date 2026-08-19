@@ -13,6 +13,7 @@ import {
     priorUTMidnightForDateInterval,
     dateToDateInterval,
     dateIntervalToDate,
+    convertETtoUT,
 } from '../es-time';
 import { kECLeapTableValidUntilISO } from '../es-leap-second';
 import {
@@ -199,6 +200,23 @@ describe('es-time leap-second ΔT', () => {
         const y2040 = deltaTAt('2040-01-01T00:00:00Z');
         expect(y2040).toBeGreaterThan(69.184);
         expect(y2040 - 69.184).toBeCloseTo(espenakDeltaT(2040) - espenakDeltaT(2027.49), 0);
+    });
+
+    test('convertETtoUT inverts the conversion to a millisecond', () => {
+        // One instant per ΔT era: polynomial (1950), exact leap table (2005,
+        // 2024), rejoined polynomial (2040).
+        for (const iso of ['1950-03-01T12:00:00Z', '2005-07-04T00:00:00Z',
+                           '2024-04-08T18:17:20Z', '2040-01-01T00:00:00Z']) {
+            const ut = appleEpoch(new Date(iso));
+            const et = ut + julianCenturiesSince2000EpochForDateInterval(ut, null).deltaT;
+            expect(Math.abs(convertETtoUT(et) - ut), iso).toBeLessThan(0.001);
+        }
+    });
+
+    test('convertETtoUT: a leap-era TT instant lands exactly ΔT earlier in UT', () => {
+        // How eclipse-data.json consumers derive UT from a stored tdMs.
+        const tt = appleEpoch(new Date('2024-04-08T18:18:29.300Z'));
+        expect(convertETtoUT(tt)).toBeCloseTo(tt - 69.184, 5);
     });
 });
 

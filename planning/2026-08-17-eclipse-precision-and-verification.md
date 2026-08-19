@@ -1,7 +1,8 @@
 # Eclipse engine verification + sub-degree greatest-eclipse positions
 
-**Status**: proposed, rev 2 (2026-08-18) — **for a fresh session; all
-prerequisites have landed and this is the next session in the pipeline.**
+**Status**: executed 2026-08-18 — outcomes and plan amendments in §8;
+commits pending Steve's review (§7). Originally rev 2 (2026-08-18), written
+for a fresh session with all prerequisites landed.
 Topocentric fix (2f756b8), horizon indicator (f5c7a75), and leap-exact ΔT
 (0513f2a + 906b7bf) are committed; Eclipse Table phase 1 is committed
 (5708e4b). §3b was reconciled 2026-08-18 with the table plan's §9a: store
@@ -289,7 +290,56 @@ changes in this plan).
 3. SEdata scrape + Besselian reduction + regenerated eclipse-data.json +
    test updates.
 
-## 8. Coordination
+## 8. Execution notes (2026-08-18 session — outcomes and plan amendments)
+
+All three deliverables are in the working tree (commits are Steve's, §7).
+Full suite (8659) and `tsc --noEmit` green; scraper and harness reports
+byte-stable across re-runs.
+
+**Findings that amend this plan:**
+
+1. **§3b/§4's "reproduce their published GE to ≤0.5′" holds only for the 43
+   central rows.** NASA's stored *partial*-row GE coordinates deviate from
+   their own documented definition (SEcatkey: "point closest to the shadow
+   cone axis… Sun's altitude is always 0°") by 3–8′ along the sunrise ring:
+   the axis distance is quadratically flat along the ring near the limb
+   tangency, so the argmin is ill-conditioned at km scale and any faithful
+   implementation lands elsewhere in the same valley. Our exact-ellipsoid
+   minimum matches the canon's *minimized distance* to ~1e-4 R⊕ and its
+   printed greatest magnitudes to all four decimals (verified against
+   Jubier's 7-decimal copies of the canon values for 2011 Jan 04 and
+   2014 Apr 29). Partial rows therefore validate against SEdata's printed
+   0.1° circumstances at 0.25°, and the scraper comment documents the
+   valley. The emitted point is the documented definition computed exactly —
+   geodetic Sun altitude 0 at the instant, which is precisely what the deep
+   links need.
+2. **Central validation:** 42/43 path fixtures agree to ≤0.48′ great-circle
+   (median ~0.1′; the pierce point is computed by exact line–ellipsoid
+   intersection, not the textbook unit-sphere scaling, which drifts past
+   0.5′ at Antarctic latitudes). One keyed allowance: 2021 Dec 04 at 1.01′
+   (gamma −0.9526 — near-limb ×3.4 error amplification, and the path pages
+   were computed with ELP2000-85 against the published elements'
+   ELP2000-82).
+3. **Harness acceptance met.** Leap era (37 rows): |Δsep| ≤ 0.86″, median
+   0.33″; engine ΔT within 2 ms of Horizons' EOP value on every row; the
+   §2a outlier (2026-08-12, −1.50″) collapsed to +0.76″ — cause confirmed
+   as pure ΔT. Predicted era (33 rows): Δsep up to 5.1″ **tracks
+   0.56″/s × δΔT exactly**, where δΔT (≤10.2 s by 2041) is Horizons
+   freezing TAI−UTC at the last announced leap second vs our rejoined
+   polynomial — written explanation per §4, no tolerance widened. Moon
+   distance ≤0.81 km, Sun ≤548 km (≤0.007″ of either disc).
+4. **New SEdata quirk** beyond §2b's list: the elements page prints t0's
+   clock against the eclipse's own date, so an eclipse at 23:53 TDT gets
+   "0.000 TDT" meaning midnight at that date's *end* (2012 May 20); the
+   parser day-snaps t0 to the printed TDT instant.
+5. **OPALE** cross-check ran via `--opale`, all 70 rows: central leap-era
+   circumstances agree to median 0.21′ / 0.7 s — three independent
+   computations (Espenak canon, JPL DE, IMCCE INPOP19A) now triangulate the
+   dataset. Partials spread to ~2′ (the same flat-valley GE-point
+   convention, on their side) and predicted-era instants to ~16 s (ΔT
+   vintages). Fixture only, per §"Explicitly not proposed".
+
+## 9. Coordination
 
 - Run **after** the topocentric-sizes session lands, **and after the
   leap-second ΔT session**

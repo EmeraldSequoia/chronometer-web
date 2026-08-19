@@ -12,6 +12,15 @@
  *      against our Willmann-Bell ephemerides: a mistyped time, a swapped
  *      hemisphere, or a mismapped type code all move the computed kind.
  *
+ * Times: rows store `tdMs`, the TT (TDT) instant of greatest eclipse — the
+ * frame the eclipse geometry is computed in. NASA's published UT labels bake
+ * in frozen ΔT predictions of assorted vintages, so UT is never stored; it is
+ * derived here (and by the page module) through the engine's own leap-exact
+ * ΔT via convertETtoUT. Replaying at that derived instant makes the engine's
+ * internal TT equal NASA's TT exactly, which is what lets every row be
+ * asserted strictly regardless of whose ΔT prediction ages how.
+ * See planning/2026-08-17-eclipse-precision-and-verification.md §3b.
+ *
  * Read as JSON text rather than imported: tsconfig has no resolveJsonModule and
  * build.sh gates on `tsc --noEmit` over src/**.
  */
@@ -20,20 +29,21 @@ import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { calculateEclipse, EclipseKind } from '../astronomy/es-astro';
-import { kECLeapTableValidUntilISO } from '../astronomy/es-leap-second';
+import { convertETtoUT } from '../astronomy/es-time';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_PATH = join(__dirname, '../help/eclipse-data.json');
 const RAW = readFileSync(DATA_PATH, 'utf-8');
 
 interface Eclipse {
-    utcMs: number;
+    tdMs: number;
+    nasaDeltaT: number;
     kind: string;
     region: string;
     pathRegion: string | null;
     lat: number;
     lon: number;
-    coordSource: 'path' | 'catalog';
+    coordSource: 'besselian' | 'catalog';
     tz: string;
     url: string;
 }
@@ -58,9 +68,14 @@ const SOLAR_KINDS = ['partial-solar', 'annular-solar', 'total-solar', 'hybrid-so
 const LUNAR_KINDS = ['partial-lunar', 'total-lunar'];
 const ALL_KINDS = [...SOLAR_KINDS, ...LUNAR_KINDS];
 
-const appleEpoch = (utcMs: number): number => utcMs / 1000 - 978307200;
+const appleEpoch = (ms: number): number => ms / 1000 - 978307200;
 const toRad = (deg: number): number => (deg * Math.PI) / 180;
-const iso = (utcMs: number): string => new Date(utcMs).toISOString().slice(0, 16);
+const iso = (ms: number): string => new Date(ms).toISOString().slice(0, 16);
+
+/** The row's UT instant of greatest eclipse (Apple-epoch seconds), derived
+ *  from the stored TT through the engine's own ΔT — see the header. */
+const utSeconds = (e: Eclipse): number => convertETtoUT(appleEpoch(e.tdMs));
+const utMs = (e: Eclipse): number => (utSeconds(e) + 978307200) * 1000;
 
 describe('eclipse-data.json — file and meta', () => {
     test('inlines safely into a <script> block', () => {
@@ -90,10 +105,11 @@ describe('eclipse-data.json — file and meta', () => {
     test('every single year is covered at a believable rate', () => {
         // Per year, not averaged over the window: an average hides a whole
         // decade going missing. Across the full 2001–2100 catalogs the
-        // non-penumbral count per year never leaves 2–7.
+        // non-penumbral count per year never leaves 2–7. Years are counted on
+        // the TD instant, matching the scraper's own gate.
         const perYear = new Map<number, number>();
         for (const e of eclipses) {
-            const year = new Date(e.utcMs).getUTCFullYear();
+            const year = new Date(e.tdMs).getUTCFullYear();
             perYear.set(year, (perYear.get(year) ?? 0) + 1);
         }
         for (let year = meta.startYear; year <= meta.endYear; year++) {
@@ -104,7 +120,7 @@ describe('eclipse-data.json — file and meta', () => {
     });
 
     test('reaches both edges of the advertised span', () => {
-        const years = eclipses.map((e) => new Date(e.utcMs).getUTCFullYear());
+        const years = eclipses.map((e) => new Date(e.tdMs).getUTCFullYear());
         expect(Math.min(...years)).toBe(meta.startYear);
         expect(Math.max(...years)).toBe(meta.endYear);
     });
@@ -121,13 +137,13 @@ describe('eclipse-data.json — file and meta', () => {
 describe('eclipse-data.json — rows', () => {
     test('chronological with no duplicates', () => {
         for (let i = 1; i < eclipses.length; i++) {
-            expect(eclipses[i].utcMs).toBeGreaterThan(eclipses[i - 1].utcMs);
+            expect(eclipses[i].tdMs).toBeGreaterThan(eclipses[i - 1].tdMs);
         }
     });
 
     test('every row is inside the covered years', () => {
         for (const e of eclipses) {
-            const year = new Date(e.utcMs).getUTCFullYear();
+            const year = new Date(e.tdMs).getUTCFullYear();
             expect(year).toBeGreaterThanOrEqual(meta.startYear);
             expect(year).toBeLessThanOrEqual(meta.endYear);
         }
@@ -135,16 +151,31 @@ describe('eclipse-data.json — rows', () => {
 
     test('fields are present and in range', () => {
         for (const e of eclipses) {
-            const where = iso(e.utcMs);
+            const where = iso(e.tdMs);
             expect(ALL_KINDS, where).toContain(e.kind);
-            expect(Number.isFinite(e.utcMs), where).toBe(true);
+            expect(Number.isFinite(e.tdMs), where).toBe(true);
+            // NASA's per-row ΔT: 66.3 s (2011) rising along their polynomial
+            // to ~85 s by 2041. Well outside this band means the column moved.
+            expect(e.nasaDeltaT, where).toBeGreaterThan(60);
+            expect(e.nasaDeltaT, where).toBeLessThan(90);
             expect(e.lat, where).toBeGreaterThanOrEqual(-90);
             expect(e.lat, where).toBeLessThanOrEqual(90);
             expect(e.lon, where).toBeGreaterThanOrEqual(-180);
             expect(e.lon, where).toBeLessThanOrEqual(180);
-            expect(['path', 'catalog'], where).toContain(e.coordSource);
+            expect(['besselian', 'catalog'], where).toContain(e.coordSource);
             expect(e.region.length, where).toBeGreaterThan(2);
             if (e.pathRegion !== null) expect(e.pathRegion.length, where).toBeGreaterThan(2);
+        }
+    });
+
+    test('derived UT stays within sane ΔT of the stored TT', () => {
+        // The engine's ΔT runs from 66.2 s (2011, leap-exact) to ~80 s by 2041
+        // (rejoined polynomial). A derivation bug — wrong epoch, wrong sign,
+        // double conversion — lands far outside this band.
+        for (const e of eclipses) {
+            const deltaT = appleEpoch(e.tdMs) - utSeconds(e);
+            expect(deltaT, `${iso(e.tdMs)} ΔT=${deltaT}`).toBeGreaterThan(60);
+            expect(deltaT, `${iso(e.tdMs)} ΔT=${deltaT}`).toBeLessThan(85);
         }
     });
 
@@ -155,7 +186,7 @@ describe('eclipse-data.json — rows', () => {
         // region text is free-form, so nothing else can tell right from wrong.
         for (const e of eclipses) {
             const central = /^(total|annular|hybrid)-solar$/.test(e.kind);
-            expect(e.pathRegion !== null, `${iso(e.utcMs)} ${e.kind}`).toBe(central);
+            expect(e.pathRegion !== null, `${iso(e.tdMs)} ${e.kind}`).toBe(central);
         }
     });
 
@@ -170,7 +201,7 @@ describe('eclipse-data.json — rows', () => {
         for (const e of eclipses) {
             expect(
                 () => new Intl.DateTimeFormat('en-US', { timeZone: e.tz }),
-                `${iso(e.utcMs)} tz=${e.tz}`
+                `${iso(e.tdMs)} tz=${e.tz}`
             ).not.toThrow();
         }
     });
@@ -181,54 +212,56 @@ describe('eclipse-data.json — rows', () => {
             const m = e.url.match(
                 /^https:\/\/www\.eclipsewise\.com\/(solar|lunar)\/(SE|LE)prime\/2001-2100\/(SE|LE)(\d{4})([A-Za-z]{3})(\d{2})([PATHN])prime\.html$/
             );
-            expect(m, `${iso(e.utcMs)} ${e.url}`).not.toBeNull();
+            expect(m, `${iso(e.tdMs)} ${e.url}`).not.toBeNull();
             const [, section, dirPrefix, filePrefix, year, mon, day, letter] = m!;
             expect(section).toBe(solar ? 'solar' : 'lunar');
             expect(dirPrefix).toBe(solar ? 'SE' : 'LE');
             expect(filePrefix).toBe(dirPrefix);
             expect(letter).toBe(e.kind[0].toUpperCase());
 
-            // EclipseWise names pages by calendar date; ours is the UT instant
-            // of maximum, which can sit on the previous day when TD − ΔT rolls
-            // back across midnight.
+            // EclipseWise names pages by calendar date; ours is the TT instant
+            // of maximum, which can sit on the next day when ΔT carries it
+            // across midnight.
             const urlDay = Date.parse(`${year} ${mon} ${day} 00:00:00 UTC`);
-            expect(Math.abs(urlDay - e.utcMs), `${iso(e.utcMs)} ${e.url}`).toBeLessThan(36 * 3600 * 1000);
+            expect(Math.abs(urlDay - utMs(e)), `${iso(e.tdMs)} ${e.url}`).toBeLessThan(36 * 3600 * 1000);
         }
     });
 
-    test('central solar eclipses carry path-page precision', () => {
-        // Whole-degree catalog coordinates are up to ~78 km off, which can fall
-        // outside a narrow umbral path and make a "total" link show a partial.
-        // NASA publishes a path page for every central eclipse except the rare
-        // non-central ones, so at most a couple of rows may lack one.
-        const central = eclipses.filter((e) => /^(total|annular|hybrid)-solar$/.test(e.kind));
-        const coarse = central.filter((e) => e.coordSource !== 'path');
-        expect(central.length).toBeGreaterThan(0);
-        expect(coarse.length / central.length).toBeLessThan(0.1);
+    test('every solar row is besselian-sourced', () => {
+        // Solar positions come from the Besselian greatest-eclipse reduction
+        // (scrape-eclipses.mjs) — one consistent ΔT convention for time and
+        // longitude, and sub-degree positions for the 27 rows the catalogs
+        // round to whole degrees (that rounding used to drop partial-eclipse
+        // deep links ~0.3° off the horizon). Lunar rows keep whole-degree
+        // catalog coordinates, where rounding is harmless.
+        for (const e of eclipses) {
+            expect(e.coordSource, `${iso(e.tdMs)} ${e.kind}`).toBe(
+                e.kind.endsWith('-solar') ? 'besselian' : 'catalog'
+            );
+        }
     });
 });
 
 describe('eclipse-data.json — replayed through the app eclipse model', () => {
     /**
-     * At the published instant and place of greatest eclipse, our own model
-     * should see the same eclipse NASA does — 113 of the 115 rows exactly,
-     * including both hybrids, which are total at greatest eclipse.
+     * At the greatest-eclipse instant and place, our own model should see the
+     * same eclipse NASA does — 114 of the 115 rows exactly, including both
+     * hybrids, which are total at greatest eclipse. The replay runs at the
+     * derived UT (see header), so the engine's internal TT equals NASA's TT
+     * exactly; the ΔT-vintage ambiguity that once forced an exemption for
+     * 2032 May 09 (22 s of annularity, published UT ~7 s off our clock) is
+     * gone, and that row is asserted strictly.
      *
-     * Two rows are exempt and assert the underlying geometry instead of the
-     * label, each for its own reason; both require the discs be concentric to
-     * within 0.02°, a tighter statement about the ephemeris than any kind
-     * label. The exemptions are deliberately narrow — see `isAmbiguous`.
-     *
-     * The first is a coordinate ambiguity: a non-central annular (no path
-     * page, so whole-degree catalog coordinates, up to ~78 km off). Its
-     * shadow axis misses the Earth entirely, so the strip where the ring is
-     * actually visible is narrow and the published position need not be on it;
-     * the sole such row, 2014 Apr 29, misses annular by 2.5 arcsec — inside
-     * that coordinate uncertainty.
-     *
-     * The second is an epoch ambiguity introduced on 2026-08-18 with the
-     * leap-second ΔT change, and it applies to exactly one far-future row
-     * (2032 May 09). Its reasoning is with `EPOCH_AMBIGUOUS` below.
+     * One row is exempt and asserts the underlying geometry instead of the
+     * label: requiring the discs concentric to within 0.02° is a tighter
+     * statement about the ephemeris than any kind label. 2014 Apr 29 is the
+     * century's only non-central annular (gamma −1.0000, path width 0.0 km):
+     * its greatest-eclipse point is the graze point where the annular
+     * threshold is met with *zero margin by construction*, so the computed
+     * kind flips between annular and partial on sub-arcsecond ephemeris
+     * differences — ours puts it ~2.5″ outside, and JPL Horizons agrees to
+     * half an arcsecond (plan §2a). The exemption is keyed by date so it
+     * cannot silently widen.
      *
      * Hybrids are asserted strictly (planning/2026-08-16-topocentric-eclipse-sizes.md):
      * their discs match to a ten-thousandth of a degree geocentrically, so
@@ -248,57 +281,19 @@ describe('eclipse-data.json — replayed through the app eclipse model', () => {
         'partial-lunar': EclipseKind.PartialLunar,
     };
 
-    /**
-     * The second exemption, and a different cause: rows whose published UT
-     * lies past the leap-second table's expiry (2026-08-18, see
-     * planning/2026-08-18-leap-second-deltat.md and docs/astronomy.md).
-     *
-     * NASA's UT of greatest eclipse is `TD − ΔT`, computed with the Espenak
-     * polynomial — 79 s for 2032. Past `kECLeapTableValidUntil` our own ΔT
-     * deliberately no longer follows that polynomial (72.4 s for 2032; the
-     * Earth sped up and nobody, NASA included, can predict the decadal part),
-     * so replaying their instant samples the eclipse ~6.8 s off its maximum —
-     * about 2.5″ at the ~0.37″/s the discs close at.
-     *
-     * That is harmless for every row but this one. 2032 May 09 is the
-     * narrowest annular in the set by a wide margin: NASA magnitude 0.9957,
-     * 44 km path, annularity lasting **22 seconds**, which leaves the
-     * `separation < sunRadius − moonRadius` test only 3.17″ of room (next
-     * tightest: 4.75″; typical: 15–30″). Being 6.8 s early is a third of the
-     * way out of the annular phase, and the row lands 0.11″ over the line.
-     *
-     * The discs and the threshold are unchanged by ΔT — only the phase along
-     * the track is — so as with the coordinate-ambiguous row above, assert the
-     * geometry instead of the label. The engine is fine: inside the leap era,
-     * where ΔT became *exact* rather than predicted, every row moved closer to
-     * concentric (2013 Nov 03 0.74″→0.32″, 2020 Jun 21 0.89″→0.47″).
-     *
-     * Keyed by date so it cannot silently widen. The real fix belongs with the
-     * Eclipse Table page, which has the same problem in its deep links: carry
-     * NASA's per-row ΔT in eclipse-data.json and replay at TD − ourΔT.
-     */
-    const EPOCH_AMBIGUOUS: Record<string, string> = {
-        '2032-05-09': '22-second annular; 3.17″ of annular margin against ~2.5″ of ΔT-prediction divergence',
-    };
+    /** TD dates of rows whose kind is grazing-ambiguous — see above. */
+    const GRAZING = new Set(['2014-04-29']);
+    const isGrazing = (e: Eclipse): boolean => GRAZING.has(iso(e.tdMs).slice(0, 10));
 
-    /** Past this, NASA's ΔT and ours diverge; before it, both are exact. */
-    const LEAP_TABLE_EXPIRY_MS = Date.parse(`${kECLeapTableValidUntilISO}T00:00:00Z`);
-
-    const isAmbiguous = (e: Eclipse): boolean => {
-        if (e.kind === 'annular-solar' && e.coordSource === 'catalog') return true;
-        return e.utcMs > LEAP_TABLE_EXPIRY_MS &&
-            EPOCH_AMBIGUOUS[iso(e.utcMs).slice(0, 10)] !== undefined;
-    };
-
-    test('every row reproduces its kind (or its geometry, at the boundary)', () => {
+    test('every row reproduces its kind (or its geometry, at the graze)', () => {
         const failures: string[] = [];
         for (const e of eclipses) {
-            const r = calculateEclipse(appleEpoch(e.utcMs), toRad(e.lat), toRad(e.lon), null);
+            const r = calculateEclipse(utSeconds(e), toRad(e.lat), toRad(e.lon), null);
             const separationDeg = (r.angularSeparation * 180) / Math.PI;
             const got = EclipseKind[r.eclipseKind];
-            const label = `${iso(e.utcMs)} ${e.kind} @${e.lat},${e.lon} [${e.coordSource}] -> ${got} sep=${separationDeg.toFixed(4)}°`;
+            const label = `${iso(e.tdMs)} ${e.kind} @${e.lat},${e.lon} [${e.coordSource}] -> ${got} sep=${separationDeg.toFixed(4)}°`;
 
-            if (isAmbiguous(e)) {
+            if (isGrazing(e)) {
                 if (separationDeg > CONCENTRIC_DEG) failures.push(`${label} (expected concentric discs)`);
             } else if (r.eclipseKind !== strictKind[e.kind]) {
                 failures.push(label);
@@ -307,15 +302,14 @@ describe('eclipse-data.json — replayed through the app eclipse model', () => {
         expect(failures, `${failures.length} row(s) disagree with the eclipse model`).toEqual([]);
     });
 
-    test('every epoch exemption names a real row past the table expiry', () => {
+    test('every grazing exemption names a real non-central annular row', () => {
         // Keeps the exemption from rotting into a blanket excuse: a stale key
         // (data regenerated, row dropped, date shifted) fails here rather than
         // silently exempting nothing — or, worse, the wrong thing.
-        for (const key of Object.keys(EPOCH_AMBIGUOUS)) {
-            const row = eclipses.find((e) => iso(e.utcMs).slice(0, 10) === key);
+        for (const key of GRAZING) {
+            const row = eclipses.find((e) => iso(e.tdMs).slice(0, 10) === key);
             expect(row, `no eclipse on ${key}`).toBeDefined();
-            expect(row!.utcMs, `${key} is not past ${kECLeapTableValidUntilISO}`)
-                .toBeGreaterThan(LEAP_TABLE_EXPIRY_MS);
+            expect(row!.kind, key).toBe('annular-solar');
         }
     });
 
@@ -323,8 +317,8 @@ describe('eclipse-data.json — replayed through the app eclipse model', () => {
         // The zenith point is on the night side by construction, so the Moon is
         // up and the Earth's shadow is on it.
         for (const e of eclipses.filter((x) => x.kind.endsWith('-lunar'))) {
-            const r = calculateEclipse(appleEpoch(e.utcMs), toRad(e.lat), toRad(e.lon), null);
-            expect(r.shadowAngularSize, iso(e.utcMs)).toBeGreaterThan(0);
+            const r = calculateEclipse(utSeconds(e), toRad(e.lat), toRad(e.lon), null);
+            expect(r.shadowAngularSize, iso(e.tdMs)).toBeGreaterThan(0);
         }
     });
 
@@ -332,8 +326,8 @@ describe('eclipse-data.json — replayed through the app eclipse model', () => {
         // Guards against an off-by-a-lot in the epoch conversion: seven days
         // after any eclipse the Moon is near quadrature, never eclipsed.
         for (const e of eclipses.slice(0, 12)) {
-            const r = calculateEclipse(appleEpoch(e.utcMs + 7 * 86400_000), toRad(e.lat), toRad(e.lon), null);
-            expect([EclipseKind.NoneSolar, EclipseKind.NoneLunar, EclipseKind.SolarNotUp, EclipseKind.LunarNotUp], iso(e.utcMs)).toContain(
+            const r = calculateEclipse(utSeconds(e) + 7 * 86400, toRad(e.lat), toRad(e.lon), null);
+            expect([EclipseKind.NoneSolar, EclipseKind.NoneLunar, EclipseKind.SolarNotUp, EclipseKind.LunarNotUp], iso(e.tdMs)).toContain(
                 r.eclipseKind
             );
         }

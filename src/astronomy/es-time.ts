@@ -227,15 +227,19 @@ export function espenakDeltaT(yearValue: number): number {
 let _leapRejoinOffset: number | null = null;
 function leapRejoinOffset(): number {
     if (_leapRejoinOffset === null) {
-        // The same year-plus-fraction convention the polynomials are fed below.
-        const d = new Date((kECLeapTableValidUntil + 978307200) * 1000);
-        const year = d.getUTCFullYear();
-        const jan1 = Date.UTC(year, 0, 1) / 1000 - 978307200;
-        const yearValue = year + (kECLeapTableValidUntil - jan1) / (365.25 * 24 * 3600);
         _leapRejoinOffset =
-            espenakDeltaT(yearValue) - ttMinusUTCForDateInterval(kECLeapTableValidUntil);
+            espenakDeltaT(yearValueForDateInterval(kECLeapTableValidUntil)) -
+            ttMinusUTCForDateInterval(kECLeapTableValidUntil);
     }
     return _leapRejoinOffset;
+}
+
+/** The year-plus-fraction convention the ΔT polynomials are fed. */
+function yearValueForDateInterval(utSeconds: number): number {
+    const d = new Date((utSeconds + 978307200) * 1000);
+    const year = d.getUTCFullYear();
+    const jan1 = Date.UTC(year, 0, 1) / 1000 - 978307200;
+    return year + (utSeconds - jan1) / (365.25 * 24 * 3600);
 }
 
 /**
@@ -269,6 +273,30 @@ function convertUTtoET(ut: number, yearValue: number): number {
         return ut + ttMinusUTCForDateInterval(ut);
     }
     return ut + espenakDeltaT(yearValue) - leapRejoinOffset();
+}
+
+/**
+ * Invert {@link convertUTtoET}: the UT instant whose ET/TDT is `et`.
+ *
+ * A one-step fixed-point inversion — the first pass evaluates ΔT with `et`
+ * standing in for UT, the second corrects with ΔT at that guess. ΔT drifts by
+ * seconds per *year*, so one refinement is exact at millisecond precision.
+ * (During a leap second the true inverse is ambiguous by construction; the
+ * fixed point simply lands on one side, which is far below any use here.)
+ *
+ * This is how stored TT instants — eclipse-data.json's `tdMs` — become
+ * displayable/replayable UT: NASA's published UT labels bake in ΔT
+ * predictions of assorted vintages, so the dataset stores the
+ * frame-independent TT instant and every consumer derives UT with the ΔT
+ * convention above, at run time. See
+ * planning/2026-08-17-eclipse-precision-and-verification.md §3b.
+ */
+export function convertETtoUT(et: number): number {
+    let ut = et;
+    for (let i = 0; i < 2; i++) {
+        ut = et - (convertUTtoET(ut, yearValueForDateInterval(ut)) - ut);
+    }
+    return ut;
 }
 
 // ============================================================================

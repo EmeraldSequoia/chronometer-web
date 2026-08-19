@@ -20,33 +20,38 @@
  *   SEdecade/LEdecade         decade tables (real <table>): the human-readable
  *                             visibility region, and for central solar
  *                             eclipses the bracketed path description
+ *   SEsearch/SEdata.php       per-eclipse Besselian-elements page, every solar
+ *                             eclipse: TDT instant of greatest eclipse, NASA's
+ *                             per-row ΔT, and the full polynomial elements
+ *                             (x, y, d, l1, l2, μ as cubics about t0)
  *   SEpath/SEpath2001/*.html  per-eclipse path pages, central solar only:
- *                             greatest eclipse in UT and lat/lon to 0.1', i.e.
- *                             ~200 m instead of the catalog's whole degrees
+ *                             greatest eclipse in UT and lat/lon to 0.1' —
+ *                             kept as validation fixtures for the reduction
  *
- * Why the path pages matter: the catalogs round the greatest-eclipse point to
- * whole degrees (up to ~78 km of error). Umbral paths in range get as narrow as
- * 21 km (2020 Jun 21) and 49 km (2023 Apr 20), so a deep link built from
- * catalog coordinates would drop the viewer outside totality and the app would
- * draw a partial eclipse on a row labelled "total". Central rows therefore take
- * their time and position from the path page; partial solar and all lunar rows
- * keep catalog coordinates, where the rounding is harmless (a partial eclipse
- * has no umbra to miss, and a lunar eclipse looks the same across the whole
- * night hemisphere).
+ * Solar positions are computed here, not copied: every solar row's
+ * greatest-eclipse point is derived from its Besselian elements
+ * (greatestEclipseFromElements below). The catalogs round the point to whole
+ * degrees (up to ~78 km — enough to miss a 21 km umbral path and draw a
+ * partial eclipse on a row labelled "total"), the path pages give 0.1' but
+ * exist only for central rows, and both bake in NASA's ΔT vintage (next
+ * paragraph). The reduction is validated against every path page to 0.5' and
+ * every SEdata circumstance block to 0.25° before its output is trusted.
+ * Lunar rows keep catalog coordinates, where the rounding is harmless (a
+ * lunar eclipse looks the same across the whole night hemisphere).
  *
- * Times: the catalogs publish TD, so UT = TD − ΔT. Path pages publish UT
- * directly and we prefer it. The two disagree by a few seconds (they assume
- * slightly different ΔT); the page displays whole minutes.
- *
- * !! When this is next re-run, also keep TD (or NASA's per-row ΔT, which the
- * century catalogs print in their own column and this script already parses).
- * Since 2026-08-18 the engine's ΔT is the exact leap-second value rather than
- * the Espenak polynomial NASA assumed, so for rows past the leap table's
- * expiry the published UT is a few seconds off *our* greatest eclipse — enough
- * to mislabel the narrowest annular in the set (2032 May 09, 22 s of
- * annularity). Storing TD lets the page and the test both work in the frame
- * that does not depend on whose ΔT you believe. See
- * planning/2026-08-16-eclipse-table-page.md §9a.
+ * Times are stored as TT (`tdMs`), not UT. NASA's published UT labels embed
+ * frozen ΔT *predictions* of three different vintages (the same 2024 eclipse
+ * carries 74.0 s on SEdata, 70.6 s on its path page, against the realized
+ * 69.184 s), and the archive never re-converts. The TT instant is what the
+ * eclipse geometry is computed in and is immune to all of that. Consumers
+ * derive UT at run/test time from the engine's own leap-exact ΔT (es-time.ts
+ * convertETtoUT), so deep links self-correct whenever the leap table is
+ * updated, without re-scraping. NASA's per-row ΔT is kept as `nasaDeltaT` for
+ * provenance and for recovering their published UT in diagnostics.
+ * Longitudes carry the same vintage bias — the Earth-fixed frame slides
+ * 15.04″ of longitude per second of ΔT — so the reduction is validated with
+ * NASA's stated ΔT and then emitted with ours. See
+ * planning/2026-08-17-eclipse-precision-and-verification.md §3b.
  *
  * Penumbral lunar eclipses are dropped: they are barely perceptible in the sky,
  * and the app's own eclipse model is umbral-only, so their deep links would
@@ -68,8 +73,6 @@ const ACKNOWLEDGMENT = "Eclipse Predictions by Fred Espenak, NASA's GSFC";
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/** Whole-degree coordinates are this coarse; see the header note. */
-const CATALOG_COORD_ERROR_KM = 78;
 /** Beyond this, the nearest city's civil time says nothing about the site. */
 const CITY_TZ_MAX_KM = 500;
 
@@ -147,12 +150,14 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const stripTags = (line) => line.replace(/<[^>]*>/g, '');
 
-/** NASA writes ° and ' as numeric entities inside the <pre> and path blocks. */
+/** NASA writes ° ' Δ μ as entities — numeric in the catalogs and path pages,
+ *  named on SEdata.php. */
 function decodeEntities(text) {
     return text
-        .replace(/&#176;/g, '°')
-        .replace(/&#39;/g, "'")
-        .replace(/&#916;/g, 'Δ')
+        .replace(/&#176;|&deg;/g, '°')
+        .replace(/&#39;|&rsquo;/g, "'")
+        .replace(/&#916;|&Delta;/g, 'Δ')
+        .replace(/&mu;/g, 'μ')
         .replace(/&nbsp;/g, ' ')
         .replace(/&amp;/g, '&');
 }
@@ -175,13 +180,13 @@ function dateKey(year, mon, day) {
     return `${year} ${mon} ${String(day).padStart(2, '0')}`;
 }
 
-function utcMsFrom(year, mon, day, hh, mm, ss, deltaTSeconds) {
+/** Epoch ms of a TT/TDT calendar instant. (Epoch ms are a UT-shaped ruler,
+ *  but they serve equally well as a linear count of TT — the JSON stores TT
+ *  instants on it, labelled `tdMs`.) */
+function tdMsFrom(year, mon, day, hh, mm, ss) {
     const monthIndex = MONTHS.indexOf(mon);
     if (monthIndex < 0) die(`unknown month "${mon}"`);
-    const td = Date.UTC(year, monthIndex, day, hh, mm, ss);
-    // UT = TD − ΔT; subtracting can roll back across midnight, which epoch
-    // arithmetic handles for us.
-    return td - deltaTSeconds * 1000;
+    return Date.UTC(year, monthIndex, day, hh, mm, ss);
 }
 
 /**
@@ -230,7 +235,8 @@ function parseCentury(html, kind, { start, end }) {
             typeCode: type,
             kindLetter: type[0],
             saros: Number(sarosStr),
-            utcMs: utcMsFrom(year, mon, Number(dayStr), Number(hh), Number(mm), Number(ss), Number(deltaTStr)),
+            tdMs: tdMsFrom(year, mon, Number(dayStr), Number(hh), Number(mm), Number(ss)),
+            nasaDeltaT: Number(deltaTStr),
             lat: signedDegrees(latField),
             lon: signedDegrees(lonField),
             pathUrl: pathHref ? `${NASA}/${pathHref[1]}` : null,
@@ -311,20 +317,249 @@ function expandDirections(text) {
         .trim();
 }
 
-/** Path pages state greatest eclipse in UT with 0.1-arcminute coordinates. */
+/** Path pages state greatest eclipse in UT with 0.1-arcminute coordinates,
+ *  and the ΔT that UT was derived with — both are validation fixtures for
+ *  the Besselian reduction (TT = published UT + stated ΔT). */
 function parsePathPage(html, url) {
     const text = decodeEntities(stripTags(html)).replace(/\s+/g, ' ');
     const m = text.match(
         /Greatest Eclipse:\s*Time\s*=\s*(\d{1,2}):(\d{2}):([\d.]+)\s*UT\s*Lat\s*=\s*(\d+)°([\d.]+)'([NS])\s*Long\s*=\s*(\d+)°([\d.]+)'([EW])/
     );
     if (!m) die(`no greatest-eclipse block in ${url} — page format changed?`);
+    const dt = text.match(/ΔT\s*=\s*([\d.]+)\s*seconds/);
+    if (!dt) die(`no ΔT statement in ${url} — page format changed?`);
     return {
         hh: Number(m[1]),
         mm: Number(m[2]),
         ss: Number(m[3]),
         lat: degreesMinutes(m[4], m[5], m[6]),
         lon: degreesMinutes(m[7], m[8], m[9]),
+        deltaT: Number(dt[1]),
     };
+}
+
+// ---------------------------------------------- SEdata Besselian elements
+
+/**
+ * SEsearch/SEdata.php?Ecl=YYYYMMDD prints one solar eclipse's polynomial
+ * Besselian elements inside a <pre>. The PHP behind it is visibly fragile:
+ * two live warnings are injected mid-<pre> where the d3 coefficient should be
+ * (`Undefined variable $_5MCSE_besselian_d3`), splitting the n=3 row, and the
+ * null prints as 0.0000000 in d3's slot (d's n=2 term is already ~1e-6, so a
+ * zero cubic is exact for our purposes). The parser drops the warning lines,
+ * then tokenizes the coefficient table and insists on exactly four rows of
+ * six coefficients so any other damage hard-fails. One more quirk: UT minutes
+ * in the circumstance block are not zero-padded ("06:3:24").
+ */
+function parseSEdata(html, url) {
+    const preMatch = html.match(/<pre>([\s\S]*?)<\/pre>/);
+    if (!preMatch) die(`no <pre> block in ${url} — page format changed?`);
+    const lines = preMatch[1].split('\n').filter((line) => !/Warning<\/b>|SEdata\.php/.test(line));
+    const text = decodeEntities(stripTags(lines.join('\n')));
+
+    const instant = text.match(/Instant of\s+(\d{1,2}):(\d{1,2}):(\d{1,2}) TDT/);
+    const deltaT = text.match(/ΔT\s*=\s*([\d.]+)\s*s/);
+    const t0Line = text.match(
+        /Polynomial Besselian Elements for:\s+(\d{4}) ([A-Z][a-z]{2})\s+(\d{1,2})\s+([\d.]+)\s+TDT/
+    );
+    const geUt = text.match(/Circumstances at Greatest Eclipse:\s+(\d{1,2}):(\d{1,2}):(\d{1,2}) UT/);
+    const geLat = text.match(/Latitude:\s+([\d.]+)°\s*([NS])/);
+    const geLon = text.match(/Longitude:\s+([\d.]+)°\s*([EW])/);
+    if (!instant || !deltaT || !t0Line || !geUt || !geLat || !geLon) {
+        die(`SEdata fields missing in ${url} — page format changed?`);
+    }
+
+    const header = text.match(/\n\s+n\s+x\s+y\s+d\s+l1\s+l2\s+μ\s*\n/);
+    const tanF = text.match(/tan f1\s*=\s*([\d.-]+)\s+tan f2\s*=\s*([\d.-]+)/);
+    if (!header || !tanF) die(`SEdata coefficient table not found in ${url} — page format changed?`);
+    const block = text.slice(header.index + header[0].length, tanF.index);
+    const tokens = block.split(/\s+/).filter((tok) => /^-?[\d.]+$/.test(tok));
+    if (tokens.length !== 4 * 7) {
+        die(`SEdata coefficient table has ${tokens.length} numbers, expected 28, in ${url}`);
+    }
+    const columns = { x: [], y: [], d: [], l1: [], l2: [], mu: [] };
+    const order = ['x', 'y', 'd', 'l1', 'l2', 'mu'];
+    for (let n = 0; n < 4; n++) {
+        if (Number(tokens[n * 7]) !== n) die(`SEdata coefficient row ${n} mislabeled in ${url}`);
+        order.forEach((name, i) => columns[name].push(Number(tokens[n * 7 + 1 + i])));
+    }
+
+    const [, yearStr, mon, dayStr, t0Str] = t0Line;
+    const dateMs = tdMsFrom(Number(yearStr), mon, Number(dayStr), 0, 0, 0);
+    const tdtInstantMs = dateMs + (Number(instant[1]) * 3600 + Number(instant[2]) * 60 + Number(instant[3])) * 1000;
+    // t0 is the integral TDT hour nearest greatest eclipse, but NASA prints
+    // its clock against the eclipse's own date — an eclipse at 23:53 TDT gets
+    // "0.000 TDT", meaning midnight at that date's *end*. Snap to the day
+    // that puts t0 beside the instant.
+    let t0Ms = dateMs + Number(t0Str) * 3600_000;
+    t0Ms -= Math.round((t0Ms - tdtInstantMs) / 86400_000) * 86400_000;
+    return {
+        url,
+        tdtInstantMs,
+        deltaT: Number(deltaT[1]),
+        t0Ms,
+        elements: columns,
+        printed: {
+            utSecondsOfDay: Number(geUt[1]) * 3600 + Number(geUt[2]) * 60 + Number(geUt[3]),
+            lat: signedDegrees(geLat[1] + geLat[2]),
+            lon: signedDegrees(geLon[1] + geLon[2]),
+        },
+    };
+}
+
+// ------------------------------------ Besselian greatest-eclipse reduction
+
+/** Flattening adopted by the Five Millennium Canon (1/298.257). */
+const EARTH_FLATTENING = 1 / 298.257;
+const EARTH_E2 = 2 * EARTH_FLATTENING - EARTH_FLATTENING * EARTH_FLATTENING;
+
+/** Degrees of longitude the ephemeris meridian leads Greenwich per second of
+ *  ΔT: 1.002738 × 15°/3600 h — the 15.04″/s rate. ΔT enters the reduction
+ *  only through this term, which is what lets main() validate the math with
+ *  NASA's stated ΔT and then emit coordinates with the engine's. */
+const LON_DEG_PER_DELTAT_SECOND = 0.00417807;
+
+const evalPoly = (c, t) => ((c[3] * t + c[2]) * t + c[1]) * t + c[0];
+const evalPolyDeriv = (c, t) => (3 * c[3] * t + 2 * c[2]) * t + c[1];
+
+/** Wrap a longitude difference onto [−180°, 180°). */
+const lonDelta = (a, b) => ((((a - b + 540) % 360) + 360) % 360) - 180;
+
+/**
+ * Greatest eclipse from polynomial Besselian elements — the standard
+ * reduction (Explanatory Supplement; Meeus, *Elements of Solar Eclipses*):
+ * the instant the shadow axis passes closest to the Earth's centre (Newton on
+ * d/dt(x² + y²) = 0), then the surface point closest to the axis at that
+ * instant, which is NASA's documented definition for every eclipse type
+ * (SEcat5/SEcatkey.html).
+ *
+ * Central rows: the axis pierces the surface. The line ξ = x, η = y is
+ * intersected with the ellipsoid exactly (a quadratic in ζ, solved in the
+ * equatorial frame) — the textbook shortcut of scaling y by 1/ρ1 against a
+ * unit sphere is only approximate and drifts past 0.5' at Antarctic
+ * latitudes (2021 Dec 04 sits at 76.8°S).
+ *
+ * Non-central rows: the closest point sits where the geodetic normal is
+ * perpendicular to the axis (the Lagrange condition — equivalently, the Sun's
+ * altitude is exactly 0°, as NASA's circumstance blocks print). That ring is
+ * parametrized by the normal's position angle and searched in 1D. NB the
+ * minimum is genuinely flat: near the limb tangency the axis distance varies
+ * only quadratically along the ring, so ~1e-4 Earth radii of formulation
+ * difference moves the argmin kilometres. NASA's stored partial positions sit
+ * 3–8′ from this exact minimum with the same axis distance to that order —
+ * same valley, different series expansion — which is why partial rows are
+ * validated to 0.25° (SEdata prints 0.1° anyway) while central rows hold 0.5′
+ * against the path pages.
+ */
+function greatestEclipseFromElements(se, deltaTSeconds) {
+    const el = se.elements;
+    // t*: t0 is chosen adjacent to greatest eclipse, so Newton from 0 converges
+    // in two or three steps; the rest are free.
+    let t = 0;
+    for (let i = 0; i < 10; i++) {
+        const x = evalPoly(el.x, t), y = evalPoly(el.y, t);
+        const xd = evalPolyDeriv(el.x, t), yd = evalPolyDeriv(el.y, t);
+        const xdd = 2 * el.x[2] + 6 * el.x[3] * t, ydd = 2 * el.y[2] + 6 * el.y[3] * t;
+        t -= (x * xd + y * yd) / (xd * xd + yd * yd + x * xdd + y * ydd);
+    }
+    const x = evalPoly(el.x, t);
+    const y = evalPoly(el.y, t);
+    const d = (evalPoly(el.d, t) * Math.PI) / 180;
+    const mu = evalPoly(el.mu, t);
+    const sinD = Math.sin(d), cosD = Math.cos(d);
+
+    // Intersect the shadow axis (ξ = x, η = y, ζ free) with the ellipsoid.
+    // In the equatorial frame A = ζ cos d − η sin d, B = ξ, C = η cos d +
+    // ζ sin d, and the surface is A² + B² + C²/(1−e²) = 1 — a quadratic in ζ
+    // whose discriminant is the exact central/non-central test.
+    const qa = cosD * cosD + (sinD * sinD) / (1 - EARTH_E2);
+    const qb = 2 * y * sinD * cosD * (1 / (1 - EARTH_E2) - 1);
+    const qc = y * y * sinD * sinD + x * x + (y * y * cosD * cosD) / (1 - EARTH_E2) - 1;
+    const disc = qb * qb - 4 * qa * qc;
+
+    let latRad, hourAngle;
+    if (disc >= 0) {
+        // Central: the near intersection (largest ζ, the Moon-ward one).
+        const zeta = (-qb + Math.sqrt(disc)) / (2 * qa);
+        const A = zeta * cosD - y * sinD;
+        const B = x;
+        const C = y * cosD + zeta * sinD;
+        // Geodetic latitude of a point on the ellipsoid, from its geocentric.
+        latRad = Math.atan(C / ((1 - EARTH_E2) * Math.hypot(A, B)));
+        hourAngle = Math.atan2(B, A);
+    } else {
+        // Non-central: search the sunrise/sunset ring. A unit normal with no
+        // ζ-component is (sin ψ, cos ψ, 0) in the fundamental frame; mapping
+        // it through the d-rotation gives the geodetic latitude and hour
+        // angle, and those give the surface position exactly.
+        const ringPoint = (psi) => {
+            const sinPhi = Math.cos(psi) * cosD;
+            const phi = Math.asin(sinPhi);
+            const H = Math.atan2(Math.sin(psi), -Math.cos(psi) * sinD);
+            const C = 1 / Math.sqrt(1 - EARTH_E2 * sinPhi * sinPhi);
+            const pcos = C * Math.cos(phi);
+            const psin = C * (1 - EARTH_E2) * sinPhi;
+            const xi = pcos * Math.sin(H);
+            const eta = psin * cosD - pcos * Math.cos(H) * sinD;
+            return { phi, H, dist: Math.hypot(xi - x, eta - y) };
+        };
+        let bestPsi = 0, bestDist = Infinity;
+        const STEPS = 720;
+        for (let i = 0; i < STEPS; i++) {
+            const psi = (2 * Math.PI * i) / STEPS;
+            const { dist } = ringPoint(psi);
+            if (dist < bestDist) { bestDist = dist; bestPsi = psi; }
+        }
+        let lo = bestPsi - (2 * Math.PI) / STEPS;
+        let hi = bestPsi + (2 * Math.PI) / STEPS;
+        for (let i = 0; i < 80; i++) {
+            const m1 = lo + (hi - lo) / 3, m2 = hi - (hi - lo) / 3;
+            if (ringPoint(m1).dist <= ringPoint(m2).dist) hi = m2; else lo = m1;
+        }
+        const p = ringPoint((lo + hi) / 2);
+        latRad = p.phi;
+        hourAngle = p.H;
+    }
+
+    let lon = (hourAngle * 180) / Math.PI - mu + LON_DEG_PER_DELTAT_SECOND * deltaTSeconds;
+    lon = ((lon % 360) + 540) % 360 - 180;
+    return {
+        tdMs: se.t0Ms + t * 3600_000,
+        lat: (latRad * 180) / Math.PI,
+        lon,
+    };
+}
+
+// ------------------------------------------------------------ engine ΔT
+
+/**
+ * The engine's own leap-exact ΔT, imported from the TypeScript sources:
+ * esbuild (already a devDependency) bundles a one-line entry in memory and
+ * the module is imported through a data: URL. Node cannot import the TS files
+ * directly (extensionless import specifiers), and duplicating the leap-second
+ * table here would let the two drift.
+ */
+async function loadEngineTime() {
+    const { build } = await import('esbuild');
+    const result = await build({
+        stdin: {
+            contents: "export { convertETtoUT } from './es-time';",
+            resolveDir: join(ROOT, 'src/astronomy'),
+            loader: 'ts',
+        },
+        bundle: true,
+        format: 'esm',
+        platform: 'node',
+        write: false,
+    });
+    const b64 = Buffer.from(result.outputFiles[0].text).toString('base64');
+    return import(`data:text/javascript;base64,${b64}`);
+}
+
+/** The engine's ΔT (seconds) in force at a TT instant, via convertETtoUT. */
+function engineDeltaTAt(convertETtoUT, tdMs) {
+    const ttSeconds = tdMs / 1000 - 978307200;
+    return ttSeconds - convertETtoUT(ttSeconds);
 }
 
 // -------------------------------------------------------------- timezones
@@ -409,6 +644,8 @@ async function main() {
     const sources = [
         `${NASA}/SEcat5/SE2001-2100.html`,
         `${NASA}/LEcat5/LE2001-2100.html`,
+        // Stands for the per-eclipse element queries (?Ecl=YYYYMMDD).
+        `${NASA}/SEsearch/SEdata.php`,
     ];
 
     const solarRows = parseCentury(await fetchText(sources[0], cache), 'solar', opts);
@@ -448,8 +685,10 @@ async function main() {
     }
 
     const cities = loadCities();
+    const { convertETtoUT } = await loadEngineTime();
     const eclipses = [];
-    let pathRefined = 0;
+    let pathValidated = 0;
+    const pad2 = (n) => String(n).padStart(2, '0');
 
     for (const [kind, rows] of [['solar', solarRows], ['lunar', lunarRows]]) {
         for (const row of rows) {
@@ -460,28 +699,97 @@ async function main() {
             const region = regions[kind].get(row.key);
             if (!region) die(`no decade-table region for ${kind} eclipse ${row.key}`);
 
-            let { lat, lon, utcMs } = row;
+            let { lat, lon, tdMs, nasaDeltaT } = row;
             let coordSource = 'catalog';
-            if (row.pathUrl) {
-                const precise = parsePathPage(await fetchText(row.pathUrl, cache), row.pathUrl);
-                const drift = Math.abs(
-                    utcMsFrom(row.year, row.mon, row.day, precise.hh, precise.mm, Math.round(precise.ss), 0) - utcMs
-                );
-                if (drift > 120_000) {
-                    die(`${row.key}: path page UT differs from catalog TD−ΔT by ${Math.round(drift / 1000)}s`);
+            if (kind === 'solar') {
+                const sedataUrl =
+                    `${NASA}/SEsearch/SEdata.php?Ecl=${row.year}${pad2(MONTHS.indexOf(row.mon) + 1)}${pad2(row.day)}`;
+                const se = parseSEdata(await fetchText(sedataUrl, cache), sedataUrl);
+
+                // Identity gates: the elements page must describe the catalog's
+                // eclipse on the catalog's clock (the catalog rounds ΔT to
+                // whole seconds; SEdata prints one decimal).
+                if (Math.abs(se.tdtInstantMs - row.tdMs) > 2000) {
+                    die(`${row.key}: SEdata TDT instant is ${Math.round((se.tdtInstantMs - row.tdMs) / 1000)}s from the catalog TD`);
                 }
-                if (Math.abs(precise.lat - lat) > 1 || Math.abs(precise.lon - lon) > 1) {
-                    die(`${row.key}: path-page position disagrees with the catalog by more than a degree`);
+                if (Math.abs(se.deltaT - row.nasaDeltaT) > 1) {
+                    die(`${row.key}: SEdata ΔT ${se.deltaT}s vs catalog ${row.nasaDeltaT}s`);
                 }
-                lat = Number(precise.lat.toFixed(4));
-                lon = Number(precise.lon.toFixed(4));
-                utcMs = utcMsFrom(row.year, row.mon, row.day, precise.hh, precise.mm, Math.round(precise.ss), 0);
-                coordSource = 'path';
-                pathRefined++;
+
+                // (1) Validate the reduction in NASA's own frame: with their
+                // stated ΔT it must land on their printed greatest-eclipse
+                // instant, clock and circumstances. (0.25°, not 0.5': the
+                // printed block rounds to 0.1° and, for non-central rows, the
+                // flat-valley effect described at greatestEclipseFromElements
+                // adds a few arcminutes of legitimate spread.)
+                const geNasa = greatestEclipseFromElements(se, se.deltaT);
+                if (Math.abs(geNasa.tdMs - se.tdtInstantMs) > 2000) {
+                    die(`${row.key}: reduced greatest-eclipse instant is ${((geNasa.tdMs - se.tdtInstantMs) / 1000).toFixed(1)}s from SEdata's`);
+                }
+                const utMsOfDay = ((se.tdtInstantMs - se.deltaT * 1000) % 86400000 + 86400000) % 86400000;
+                const utDiff = Math.abs(utMsOfDay / 1000 - se.printed.utSecondsOfDay);
+                if (Math.min(utDiff, 86400 - utDiff) > 1.5) {
+                    die(`${row.key}: TDT − ΔT does not reproduce SEdata's printed UT clock`);
+                }
+                if (Math.abs(geNasa.lat - se.printed.lat) > 0.25 || Math.abs(lonDelta(geNasa.lon, se.printed.lon)) > 0.25) {
+                    die(`${row.key}: reduced position ${geNasa.lat.toFixed(3)},${geNasa.lon.toFixed(3)} vs SEdata's printed ${se.printed.lat},${se.printed.lon}`);
+                }
+
+                // (1b) Where a path page exists (central rows), it is the
+                // 0.1'-precision fixture: the reduction run with the path
+                // page's own ΔT must reproduce its position to 0.5' and its
+                // TT instant (published UT + stated ΔT) to 2 s.
+                if (row.pathUrl) {
+                    const path = parsePathPage(await fetchText(row.pathUrl, cache), row.pathUrl);
+                    const gePath = greatestEclipseFromElements(se, path.deltaT);
+                    let pathTdMs = tdMsFrom(row.year, row.mon, row.day, path.hh, path.mm, 0)
+                        + Math.round((path.ss + path.deltaT) * 1000);
+                    pathTdMs -= Math.round((pathTdMs - se.tdtInstantMs) / 86400000) * 86400000;
+                    if (Math.abs(gePath.tdMs - pathTdMs) > 2000) {
+                        die(`${row.key}: reduced instant is ${((gePath.tdMs - pathTdMs) / 1000).toFixed(1)}s from the path page's`);
+                    }
+                    // Great-circle arc is the meaningful metric: raw
+                    // longitude minutes inflate by 1/cos(lat) at the polar
+                    // latitudes central eclipses favour.
+                    const gcArcmin = Math.hypot(
+                        gePath.lat - path.lat,
+                        lonDelta(gePath.lon, path.lon) * Math.cos((path.lat * Math.PI) / 180)
+                    ) * 60;
+                    // 42 of the 43 fixtures agree to ≤0.48' (median ~0.1').
+                    // 2021 Dec 04 sits at gamma −0.9526, where the pierce
+                    // point is near the limb and position error amplifies by
+                    // 1/ζ (×3.4) — and the path pages were computed with
+                    // ELP2000-85 against the published elements' ELP2000-82.
+                    // The allowance is keyed so it cannot widen silently.
+                    const allowance = row.key === '2021 Dec 04' ? 1.2 : 0.5;
+                    if (gcArcmin > allowance) {
+                        die(`${row.key}: reduced position is ${gcArcmin.toFixed(2)}' (great-circle) from the path page's — reduction is broken`);
+                    }
+                    pathValidated++;
+                }
+
+                // (2) Emit in the engine's ΔT frame. The reduction's only ΔT
+                // dependence is the ephemeris-meridian rate, asserted exactly.
+                const ourDeltaT = engineDeltaTAt(convertETtoUT, se.tdtInstantMs);
+                const ge = greatestEclipseFromElements(se, ourDeltaT);
+                const expectedShift = LON_DEG_PER_DELTAT_SECOND * (se.deltaT - ourDeltaT);
+                if (Math.abs(lonDelta(geNasa.lon, ge.lon) - expectedShift) > 1e-9) {
+                    die(`${row.key}: ΔT self-test failed — longitude moved ${lonDelta(geNasa.lon, ge.lon)}° for ${(se.deltaT - ourDeltaT).toFixed(3)}s of ΔT`);
+                }
+                if (Math.abs(ge.lat - row.lat) > 0.75 || Math.abs(lonDelta(ge.lon, row.lon)) > 0.75) {
+                    die(`${row.key}: reduced position disagrees with the whole-degree catalog value`);
+                }
+
+                lat = Number(ge.lat.toFixed(4));
+                lon = Number(ge.lon.toFixed(4));
+                tdMs = Math.round(ge.tdMs);
+                nasaDeltaT = se.deltaT;
+                coordSource = 'besselian';
             }
 
             eclipses.push({
-                utcMs,
+                tdMs,
+                nasaDeltaT,
                 kind: kindName,
                 region: region.region,
                 pathRegion: region.pathRegion,
@@ -494,21 +802,21 @@ async function main() {
         }
     }
 
-    eclipses.sort((a, b) => a.utcMs - b.utcMs);
+    eclipses.sort((a, b) => a.tdMs - b.tdMs);
 
     // Sanity gates — better to fail than to commit a plausible-looking table.
     const years = end - start + 1;
     const perYear = eclipses.length / years;
     if (perYear < 2 || perYear > 8) die(`${eclipses.length} eclipses over ${years} years (${perYear.toFixed(1)}/yr) is outside the expected band`);
     for (let i = 1; i < eclipses.length; i++) {
-        if (eclipses[i].utcMs <= eclipses[i - 1].utcMs) die(`eclipses out of order at index ${i}`);
+        if (eclipses[i].tdMs <= eclipses[i - 1].tdMs) die(`eclipses out of order at index ${i}`);
     }
     // Every year has at least two solar eclipses, and the century's busiest has
     // seven non-penumbral events; anything outside that means rows were dropped
     // (a hidden subset parses as a plausible but incomplete table) or doubled.
     const perYearCounts = new Map();
     for (const e of eclipses) {
-        const year = new Date(e.utcMs).getUTCFullYear();
+        const year = new Date(e.tdMs).getUTCFullYear();
         perYearCounts.set(year, (perYearCounts.get(year) ?? 0) + 1);
     }
     for (let year = start; year <= end; year++) {
@@ -516,24 +824,21 @@ async function main() {
         if (n < 2 || n > 7) die(`${year} has ${n} eclipses — expected 2–7; rows are being dropped or duplicated`);
     }
 
-    // A central eclipse whose catalog row lost its path link silently falls back
-    // to whole-degree coordinates, which can land outside a narrow umbral path.
-    // NASA publishes a path page for every central eclipse bar a handful of
-    // non-central ones (three in the whole century), so more than a few misses
-    // means the link markup moved, not that the pages are absent.
+    // Positions no longer depend on the path pages, but they are the only
+    // 0.1'-grade fixtures the reduction is validated against, so losing the
+    // catalog's link markup would silently gut the validation. NASA publishes
+    // a path page for every central eclipse bar the rare non-central ones
+    // (three in the whole century).
     const central = eclipses.filter((e) => /^(total|annular|hybrid)-solar$/.test(e.kind));
-    const coarseCentral = central.filter((e) => e.coordSource !== 'path');
-    if (coarseCentral.length > 3) {
+    if (central.length - pathValidated > 3) {
         die(
-            `${coarseCentral.length}/${central.length} central eclipses have no ../SEpath/…path.html link in their ` +
-            `catalog row — the catalog's link markup has probably changed. Positions would silently degrade to ` +
-            `~${CATALOG_COORD_ERROR_KM} km, enough to miss a narrow umbral path.`
+            `only ${pathValidated}/${central.length} central eclipses had a ../SEpath/…path.html link in their ` +
+            `catalog row — the catalog's link markup has probably changed, and with it the reduction's 0.1' validation coverage.`
         );
     }
     console.log(
-        `Refined ${pathRefined} positions from path pages; ` +
-        `${coarseCentral.length}/${central.length} central eclipses have no path link in the catalog` +
-        (coarseCentral.length ? ` (${coarseCentral.map((e) => new Date(e.utcMs).toISOString().slice(0, 10)).join(', ')} — position good to ~${CATALOG_COORD_ERROR_KM} km)` : '')
+        `Besselian positions for ${eclipses.filter((e) => e.coordSource === 'besselian').length} solar rows; ` +
+        `reduction validated against ${pathValidated} path pages (0.5') and every SEdata circumstance block (0.25°)`
     );
 
     const payload = {
@@ -545,10 +850,15 @@ async function main() {
             acknowledgment: ACKNOWLEDGMENT,
             sources,
             note:
-                'Penumbral lunar eclipses are omitted. Central solar positions come from NASA path pages; ' +
-                'others are catalog values rounded to whole degrees. Region text is NASA\'s own, with lowercase ' +
-                'compass abbreviations spelled out ("c US" to "central US") and stray punctuation tidied; ' +
-                'capitalised forms are left alone because they are names, not directions ("S. Africa" is the country).',
+                'Penumbral lunar eclipses are omitted. tdMs is the TT (TDT) instant of greatest eclipse; derive ' +
+                'UT at run time with the engine\'s ΔT (es-time convertETtoUT) — NASA\'s published UT labels bake ' +
+                'in frozen ΔT predictions of assorted vintages, kept per row as nasaDeltaT for provenance. Solar ' +
+                'positions are Besselian greatest-eclipse reductions from SEdata.php elements, emitted with the ' +
+                'engine\'s ΔT and validated against NASA\'s path pages (0.5\') and printed circumstances (0.25°); ' +
+                'lunar positions are catalog values rounded to whole degrees. Region text is NASA\'s own, with ' +
+                'lowercase compass abbreviations spelled out ("c US" to "central US") and stray punctuation ' +
+                'tidied; capitalised forms are left alone because they are names, not directions ' +
+                '("S. Africa" is the country).',
             counts: {
                 total: eclipses.length,
                 solar: eclipses.filter((e) => e.kind.endsWith('solar')).length,
