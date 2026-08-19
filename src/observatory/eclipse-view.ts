@@ -11,7 +11,8 @@
  *     over it (multiply blend), plus the shadow outline.
  * It only draws when Sun and Moon (or shadow and Moon) are within 10°; otherwise
  * an "Eclipse Simulator" caption shows. A green overlay marks any below-horizon
- * portion.
+ * portion, drawn at the *apparent* (refracted) horizon and captioned off the
+ * eclipse kind — see horizonOverlayState.
  *
  * Around the disc, five image markers ride an annular ring showing the
  * right-ascensions of the Sun, Moon, Earth-shadow (anti-solar), and the
@@ -50,6 +51,7 @@ import type { LayoutParams } from './layout.js';
 import type { ObsValueName } from './obs-values.js';
 import type { Updater } from '../shared/updater.js';
 import { EclipseKind, eclipseKindIsMoreSolarThanLunar } from '../astronomy/es-astro.js';
+import { kECRefractionAtHorizonX } from '../astronomy/astro-constants.js';
 import { drawText } from './draw-utils.js';
 import { OUTER_DIAL_TITLE_RATIO } from './layout.js';
 
@@ -193,6 +195,41 @@ function drawRingMarker(
 // ============================================================================
 
 /**
+ * The two decisions the below-horizon overlay makes, as a pure function so the
+ * fixture arithmetic is unit-testable (no canvas).
+ *
+ * **Overlay position.** The disc is an angular map, so the horizon line is drawn
+ * at the scene midpoint's altitude — but what we *see* near the horizon is the
+ * refracted image, lifted by the engine's horizon-refraction constant (34′). The
+ * shift is unconditional; away from the horizon the line is clamped off-disc
+ * anyway. Using `kECRefractionAtHorizonX` rather than an altitude-dependent
+ * formula is deliberate: it is the refraction convention the rest of the engine
+ * lives by (`altitudeAtRiseSet`, and hence `calculateEclipse`'s "not up" test),
+ * so the drawn geometry and the caption agree exactly at the moments that
+ * matter — at the rise/set instant the disc sits tangent above the line, and at
+ * the caption flip the wash has just closed over the top limb.
+ *
+ * **Caption.** "Below horizon" is gated on the eclipse *kind*, not on the line's
+ * pixel position, so it flips on the same tick of the same `calculateEclipse`
+ * classification that Basel's wheel renders (`legacyEclipseKind`). The wash
+ * keeps its own life: it can cover part of a disc with no caption — that is the
+ * point of it.
+ *
+ * @param avgAlt True (unrefracted) topocentric altitude of the drawn scene's
+ *               midpoint, in radians.
+ * @param kind   The current `EclipseKind` (obs-value `eclKind`).
+ */
+export function horizonOverlayState(avgAlt: number, kind: EclipseKind): {
+    apparentAvgAlt: number;
+    showLabel: boolean;
+} {
+    return {
+        apparentAvgAlt: avgAlt + kECRefractionAtHorizonX,
+        showLabel: kind === EclipseKind.SolarNotUp || kind === EclipseKind.LunarNotUp,
+    };
+}
+
+/**
  * Draw the eclipse simulator disc, caption/horizon labels, and ring hands.
  *
  * @param ctx Main canvas 2D context (layout/CSS-pixel space)
@@ -242,6 +279,7 @@ export function drawEclipseView(
     const moonAz = fmod(u.get('eclMoonAz').currentValue, TWO_PI);
 
     let horizonPixelY = 0;
+    let horizonLabelForKind = false;
     let drawingSomething = false;
 
     ctx.save();
@@ -265,7 +303,9 @@ export function drawEclipseView(
         const sunPixelX = -moonPixelX;
         const moonPixelY = -sinTheta * separation * ppar / 2;
         const sunPixelY = -moonPixelY;
-        horizonPixelY = -avgAlt * ppar;
+        const horizon = horizonOverlayState(avgAlt, kind);
+        horizonPixelY = -horizon.apparentAvgAlt * ppar;
+        horizonLabelForKind = horizon.showLabel;
 
         if (kind === EclipseKind.TotalSolar) {
             const totalR = moonPixelRadius / SUN_RADIUS_FRACTION;
@@ -295,7 +335,9 @@ export function drawEclipseView(
         if (azDelta > Math.PI) azDelta -= TWO_PI;
         const altDelta = earthShadowAlt - moonAlt;
         const avgAlt = (earthShadowAlt + moonAlt) / 2;
-        horizonPixelY = -avgAlt * ppar;
+        const horizon = horizonOverlayState(avgAlt, kind);
+        horizonPixelY = -horizon.apparentAvgAlt * ppar;
+        horizonLabelForKind = horizon.showLabel;
 
         let moonPixelX: number, moonPixelY: number;
         let earthShadowPixelX: number, earthShadowPixelY: number;
@@ -354,8 +396,9 @@ export function drawEclipseView(
         drawingSomething = (distMoon - moonPixelRadius < viewR) || (distShadow - shadowImageRadius < viewR);
     }
 
-    // --- Below-horizon green overlay (port L291-308) ---
-    let showHorizonLabel = false;
+    // --- Below-horizon green overlay (port L291-308, with the refraction lift
+    // and the kind-gated caption; see horizonOverlayState) ---
+    const showHorizonLabel = drawingSomething && horizonLabelForKind;
     if (drawingSomething && horizonPixelY > -viewR) {
         if (horizonPixelY > viewR) horizonPixelY = viewR;
         ctx.fillStyle = 'rgba(0,76,0,0.5)';   // (0, 0.3, 0, 0.5)
@@ -363,7 +406,6 @@ export function drawEclipseView(
         // — the fill origin is −horizonPixelY (the height h = 2·viewR then covers
         // the whole disc when the bodies are fully below the horizon).
         ctx.fillRect(-viewR, -horizonPixelY, viewR * 2, viewR * 2);
-        showHorizonLabel = horizonPixelY > 0;
     }
 
     ctx.restore();   // remove clip + translate

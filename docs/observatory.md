@@ -702,12 +702,64 @@ Simulator" caption:
   orientation) with Earth's umbral shadow (`earthShadow.png`, *multiply* blend,
   clipped to the Moon) drawn over it, plus the shadow outline.
 
-A translucent green overlay (`rgba(0,76,0,0.5)`) marks any below-horizon portion;
-when the event is mostly below the horizon a "Below horizon" label replaces the
-caption. Around the disc, five image markers ride the ring at RA-derived clock
-angles: Sun, Moon, Earth-shadow (anti-solar), and the ascending/descending lunar
-nodes. When the Sun and Moon markers coincide near a node, an eclipse is
-imminent.
+A translucent green overlay (`rgba(0,76,0,0.5)`) marks any below-horizon portion
+(see below); when the eclipse itself is below the horizon a "Below horizon" label
+replaces the caption. Around the disc, five image markers ride the ring at
+RA-derived clock angles: Sun, Moon, Earth-shadow (anti-solar), and the
+ascending/descending lunar nodes. When the Sun and Moon markers coincide near a
+node, an eclipse is imminent.
+
+### Below-horizon overlay: apparent horizon + kind-gated caption (deliberate iOS divergence)
+
+**2026-08-18.** The disc is an angular map — bodies sit at their true relative
+alt/az offsets around the scene midpoint, and the horizon line is drawn at the
+midpoint's altitude — so the *fraction* of each disc the green wash covers is
+already geometrically right. Two things were not:
+
+- The wash was drawn at the **geometric** horizon. At true altitude −0.27° the
+  refracted Sun is fully visible, sitting tangent on the horizon; the disc was
+  painted fully green.
+- The caption fired on the wash's pixel position (`horizonPixelY > 0`, i.e. true
+  midpoint altitude < 0), while Basel's wheel (`legacyEclipseKind` →
+  `calculateEclipse`) says "Sun not up" only below −(34′ + semidiameter) ≈
+  −0.838°. The two apps disagreed across a 0.83° band that partial-eclipse deep
+  links land in constantly — greatest eclipse for a partial is always on the
+  terminator, so ~12 of the eclipse table's 70 solar rows sit in it.
+
+`horizonOverlayState(avgAlt, kind)` (exported from `eclipse-view.ts`, unit-tested
+in `src/observatory/__tests__/eclipse.test.ts`) fixes both:
+
+- **Overlay** — the line is drawn at the **apparent** altitude,
+  `avgAlt + kECRefractionAtHorizonX` (34′), in both the solar and lunar branches.
+  The constant, not an altitude-dependent formula (Sæmundsson/Bennett), because
+  34′ is the refraction convention the rest of the engine lives by:
+  `altitudeAtRiseSet`, and hence `calculateEclipse`'s "not up" test. That makes
+  the consequences exact by construction — at the engine's rise/set instant the
+  disc sits tangent above the line; at the caption flip the wash has *just*
+  closed over the top limb (apparent center = −SD), so there are no
+  sliver-visible-but-captioned states; and true altitude −34′ draws the line
+  through the disc center, i.e. halfway looks halfway.
+- **Caption** — gated on the eclipse kind (`SolarNotUp`/`LunarNotUp`) rather than
+  the pixel position, so EO's label and Basel's wheel flip on the same tick of
+  the same `calculateEclipse` classification, with the same topocentric
+  altitudes. The wash keeps its own independent life: it can cover part of a disc
+  with no caption — that is the point of it.
+
+Accepted approximations: the uniform 34′ lift overstates refraction away from
+the horizon (real refraction at +1° true altitude is ~21′, so a disc a degree up
+is drawn ~13′ — half a disc radius — closer to the line than reality), the error
+vanishing exactly at rise/set tangency and the caption flip; one straight line at
+the *average* apparent altitude, ignoring differential refraction across the ≤1°
+scene; and no refracted flattening (the real setting Sun is ~20% vertically
+squashed). The existing placement fudges (`az×cos(alt)`, linear alt/az mapping)
+are unchanged.
+
+iOS `EOEclipseView.mm:292–308` has the original fill and `horizonPixelY > 0`
+label logic and needs the mirror change. Like the topocentric eclipse sizes and
+the ΔT work, this is the original author correcting the shared algorithm here
+first, not a port simplification (see
+[Development Rules §2](development-rules.md#2-never-simplify-ios-algorithms)).
+See [planning/2026-08-18-eclipse-horizon-indicator.md](../planning/2026-08-18-eclipse-horizon-indicator.md).
 
 ### Animation-friendly via shared-sentinel obs-values
 
