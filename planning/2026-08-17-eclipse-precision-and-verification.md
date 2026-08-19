@@ -1,10 +1,15 @@
 # Eclipse engine verification + sub-degree greatest-eclipse positions
 
-**Status**: proposed — **for a fresh session**, to run **after** the
-topocentric-sizes fix ([2026-08-16-topocentric-eclipse-sizes.md](2026-08-16-topocentric-eclipse-sizes.md))
-lands. Sequel to the Eclipse Table plan
-([2026-08-16-eclipse-table-page.md](2026-08-16-eclipse-table-page.md), whose
-phase 1 may still be uncommitted — see §8 coordination note). All sources
+**Status**: proposed, rev 2 (2026-08-18) — **for a fresh session; all
+prerequisites have landed and this is the next session in the pipeline.**
+Topocentric fix (2f756b8), horizon indicator (f5c7a75), and leap-exact ΔT
+(0513f2a + 906b7bf) are committed; Eclipse Table phase 1 is committed
+(5708e4b). §3b was reconciled 2026-08-18 with the table plan's §9a: store
+`tdMs` + `nasaDeltaT`, drop `utcMs`, derive UT at run/test time — this
+session owns that schema change, the data regeneration, and deleting the
+`EPOCH_AMBIGUOUS` exemption (2032 May 09) from eclipse-data.test.ts.
+Sequel to the Eclipse Table plan
+([2026-08-16-eclipse-table-page.md](2026-08-16-eclipse-table-page.md)). All sources
 below were **live-probed on 2026-08-17**, not surveyed from memory; raw
 responses are archived under the session scratchpad `precision-probe/` and the
 key numbers are reproduced here so this doc stands alone.
@@ -171,20 +176,36 @@ re-convert (decade-page footers frozen ~2013). The eclipse *geometry* is
 computed in TT and is immune to all of this, and **TT is recoverable for
 every row**: the century catalogs' primary column is TD of greatest eclipse
 (solar and lunar both), SEdata prints the TDT instant directly, and SEpath
-pages state the ΔT they used (so TT = published UT + stated ΔT). Therefore:
-the scraper stops trusting any NASA UT label, recovers the TT instant per
-row, and derives `utcMs = TT − (32.184 + TAI−UTC)` using the same
-leap-second table the engine uses (prerequisite:
-[2026-08-18-leap-second-deltat.md](2026-08-18-leap-second-deltat.md) —
-import the generated es-leap-second data from the script). `meta.note`
-records the convention. Expected shifts vs the current file: ~1–5 s for
-2011–2026 rows, up to ~16 s for 2041 rows (NASA's assumed ΔT there is far
-along the bad polynomial); invisible at minute display precision, but it
-closes the loop exactly — the leap-fixed engine converts our `utcMs` back
-to precisely NASA's TT, so the cross-check evaluates at the true geometry
-instant and its margins tighten. Future rows use the flat post-table value,
-refreshed on every re-scrape (the table is regenerated every few years
-anyway, which keeps this self-correcting).
+pages state the ΔT they used (so TT = published UT + stated ΔT). Therefore
+(**reconciled 2026-08-18 with the table plan's §9a — this wording is the
+authoritative version of the scheme, and this session owns implementing
+it**): the scraper stops trusting any NASA UT label and stores the
+frame-independent instant itself — **`tdMs`** (the TT instant of greatest
+eclipse) plus **`nasaDeltaT`** (their per-row ΔT, kept for provenance and
+for recovering their published UT in diagnostics) — and **drops `utcMs`
+from the JSON entirely**. No stored UT: a baked-in derived UT would go
+stale exactly the way NASA's labels did, just against a different ΔT
+vintage. Consumers derive UT where they need it, at run/test time, from
+the engine's own leap-exact ΔT (already landed, 906b7bf):
+
+- the page module builds `?t=` and the today-marker comparisons from
+  `tdMs − ΔT` at render time — a one-step fixed-point inversion of
+  `convertUTtoET` (ΔT drifts seconds per *year*, so one refinement is
+  exact at ms precision), via a small shared helper the test imports too.
+  Because the page bundle is rebuilt on every build, deep links
+  self-correct whenever the leap table is updated, **without re-scraping**;
+- `eclipse-data.test.ts` replays `calculateEclipse` at the same derived
+  instant — the engine's internal TT then equals NASA's TT *exactly*, which
+  **deletes the `EPOCH_AMBIGUOUS` exemption** (2032 May 09) and tightens
+  the cross-check for all 115 rows;
+- `meta.note` records the convention.
+
+Expected effect vs the current file: every stored instant becomes a TT
+value (~70–80 s later than the old `utcMs` numbers — a schema change, not a
+drift); *derived* UT shifts vs NASA's labels by ~1–5 s for 2011–2026 rows
+and up to ~16 s for 2041 rows (NASA's assumed ΔT out there is far along the
+polynomial the engine no longer uses). Invisible at minute display
+precision; decisive at the arcsecond margins the test now runs at.
 
 **Longitude carries the same ΔT vintage bias (added 2026-08-18, Steve's
 observation).** Greatest eclipse is TT-frame geometry — its instant and its

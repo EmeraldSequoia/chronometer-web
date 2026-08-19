@@ -1,7 +1,8 @@
 # Leap-second-exact ΔT (TT−UT) from 1972 onward
 
-**Status**: **IMPLEMENTED 2026-08-18** (uncommitted, awaiting Steve) — see
-§10 for what landed and the one place §5's prediction was wrong.
+**Status**: **IMPLEMENTED 2026-08-18**, committed as 0513f2a (table
+generator, no behavior change) + 906b7bf (ΔT switchover) — see §10 for what
+landed and the one place §5's prediction was wrong.
 Previously: proposed, rev 2 (2026-08-18) — Q1 resolved (leap-seconds.list
 updater + file-native expiry + build-time warning; Inspector :59/:60
 declined). **For a fresh session**, sequenced after the

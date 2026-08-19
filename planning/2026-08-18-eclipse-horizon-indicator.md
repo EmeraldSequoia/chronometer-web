@@ -1,13 +1,15 @@
 # EO eclipse simulator: physical horizon + Basel-matched "Below horizon"
 
-**Status**: proposed — **for a fresh session, after the topocentric-sizes
-session lands** (it is editing the same file; its obs-values changes are
-already visible in the working tree). This plan supersedes the optional
+**Status**: **IMPLEMENTED 2026-08-18** (commit f5c7a75) — landed as §9
+specified: `horizonOverlayState` helper exactly per §3c (engine-constant
+refraction, caption gated on `SolarNotUp`/`LunarNotUp`), unit tests with the
+§8 fixture table added to `src/observatory/__tests__/eclipse.test.ts`, and
+the divergence note in docs/observatory.md. Supersedes the optional
 "commit 4" sketched in §10 of
-[2026-08-16-topocentric-eclipse-sizes.md](2026-08-16-topocentric-eclipse-sizes.md);
-that doc is deliberately left unedited because its session owns it right now.
+[2026-08-16-topocentric-eclipse-sizes.md](2026-08-16-topocentric-eclipse-sizes.md).
+Status updated retroactively by the planning session.
 **Created**: 2026-08-18
-**Baseline**: e2c7b43 (+ in-flight topocentric work)
+**Baseline**: e2c7b43 (+ topocentric fix 2f756b8)
 
 ## 1. What's wrong (two defects, one overlay)
 

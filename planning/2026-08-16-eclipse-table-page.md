@@ -356,17 +356,24 @@ rejoins the polynomial with a continuity offset. Consequences for this page:
   for it (`EPOCH_AMBIGUOUS`, with a rot guard) so the suite is green — that
   exemption is a marker for this work, not a resolution.
 
-**The fix, when commits 2–3 touch the scraper anyway**: have
-`scripts/update-leap-seconds.mjs`'s sibling `scrape-eclipses.mjs` keep NASA's
-per-row ΔT — the century catalogs print it in their own `ΔT` column, already
-parsed — and store `tdMs` (or `deltaTSeconds`) alongside `utcMs`. Then both
-consumers can work in TD, which is the frame-independent quantity:
+**The fix (reconciled 2026-08-18; owned by the precision session,
+[2026-08-17 §3b](2026-08-17-eclipse-precision-and-verification.md), which
+regenerates the data anyway)**: the scraper stores the frame-independent
+**`tdMs`** + **`nasaDeltaT`** (their ΔT column, already parsed) and **drops
+`utcMs`** — a stored derived UT would go stale exactly the way NASA's labels
+did. Consumers derive UT at run/test time from the engine's leap-exact ΔT
+(one-step fixed-point inversion, shared helper):
 
-- the page builds `?t=` from `TD − ourΔT`, so the link lands on *our* maximum;
-- the test replays at the same instant, which lets the 2032 exemption be
-  deleted and makes the cross-check stronger for all 115 rows, not weaker.
+- the page builds `?t=` from `tdMs − ourΔT` at render time, so links land on
+  *our* maximum and self-correct on every rebuild when the leap table
+  updates — no re-scrape needed;
+- the test replays at the same derived instant, which deletes the 2032
+  `EPOCH_AMBIGUOUS` exemption and makes the cross-check stronger for all
+  115 rows, not weaker.
 
-Until then the coarse-margin rows are fine (15–30″ of slack); only the two
+Phase 2's renderer (this plan, §5) consumes the `tdMs` schema — build it
+against that, not against the current `utcMs` field. Until the regeneration
+lands, the coarse-margin rows are fine (15–30″ of slack); only the two
 narrowest annulars in the set are sensitive, and both are documented.
 
 ## 10. Tests — data cross-check + the real renderer

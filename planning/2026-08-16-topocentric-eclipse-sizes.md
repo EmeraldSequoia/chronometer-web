@@ -1,9 +1,18 @@
 # Eclipse discs: topocentric angular sizes
 
-**Status**: proposed — **for a fresh session**. Found while validating the
-Eclipse Table dataset ([2026-08-16-eclipse-table-page.md](2026-08-16-eclipse-table-page.md)).
-Steve is the original author of this algorithm in both iOS and EO, so this is a
-deliberate correction to the shared algorithm, not a port question.
+**Status**: **IMPLEMENTED 2026-08-18** (commit 2f756b8) — §7's acceptance
+criteria met: both hybrids (2013 Nov 03, 2023 Apr 20) classify TotalSolar,
+all totals/annulars/partials/lunar rows held, and
+`eclipse-data.test.ts` now asserts hybrids **strictly** (its comment marks
+that as the permanent guard on this fix). §4a–4c all landed in one commit
+(`distanceRatio` return, topocentric thresholds, obs-values
+`distanceFromObserverOfPlanet` for the drawn discs) with the divergence
+notes in docs/astronomy.md and docs/observatory.md. §10's open question
+(EO horizon convention) was planned and implemented separately —
+[2026-08-18-eclipse-horizon-indicator.md](2026-08-18-eclipse-horizon-indicator.md),
+commit f5c7a75. Status updated retroactively 2026-08-18 by the planning
+session; the implementing session recorded its outcome in code and docs
+rather than here.
 **Created**: 2026-08-16
 **Baseline**: e2c7b43
 
