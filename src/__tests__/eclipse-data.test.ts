@@ -20,6 +20,7 @@ import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { calculateEclipse, EclipseKind } from '../astronomy/es-astro';
+import { kECLeapTableValidUntilISO } from '../astronomy/es-leap-second';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_PATH = join(__dirname, '../help/eclipse-data.json');
@@ -210,17 +211,24 @@ describe('eclipse-data.json — rows', () => {
 describe('eclipse-data.json — replayed through the app eclipse model', () => {
     /**
      * At the published instant and place of greatest eclipse, our own model
-     * should see the same eclipse NASA does — 114 of the 115 rows exactly,
+     * should see the same eclipse NASA does — 113 of the 115 rows exactly,
      * including both hybrids, which are total at greatest eclipse.
      *
-     * One category is exempt and asserts the underlying geometry instead of
-     * the label: a non-central annular (no path page, so whole-degree catalog
-     * coordinates, up to ~78 km off). Its shadow axis misses the Earth
-     * entirely, so the strip where the ring is actually visible is narrow and
-     * the published position need not be on it; the sole such row,
-     * 2014 Apr 29, misses annular by 2.5 arcsec — inside that coordinate
-     * uncertainty. For it, require the discs be concentric to within 0.02° —
-     * a tighter statement about the ephemeris than any kind label.
+     * Two rows are exempt and assert the underlying geometry instead of the
+     * label, each for its own reason; both require the discs be concentric to
+     * within 0.02°, a tighter statement about the ephemeris than any kind
+     * label. The exemptions are deliberately narrow — see `isAmbiguous`.
+     *
+     * The first is a coordinate ambiguity: a non-central annular (no path
+     * page, so whole-degree catalog coordinates, up to ~78 km off). Its
+     * shadow axis misses the Earth entirely, so the strip where the ring is
+     * actually visible is narrow and the published position need not be on it;
+     * the sole such row, 2014 Apr 29, misses annular by 2.5 arcsec — inside
+     * that coordinate uncertainty.
+     *
+     * The second is an epoch ambiguity introduced on 2026-08-18 with the
+     * leap-second ΔT change, and it applies to exactly one far-future row
+     * (2032 May 09). Its reasoning is with `EPOCH_AMBIGUOUS` below.
      *
      * Hybrids are asserted strictly (planning/2026-08-16-topocentric-eclipse-sizes.md):
      * their discs match to a ten-thousandth of a degree geocentrically, so
@@ -240,8 +248,47 @@ describe('eclipse-data.json — replayed through the app eclipse model', () => {
         'partial-lunar': EclipseKind.PartialLunar,
     };
 
-    const isAmbiguous = (e: Eclipse): boolean =>
-        e.kind === 'annular-solar' && e.coordSource === 'catalog';
+    /**
+     * The second exemption, and a different cause: rows whose published UT
+     * lies past the leap-second table's expiry (2026-08-18, see
+     * planning/2026-08-18-leap-second-deltat.md and docs/astronomy.md).
+     *
+     * NASA's UT of greatest eclipse is `TD − ΔT`, computed with the Espenak
+     * polynomial — 79 s for 2032. Past `kECLeapTableValidUntil` our own ΔT
+     * deliberately no longer follows that polynomial (72.4 s for 2032; the
+     * Earth sped up and nobody, NASA included, can predict the decadal part),
+     * so replaying their instant samples the eclipse ~6.8 s off its maximum —
+     * about 2.5″ at the ~0.37″/s the discs close at.
+     *
+     * That is harmless for every row but this one. 2032 May 09 is the
+     * narrowest annular in the set by a wide margin: NASA magnitude 0.9957,
+     * 44 km path, annularity lasting **22 seconds**, which leaves the
+     * `separation < sunRadius − moonRadius` test only 3.17″ of room (next
+     * tightest: 4.75″; typical: 15–30″). Being 6.8 s early is a third of the
+     * way out of the annular phase, and the row lands 0.11″ over the line.
+     *
+     * The discs and the threshold are unchanged by ΔT — only the phase along
+     * the track is — so as with the coordinate-ambiguous row above, assert the
+     * geometry instead of the label. The engine is fine: inside the leap era,
+     * where ΔT became *exact* rather than predicted, every row moved closer to
+     * concentric (2013 Nov 03 0.74″→0.32″, 2020 Jun 21 0.89″→0.47″).
+     *
+     * Keyed by date so it cannot silently widen. The real fix belongs with the
+     * Eclipse Table page, which has the same problem in its deep links: carry
+     * NASA's per-row ΔT in eclipse-data.json and replay at TD − ourΔT.
+     */
+    const EPOCH_AMBIGUOUS: Record<string, string> = {
+        '2032-05-09': '22-second annular; 3.17″ of annular margin against ~2.5″ of ΔT-prediction divergence',
+    };
+
+    /** Past this, NASA's ΔT and ours diverge; before it, both are exact. */
+    const LEAP_TABLE_EXPIRY_MS = Date.parse(`${kECLeapTableValidUntilISO}T00:00:00Z`);
+
+    const isAmbiguous = (e: Eclipse): boolean => {
+        if (e.kind === 'annular-solar' && e.coordSource === 'catalog') return true;
+        return e.utcMs > LEAP_TABLE_EXPIRY_MS &&
+            EPOCH_AMBIGUOUS[iso(e.utcMs).slice(0, 10)] !== undefined;
+    };
 
     test('every row reproduces its kind (or its geometry, at the boundary)', () => {
         const failures: string[] = [];
@@ -258,6 +305,18 @@ describe('eclipse-data.json — replayed through the app eclipse model', () => {
             }
         }
         expect(failures, `${failures.length} row(s) disagree with the eclipse model`).toEqual([]);
+    });
+
+    test('every epoch exemption names a real row past the table expiry', () => {
+        // Keeps the exemption from rotting into a blanket excuse: a stale key
+        // (data regenerated, row dropped, date shifted) fails here rather than
+        // silently exempting nothing — or, worse, the wrong thing.
+        for (const key of Object.keys(EPOCH_AMBIGUOUS)) {
+            const row = eclipses.find((e) => iso(e.utcMs).slice(0, 10) === key);
+            expect(row, `no eclipse on ${key}`).toBeDefined();
+            expect(row!.utcMs, `${key} is not past ${kECLeapTableValidUntilISO}`)
+                .toBeGreaterThan(LEAP_TABLE_EXPIRY_MS);
+        }
     });
 
     test('lunar rows are eclipsed at their zenith point', () => {

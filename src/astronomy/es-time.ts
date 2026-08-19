@@ -16,6 +16,12 @@ import {
 } from './astro-constants';
 import type { AstroCache } from './astro-cache';
 import { CacheSlot } from './astro-cache';
+import {
+    kECLeapEraStart,
+    kECLeapTableValidUntil,
+    kECLeapTableValidUntilISO,
+    ttMinusUTCForDateInterval,
+} from './es-leap-second';
 
 // ============================================================================
 // Supported astronomical date range
@@ -213,9 +219,56 @@ export function espenakDeltaT(yearValue: number): number {
     }
 }
 
-/** Convert UT to ET/TDT by adding Delta T. Uses Espenak by default. */
+/**
+ * Espenak's ΔT at `kECLeapTableValidUntil` minus the exact value there — the
+ * constant that makes the polynomial rejoin the table without a step. Computed
+ * once, lazily, from generated constants.
+ */
+let _leapRejoinOffset: number | null = null;
+function leapRejoinOffset(): number {
+    if (_leapRejoinOffset === null) {
+        // The same year-plus-fraction convention the polynomials are fed below.
+        const d = new Date((kECLeapTableValidUntil + 978307200) * 1000);
+        const year = d.getUTCFullYear();
+        const jan1 = Date.UTC(year, 0, 1) / 1000 - 978307200;
+        const yearValue = year + (kECLeapTableValidUntil - jan1) / (365.25 * 24 * 3600);
+        _leapRejoinOffset =
+            espenakDeltaT(yearValue) - ttMinusUTCForDateInterval(kECLeapTableValidUntil);
+    }
+    return _leapRejoinOffset;
+}
+
+/**
+ * Convert UT to ET/TDT by adding ΔT. Three eras, in time order:
+ *
+ * 1. **Before 1972** — `espenakDeltaT`, the Five Millennium Canon polynomials.
+ *    That is what they are for, and there is nothing better.
+ * 2. **1972 through {@link kECLeapTableValidUntilISO}** — exact, from the
+ *    leap-second table: `TT − UTC = 32.184 + (TAI − UTC)`. No fit is involved,
+ *    so within this window ΔT is right to the millisecond rather than to the
+ *    several seconds the polynomial had drifted (it predicted the Earth would
+ *    keep slowing; instead it sped up, and by 2026 the 2005–2050 branch is
+ *    ~5.9 s high — about 3″ of Moon).
+ * 3. **After the table's expiry** — the polynomial again, shifted by the
+ *    constant that makes it continuous at the handover. The parabola's
+ *    curvature is the trustworthy part of the physics (tidal braking, good to
+ *    centuries); its decadal level is not, and the offset absorbs that.
+ *
+ * The 1972 boundary itself steps by about 0.07 s (espenakDeltaT(1972.0) ≈ 42.25
+ * against the exact 42.184) — far inside the polynomial's own error band there,
+ * and not worth blending across.
+ *
+ * `ut` is UTC, not UT1; the |UT1 − UTC| < 0.9 s difference is unmodelled here
+ * exactly as it was before. See planning/2026-08-18-leap-second-deltat.md.
+ */
 function convertUTtoET(ut: number, yearValue: number): number {
-    return ut + espenakDeltaT(yearValue);
+    if (ut < kECLeapEraStart) {
+        return ut + espenakDeltaT(yearValue);
+    }
+    if (ut <= kECLeapTableValidUntil) {
+        return ut + ttMinusUTCForDateInterval(ut);
+    }
+    return ut + espenakDeltaT(yearValue) - leapRejoinOffset();
 }
 
 // ============================================================================

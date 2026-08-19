@@ -1,6 +1,8 @@
 # Leap-second-exact ΔT (TT−UT) from 1972 onward
 
-**Status**: proposed, rev 2 (2026-08-18) — Q1 resolved (leap-seconds.list
+**Status**: **IMPLEMENTED 2026-08-18** (uncommitted, awaiting Steve) — see
+§10 for what landed and the one place §5's prediction was wrong.
+Previously: proposed, rev 2 (2026-08-18) — Q1 resolved (leap-seconds.list
 updater + file-native expiry + build-time warning; Inspector :59/:60
 declined). **For a fresh session**, sequenced after the
 topocentric-sizes fix ([2026-08-16-topocentric-eclipse-sizes.md](2026-08-16-topocentric-eclipse-sizes.md))
@@ -271,3 +273,66 @@ unmodified before and after this change.
    golden re-baseline (audited) — the behavior commit.
 3. (with the harness session, not here) Horizons re-run demonstrating the
    2026 residual collapse.
+
+## 10. Outcome (2026-08-18)
+
+Implemented as planned, with one deviation from §5/§8 recorded below.
+
+**Confirmed by construction**
+- ΔT is exactly 69.184 s for any 2017-present instant; 42.184 s at
+  1972-01-02; 47.184 s at 1976-06-15 and 61.184 s at 1995-06-15 (the
+  mid-table epochs). Continuity swept at 6-hour steps from 1970 to 2400:
+  exactly 27 one-second steps, nothing else above 0.1 s, and the rejoin at
+  `kECLeapTableValidUntil` (2027-06-28, from the source file's `#@`) is
+  continuous.
+- **iOS cross-check clean.** The generated table matches
+  `.estime-ref/src/ESLeapSecond.cpp` on all 27 transitions — instants,
+  per-step and cumulative counts. The 2016 Wikipedia scrape was right;
+  nothing to report against the shipped iOS data. (The updater re-runs this
+  check automatically whenever `.estime-ref` is present.)
+- The `#h` SHA-1 in leap-seconds.list is verified at generation time, not
+  just noted — it covers every number in the file, so a match proves the
+  parse is complete and untranscribed.
+
+**Golden re-baseline, audited (§5)** — 45 snapshot files, 3.3 M numeric
+leaves, no structural changes. The distribution is *not* uniformly ≲1e-4 rad
+as §5 predicted, and the reason is benign: every part exceeding that is a
+rise/set **time** hand, where a few seconds of event time is amplified by the
+dial. Max angle delta 6.98e-3 rad = 24.00 arcmin exactly = 4 s on a
+60-minute dial (`set min`, `mset min`, `nxt rs mn`, `nxt mrs mn`), with the
+matching hour hands at exactly 1/12 of that. All 51 other part names —
+every position angle, sun, moon, planets, terminator — stay under 1e-4 rad,
+as predicted. 153 `angleAnimating` flips are float-equality artifacts at the
+1e-10 level. No delta ≥ 1e-2 anywhere.
+
+**Independent evidence the fix is right**, without waiting for Horizons:
+replaying NASA's own published instants of greatest eclipse, every row inside
+the leap era moved *closer* to concentric — 2013 Nov 03 0.74″→0.32″,
+2016 Sep 01 1.70″→0.88″, 2017 Feb 26 1.03″→0.58″, 2020 Jun 21 0.89″→0.47″,
+2023 Apr 20 1.57″→0.76″.
+
+**Deviation from §8 — eclipse-data.test.ts did not pass unmodified.** §5
+expected margins to move ≤3″ and hold; one row flipped, and the cause is not
+an implementation error:
+
+- 2032 May 09 is the narrowest annular in the 115-row set — NASA magnitude
+  0.9957, 44 km path, annularity lasting **22 seconds** — leaving the
+  `separation < sunRadius − moonRadius` test just 3.17″ of room (next
+  tightest 4.75″, typical 15–30″).
+- Its published UT is `TD − 79 s` (NASA's Espenak ΔT). Past the table's
+  expiry ours is 72.4 s, so we sample 6.8 s before maximum ≈ 2.5″ at the
+  ~0.37″/s the discs close at. 0.32″ + 2.5″ = 3.28″, i.e. 0.11″ over.
+  The discs and the threshold are unchanged by ΔT; only the phase along the
+  track is.
+- Resolution (Steve, 2026-08-18): a narrow date-keyed exemption
+  (`EPOCH_AMBIGUOUS`) asserting concentricity, with a rot guard so a stale
+  key fails rather than silently excusing a row. The real fix — carry NASA's
+  per-row ΔT in eclipse-data.json and replay at `TD − ourΔT`, which *deletes*
+  the exemption and strengthens the test — is recorded for the Eclipse Table
+  session in
+  [2026-08-16-eclipse-table-page.md §9a](2026-08-16-eclipse-table-page.md),
+  its §14 risks, and the scrape-eclipses.mjs header. The same staleness
+  affects that page's post-2027 **deep links**.
+
+**Not done here**: §6's Horizons re-run, which belongs to the harness session
+([2026-08-17-eclipse-precision-and-verification.md](2026-08-17-eclipse-precision-and-verification.md)).

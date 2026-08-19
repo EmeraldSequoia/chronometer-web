@@ -38,6 +38,7 @@ See [iOS Reference](ios-reference.md) for a complete file listing.
 | `src/astronomy/es-riseset.ts` | Rise/set/transit calculations for sun and moon | `ECAstronomyManager.cpp` |
 | `src/astronomy/es-sidereal.ts` | Sidereal time (GMST, LST) | `ECAstronomy.m` |
 | `src/astronomy/es-time.ts` | Julian date, ΔT, date interval conversions | `ESTime.cpp`, `ESCalendar.cpp` |
+| `src/astronomy/es-leap-second.ts` | TAI−UTC table behind exact ΔT — **generated**, see `scripts/update-leap-seconds.mjs` | `ESLeapSecond.cpp` |
 | `src/astronomy/es-calendar.ts` | Calendar utilities (day of year, leap year, month lengths) | `ESCalendar.cpp` |
 | `src/astronomy/wb-sun.ts` | Willmann-Bell sun position (Bretagnon & Simon series) | `ESWillmannBellSun.cpp` |
 | `src/astronomy/wb-moon.ts` | Willmann-Bell moon position (Chapront-Touzé tables) | `ESWillmannBellMoon.cpp` |
@@ -89,6 +90,48 @@ classical geocentric shadow construction and reproduces all 45 NASA lunar
 eclipses) and `altitudeAtRiseSet` (geocentric diameter and parallax are
 correct for what it computes). See
 [planning/2026-08-16-topocentric-eclipse-sizes.md](../planning/2026-08-16-topocentric-eclipse-sizes.md).
+
+### ΔT Is Exact From 1972 Onward (deliberate iOS divergence)
+
+**2026-08-18.** `convertUTtoET` (es-time.ts) no longer asks the Espenak
+polynomial for modern dates. From 1972-01-01 through the leap-second table's
+published expiry it computes ΔT as
+
+```
+TT − UTC = 32.184 s + (TAI − UTC)
+```
+
+which is exact by definition — `TAI − UTC` is the integer maintained by the
+IERS, tabulated in the generated `src/astronomy/es-leap-second.ts`. Outside
+that window nothing changed: before 1972 the polynomial is still
+authoritative, and past the expiry it resumes with the constant offset that
+makes it continuous at the handover.
+
+iOS `ECAstronomy.m:185–199` still uses the Meeus table/polynomial and needs the
+mirror change. `ESLeapSecond` is already linked into the iOS products —
+this is the wiring that was always intended there and never happened. Like
+the topocentric note above, this is a correction to the shared algorithm, not
+a port simplification (see
+[Development Rules §2](development-rules.md#2-never-simplify-ios-algorithms)).
+
+Why: the polynomial assumed the Earth would keep decelerating. Instead it sped
+up — no leap second since 2017 — so the 2005–2050 branch reads 75.07 s for
+2026 against the true 69.184 s. The Moon moves 0.55″ per second of ΔT, so
+every lunar position was ~3″ off and growing by ~0.5 s/yr. The evidence the
+fix works: replaying NASA's published instants of greatest eclipse, every row
+inside the leap era moved *closer* to concentric (2013 Nov 03: 0.74″ → 0.32″;
+2016 Sep 01: 1.70″ → 0.88″; 2017 Feb 26: 1.03″ → 0.58″; 2020 Jun 21:
+0.89″ → 0.47″; 2023 Apr 20: 1.57″ → 0.76″).
+
+Two things the table deliberately does not fix. It is UTC, not UT1, so
+GST and hour angles still carry the |UT1 − UTC| < 0.9 s ambiguity they always
+did. And past `kECLeapTableValidUntilISO` nobody — including NASA — knows ΔT:
+the IERS announces leap seconds only about six months ahead, which is why the
+source file carries an expiry and build.sh warns once it passes. Our
+post-expiry extrapolation is deliberately lower than the raw polynomial NASA's
+eclipse catalogs assume (72.4 s vs 79 s for 2032), so replaying a *future*
+NASA instant now lands a few arcseconds off its maximum. See
+[planning/2026-08-18-leap-second-deltat.md](../planning/2026-08-18-leap-second-deltat.md).
 
 ### Astronomy Caching
 

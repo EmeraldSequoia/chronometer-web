@@ -14,6 +14,7 @@ import {
     dateToDateInterval,
     dateIntervalToDate,
 } from '../es-time';
+import { kECLeapTableValidUntilISO } from '../es-leap-second';
 import {
     convertUTToGSTP03,
     convertGSTtoLST,
@@ -123,6 +124,81 @@ describe('es-time', () => {
         const j2100 = appleEpoch(new Date('2100-01-01T12:00:00Z'));
         const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(j2100, null);
         expect(Math.abs(julianCenturiesSince2000Epoch - 1.0)).toBeLessThan(0.001);
+    });
+});
+
+/**
+ * ΔT from 1972 onward is a table lookup, not a fit — see convertUTtoET.
+ * These pin the exact values; `espenakDeltaT` and `ECMeeusDeltaT` above are
+ * unchanged and still cover the polynomial era.
+ */
+describe('es-time leap-second ΔT', () => {
+    const deltaTAt = (iso: string) =>
+        julianCenturiesSince2000EpochForDateInterval(appleEpoch(new Date(iso)), null).deltaT;
+
+    test.each([
+        ['1972-01-02T00:00:00Z', 42.184],   // first day of the leap era
+        ['1976-06-15T00:00:00Z', 47.184],   // mid-table: TAI−UTC = 15
+        ['1995-06-15T00:00:00Z', 61.184],   // mid-table: TAI−UTC = 29
+        ['2017-01-01T00:00:00Z', 69.184],   // the last leap second
+        ['2020-06-21T06:41:00Z', 69.184],   // an eclipse the data test replays
+        ['2026-08-18T12:00:00Z', 69.184],   // today
+    ])('ΔT at %s is exactly %s s', (iso, expected) => {
+        expect(deltaTAt(iso)).toBeCloseTo(expected, 5);
+    });
+
+    test('pre-1972 instants still use the Espenak polynomial', () => {
+        // 1971-07-01 is half a year before the table starts, so the
+        // polynomial's 1961–1986 branch is what should answer — 41.7 s, well
+        // clear of the 42.184 s the table would have given.
+        const yearValue = 1971 + 181 / 365.25;   // the convention convertUTtoET is fed
+        expect(deltaTAt('1971-07-01T00:00:00Z')).toBeCloseTo(espenakDeltaT(yearValue), 5);
+    });
+
+    test('the 1972 handover steps by less than a tenth of a second', () => {
+        const before = deltaTAt('1971-12-31T23:00:00Z');
+        const after = deltaTAt('1972-01-01T01:00:00Z');
+        expect(Math.abs(after - before)).toBeLessThan(0.1);
+    });
+
+    test('ΔT is continuous except at the leap seconds themselves', () => {
+        // Sample every 6 hours from 1970 to 2400. Steps of exactly 1 s are
+        // leap seconds; the handovers at 1972 and at the table's expiry, and
+        // everything in between, must stay under 0.1 s.
+        const start = appleEpoch(new Date('1970-01-01T00:00:00Z'));
+        const step = 6 * 3600;
+        const samples = Math.floor((appleEpoch(new Date('2400-01-01T00:00:00Z')) - start) / step);
+        let previous = julianCenturiesSince2000EpochForDateInterval(start, null).deltaT;
+        let leapSteps = 0;
+        for (let i = 1; i <= samples; i++) {
+            const t = start + i * step;
+            const current = julianCenturiesSince2000EpochForDateInterval(t, null).deltaT;
+            const jump = current - previous;
+            if (Math.abs(jump - 1) < 1e-6) {
+                leapSteps++;
+            } else if (Math.abs(jump) >= 0.1) {
+                throw new Error(`ΔT jumped ${jump.toFixed(4)} s at ` +
+                    `${new Date((t + 978307200) * 1000).toISOString()}`);
+            }
+            previous = current;
+        }
+        expect(leapSteps).toBe(27);
+    });
+
+    test('the rejoin at the table expiry is continuous', () => {
+        const expiry = appleEpoch(new Date(`${kECLeapTableValidUntilISO}T00:00:00Z`));
+        const inside = julianCenturiesSince2000EpochForDateInterval(expiry - 1, null).deltaT;
+        const outside = julianCenturiesSince2000EpochForDateInterval(expiry + 1, null).deltaT;
+        expect(inside).toBeCloseTo(69.184, 5);
+        expect(outside).toBeCloseTo(69.184, 4);
+    });
+
+    test('past the expiry ΔT resumes growing at the polynomial rate', () => {
+        // Offset, not clamp: the parabola's curvature is the part of the
+        // physics worth keeping.
+        const y2040 = deltaTAt('2040-01-01T00:00:00Z');
+        expect(y2040).toBeGreaterThan(69.184);
+        expect(y2040 - 69.184).toBeCloseTo(espenakDeltaT(2040) - espenakDeltaT(2027.49), 0);
     });
 });
 

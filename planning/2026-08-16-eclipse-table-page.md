@@ -10,8 +10,11 @@ whole-degree coordinates miss narrow umbral paths), and EclipseWise links are
 **not** HEAD-verified (the site bot-blocks automation; the URL rule was
 validated against 96 of mreclipse's own published links instead). 115 eclipses
 generated for 2011–2041; 17 tests; full suite 8606 passing.
+**⚠ New for commits 2–3 (2026-08-18)**: the leap-second ΔT change landed and
+introduced a *stale-epoch* problem in this page's data and deep links — §9a
+below, and §14. Read it before building the cards.
 **Created**: 2026-08-16
-**Last Updated**: 2026-08-16 (rev 3 — commit 1 landed)
+**Last Updated**: 2026-08-18 (rev 3 + §9a, the ΔT epoch note)
 **Baseline**: e2c7b43
 
 ## 1. Goal
@@ -329,6 +332,43 @@ a single rAF, so the canvas stayed black — the known frozen-rAF pane
 limitation. Visual confirmation moves to commit 2's headless pass (in a
 session where rAF runs) or Steve's on-device flow.
 
+### 9a. Deep-link epochs are stale for post-2027 rows (2026-08-18)
+
+**Read this before building the cards.** `utcMs` in eclipse-data.json is
+NASA's UT of greatest eclipse, which they formed as `TD − ΔT` using the
+Espenak polynomial. As of
+[planning/2026-08-18-leap-second-deltat.md](2026-08-18-leap-second-deltat.md)
+the engine no longer uses that polynomial for modern dates: from 1972 through
+the IERS leap-second table's expiry ΔT is exact, and past the expiry it
+rejoins the polynomial with a continuity offset. Consequences for this page:
+
+- **Rows through 2027 got better.** Exact ΔT moved every leap-era row closer
+  to NASA's own maximum (2013 Nov 03 0.74″ → 0.32″ of disc separation;
+  2020 Jun 21 0.89″ → 0.47″). Nothing to do.
+- **Rows after the expiry are replayed a few seconds off maximum**, because
+  NASA's ΔT prediction and ours deliberately differ — 79 s vs 72.4 s for
+  2032, i.e. ~6.8 s, about 2.5″ at the rate the discs close. Following such a
+  deep link lands the app slightly before greatest eclipse.
+- **One row is already over the line**: 2032 May 09, a 22-second annular
+  (NASA magnitude 0.9957, 44 km path) with only 3.17″ of annular margin. The
+  app now draws a **partial** eclipse on a card labelled *annular*.
+  `src/__tests__/eclipse-data.test.ts` carries a narrow, date-keyed exemption
+  for it (`EPOCH_AMBIGUOUS`, with a rot guard) so the suite is green — that
+  exemption is a marker for this work, not a resolution.
+
+**The fix, when commits 2–3 touch the scraper anyway**: have
+`scripts/update-leap-seconds.mjs`'s sibling `scrape-eclipses.mjs` keep NASA's
+per-row ΔT — the century catalogs print it in their own `ΔT` column, already
+parsed — and store `tdMs` (or `deltaTSeconds`) alongside `utcMs`. Then both
+consumers can work in TD, which is the frame-independent quantity:
+
+- the page builds `?t=` from `TD − ourΔT`, so the link lands on *our* maximum;
+- the test replays at the same instant, which lets the 2032 exemption be
+  deleted and makes the cross-check stronger for all 115 rows, not weaker.
+
+Until then the coarse-margin rows are fine (15–30″ of slack); only the two
+narrowest annulars in the set are sensitive, and both are documented.
+
 ## 10. Tests — data cross-check + the real renderer
 
 New vitest (house style: `readFileSync` + `JSON.parse` — tsconfig has no
@@ -483,6 +523,11 @@ display/list-item (§7), `</script` assertion (§3). Remaining:
   see it once on device before blessing the UX.
 - Test builds auto-bump version.txt; use the fresh-port dist server +
   build-stamp check for verification runs.
+- **Post-2027 deep links point a few seconds off maximum** since the
+  leap-second ΔT change (2026-08-18) — harmless for all but the narrowest
+  annulars, one of which (2032 May 09) already mislabels. Cause, blast
+  radius and the fix are in §9a; the test exemption guarding it is
+  `EPOCH_AMBIGUOUS` in `src/__tests__/eclipse-data.test.ts`.
 
 ## 15. Decisions (resolved 2026-08-16)
 

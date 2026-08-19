@@ -38,6 +38,16 @@
  * directly and we prefer it. The two disagree by a few seconds (they assume
  * slightly different ΔT); the page displays whole minutes.
  *
+ * !! When this is next re-run, also keep TD (or NASA's per-row ΔT, which the
+ * century catalogs print in their own column and this script already parses).
+ * Since 2026-08-18 the engine's ΔT is the exact leap-second value rather than
+ * the Espenak polynomial NASA assumed, so for rows past the leap table's
+ * expiry the published UT is a few seconds off *our* greatest eclipse — enough
+ * to mislabel the narrowest annular in the set (2032 May 09, 22 s of
+ * annularity). Storing TD lets the page and the test both work in the frame
+ * that does not depend on whose ΔT you believe. See
+ * planning/2026-08-16-eclipse-table-page.md §9a.
+ *
  * Penumbral lunar eclipses are dropped: they are barely perceptible in the sky,
  * and the app's own eclipse model is umbral-only, so their deep links would
  * show "no eclipse" (decision Q2 in the plan).
