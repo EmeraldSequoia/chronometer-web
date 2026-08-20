@@ -135,8 +135,9 @@ This auto-resize approach avoids a fixed iframe height, so the General Help Topi
 
 `eclipse-table.html` is the primary, bookmarkable entry for "when is the next eclipse?": every solar and lunar eclipse from 15 years back to 15 years ahead (currently 2011–2041), each with deep links that open the moment and place of maximum eclipse in the Observatory and the Chronometer (Basel + Venezia + Selene via `selected.html`), plus a per-eclipse EclipseWise "Details" link. The renderer and URL builders live in `src/eclipse-table-page.ts` (tested by `src/__tests__/eclipse-table-page.test.ts`); the page is the **single generator** of those deep links — no other page hardcodes them, and prose elsewhere names table rows instead.
 
-The help system links **to** the page from five places, and never embeds its content:
+The help system links **to** the page from six places, and never embeds its content:
 
+- index.html has an "Eclipse Table" face-card (third in the grid, `thumb-eclipses.png` — a center-crop of the Observatory simulator's totality photo, `src/shared/assets/totalEclipse.png`)
 - help.html's `#eclipses` section opens with a pointer paragraph (works in embed mode through `<base target="_blank">`)
 - help.html's standalone `.help-nav` has an "Eclipse table" entry (nav is removed in embed mode)
 - the Basel, Observatory, Selene, and Chandra help fragments each carry a one-sentence link with explicit `target="_blank"` — the face-page popover retargets only `http…` links (help-popover.ts), so a bare relative link would navigate the running app away

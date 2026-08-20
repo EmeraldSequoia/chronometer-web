@@ -481,6 +481,12 @@ if [ ! -f "$SRC/faces/thumb-observatory.png" ]; then
   exit 1
 fi
 cp "$SRC/faces/thumb-observatory.png" "$DIST/" && echo "  → thumb-observatory.png"
+# Copy eclipse-table card thumbnail (index page)
+if [ ! -f "$SRC/faces/thumb-eclipses.png" ]; then
+  echo "ERROR: Missing $SRC/faces/thumb-eclipses.png" >&2
+  exit 1
+fi
+cp "$SRC/faces/thumb-eclipses.png" "$DIST/" && echo "  → thumb-eclipses.png"
 # Copy app icon
 if [ ! -f "$SRC/apple-touch-icon.png" ]; then
   echo "ERROR: Missing $SRC/apple-touch-icon.png" >&2
