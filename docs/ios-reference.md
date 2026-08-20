@@ -3,6 +3,15 @@
 The Chronometer Web codebase was ported from the original Emerald Chronometer iOS app and its supporting libraries. The original source code is available in five GitHub repositories that can be cloned locally for reference.
 
 > **Setup**: Run `scripts/clone-refs.sh` from the project root to clone all five reference repos. They are cloned into dot-prefixed directories that are listed in `.gitignore`.
+>
+> Two additional refs exist locally but are **not** in the script or on
+> GitHub — `.esgl-ref/` and `.observatory-opengl-ref/` (branch `OpenGL`)
+> come from Steve's own git server (`ssh://127.0.0.1/…`) and cannot be
+> re-cloned from origin inside the VPN.
+>
+> These directories are **read-only reference snapshots**. To *modify* the
+> original repos (back-porting fixes), use the mutable clones in
+> `ios-backports/` instead — see [ios-backports.md](ios-backports.md).
 
 ## Reference Repositories
 

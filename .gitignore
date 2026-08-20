@@ -15,3 +15,5 @@ scripts/extra-cities-temp.js
 src/__tests__/snapshots/
 src/faces/generated/
 dist.zip
+# iOS back-port working clones (see docs/ios-backports.md)
+ios-backports/
