@@ -1,6 +1,8 @@
 # iOS back-port: leap-second-exact ΔT from 1972 onward
 
-**Status**: proposed — **for a fresh session**. Read
+**Status**: **implemented in the clones 2026-08-20** (§6); trees left dirty
+for Steve's commit per docs/ios-backports.md. Originally: proposed — **for a
+fresh session**. Read
 [docs/ios-backports.md](../docs/ios-backports.md) first (workflow: edit
 `ios-backports/` clones only, never commit, Steve pushes outside the VM).
 Sequence **after** the topocentric back-port in each repo
@@ -109,3 +111,41 @@ originally intended `ESLeapSecond` to feed ΔT and never wired it (confirmed
 Per docs/ios-backports.md: dirty trees + per-repo diffs + explicit
 verified/unverified list + the Chronometer-dependency recommendation (§2)
 called out for Steve's decision before he commits.
+
+## 6. Outcome (2026-08-20)
+
+Implemented in all three clones; trees dirty, nothing committed.
+
+- **estime** `src/ESLeapSecond.hpp`: added `ESLeapSecondTableValidUntil`
+  (835833600 = 2027-06-28, the leap-seconds.list `#@` expiry) beside the
+  other table #defines. Chosen over the ESAstronomy.cpp-local option
+  because the horizon and the table must move together when the IERS next
+  announces; a consumer-side copy could silently rot.
+- **esastro** `src/ESAstronomy.cpp`: three-era `convertUTtoET` mirroring
+  the web's; exact era via `ESLeapSecond::cumulativeLeapSecondsForUTC`
+  (+42.184 = 32.184 + the 10 s TAI−UTC of 1972-01-01); `kECLeapEraStart`
+  derived in-code as `ESFirstLeapSecondTransition − 182 days` (== the web's
+  −915235200, confirmed at runtime via ESCalendar); lazy `leapRejoinOffset()`
+  using the caller's own year-plus-fraction convention. `useMeeusDeltaT`
+  stays as the outermost debug branch (full-Meeus comparison mode).
+- **Chronometer** `Classes/ECAstronomy.m`: **§2's option (a) taken** — the
+  build questions resolved as suspected: esastro links estime
+  (project ref + `../../estime/src` header path), Chronometer does **not**
+  (no libESTime in any link phase, only `../esastro/src` on header paths;
+  and the file is plain ObjC, which cannot call a C++ class anyway). The
+  27-entry table is vendored entry-for-entry from ESLeapSecond.cpp with a
+  provenance comment; otherwise token-parallel to the esastro change.
+- Both files' dormant `testConversion` harnesses now feed convertUTtoET an
+  approximate `ut` for the printed year (they passed `ut=0` = 2001, which
+  after this change would pin the production line to 69.184 for every year).
+- **Validation** (host-side harness per the planetdecl appendix, reusing the
+  topocentric session's stubs/events.csv): every §3 exact-value target hit
+  (69.184 for 2017→present, 42.184/47.184/61.184 mid-table, era-start step
+  0.067 s, rejoin continuous at 835833600); 6-hourly 1970–2400 sweep =
+  exactly 27 one-second steps, nothing else >0.1 s; pre-1972 byte-identical
+  to HEAD; daily-ΔT CSV 1965–2100 identical between the esastro build and a
+  compile of the ECAstronomy.m block extracted verbatim; NASA 115-eclipse
+  replay 115/115 kinds before AND after (2032 May 09 stayed annular here —
+  sep 0.99″→0.08″ — the web's §10 exemption nuance did not bite the iOS
+  engine's threshold form). Not verifiable in-VM: Xcode builds, on-device
+  behavior (expect ~2–3″ modern-era Moon shifts, rise/set times by seconds).
