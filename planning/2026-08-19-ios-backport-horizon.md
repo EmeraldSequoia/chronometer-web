@@ -1,6 +1,9 @@
 # iOS back-port: Observatory eclipse-simulator horizon indicator
 
-**Status**: proposed — **for a fresh session**. Read
+**Status**: **implemented in the clones 2026-08-20** (§7 — Observatory
+plus a small esastro header move Steve requested); trees left dirty for
+Steve's commit per docs/ios-backports.md. Originally: proposed — **for
+a fresh session**. Read
 [docs/ios-backports.md](../docs/ios-backports.md) first (workflow: edit
 `ios-backports/` clones only, never commit, Steve pushes outside the VM).
 Independent of the other two back-ports (different repos); can run any
@@ -91,3 +94,48 @@ file's local style (tabs, C-style comments).
 
 Per docs/ios-backports.md: dirty tree + diff + verified/unverified list.
 Steve commits, copies out, pushes to GitHub.
+
+## 7. Implementation notes (2026-08-20)
+
+Done in `ios-backports/Observatory/Classes/EOEclipseView.mm` plus, at
+Steve's direction, a constant move in `ios-backports/esastro`; both trees
+left dirty. The edits:
+
+- **esastro**: `kECRefractionAtHorizonX` moved from its file-local
+  `#define` in `ESAstronomy.cpp` (:37) into `ESAstronomy.hpp`, so view
+  code shares the engine's convention instead of defining its own copy
+  (the invariant: one copy per engine implementation, no consumer-side
+  copies; `ECAstronomy.m`'s copy stays — deliberate parallel engine).
+  Note `ECConstants.h` was considered and rejected as the home: the
+  `ESAstroConstants.hpp` shim's `EC_CONSTANTS` guard skips it in any app
+  (like Observatory) whose own `Constants.h` defined that guard first, so
+  a constant there is invisible exactly where it's needed.
+- **Observatory**: both `horizonPixelY` assignments (solar :150,
+  lunar :210) lift `avgAlt` by the constant (which arrives via the
+  existing `ESAstronomy.hpp` import).
+- **Observatory**: the label if/else was pulled out of the fill block:
+  fill keeps its pixel-position condition; caption is now
+  `drawingSomething && (eclipseKind == ECEclipseSolarNotUp || eclipseKind
+  == ECEclipseLunarNotUp)`. The old fill-else became the caption's else,
+  so the not-drawing label states are unchanged.
+
+**Verified in-VM**: the §4 fixture table replayed through the exact edited
+expression, in a scratch harness compiled against the real
+`ESAstronomy.hpp` (stubbing only the two esutil headers absent from the
+clones, `ESUserString.hpp`/`ESPlatform.h`) — all five rows, the
+wash-coverage geometry, the caption gate per kind, and the −0.838° flip
+identity all pass. A second TU shaped exactly like EOEclipseView.mm's
+(Observatory's own `Constants.h` first, then `ESAstronomy.hpp`, so the
+`EC_CONSTANTS` guard skips esastro's `ECConstants.h`) compiles and
+evaluates both edited expressions — proving the moved macro is visible in
+the view's actual include context. Enum values (SolarNotUp=2,
+LunarNotUp=6) match between esastro's `ECConstants.h` and Observatory's
+own `Constants.h` copy; the edit site already used `ECEclipseTotalSolar`,
+so the enum's availability is proven by the existing build. The engine's
+own use at `ESAstronomy.cpp:1342` still resolves: the .cpp includes
+`ESAstronomy.hpp` (line 13) ahead of it.
+
+**Not verifiable in-VM**: full `clang -fsyntax-only` of the .mm (UIKit —
+no iOS SDK here; fails at `#import <UIKit/UIKit.h>` before reaching the
+edits) and any runtime rendering. Steve's Xcode build + the §4 on-device
+cases (2011 Jan 04, 2014 Apr 29) are the closing gate.
