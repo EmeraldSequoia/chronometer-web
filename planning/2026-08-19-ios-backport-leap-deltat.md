@@ -2,7 +2,7 @@
 
 **Status**: proposed — **for a fresh session**. Read
 [docs/ios-backports.md](../docs/ios-backports.md) first (workflow: edit
-`ios-backports/` clones only, never commit, Steve pushes outside the VPN).
+`ios-backports/` clones only, never commit, Steve pushes outside the VM).
 Sequence **after** the topocentric back-port in each repo
 ([2026-08-19-ios-backport-topocentric.md](2026-08-19-ios-backport-topocentric.md)),
 matching the web's commit order.
@@ -65,7 +65,7 @@ originally intended `ESLeapSecond` to feed ΔT and never wired it (confirmed
     recommendation** — smallest blast radius in a legacy app — but flag it
     prominently for Steve's call before he commits.
 
-## 3. Validation inside the VPN (no Xcode here)
+## 3. Validation inside the VM (no Xcode here)
 
 - `clang -fsyntax-only` on touched files where includes resolve.
 - **Exact-value targets** (all verified on the web; ΔT here = ET−UT):

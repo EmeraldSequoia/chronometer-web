@@ -1,9 +1,27 @@
 # iOS back-port: topocentric disc sizes in calculateEclipse
 
-**Status**: proposed — **for a fresh session**. Read
+**Status**: **IMPLEMENTED 2026-08-19** (working trees left dirty for Steve per
+the workflow — nothing committed). All three sites landed: esastro
+(`topocentricParallax` distanceRatio out-param, `calculateEclipse` topocentric
+solar thresholds, new `ESAstronomyManager::planetTopocentricDistance` + hpp
+declaration), Chronometer (`ECAstronomy.m` mirror, explicit `NULL` at the three
+unrelated call sites — C has no default arguments), Observatory
+(`EOEclipseView.mm` §2 answer: the drawn discs do **not** flow from
+`calculateEclipse` — the view sizes them itself from planet distances, so both
+disc sites switched to the new accessor). Gold validation (§4): a host-side
+harness compiled the real `ESAstronomy.cpp` and replayed all 115 NASA
+eclipses (TT-equalized like the web suite) — before 112/115, after **115/115**,
+kind changes confined to the three hybrids (2013/2023/2031 → Total; before-fix
+kinds were Partial/Annular/Annular — the plan predicted Partial for 2023);
+moon SD topo 0.2731°/0.2690° at the two named hybrids (geo 0.2686°/0.2648°).
+`ECAstronomy.m` passed a host `clang -fsyntax-only` (0 errors); it and the
+Observatory path have no in-VM runtime coverage — Steve's Xcode build is the
+closing gate. Adversarially reviewed (5-lens + critic workflow): no blockers.
+Original plan follows.
+**Original status**: proposed — **for a fresh session**. Read
 [docs/ios-backports.md](../docs/ios-backports.md) first; it defines the
 workflow (edit `ios-backports/` clones only, never commit, Steve pushes from
-outside the VPN).
+outside the VM).
 **Created**: 2026-08-19
 **Web spec**: commit **2f756b8** ("Use topocentric apparent diameter when
 calculating eclipses") — `git show 2f756b8` is the authoritative diff.
@@ -59,7 +77,7 @@ needed — say which in the report.
 - Change nothing else: no reformatting, no modernization, no lunar-branch
   symmetry "fixes".
 
-## 4. Validation inside the VPN (no Xcode here)
+## 4. Validation inside the VM (no Xcode here)
 
 - `clang -fsyntax-only` on the touched files where includes resolve.
 - **Numeric parity targets** (from the web work; the web engine is
@@ -76,7 +94,7 @@ needed — say which in the report.
   feasible, line-by-line comparison against `git show 2f756b8` plus
   syntax-only compile, and say so.
 - The full web test suite equivalent (115-row cross-check) exists only on
-  the web side — Steve's outside-VPN Xcode build is the final gate.
+  the web side — Steve's outside-VM Xcode build is the final gate.
 
 ## 5. Report format
 

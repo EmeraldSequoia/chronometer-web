@@ -7,7 +7,7 @@ The Chronometer Web codebase was ported from the original Emerald Chronometer iO
 > Two additional refs exist locally but are **not** in the script or on
 > GitHub — `.esgl-ref/` and `.observatory-opengl-ref/` (branch `OpenGL`)
 > come from Steve's own git server (`ssh://127.0.0.1/…`) and cannot be
-> re-cloned from origin inside the VPN.
+> re-cloned from origin inside the VM.
 >
 > These directories are **read-only reference snapshots**. To *modify* the
 > original repos (back-porting fixes), use the mutable clones in

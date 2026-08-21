@@ -2,7 +2,7 @@
 
 **Status**: proposed — **for a fresh session**. Read
 [docs/ios-backports.md](../docs/ios-backports.md) first (workflow: edit
-`ios-backports/` clones only, never commit, Steve pushes outside the VPN).
+`ios-backports/` clones only, never commit, Steve pushes outside the VM).
 Independent of the other two back-ports (different repos); can run any
 time.
 **Created**: 2026-08-19
@@ -60,7 +60,7 @@ eclipse-kind value (the view already branches on `ECEclipseTotalSolar` and
 manages `statusLabel`/`horizonLabel`, so the kind is at hand). Match each
 file's local style (tabs, C-style comments).
 
-## 4. Validation inside the VPN (no Xcode here)
+## 4. Validation inside the VM (no Xcode here)
 
 - `clang -fsyntax-only` where includes resolve (ObjC++ — may need
   `-x objective-c++` and framework stubs; if it won't resolve, careful
@@ -76,7 +76,7 @@ file's local style (tabs, C-style comments).
   | −0.838° | −SD | wash just closes over top limb | flips on |
   | −1.5° | −0.93° | fully washed | on |
 
-- On-device verification is Steve's (outside the VPN): the 2011 Jan 04 and
+- On-device verification is Steve's (outside the VM): the 2011 Jan 04 and
   2014 Apr 29 rows of the web Eclipse Table are the canonical
   before/after cases (full green + caption before; visible Sun on the
   horizon, no caption after).

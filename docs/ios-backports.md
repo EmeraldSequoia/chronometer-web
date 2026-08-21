@@ -11,18 +11,20 @@ Contrast with the dot-prefixed `.*-ref/` directories
 snapshots** used for porting research. Never edit the refs; edit the
 `ios-backports/` clones.
 
-## The VPN workflow (why this exists)
+## The VM workflow (why this exists)
 
-This development environment sits inside a VPN with no GitHub credentials.
+This development environment sits inside a VM with no GitHub credentials.
 The flow for every back-port:
 
 1. A session **pulls** the target repo (GitHub-origin repos only, see table)
    and **makes the fix** in `ios-backports/<repo>/`, leaving the working
    tree dirty — sessions never commit in these clones.
 2. **Steve commits** in the clone (he owns every commit).
-3. Steve **copies the repo directory out of the VPN** and pushes from
-   outside, where credentials live. (For the one local-origin repo, esgl,
-   the push target is his own git server, not GitHub.)
+3. Steve **pushes to the clone's local `transfer` remote** — a bare
+   repository in `/Users/spucci/git-repositories/<repo>.git` (see below) —
+   copies that bare repo out of the VM, and pushes from outside, where
+   credentials live. (For the one local-origin repo, esgl, the outside
+   push target is his own git server, not GitHub.)
 
 ## The clones
 
@@ -36,13 +38,47 @@ shallow clone). HEADs at creation matched the `.*-ref` snapshots exactly.
 | `estime/` | github.com/EmeraldSequoia/estime | main | Time/NTP/calendar; `src/ESLeapSecond.{hpp,cpp}` |
 | `eslocation/` | github.com/EmeraldSequoia/eslocation | main | |
 | `Observatory/` | github.com/EmeraldSequoia/Observatory | main | Links `libesastro.a` (esastro.xcodeproj reference) |
-| `esgl/` | ssh://127.0.0.1/…/libs/esgl.git | master | **Local-origin**: unreachable in-VPN; cloned from `.esgl-ref`; cannot `git pull` here |
+| `esgl/` | ssh://127.0.0.1/…/libs/esgl.git | master | **Local-origin**: unreachable in-VM; cloned from `.esgl-ref`; cannot `git pull` here |
 
 **Deliberately absent — not forgotten**: `.observatory-opengl-ref/` (the
 OpenGL-era Observatory variant, branch `OpenGL`, local-origin) is a
 **historical artifact only** — nothing back-ports to it (Steve,
 2026-08-19). A clone was created here initially and then removed to avoid
 confusion; the read-only ref snapshot remains for archaeology.
+
+## The `transfer` remotes (added 2026-08-20)
+
+Each clone has a second remote, `transfer`, pointing at a bare repository
+`/Users/spucci/git-repositories/<repo>.git` (Steve's existing bare-repo
+collection). It is the **outbound** half of the loop; `origin` stays the
+inbound half (the freshen pull in "How a session does a single fix" step 2).
+Bare repos carry committed history only — a dirty working tree transfers
+nothing, so the commit comes first.
+
+After committing a fix (Steve's step, like the commit itself):
+
+```sh
+git -C ios-backports/<repo> push transfer HEAD
+```
+
+`HEAD` sidesteps esgl's `master` vs the others' `main`, and pushing an
+unchanged repo is a harmless no-op, so pushing all six at once is fine. The
+bare repo then leaves the VM as a zip in its shared folder — the
+chronometer-web precedent is `/Users/spucci/git-repositories/`
+`export-bare-repo-to-shared.sh` plus its host-side verify-and-publish
+counterpart; that script is hardcoded to chronometer-web today and needs
+parameterizing (or a copy) for these repos. Outside, note the bare repo's
+recorded `origin` is the in-VM clone path, which won't resolve there:
+fetch from the copied `<repo>.git` into an outside checkout, or push
+straight from it with an explicit URL
+(`git -C <repo>.git push git@github.com:EmeraldSequoia/<repo>.git main`).
+
+If a clone or bare repo is ever recreated, re-pair them with:
+
+```sh
+git clone --bare ios-backports/<repo> /Users/spucci/git-repositories/<repo>.git
+git -C ios-backports/<repo> remote add transfer /Users/spucci/git-repositories/<repo>.git
+```
 
 ## How a session does a single fix
 
@@ -63,7 +99,7 @@ confusion; the read-only ref snapshot remains for archaeology.
    `Classes/ECAstronomy.m` and esastro's `src/ESAstronomy.cpp` are parallel
    implementations of the same astronomy — a fix usually lands in **both**
    (and the per-fix plan says where).
-5. **Validate what the VPN allows.** There is no Xcode/iOS SDK here; full
+5. **Validate what the VM allows.** There is no Xcode/iOS SDK here; full
    builds happen outside. Available in-VM:
    - `clang -fsyntax-only` (Apple clang is installed) on the touched file
      where its includes resolve;
@@ -75,9 +111,9 @@ confusion; the read-only ref snapshot remains for archaeology.
      (`#if 0` near line 325) that a session may temporarily enable in a
      scratch copy for host-side spot checks.
    State plainly in your report what was and wasn't verifiable.
-6. **Do not commit, do not push, do not touch `.*-ref/`.** Report the diff
-   (`git -C ios-backports/<repo> diff`) and stop. Steve takes it from there
-   (workflow above).
+6. **Do not commit, do not push (not even to `transfer`), do not touch
+   `.*-ref/`.** Report the diff (`git -C ios-backports/<repo> diff`) and
+   stop. Steve takes it from there (workflow above).
 7. The only chronometer-web files a back-port session may touch are its own
    planning doc (status updates) — and never anything that references
    `ios-backports/` paths from tracked code.
@@ -95,3 +131,8 @@ its own planning doc and intended for its own session:
 
 Suggested order within each repo: topocentric before ΔT (matches the web's
 commit history, so diffs stay comparable). The horizon fix is independent.
+
+**Status**: the topocentric back-port landed in the clones 2026-08-20
+(esastro eb077b4, Chronometer f4c7128, Observatory 8ba1206; details in its
+planning doc) and the bare `transfer` repos carry it, awaiting the outside
+push. The ΔT and horizon back-ports are not started.
