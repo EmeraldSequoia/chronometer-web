@@ -139,3 +139,6 @@ commit history, so diffs stay comparable). The horizon fix is independent.
 (esastro eb077b4, Chronometer f4c7128, Observatory 8ba1206; details in its
 planning doc) and the bare `transfer` repos carry it, awaiting the outside
 push. The ΔT, horizon, and planetDecl-RA-topo back-ports are not started.
+**Steve batches the outside push and on-device testing until all planned
+back-ports have landed** (decided 2026-08-20) — commits accumulating in the
+clones ahead of origin is the expected state, not a loose end.

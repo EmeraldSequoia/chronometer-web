@@ -80,6 +80,16 @@ originally intended `ESLeapSecond` to feed ΔT and never wired it (confirmed
   enabling it in a scratch copy (host-side, if the file compiles with the
   repo's headers) is the cheapest real numeric check. Do not leave it
   enabled in the diff.
+- **Better (proven 2026-08-20)**: the topocentric session compiled and ran
+  the *whole real* `ESAstronomy.cpp` host-side — recipe in the appendix of
+  [2026-08-20-ios-backport-planetdecl-ratopo.md](2026-08-20-ios-backport-planetdecl-ratopo.md).
+  With it, every §3 exact-value target is directly checkable via
+  `julianCenturiesSince2000EpochForDateInterval`'s deltaT out-param (no
+  `testConversion()` hack), and the 115-eclipse NASA replay doubles as a
+  regression gate: its TT-equalization derives UT through the engine's own
+  ΔT, so **all 115 kinds must be unchanged by this fix** — a clean
+  invariance check. (The topocentric commits shifted line numbers only
+  beyond ~:540, so this plan's §2 references remain accurate.)
 - Downstream effect Steve should expect on-device (not verifiable in-VM):
   modern-era Moon-position-derived displays shift ~2–3″; rise/set *times*
   by a few seconds. The web's golden audit (plan §10) characterizes it.
