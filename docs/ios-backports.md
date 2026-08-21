@@ -136,9 +136,14 @@ Suggested order within each repo: topocentric before ΔT (matches the web's
 commit history, so diffs stay comparable). The horizon fix is independent.
 
 **Status**: the topocentric back-port landed in the clones 2026-08-20
-(esastro eb077b4, Chronometer f4c7128, Observatory 8ba1206; details in its
-planning doc) and the bare `transfer` repos carry it, awaiting the outside
-push. The ΔT, horizon, and planetDecl-RA-topo back-ports are not started.
-**Steve batches the outside push and on-device testing until all planned
-back-ports have landed** (decided 2026-08-20) — commits accumulating in the
-clones ahead of origin is the expected state, not a loose end.
+(esastro eb077b4, Chronometer f4c7128, Observatory 8ba1206) and the ΔT
+back-port followed the same day (esastro 0f877ab, estime 0a5fbeb,
+Chronometer 22c11fc); details in their planning docs. Both are committed,
+pushed to the `transfer` bare repos, and copied out of the VM. The horizon
+and planetDecl-RA-topo back-ports are not started (planetDecl is unblocked —
+its topocentric-then-ΔT sequencing condition is now met — but awaits
+Steve's land-it-at-all and fix-shape decisions, plan §3).
+**Steve batches the outside GitHub push and on-device testing until all
+planned back-ports have landed** (decided 2026-08-20) — commits
+accumulating in the clones ahead of origin is the expected state, not a
+loose end.
