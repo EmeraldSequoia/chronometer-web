@@ -62,7 +62,9 @@ git -C ios-backports/<repo> push transfer HEAD
 ```
 
 `HEAD` sidesteps esgl's `master` vs the others' `main`, and pushing an
-unchanged repo is a harmless no-op, so pushing all six at once is fine. The
+unchanged repo is a harmless no-op, so pushing all six at once is fine —
+`ios-backports/push-to-transfer.sh` does exactly that (it iterates over
+every directory there, so new clones are picked up automatically). The
 bare repo then leaves the VM as a zip in its shared folder — the
 chronometer-web precedent is `/Users/spucci/git-repositories/`
 `export-bare-repo-to-shared.sh` plus its host-side verify-and-publish
