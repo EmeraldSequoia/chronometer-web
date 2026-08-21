@@ -162,3 +162,25 @@ predate their latest commits; estime's copy is current, eslocation has
 nothing to push), push to GitHub, and test on device. All working trees
 are clean; commits ahead of origin remain the expected state until that
 push.
+
+## Back-port batch 2 (2026-08-21)
+
+Three one-line Chronometer-only fixes — Mauna Kea EOT hand cadence
+(30-minute updates), Mauna Kea sunrise/sunset hand anchors, and Babylon's
+October 1582 wheel wrongly appearing in BCE 1582:
+
+| Plan | Web spec commit(s) | iOS repos touched |
+|---|---|---|
+| [ios-backport-mk-babylon-oneliners](../planning/2026-08-21-ios-backport-mk-babylon-oneliners.md) | a810ae9 + ed0894f + 409b610 | Chronometer only |
+
+**Status**: **committed and pushed to `transfer` 2026-08-21** — Steve
+squashed all three fixes into Chronometer `43e6a8b`; the working tree is
+clean. Scope included the `Builtin-Android/Mauna Kea I` XML twins with
+their night-mode hands, plus the Android `dusk n` anchor (a web-fix
+oversight caught and resolved during review; plan §7). Remaining, all
+Steve's, all outside the VM: copy the Chronometer bare repo out (its
+earlier copies predate `43e6a8b`), push to GitHub, run the Henry archive
+regeneration for the two XML fixes (`archiveHD/…/archive.dat` is
+generated from the XML and tracked; the regenerated archives ride in a
+follow-on commit — the Babylon code fix is complete as-is), and test on
+device.
