@@ -130,6 +130,7 @@ its own planning doc and intended for its own session:
 | [ios-backport-topocentric](../planning/2026-08-19-ios-backport-topocentric.md) | 2f756b8 | esastro, Chronometer, (Observatory drawing path) |
 | [ios-backport-leap-deltat](../planning/2026-08-19-ios-backport-leap-deltat.md) | 0513f2a + 906b7bf | esastro, Chronometer, estime |
 | [ios-backport-horizon](../planning/2026-08-19-ios-backport-horizon.md) | f5c7a75 | Observatory |
+| [ios-backport-planetdecl-ratopo](../planning/2026-08-20-ios-backport-planetdecl-ratopo.md) | — (iOS-only; spec is the sibling `planetRA`) | esastro, Chronometer |
 
 Suggested order within each repo: topocentric before ΔT (matches the web's
 commit history, so diffs stay comparable). The horizon fix is independent.
@@ -137,4 +138,4 @@ commit history, so diffs stay comparable). The horizon fix is independent.
 **Status**: the topocentric back-port landed in the clones 2026-08-20
 (esastro eb077b4, Chronometer f4c7128, Observatory 8ba1206; details in its
 planning doc) and the bare `transfer` repos carry it, awaiting the outside
-push. The ΔT and horizon back-ports are not started.
+push. The ΔT, horizon, and planetDecl-RA-topo back-ports are not started.
