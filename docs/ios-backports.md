@@ -115,7 +115,11 @@ git -C ios-backports/<repo> remote add transfer /Users/spucci/git-repositories/<
    State plainly in your report what was and wasn't verifiable.
 6. **Do not commit, do not push (not even to `transfer`), do not touch
    `.*-ref/`.** Report the diff (`git -C ios-backports/<repo> diff`) and
-   stop. Steve takes it from there (workflow above).
+   print a **suggested commit message for each repo touched** — written in
+   that repo's terms, ready for Steve to use verbatim or edit. Suggesting
+   the message is where a session stops: it never runs `git commit` (or
+   push) in any repo. Steve owns every commit and takes it from there
+   (workflow above).
 7. The only chronometer-web files a back-port session may touch are its own
    planning doc (status updates) — and never anything that references
    `ios-backports/` paths from tracked code.
@@ -139,11 +143,22 @@ commit history, so diffs stay comparable). The horizon fix is independent.
 (esastro eb077b4, Chronometer f4c7128, Observatory 8ba1206) and the ΔT
 back-port followed the same day (esastro 0f877ab, estime 0a5fbeb,
 Chronometer 22c11fc); details in their planning docs. Both are committed,
-pushed to the `transfer` bare repos, and copied out of the VM. The horizon
-and planetDecl-RA-topo back-ports are not started (planetDecl is unblocked —
-its topocentric-then-ΔT sequencing condition is now met — but awaits
-Steve's land-it-at-all and fix-shape decisions, plan §3).
-**Steve batches the outside GitHub push and on-device testing until all
-planned back-ports have landed** (decided 2026-08-20) — commits
-accumulating in the clones ahead of origin is the expected state, not a
-loose end.
+pushed to the `transfer` bare repos, and copied out of the VM. The
+horizon back-port also landed 2026-08-20 (Observatory 1f0bf05, plus a
+companion esastro header move cec5f1c exporting the horizon-refraction
+constant); both commits are pushed to `transfer` (note esastro's bare
+repo now needs re-copying out of the VM — its earlier copy predates
+cec5f1c). The planetDecl-RA-topo back-port landed 2026-08-21 (fix
+option 1 plus ECOptionsData comment flags; validated with a live
+cache-interleaving before/after harness, planning doc §7); Steve
+committed esastro 0a6023b and Chronometer beed32a, both pushed to
+`transfer`.
+**All four planned back-ports have now landed** in the clones and the
+`transfer` bare repos, so the batched outside GitHub push and on-device
+testing (deferred by decision of 2026-08-20) are unblocked. Remaining
+steps, all Steve's, all outside the VM: re-copy the esastro,
+Chronometer, and Observatory bare repos out (their earlier copies
+predate their latest commits; estime's copy is current, eslocation has
+nothing to push), push to GitHub, and test on device. All working trees
+are clean; commits ahead of origin remain the expected state until that
+push.

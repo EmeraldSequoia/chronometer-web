@@ -1,8 +1,9 @@
 # iOS back-port: Observatory eclipse-simulator horizon indicator
 
 **Status**: **implemented in the clones 2026-08-20** (§7 — Observatory
-plus a small esastro header move Steve requested); trees left dirty for
-Steve's commit per docs/ios-backports.md. Originally: proposed — **for
+plus a small esastro header move Steve requested); committed by Steve
+(Observatory `1f0bf05`, esastro `cec5f1c`) and pushed to the `transfer`
+bare repos. Originally: proposed — **for
 a fresh session**. Read
 [docs/ios-backports.md](../docs/ios-backports.md) first (workflow: edit
 `ios-backports/` clones only, never commit, Steve pushes outside the VM).
