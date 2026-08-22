@@ -19909,7 +19909,7 @@
     ];
     const utc = [
       // UTC subdial is 24h
-      { name: "utcHour", expr: "fmod((hour24Value() - tzOffset() / 3600), 24) * 2 * pi / 24", updateInterval: 60 },
+      { name: "utcHour", expr: "fmod((hour24Value() - tzOffset() / 3600), 24) * 2 * pi / 24 + pi * noonOnTop", updateInterval: 60 },
       { name: "utcMinute", expr: "utcMinuteAngle()", updateInterval: 15 },
       { name: "utcSecond", expr: "utcSecondAngle()", updateInterval: 20, naturalSpeed: SECOND_NATURAL_SPEED }
     ];
