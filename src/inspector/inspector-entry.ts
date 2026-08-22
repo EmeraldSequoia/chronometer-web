@@ -52,13 +52,6 @@ timeSubsecEl.className = 'time-subsec';
 timeDisplay.textContent = '';
 timeDisplay.append(timeMainEl, timeSubsecEl);
 
-// Live-astronomy cache slop for the Inspector's environments. The catalog
-// displays sub-second digits at a 0.1 s eval cadence, so the shared 0.5 s
-// ASTRO_SLOP would hold fully-cached values (e.g. lstValue) frozen across
-// several evals — visible as a hold-then-jump in the readout. Zero re-keys
-// the cache whenever the eval time changes; same-time cells still share it.
-const INSPECTOR_LIVE_ASTRO_SLOP_SEC = 0;
-
 // --- Resolve location from URL params ---
 initAppState({ app: 'inspector' });
 const urlState = getState();
@@ -216,7 +209,7 @@ const locationDialog = initLocationDialog({
         }
 
         // Rebuild the astronomy environment with new location
-        env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
+        env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
 
         // Refresh all displays
         updateLocationDisplay();
@@ -256,7 +249,7 @@ if (locationDialog) {
                 // filled by updateLocationDisplay's reverse-geocode.
                 if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat, lon, tz: locationTimezone || null });
                 locationDialog.updateState(lat, lon, 'browser', '', '');
-                env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
+                env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
                 updateLocationDisplay();
                 updateTimeDisplay();
                 resetAllSchedules();   // re-evaluate the catalog against the new env
@@ -290,7 +283,7 @@ if (locationDialog) {
             // reverse-geocodes the new spot.
             if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat, lon, city: null, tz });
             locationDialog.updateState(lat, lon, 'browser', '', '');
-            env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
+            env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
             updateLocationDisplay();
             updateTimeDisplay();
             resetAllSchedules();
@@ -320,7 +313,7 @@ if (urlState.off !== null && !isNaN(urlState.off)) {
 // transiently evaluate "ahead" at a future display time (eval-ahead).
 const { getNow, withDisplayTime } = makeOverridableGetNow(() => timeController.getDisplayTime());
 
-let env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
+let env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
 
 // The updater owns the catalog's ObsValue collection.
 const updater = new Updater();
@@ -423,7 +416,7 @@ onSharedChange((s) => {
         tzDeltaMs = computeTzDeltaMs(locationTimezone);
         needsPrompt = false;
         urlState.city = s.city;
-        env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
+        env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
         updateLocationDisplay();
         resetAllSchedules();
         changed = true;
@@ -460,6 +453,13 @@ let lastBrowserTimeStr = '';
 
 /** Build the catalog DOM and its parallel ObsValue list (once, at startup). */
 function buildCatalog(): void {
+    // Frozen: every catalog cell evaluates its expression once at construction;
+    // freezing pins the whole storm to one instant so the astro cache isn't
+    // re-keyed per elapsed ms (planning/2026-08-22-astro-slop-zero.md §4).
+    timeController.withFrozenFrame(buildCatalogFrozen);
+}
+
+function buildCatalogFrozen(): void {
     const now = performance.now();
     for (const group of CATALOG) {
         const groupEl = document.createElement('section');
@@ -960,7 +960,7 @@ if (tzNeedsResolution) {
         if (resolved && resolved !== locationTimezone) {
             locationTimezone = resolved;
             tzDeltaMs = computeTzDeltaMs(locationTimezone);
-            env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
+            env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
             if (isPersistentMode()) setState({ tz: locationTimezone });
             updateLocationDisplay();
             updateTimeDisplay();

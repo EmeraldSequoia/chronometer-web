@@ -702,7 +702,6 @@ return {${names2.join(",")}};`;
   ];
 
   // src/astronomy/astro-cache.ts
-  var ASTRO_SLOP_RAW = 0.5;
   var AstroCache = class {
     constructor(numSlots = 480 /* NUM_SLOTS */) {
       this.cacheSlots = new Float64Array(numSlots);
@@ -710,7 +709,6 @@ return {${names2.join(",")}};`;
       this.currentFlag = 1;
       this.globalValidFlag = 0;
       this.dateInterval = NaN;
-      this.astroSlop = ASTRO_SLOP_RAW;
     }
     /** Check whether a given slot contains a valid cached value. */
     isValid(slotIndex) {
@@ -744,8 +742,6 @@ return {${names2.join(",")}};`;
       this.currentGlobalCacheFlag = 1;
       /** The main cache, used for the "current" time. */
       this.finalCache = new AstroCache();
-      /** Temporary cache for intermediate calculations. */
-      this.tempCache = new AstroCache();
       /** Cache used during rise/set refinement iterations. */
       this.refinementCache = new AstroCache();
       /** Cache for UT midnight calculations. */
@@ -775,10 +771,9 @@ return {${names2.join(",")}};`;
     }
     pushECAstroCacheInPool(pool, pool.finalCache, dateInterval);
   }
-  function pushECAstroCacheWithSlopInPool(pool, valueCache, dateInterval, slop) {
+  function pushECAstroCacheInPool(pool, valueCache, dateInterval) {
     const oldCache = pool.currentCache;
     pool.currentCache = valueCache;
-    valueCache.astroSlop = slop;
     if (valueCache.currentFlag === 0) {
       valueCache.currentFlag = 1;
     }
@@ -786,13 +781,7 @@ return {${names2.join(",")}};`;
     if (valueCache.globalValidFlag !== pool.currentGlobalCacheFlag) {
       valueCache.globalValidFlag = pool.currentGlobalCacheFlag;
       needsInvalidation = true;
-    } else if (isNaN(dateInterval)) {
-      if (!isNaN(valueCache.dateInterval)) {
-        needsInvalidation = true;
-      }
-    } else if (isNaN(valueCache.dateInterval)) {
-      needsInvalidation = true;
-    } else if (Math.abs(dateInterval - valueCache.dateInterval) > slop) {
+    } else if (!Object.is(valueCache.dateInterval, dateInterval)) {
       needsInvalidation = true;
     }
     if (needsInvalidation) {
@@ -800,9 +789,6 @@ return {${names2.join(",")}};`;
       valueCache.dateInterval = dateInterval;
     }
     return oldCache;
-  }
-  function pushECAstroCacheInPool(pool, valueCache, dateInterval) {
-    return pushECAstroCacheWithSlopInPool(pool, valueCache, dateInterval, ASTRO_SLOP_RAW);
   }
   function popECAstroCacheToInPool(pool, previousCache) {
     pool.currentCache = previousCache;
@@ -812,7 +798,6 @@ return {${names2.join(",")}};`;
   }
   function invalidateCachePool(pool) {
     pool.finalCache.invalidate();
-    pool.tempCache.invalidate();
     pool.refinementCache.invalidate();
     pool.midnightCache.invalidate();
   }
@@ -10929,11 +10914,10 @@ return {${names2.join(",")}};`;
         i--;
         fitTries = 0;
       }
-      let priorCache = pushECAstroCacheWithSlopInPool(
+      let priorCache = pushECAstroCacheInPool(
         cachePool,
         cachePool.refinementCache,
-        tryDate,
-        0
+        tryDate
       );
       let jcse = julianCenturiesSince2000EpochForDateInterval(tryDate, cachePool.currentCache).julianCenturiesSince2000Epoch;
       let radecl = getPlanetRADeclDist(
@@ -10958,11 +10942,10 @@ return {${names2.join(",")}};`;
         if (!convergedToInvalid) {
           convergedToInvalid = true;
           const wantHighTransit = newDate === ALWAYS_BELOW_HORIZON;
-          priorCache = pushECAstroCacheWithSlopInPool(
+          priorCache = pushECAstroCacheInPool(
             cachePool,
             cachePool.refinementCache,
-            tryDate,
-            0
+            tryDate
           );
           const transitT = planettransitTimeRefined(
             tryDate,
@@ -10975,11 +10958,10 @@ return {${names2.join(",")}};`;
           popECAstroCacheToInPool(cachePool, priorCache);
           firstTransit = transitT;
           firstNan = newDate;
-          priorCache = pushECAstroCacheWithSlopInPool(
+          priorCache = pushECAstroCacheInPool(
             cachePool,
             cachePool.refinementCache,
-            transitT,
-            0
+            transitT
           );
           jcse = julianCenturiesSince2000EpochForDateInterval(transitT, cachePool.currentCache).julianCenturiesSince2000Epoch;
           radecl = getPlanetRADeclDist(
@@ -11003,11 +10985,10 @@ return {${names2.join(",")}};`;
           if (isNoRiseSet(newDate)) {
             if (polarSpecial) {
               const priorPolar = transitT - 13 * 3600;
-              priorCache = pushECAstroCacheWithSlopInPool(
+              priorCache = pushECAstroCacheInPool(
                 cachePool,
                 cachePool.refinementCache,
-                priorPolar,
-                0
+                priorPolar
               );
               jcse = julianCenturiesSince2000EpochForDateInterval(priorPolar, cachePool.currentCache).julianCenturiesSince2000Epoch;
               radecl = getPlanetRADeclDist(
@@ -11039,11 +11020,10 @@ return {${names2.join(",")}};`;
                   binaryHighEvent = newDate;
                 }
                 const nextPolar = tryDate + 13 * 3600;
-                priorCache = pushECAstroCacheWithSlopInPool(
+                priorCache = pushECAstroCacheInPool(
                   cachePool,
                   cachePool.refinementCache,
-                  nextPolar,
-                  0
+                  nextPolar
                 );
                 jcse = julianCenturiesSince2000EpochForDateInterval(nextPolar, cachePool.currentCache).julianCenturiesSince2000Epoch;
                 radecl = getPlanetRADeclDist(
@@ -11090,11 +11070,10 @@ return {${names2.join(",")}};`;
                 let polarTries = numPolarTries;
                 while (polarTries-- > 0) {
                   const split = (binaryLow + binaryHigh) / 2;
-                  priorCache = pushECAstroCacheWithSlopInPool(
+                  priorCache = pushECAstroCacheInPool(
                     cachePool,
                     cachePool.refinementCache,
-                    split,
-                    0
+                    split
                   );
                   jcse = julianCenturiesSince2000EpochForDateInterval(split, cachePool.currentCache).julianCenturiesSince2000Epoch;
                   radecl = getPlanetRADeclDist(
@@ -11186,11 +11165,10 @@ return {${names2.join(",")}};`;
         i--;
         fitTries = 0;
       }
-      const priorCache = pushECAstroCacheWithSlopInPool(
+      const priorCache = pushECAstroCacheInPool(
         cachePool,
         cachePool.refinementCache,
-        tryDate,
-        0
+        tryDate
       );
       const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(tryDate, cachePool.currentCache);
       const { rightAscension } = getPlanetRADeclDist(
@@ -13078,7 +13056,7 @@ return {${names2.join(",")}};`;
     const b = v & 255;
     return `rgba(${r},${g},${b},${a.toFixed(3)})`;
   }
-  function registerAstroFunctions(env, OBSERVER_LAT, OBSERVER_LON, getNow = () => /* @__PURE__ */ new Date(), olsonTimezone, liveAstroSlopSec) {
+  function registerAstroFunctions(env, OBSERVER_LAT, OBSERVER_LON, getNow = () => /* @__PURE__ */ new Date(), olsonTimezone) {
     const { functions } = env;
     const now = getNow();
     const dateInterval = dateToDateInterval(now);
@@ -13217,7 +13195,7 @@ return {${names2.join(",")}};`;
     function liveAstro(compute) {
       const di = dateToDateInterval(getNow());
       const cache = pool.finalCache;
-      const prior = liveAstroSlopSec !== void 0 ? pushECAstroCacheWithSlopInPool(pool, cache, di, liveAstroSlopSec) : pushECAstroCacheInPool(pool, cache, di);
+      const prior = pushECAstroCacheInPool(pool, cache, di);
       const r = compute(cache, di);
       popECAstroCacheToInPool(pool, prior);
       return r;
@@ -18908,6 +18886,25 @@ return {${names2.join(",")}};`;
       this.frameSnapshot = null;
     }
     /**
+     * Run `fn` with the display time frozen at its current value, as if inside
+     * a render frame. Re-entrancy-safe: when a frame snapshot is already
+     * active the existing frozen time is used unchanged (holds and
+     * stopped/quantized modes are constant-time anyway via
+     * _computeDisplayTime). Used to pin build/rebuild "storms" — mass ObsValue
+     * construction, env rebuilds, static-cache builds — to a single instant so
+     * their astronomy pushes share one cache era under exact-match re-keying.
+     * See planning/2026-08-22-astro-slop-zero.md §4.
+     */
+    withFrozenFrame(fn) {
+      if (this.frameSnapshot !== null) return fn();
+      this.beginFrame();
+      try {
+        return fn();
+      } finally {
+        this.endFrame();
+      }
+    }
+    /**
      * Freeze the *displayed* time at its current value. Read-side only:
      * transport state is untouched and real/simulated time keeps flowing
      * underneath, so releaseHold() snaps the display back to live time
@@ -22701,7 +22698,7 @@ return {${names2.join(",")}};`;
       const faceOverrides = slotResult?.overrides;
       const { getNow: faceRawGetNow, withDisplayTime } = makeOverridableGetNow(rawGetNow);
       const faceGetNow = makeGetNow(watch.beatsPerSecond, faceRawGetNow);
-      const env = createWatchEnvironment(watch, lat, lon, faceGetNow, locationTimezone, faceOverrides, slotResult?.globalLocationSlot);
+      const env = timeController.withFrozenFrame(() => createWatchEnvironment(watch, lat, lon, faceGetNow, locationTimezone, faceOverrides, slotResult?.globalLocationSlot));
       const face = {
         watch,
         env,
@@ -22792,6 +22789,9 @@ return {${names2.join(",")}};`;
     }
     function buildCache(face) {
       if (!face.enabled || face.sizePx === 0) return;
+      timeController.withFrozenFrame(() => buildCacheFrozen(face));
+    }
+    function buildCacheFrozen(face) {
       const { canvas, watch, env, images, scale } = face;
       face.terminatorLeaves = [];
       for (const part of watch.parts) {
@@ -22850,6 +22850,9 @@ return {${names2.join(",")}};`;
       buildNext();
     }
     function rebuildEnvironments() {
+      timeController.withFrozenFrame(rebuildEnvironmentsFrozen);
+    }
+    function rebuildEnvironmentsFrozen() {
       const oldTzDeltaMs = tzDeltaMs;
       tzDeltaMs = computeTzDeltaMs(locationTimezone, rawGetNow());
       let tzOffsetChanged = false;
@@ -22990,7 +22993,7 @@ return {${names2.join(",")}};`;
       return `canvas/bitmap est TOTAL ${MB(total)}MB: faces ${MB(facesB)} \xB7 static caches ${MB(staticB)} \xB7 images ${MB(imagesB)} \xB7 src blobs ${MB(srcBlobB)} \xB7 shadows ${MB(shadowB)} \xB7 wedge cache ${MB(rc.wedgeCache)} \xB7 wheel cache ${MB(rc.wheelCache)} \xB7 hand cache ${MB(rc.handCache)} \xB7 analemma ${MB(analemmaB)} \xB7 terra ring ${MB(terraB)} \xB7 cutout temp ${MB(rc.cutoutTemp)} \xB7 face buffers ${MB(buffersB)} \xB7 shared canvas ${MB(sharedB)}${jsHeap}`;
     }
     function _buildStamp() {
-      return true ? "2.0.101" : "dev";
+      return true ? "2.0.102" : "dev";
     }
     function _browserShort() {
       const ua = navigator.userAgent;
@@ -23429,6 +23432,9 @@ return {${names2.join(",")}};`;
     }
     let _dstTimerId = null;
     function handleDstTransition() {
+      timeController.withFrozenFrame(handleDstTransitionFrozen);
+    }
+    function handleDstTransitionFrozen() {
       tzDeltaMs = computeTzDeltaMs(locationTimezone, rawGetNow());
       for (const face of faces) {
         if (!face.enabled) continue;
@@ -23671,6 +23677,9 @@ return {${names2.join(",")}};`;
     });
     resizeObserver.observe(grid.parentElement);
     function rebuildAllForLocation(newLat, newLon) {
+      timeController.withFrozenFrame(() => rebuildAllForLocationFrozen(newLat, newLon));
+    }
+    function rebuildAllForLocationFrozen(newLat, newLon) {
       lat = newLat;
       lon = newLon;
       for (const face of faces) {
@@ -24278,17 +24287,19 @@ return {${names2.join(",")}};`;
           updateBodyLabels2(p.name, planetNumberForIdx[idx]);
           setState({ body: p.param });
           updateNavigationLinks();
-          for (const face of faces) {
-            if (!face.enabled) continue;
-            face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
-            restoreKyotoState(face);
-            if (face.terminatorLeaves.length > 0) {
-              updateLeafAngles(face.terminatorLeaves, face.env);
+          timeController.withFrozenFrame(() => {
+            for (const face of faces) {
+              if (!face.enabled) continue;
+              face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+              restoreKyotoState(face);
+              if (face.terminatorLeaves.length > 0) {
+                updateLeafAngles(face.terminatorLeaves, face.env);
+              }
+              const { canvas, watch, env, images, scale } = face;
+              buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
+              face.updater.reset();
             }
-            const { canvas, watch, env, images, scale } = face;
-            buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-            face.updater.reset();
-          }
+          });
           stopScheduler();
           startScheduler();
         };
@@ -24375,12 +24386,14 @@ return {${names2.join(",")}};`;
           const targetFlip = noonOnTop ? Math.PI : 0;
           viennaFace.env.variables.set("noonOnTop", val);
           viennaFace.env.variables.set("dialFlip", targetFlip);
-          const { canvas, watch, env, images, scale } = viennaFace;
-          buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, viennaFace.terminatorLeaves);
-          viennaFace.updater.reset();
-          if (viennaFace.terminatorLeaves.length > 0) {
-            updateLeafAngles(viennaFace.terminatorLeaves, viennaFace.env);
-          }
+          timeController.withFrozenFrame(() => {
+            const { canvas, watch, env, images, scale } = viennaFace;
+            buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, viennaFace.terminatorLeaves);
+            viennaFace.updater.reset();
+            if (viennaFace.terminatorLeaves.length > 0) {
+              updateLeafAngles(viennaFace.terminatorLeaves, viennaFace.env);
+            }
+          });
           stopScheduler();
           startScheduler();
           setState({ vnoon: noonOnTop });
@@ -24529,18 +24542,20 @@ return {${names2.join(",")}};`;
             terraFace.terraSlotOverrides = slotResult.overrides;
             terraFace.globalLocationSlot = slotResult.globalLocationSlot;
           }
-          for (const face of faces) {
-            if (!face.enabled) continue;
-            face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
-            restoreKyotoState(face);
-            if (face.terminatorLeaves.length > 0) {
-              updateLeafAngles(face.terminatorLeaves, face.env);
+          timeController.withFrozenFrame(() => {
+            for (const face of faces) {
+              if (!face.enabled) continue;
+              face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+              restoreKyotoState(face);
+              if (face.terminatorLeaves.length > 0) {
+                updateLeafAngles(face.terminatorLeaves, face.env);
+              }
+              face.env._terraCityKnockout = null;
+              const { canvas, watch, env, images, scale } = face;
+              buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
+              face.updater.reset();
             }
-            face.env._terraCityKnockout = null;
-            const { canvas, watch, env, images, scale } = face;
-            buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-            face.updater.reset();
-          }
+          });
           stopScheduler();
           startScheduler();
         }, assignCityToSlot2 = function(slot, city) {
@@ -24779,17 +24794,19 @@ return {${names2.join(",")}};`;
           setSlotOverrides(changes);
           updateNavigationLinks();
         }, rebuildGaiaForSlotChange2 = function() {
-          for (const face of faces) {
-            if (!face.enabled) continue;
-            face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
-            restoreKyotoState(face);
-            if (face.terminatorLeaves.length > 0) {
-              updateLeafAngles(face.terminatorLeaves, face.env);
+          timeController.withFrozenFrame(() => {
+            for (const face of faces) {
+              if (!face.enabled) continue;
+              face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+              restoreKyotoState(face);
+              if (face.terminatorLeaves.length > 0) {
+                updateLeafAngles(face.terminatorLeaves, face.env);
+              }
+              const { canvas, watch, env, images, scale } = face;
+              buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
+              face.updater.reset();
             }
-            const { canvas, watch, env, images, scale } = face;
-            buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-            face.updater.reset();
-          }
+          });
           stopScheduler();
           startScheduler();
         }, assignCityToGaiaSlot2 = function(slot, city) {

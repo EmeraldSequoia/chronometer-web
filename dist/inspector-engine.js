@@ -179,7 +179,6 @@
   ];
 
   // src/astronomy/astro-cache.ts
-  var ASTRO_SLOP_RAW = 0.5;
   var AstroCache = class {
     constructor(numSlots = 480 /* NUM_SLOTS */) {
       this.cacheSlots = new Float64Array(numSlots);
@@ -187,7 +186,6 @@
       this.currentFlag = 1;
       this.globalValidFlag = 0;
       this.dateInterval = NaN;
-      this.astroSlop = ASTRO_SLOP_RAW;
     }
     /** Check whether a given slot contains a valid cached value. */
     isValid(slotIndex) {
@@ -221,8 +219,6 @@
       this.currentGlobalCacheFlag = 1;
       /** The main cache, used for the "current" time. */
       this.finalCache = new AstroCache();
-      /** Temporary cache for intermediate calculations. */
-      this.tempCache = new AstroCache();
       /** Cache used during rise/set refinement iterations. */
       this.refinementCache = new AstroCache();
       /** Cache for UT midnight calculations. */
@@ -252,10 +248,9 @@
     }
     pushECAstroCacheInPool(pool, pool.finalCache, dateInterval);
   }
-  function pushECAstroCacheWithSlopInPool(pool, valueCache, dateInterval, slop) {
+  function pushECAstroCacheInPool(pool, valueCache, dateInterval) {
     const oldCache = pool.currentCache;
     pool.currentCache = valueCache;
-    valueCache.astroSlop = slop;
     if (valueCache.currentFlag === 0) {
       valueCache.currentFlag = 1;
     }
@@ -263,13 +258,7 @@
     if (valueCache.globalValidFlag !== pool.currentGlobalCacheFlag) {
       valueCache.globalValidFlag = pool.currentGlobalCacheFlag;
       needsInvalidation = true;
-    } else if (isNaN(dateInterval)) {
-      if (!isNaN(valueCache.dateInterval)) {
-        needsInvalidation = true;
-      }
-    } else if (isNaN(valueCache.dateInterval)) {
-      needsInvalidation = true;
-    } else if (Math.abs(dateInterval - valueCache.dateInterval) > slop) {
+    } else if (!Object.is(valueCache.dateInterval, dateInterval)) {
       needsInvalidation = true;
     }
     if (needsInvalidation) {
@@ -277,9 +266,6 @@
       valueCache.dateInterval = dateInterval;
     }
     return oldCache;
-  }
-  function pushECAstroCacheInPool(pool, valueCache, dateInterval) {
-    return pushECAstroCacheWithSlopInPool(pool, valueCache, dateInterval, ASTRO_SLOP_RAW);
   }
   function popECAstroCacheToInPool(pool, previousCache) {
     pool.currentCache = previousCache;
@@ -289,7 +275,6 @@
   }
   function invalidateCachePool(pool) {
     pool.finalCache.invalidate();
-    pool.tempCache.invalidate();
     pool.refinementCache.invalidate();
     pool.midnightCache.invalidate();
   }
@@ -10547,11 +10532,10 @@
         i--;
         fitTries = 0;
       }
-      let priorCache = pushECAstroCacheWithSlopInPool(
+      let priorCache = pushECAstroCacheInPool(
         cachePool,
         cachePool.refinementCache,
-        tryDate,
-        0
+        tryDate
       );
       let jcse = julianCenturiesSince2000EpochForDateInterval(tryDate, cachePool.currentCache).julianCenturiesSince2000Epoch;
       let radecl = getPlanetRADeclDist(
@@ -10576,11 +10560,10 @@
         if (!convergedToInvalid) {
           convergedToInvalid = true;
           const wantHighTransit = newDate === ALWAYS_BELOW_HORIZON;
-          priorCache = pushECAstroCacheWithSlopInPool(
+          priorCache = pushECAstroCacheInPool(
             cachePool,
             cachePool.refinementCache,
-            tryDate,
-            0
+            tryDate
           );
           const transitT = planettransitTimeRefined(
             tryDate,
@@ -10593,11 +10576,10 @@
           popECAstroCacheToInPool(cachePool, priorCache);
           firstTransit = transitT;
           firstNan = newDate;
-          priorCache = pushECAstroCacheWithSlopInPool(
+          priorCache = pushECAstroCacheInPool(
             cachePool,
             cachePool.refinementCache,
-            transitT,
-            0
+            transitT
           );
           jcse = julianCenturiesSince2000EpochForDateInterval(transitT, cachePool.currentCache).julianCenturiesSince2000Epoch;
           radecl = getPlanetRADeclDist(
@@ -10621,11 +10603,10 @@
           if (isNoRiseSet(newDate)) {
             if (polarSpecial) {
               const priorPolar = transitT - 13 * 3600;
-              priorCache = pushECAstroCacheWithSlopInPool(
+              priorCache = pushECAstroCacheInPool(
                 cachePool,
                 cachePool.refinementCache,
-                priorPolar,
-                0
+                priorPolar
               );
               jcse = julianCenturiesSince2000EpochForDateInterval(priorPolar, cachePool.currentCache).julianCenturiesSince2000Epoch;
               radecl = getPlanetRADeclDist(
@@ -10657,11 +10638,10 @@
                   binaryHighEvent = newDate;
                 }
                 const nextPolar = tryDate + 13 * 3600;
-                priorCache = pushECAstroCacheWithSlopInPool(
+                priorCache = pushECAstroCacheInPool(
                   cachePool,
                   cachePool.refinementCache,
-                  nextPolar,
-                  0
+                  nextPolar
                 );
                 jcse = julianCenturiesSince2000EpochForDateInterval(nextPolar, cachePool.currentCache).julianCenturiesSince2000Epoch;
                 radecl = getPlanetRADeclDist(
@@ -10708,11 +10688,10 @@
                 let polarTries = numPolarTries;
                 while (polarTries-- > 0) {
                   const split = (binaryLow + binaryHigh) / 2;
-                  priorCache = pushECAstroCacheWithSlopInPool(
+                  priorCache = pushECAstroCacheInPool(
                     cachePool,
                     cachePool.refinementCache,
-                    split,
-                    0
+                    split
                   );
                   jcse = julianCenturiesSince2000EpochForDateInterval(split, cachePool.currentCache).julianCenturiesSince2000Epoch;
                   radecl = getPlanetRADeclDist(
@@ -10804,11 +10783,10 @@
         i--;
         fitTries = 0;
       }
-      const priorCache = pushECAstroCacheWithSlopInPool(
+      const priorCache = pushECAstroCacheInPool(
         cachePool,
         cachePool.refinementCache,
-        tryDate,
-        0
+        tryDate
       );
       const { julianCenturiesSince2000Epoch } = julianCenturiesSince2000EpochForDateInterval(tryDate, cachePool.currentCache);
       const { rightAscension } = getPlanetRADeclDist(
@@ -11398,7 +11376,7 @@
     const browserOffsetSec = -now.getTimezoneOffset() * 60;
     return browserOffsetSec + computeTzDeltaMs(olsonTimezone, now) / 1e3;
   }
-  function createAstroEnvironment(observerLatDeg = DEFAULT_LAT_DEG, observerLonDeg = DEFAULT_LON_DEG, getNow2 = () => /* @__PURE__ */ new Date(), olsonTimezone, liveAstroSlopSec) {
+  function createAstroEnvironment(observerLatDeg = DEFAULT_LAT_DEG, observerLonDeg = DEFAULT_LON_DEG, getNow2 = () => /* @__PURE__ */ new Date(), olsonTimezone) {
     const OBSERVER_LAT = observerLatDeg * Math.PI / 180;
     const OBSERVER_LON = observerLonDeg * Math.PI / 180;
     initBatteryState();
@@ -11434,11 +11412,11 @@
     env2.variables.set("topAnchorClockMidnight", 1);
     env2.variables.set("topAnchorSolarNoon", 2);
     env2.variables.set("topAnchorSolarMidnight", 3);
-    const internals = registerAstroFunctions(env2, OBSERVER_LAT, OBSERVER_LON, getNow2, olsonTimezone, liveAstroSlopSec);
+    const internals = registerAstroFunctions(env2, OBSERVER_LAT, OBSERVER_LON, getNow2, olsonTimezone);
     releaseCachePool(internals.pool);
     return env2;
   }
-  function registerAstroFunctions(env2, OBSERVER_LAT, OBSERVER_LON, getNow2 = () => /* @__PURE__ */ new Date(), olsonTimezone, liveAstroSlopSec) {
+  function registerAstroFunctions(env2, OBSERVER_LAT, OBSERVER_LON, getNow2 = () => /* @__PURE__ */ new Date(), olsonTimezone) {
     const { functions } = env2;
     const now = getNow2();
     const dateInterval = dateToDateInterval(now);
@@ -11577,7 +11555,7 @@
     function liveAstro(compute) {
       const di = dateToDateInterval(getNow2());
       const cache = pool.finalCache;
-      const prior = liveAstroSlopSec !== void 0 ? pushECAstroCacheWithSlopInPool(pool, cache, di, liveAstroSlopSec) : pushECAstroCacheInPool(pool, cache, di);
+      const prior = pushECAstroCacheInPool(pool, cache, di);
       const r = compute(cache, di);
       popECAstroCacheToInPool(pool, prior);
       return r;
@@ -13390,6 +13368,25 @@
      */
     endFrame() {
       this.frameSnapshot = null;
+    }
+    /**
+     * Run `fn` with the display time frozen at its current value, as if inside
+     * a render frame. Re-entrancy-safe: when a frame snapshot is already
+     * active the existing frozen time is used unchanged (holds and
+     * stopped/quantized modes are constant-time anyway via
+     * _computeDisplayTime). Used to pin build/rebuild "storms" — mass ObsValue
+     * construction, env rebuilds, static-cache builds — to a single instant so
+     * their astronomy pushes share one cache era under exact-match re-keying.
+     * See planning/2026-08-22-astro-slop-zero.md §4.
+     */
+    withFrozenFrame(fn) {
+      if (this.frameSnapshot !== null) return fn();
+      this.beginFrame();
+      try {
+        return fn();
+      } finally {
+        this.endFrame();
+      }
     }
     /**
      * Freeze the *displayed* time at its current value. Read-side only:
@@ -17659,7 +17656,6 @@
   timeSubsecEl.className = "time-subsec";
   timeDisplay.textContent = "";
   timeDisplay.append(timeMainEl, timeSubsecEl);
-  var INSPECTOR_LIVE_ASTRO_SLOP_SEC = 0;
   initAppState({ app: "inspector" });
   var urlState = getState();
   var hasUrlLocation = urlState.lat !== null && urlState.lon !== null;
@@ -17772,7 +17768,7 @@
       } else {
         setState({ bloc: false, lsrc: info.sourceType, lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
       }
-      env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
+      env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
       updateLocationDisplay();
       updateTimeDisplay();
       resetAllSchedules();
@@ -17801,7 +17797,7 @@
           needsPrompt = false;
           if (isPersistentMode()) setState({ bloc: true, lsrc: "browser", lat, lon, tz: locationTimezone || null });
           locationDialog.updateState(lat, lon, "browser", "", "");
-          env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
+          env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
           updateLocationDisplay();
           updateTimeDisplay();
           resetAllSchedules();
@@ -17830,7 +17826,7 @@
         tzDeltaMs = computeTzDeltaMs(locationTimezone);
         if (isPersistentMode()) setState({ bloc: true, lsrc: "browser", lat, lon, city: null, tz });
         locationDialog.updateState(lat, lon, "browser", "", "");
-        env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
+        env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
         updateLocationDisplay();
         updateTimeDisplay();
         resetAllSchedules();
@@ -17854,7 +17850,7 @@
     }
   }
   var { getNow, withDisplayTime } = makeOverridableGetNow(() => timeController.getDisplayTime());
-  var env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
+  var env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
   var updater = new Updater();
   function formatTime(date) {
     const h = date.getHours().toString().padStart(2, "0");
@@ -17933,7 +17929,7 @@
       tzDeltaMs = computeTzDeltaMs(locationTimezone);
       needsPrompt = false;
       urlState.city = s.city;
-      env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
+      env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
       updateLocationDisplay();
       resetAllSchedules();
       changed = true;
@@ -17967,6 +17963,9 @@
   var browserTimeRowEl = null;
   var lastBrowserTimeStr = "";
   function buildCatalog() {
+    timeController.withFrozenFrame(buildCatalogFrozen);
+  }
+  function buildCatalogFrozen() {
     const now = performance.now();
     for (const group of CATALOG) {
       const groupEl = document.createElement("section");
@@ -18380,7 +18379,7 @@
       if (resolved && resolved !== locationTimezone) {
         locationTimezone = resolved;
         tzDeltaMs = computeTzDeltaMs(locationTimezone);
-        env = createAstroEnvironment(lat, lon, getNow, locationTimezone, INSPECTOR_LIVE_ASTRO_SLOP_SEC);
+        env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
         if (isPersistentMode()) setState({ tz: locationTimezone });
         updateLocationDisplay();
         updateTimeDisplay();

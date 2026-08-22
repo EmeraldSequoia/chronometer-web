@@ -812,7 +812,9 @@ async function main() {
         // withDisplayTime() shifts the env's evaluation time (see makeGetNow).
         const { getNow: faceRawGetNow, withDisplayTime } = makeOverridableGetNow(rawGetNow);
         const faceGetNow = makeGetNow(watch.beatsPerSecond, faceRawGetNow);
-        const env = createWatchEnvironment(watch, lat, lon, faceGetNow, locationTimezone, faceOverrides, slotResult?.globalLocationSlot);
+        // Frozen: init-block evaluation is a (small) eval storm — see buildCache.
+        const env = timeController.withFrozenFrame(() =>
+            createWatchEnvironment(watch, lat, lon, faceGetNow, locationTimezone, faceOverrides, slotResult?.globalLocationSlot));
 
         const face: FaceInstance = {
             watch,
@@ -924,8 +926,18 @@ async function main() {
     }
 
     // --- Build (or rebuild) the StaticCache for a face ---
+    // The body runs under withFrozenFrame: it evaluates hundreds of
+    // expressions (leaf angles, static blocks, ObsValue construction), and in
+    // live mode an unfrozen clock would advance between them — each new ms
+    // re-keying the astro cache under exact-match invalidation. Freezing pins
+    // the whole build to one instant (one cache era, mutually consistent
+    // values). See planning/2026-08-22-astro-slop-zero.md §4.
     function buildCache(face: FaceInstance) {
         if (!face.enabled || face.sizePx === 0) return;
+        timeController.withFrozenFrame(() => buildCacheFrozen(face));
+    }
+
+    function buildCacheFrozen(face: FaceInstance) {
         const { canvas, watch, env, images, scale } = face;
         face.terminatorLeaves = [];
         for (const part of watch.parts) {
@@ -1026,6 +1038,13 @@ async function main() {
      * a fresh environment.
      */
     function rebuildEnvironments() {
+        // Frozen: the miss path is an eval storm (init blocks + static caches)
+        // — see buildCache. On scrub ticks (called before beginFrame) the
+        // quantized display time is constant, so the freeze is inert there.
+        timeController.withFrozenFrame(rebuildEnvironmentsFrozen);
+    }
+
+    function rebuildEnvironmentsFrozen() {
         const oldTzDeltaMs = tzDeltaMs;
         tzDeltaMs = computeTzDeltaMs(locationTimezone, rawGetNow());
         let tzOffsetChanged = false;
@@ -1063,8 +1082,9 @@ async function main() {
             // Invalidate QDayNightRing render caches so astronomy values
             // are recomputed immediately for the new time.
             // Preserve terminator leaves — their angle/rotation ObsValues are
-            // evaluated against the (live) env each frame by updater.tick, so they
-            // don't need recreating. Recreating them would destroy animation state.
+            // driven by updater.tick against the (live) env (evaluated on their
+            // own boundary arrivals, interpolated between), so they don't need
+            // recreating. Recreating them would destroy animation state.
             const { canvas, watch, env, images, scale } = face;
             buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
             // Statics changed without any ObsValue moving — force a redraw.
@@ -1836,6 +1856,11 @@ async function main() {
      * system timezone changes.  Follows the §3 animation-preserving pattern.
      */
     function handleDstTransition() {
+        timeController.withFrozenFrame(handleDstTransitionFrozen);
+    }
+
+    // Frozen: env rebuilds + static-cache builds are eval storms — see buildCache.
+    function handleDstTransitionFrozen() {
 
         // Use displayed time — in offset 1× mode the displayed date may
         // be in a different DST state than the real date.
@@ -2202,6 +2227,11 @@ async function main() {
     // =========================================================================
 
     function rebuildAllForLocation(newLat: number, newLon: number) {
+        // Frozen: env rebuilds + static-cache builds are eval storms — see buildCache.
+        timeController.withFrozenFrame(() => rebuildAllForLocationFrozen(newLat, newLon));
+    }
+
+    function rebuildAllForLocationFrozen(newLat: number, newLon: number) {
         lat = newLat;
         lon = newLon;
         for (const face of faces) {
@@ -3081,23 +3111,26 @@ async function main() {
                 // Keep navigation links in sync (carries the param in URL-fallback mode).
                 updateNavigationLinks();
 
-                // Rebuild face with new body — preserve hand states for smooth animation
-                for (const face of faces) {
-                    if (!face.enabled) continue;
-                    // Rebuild environment (picks up new body URL param)
-                    face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
-                    restoreKyotoState(face);
-                    // Update terminator leaf angles for the new planet's phase
-                    // (keep existing leaves so the animation system can interpolate)
-                    if (face.terminatorLeaves.length > 0) {
-                        updateLeafAngles(face.terminatorLeaves, face.env);
+                // Rebuild face with new body — preserve hand states for smooth animation.
+                // Frozen: env rebuild + static-cache eval storm — see buildCache.
+                timeController.withFrozenFrame(() => {
+                    for (const face of faces) {
+                        if (!face.enabled) continue;
+                        // Rebuild environment (picks up new body URL param)
+                        face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+                        restoreKyotoState(face);
+                        // Update terminator leaf angles for the new planet's phase
+                        // (keep existing leaves so the animation system can interpolate)
+                        if (face.terminatorLeaves.length > 0) {
+                            updateLeafAngles(face.terminatorLeaves, face.env);
+                        }
+                        // Rebuild static caches (background, marks, windows)
+                        const { canvas, watch, env, images, scale } = face;
+                        buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
+                        // Force all hands to re-evaluate immediately (reset update timers)
+                        face.updater.reset();
                     }
-                    // Rebuild static caches (background, marks, windows)
-                    const { canvas, watch, env, images, scale } = face;
-                    buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-                    // Force all hands to re-evaluate immediately (reset update timers)
-                    face.updater.reset();
-                }
+                });
                 // Kick the scheduler immediately so animations start without delay
                 stopScheduler();
                 startScheduler();
@@ -3143,19 +3176,22 @@ async function main() {
                 viennaFace!.env.variables.set('noonOnTop', val);
                 viennaFace!.env.variables.set('dialFlip', targetFlip);
 
-                // 2. Rebuild static cache
-                const { canvas, watch, env, images, scale } = viennaFace!;
-                buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, viennaFace!.terminatorLeaves);
+                // 2-4. Rebuild static cache, re-arm ObsValues, reset leaves.
+                // Frozen: static-block + leaf-angle eval storm — see buildCache.
+                timeController.withFrozenFrame(() => {
+                    const { canvas, watch, env, images, scale } = viennaFace!;
+                    buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, viennaFace!.terminatorLeaves);
 
-                // 3. Re-evaluate all ObsValues (hands, dials, and the ring's
-                //    masterOffset) against the new dialFlip; they animate to the
-                //    flipped position via the Updater.
-                viennaFace!.updater.reset();
+                    // Re-evaluate all ObsValues (hands, dials, and the ring's
+                    // masterOffset) against the new dialFlip; they animate to the
+                    // flipped position via the Updater.
+                    viennaFace!.updater.reset();
 
-                // 4. Reset terminator leaves for the new dialFlip
-                if (viennaFace!.terminatorLeaves.length > 0) {
-                    updateLeafAngles(viennaFace!.terminatorLeaves, viennaFace!.env);
-                }
+                    // Reset terminator leaves for the new dialFlip
+                    if (viennaFace!.terminatorLeaves.length > 0) {
+                        updateLeafAngles(viennaFace!.terminatorLeaves, viennaFace!.env);
+                    }
+                });
 
 
                 // 7. Kick the scheduler so animations start immediately
@@ -3364,18 +3400,21 @@ async function main() {
                     terraFace!.terraSlotOverrides = slotResult.overrides;
                     terraFace!.globalLocationSlot = slotResult.globalLocationSlot;
                 }
-                for (const face of faces) {
-                    if (!face.enabled) continue;
-                    face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
-                    restoreKyotoState(face);
-                    if (face.terminatorLeaves.length > 0) {
-                        updateLeafAngles(face.terminatorLeaves, face.env);
+                // Frozen: env rebuild + static-cache eval storm — see buildCache.
+                timeController.withFrozenFrame(() => {
+                    for (const face of faces) {
+                        if (!face.enabled) continue;
+                        face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+                        restoreKyotoState(face);
+                        if (face.terminatorLeaves.length > 0) {
+                            updateLeafAngles(face.terminatorLeaves, face.env);
+                        }
+                        (face.env as any)._terraCityKnockout = null;
+                        const { canvas, watch, env, images, scale } = face;
+                        buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
+                        face.updater.reset();
                     }
-                    (face.env as any)._terraCityKnockout = null;
-                    const { canvas, watch, env, images, scale } = face;
-                    buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-                    face.updater.reset();
-                }
+                });
                 stopScheduler();
                 startScheduler();
             }
@@ -3670,17 +3709,20 @@ async function main() {
 
             /** Rebuild Gaia after a slot change */
             function rebuildGaiaForSlotChange() {
-                for (const face of faces) {
-                    if (!face.enabled) continue;
-                    face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
-                    restoreKyotoState(face);
-                    if (face.terminatorLeaves.length > 0) {
-                        updateLeafAngles(face.terminatorLeaves, face.env);
+                // Frozen: env rebuild + static-cache eval storm — see buildCache.
+                timeController.withFrozenFrame(() => {
+                    for (const face of faces) {
+                        if (!face.enabled) continue;
+                        face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+                        restoreKyotoState(face);
+                        if (face.terminatorLeaves.length > 0) {
+                            updateLeafAngles(face.terminatorLeaves, face.env);
+                        }
+                        const { canvas, watch, env, images, scale } = face;
+                        buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
+                        face.updater.reset();
                     }
-                    const { canvas, watch, env, images, scale } = face;
-                    buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-                    face.updater.reset();
-                }
+                });
                 stopScheduler();
                 startScheduler();
             }

@@ -357,9 +357,6 @@ export const enum CacheSlot {
     NUM_SLOTS,
 }
 
-/** The default ASTRO_SLOP tolerance for cache matching (seconds). */
-const ASTRO_SLOP_RAW = 0.5;
-
 // ============================================================================
 // AstroCache class
 // ============================================================================
@@ -387,16 +384,12 @@ export class AstroCache {
     /** The date interval this cache was set up for. */
     dateInterval: number;
 
-    /** The slop tolerance for this cache. */
-    astroSlop: number;
-
     constructor(numSlots: number = CacheSlot.NUM_SLOTS) {
         this.cacheSlots = new Float64Array(numSlots);
         this.cacheSlotValidFlag = new Uint32Array(numSlots);
         this.currentFlag = 1;  // Start at 1; flags initialize to 0, so all are initially invalid
         this.globalValidFlag = 0;
         this.dateInterval = NaN;
-        this.astroSlop = ASTRO_SLOP_RAW;
     }
 
     /** Check whether a given slot contains a valid cached value. */
@@ -444,9 +437,6 @@ export class AstroCachePool {
 
     /** The main cache, used for the "current" time. */
     finalCache: AstroCache = new AstroCache();
-
-    /** Temporary cache for intermediate calculations. */
-    tempCache: AstroCache = new AstroCache();
 
     /** Cache used during rise/set refinement iterations. */
     refinementCache: AstroCache = new AstroCache();
@@ -513,17 +503,21 @@ export function initializeCachePool(
 
 /**
  * Set the given cache active in the pool, returning the previously active cache.
- * If the date has changed beyond slop tolerance, the cache is invalidated.
+ * If the date has changed at all, the cache is invalidated: re-keying is an
+ * exact-match test, so a value evaluated at time t always uses a cache valid
+ * for exactly t. (Historically this tolerated a slop — 2.0 s on iOS, then
+ * 0.5 s here — which could serve slots computed up to that far from the
+ * requested time; see planning/2026-08-22-astro-slop-zero.md for why that was
+ * retired. Within one frozen frame, same-group pushes carry bit-identical
+ * dateIntervals, so cross-part sharing is unaffected.)
  */
-export function pushECAstroCacheWithSlopInPool(
+export function pushECAstroCacheInPool(
     pool: AstroCachePool,
     valueCache: AstroCache,
     dateInterval: number,
-    slop: number,
 ): AstroCache | null {
     const oldCache = pool.currentCache;
     pool.currentCache = valueCache;
-    valueCache.astroSlop = slop;
 
     if (valueCache.currentFlag === 0) {
         valueCache.currentFlag = 1;
@@ -535,13 +529,10 @@ export function pushECAstroCacheWithSlopInPool(
     if (valueCache.globalValidFlag !== pool.currentGlobalCacheFlag) {
         valueCache.globalValidFlag = pool.currentGlobalCacheFlag;
         needsInvalidation = true;
-    } else if (isNaN(dateInterval)) {
-        if (!isNaN(valueCache.dateInterval)) {
-            needsInvalidation = true;
-        }
-    } else if (isNaN(valueCache.dateInterval)) {
-        needsInvalidation = true;
-    } else if (Math.abs(dateInterval - valueCache.dateInterval) > slop) {
+    } else if (!Object.is(valueCache.dateInterval, dateInterval)) {
+        // Exact-match re-keying: any real time change invalidates. SameValue
+        // (not !==) so repeated NaN pushes — eval-ahead toward a "never"
+        // boundary — stay a no-op instead of invalidating on every push.
         needsInvalidation = true;
     }
 
@@ -551,17 +542,6 @@ export function pushECAstroCacheWithSlopInPool(
     }
 
     return oldCache;
-}
-
-/**
- * Push a cache with the default ASTRO_SLOP tolerance.
- */
-export function pushECAstroCacheInPool(
-    pool: AstroCachePool,
-    valueCache: AstroCache,
-    dateInterval: number,
-): AstroCache | null {
-    return pushECAstroCacheWithSlopInPool(pool, valueCache, dateInterval, ASTRO_SLOP_RAW);
 }
 
 /**
@@ -593,7 +573,6 @@ export function releaseCachePool(pool: AstroCachePool): void {
  */
 export function invalidateCachePool(pool: AstroCachePool): void {
     pool.finalCache.invalidate();
-    pool.tempCache.invalidate();
     pool.refinementCache.invalidate();
     pool.midnightCache.invalidate();
 }

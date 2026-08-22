@@ -681,6 +681,14 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
 }
 
 function rebuildEnv(): void {
+    // Frozen: the rebuild (and any ObsValue re-evals it triggers) is pinned to
+    // one instant so its astronomy pushes share one cache era under the slot
+    // cache's exact-match re-keying (planning/2026-08-22-astro-slop-zero.md §4).
+    // Inert during scrub (quantized tickTime is constant) and drags (hold active).
+    timeController.withFrozenFrame(rebuildEnvFrozen);
+}
+
+function rebuildEnvFrozen(): void {
     tzDeltaMs = computeTzDeltaMs(locationTimezone);
     env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
     // Preserve env variables across the re-created environment.
@@ -1408,7 +1416,10 @@ function init(): void {
     // Initialize Observatory value system
     env.variables.set('noonOnTop', noonOnTop ? 1 : 0);
     env.variables.set('dialPlanet', selectedPlanet);
-    updater = buildObsValues(env, performance.now(), getNow);
+    // Frozen: ~130 initial ObsValue evals run here, outside any frame; freezing
+    // pins them to one instant so the astro cache isn't re-keyed per elapsed ms
+    // (planning/2026-08-22-astro-slop-zero.md §4).
+    updater = timeController.withFrozenFrame(() => buildObsValues(env, performance.now(), getNow));
 
     // Initialize earth view (altitude table + Blue Marble images)
     initEarthView();

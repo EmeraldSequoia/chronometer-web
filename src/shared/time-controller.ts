@@ -288,6 +288,26 @@ export class TimeController {
     }
 
     /**
+     * Run `fn` with the display time frozen at its current value, as if inside
+     * a render frame. Re-entrancy-safe: when a frame snapshot is already
+     * active the existing frozen time is used unchanged (holds and
+     * stopped/quantized modes are constant-time anyway via
+     * _computeDisplayTime). Used to pin build/rebuild "storms" — mass ObsValue
+     * construction, env rebuilds, static-cache builds — to a single instant so
+     * their astronomy pushes share one cache era under exact-match re-keying.
+     * See planning/2026-08-22-astro-slop-zero.md §4.
+     */
+    withFrozenFrame<T>(fn: () => T): T {
+        if (this.frameSnapshot !== null) return fn();
+        this.beginFrame();
+        try {
+            return fn();
+        } finally {
+            this.endFrame();
+        }
+    }
+
+    /**
      * Freeze the *displayed* time at its current value. Read-side only:
      * transport state is untouched and real/simulated time keeps flowing
      * underneath, so releaseHold() snaps the display back to live time

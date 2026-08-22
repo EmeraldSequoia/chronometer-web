@@ -27,7 +27,7 @@ import {
     AstroCache,
     AstroCachePool,
     CacheSlot,
-    pushECAstroCacheWithSlopInPool,
+    pushECAstroCacheInPool,
     popECAstroCacheToInPool,
 } from './astro-cache';
 import { julianCenturiesSince2000EpochForDateInterval, priorUTMidnightForDateInterval } from './es-time';
@@ -292,8 +292,8 @@ export function planetaryRiseSetTimeRefined(
             fitTries = 0;  // Ignore low-precision prior values
         }
 
-        let priorCache = pushECAstroCacheWithSlopInPool(
-            cachePool, cachePool.refinementCache, tryDate, 0,
+        let priorCache = pushECAstroCacheInPool(
+            cachePool, cachePool.refinementCache, tryDate,
         );
 
         let jcse =
@@ -325,8 +325,8 @@ export function planetaryRiseSetTimeRefined(
                 //      if above horizon, want low transit to check lowest point
                 const wantHighTransit = newDate === ALWAYS_BELOW_HORIZON;
 
-                priorCache = pushECAstroCacheWithSlopInPool(
-                    cachePool, cachePool.refinementCache, tryDate, 0,
+                priorCache = pushECAstroCacheInPool(
+                    cachePool, cachePool.refinementCache, tryDate,
                 );
                 const transitT = planettransitTimeRefined(
                     tryDate, observerLatitude, observerLongitude,
@@ -337,8 +337,8 @@ export function planetaryRiseSetTimeRefined(
                 firstNan = newDate;
 
                 // Retry rise/set from the transit point
-                priorCache = pushECAstroCacheWithSlopInPool(
-                    cachePool, cachePool.refinementCache, transitT, 0,
+                priorCache = pushECAstroCacheInPool(
+                    cachePool, cachePool.refinementCache, transitT,
                 );
                 jcse = julianCenturiesSince2000EpochForDateInterval(transitT, cachePool.currentCache).julianCenturiesSince2000Epoch;
                 radecl = getPlanetRADeclDist(
@@ -361,8 +361,8 @@ export function planetaryRiseSetTimeRefined(
 
                         // Check -13 hrs
                         const priorPolar = transitT - 13 * 3600;
-                        priorCache = pushECAstroCacheWithSlopInPool(
-                            cachePool, cachePool.refinementCache, priorPolar, 0,
+                        priorCache = pushECAstroCacheInPool(
+                            cachePool, cachePool.refinementCache, priorPolar,
                         );
                         jcse = julianCenturiesSince2000EpochForDateInterval(priorPolar, cachePool.currentCache).julianCenturiesSince2000Epoch;
                         radecl = getPlanetRADeclDist(
@@ -393,8 +393,8 @@ export function planetaryRiseSetTimeRefined(
 
                             // Check +13 hrs
                             const nextPolar = tryDate + 13 * 3600;
-                            priorCache = pushECAstroCacheWithSlopInPool(
-                                cachePool, cachePool.refinementCache, nextPolar, 0,
+                            priorCache = pushECAstroCacheInPool(
+                                cachePool, cachePool.refinementCache, nextPolar,
                             );
                             jcse = julianCenturiesSince2000EpochForDateInterval(nextPolar, cachePool.currentCache).julianCenturiesSince2000Epoch;
                             radecl = getPlanetRADeclDist(
@@ -443,8 +443,8 @@ export function planetaryRiseSetTimeRefined(
                             let polarTries = numPolarTries;
                             while (polarTries-- > 0) {
                                 const split = (binaryLow + binaryHigh) / 2;
-                                priorCache = pushECAstroCacheWithSlopInPool(
-                                    cachePool, cachePool.refinementCache, split, 0,
+                                priorCache = pushECAstroCacheInPool(
+                                    cachePool, cachePool.refinementCache, split,
                                 );
                                 jcse = julianCenturiesSince2000EpochForDateInterval(split, cachePool.currentCache).julianCenturiesSince2000Epoch;
                                 radecl = getPlanetRADeclDist(
@@ -563,8 +563,8 @@ export function planettransitTimeRefined(
             fitTries = 0;
         }
 
-        const priorCache = pushECAstroCacheWithSlopInPool(
-            cachePool, cachePool.refinementCache, tryDate, 0,
+        const priorCache = pushECAstroCacheInPool(
+            cachePool, cachePool.refinementCache, tryDate,
         );
 
         const { julianCenturiesSince2000Epoch } =
