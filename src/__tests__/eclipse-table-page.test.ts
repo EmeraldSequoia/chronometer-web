@@ -8,7 +8,7 @@
  * The module's page bootstrap no-ops here: jsdom's document has no
  * #eclipse-data block.
  */
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, vi } from 'vitest';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -16,12 +16,15 @@ import {
     utcMsForTdMs,
     formatUtcDate,
     formatUtcTime,
+    formatViewerDateTime,
+    formatSiteTime,
     formatCoords,
     observatoryUrl,
     chronometerUrl,
     renderEclipseTable,
     renderMeta,
     hydrateGlobes,
+    armTodayRecenter,
     type EclipseData,
     type EclipseRecord,
 } from '../eclipse-table-page';
@@ -58,6 +61,43 @@ describe('time derivation', () => {
         // said 18:17:18 with a stale ΔT. Whole-minute display: 18:17.
         const row = data.eclipses.find((e) => formatUtcDate(utcMsForTdMs(e.tdMs)) === '2024 Apr 08')!;
         expect(formatUtcTime(utcMsForTdMs(row.tdMs))).toBe('18:17 UTC');
+    });
+});
+
+describe('viewer and site times', () => {
+    // The motivating misread: 2026 Aug 28 04:07 UTC is FRIDAY in UTC but
+    // Thursday evening throughout the Americas. Locale and zone pinned so the
+    // assertions hold on any machine; the page passes neither (browser
+    // defaults).
+    const utc = Date.UTC(2026, 7, 28, 4, 7);
+
+    test('viewer time carries weekday, date, and an explicit zone name', () => {
+        expect(formatViewerDateTime(utc, 'en-US', 'America/Los_Angeles')).toBe('Thu, Aug 27, 9:07 PM PDT');
+        expect(formatViewerDateTime(utc, 'en-US', 'America/Chicago')).toBe('Thu, Aug 27, 11:07 PM CDT');
+        // 24-hour locales follow their own conventions.
+        expect(formatViewerDateTime(utc, 'en-GB', 'Europe/Paris')).toBe('Fri 28 Aug, 06:07 CEST');
+    });
+
+    test('viewer year appears only when it differs from the UTC year', () => {
+        expect(formatViewerDateTime(utc, 'en-US', 'UTC')).toBe('Fri, Aug 28, 4:07 AM UTC');
+        // 2028 Jan 01 02:00 UTC is still 2027 in California.
+        const straddle = Date.UTC(2028, 0, 1, 2, 0);
+        expect(formatViewerDateTime(straddle, 'en-US', 'America/Los_Angeles')).toBe(
+            'Fri, Dec 31, 2027, 6:00 PM PST',
+        );
+    });
+
+    test('site time is a bare wall time on the UTC date, dated across the dateline', () => {
+        expect(formatSiteTime(utc, 'Etc/GMT+3', 'en-US')).toBe('1:07 AM');
+        // 21:00 UTC is already the NEXT calendar day in New Zealand — the
+        // month and day must come along or the time reads onto the UTC date.
+        expect(formatSiteTime(Date.UTC(2035, 8, 1, 21, 0), 'Pacific/Auckland', 'en-US')).toBe(
+            'Sep 2, 9:00 AM',
+        );
+    });
+
+    test('an invalid zone degrades to null, not a thrown render', () => {
+        expect(formatSiteTime(utc, 'Etc/GMT 5', 'en-US')).toBeNull();
     });
 });
 
@@ -156,6 +196,13 @@ describe('rendering', () => {
             expect(Number(globe.dataset.lon)).toBe(e.lon);
             expect(card.textContent).toContain(formatUtcDate(utcMs));
             expect(card.textContent).toContain(formatUtcTime(utcMs));
+            // Viewer-zone rendering (environment locale/zone here, so mirror
+            // the formatter; the exact format is pinned in 'viewer and site
+            // times' above). All-NBSP so the span wraps as one piece: no
+            // plain space may survive.
+            const localText = card.querySelector('.ek-local')!.textContent!;
+            expect(localText).toBe(`· ${formatViewerDateTime(utcMs)}`.replace(/ /g, ' '));
+            expect(localText).not.toContain(' ');
             expect(card.textContent).toContain(formatCoords(e.lat, e.lon));
             const links = [...card.querySelectorAll('a')].map((a) => a.getAttribute('href')!);
             expect(links.length).toBe(3);
@@ -163,6 +210,35 @@ describe('rendering', () => {
             expect(links[1]).toBe(chronometerUrl(e));
             expect(links[2]).toBe(e.url);
         });
+    });
+
+    test('coords lines name the jump target: sublunar point vs greatest point', () => {
+        const { container } = render(NOW_MS);
+        const sorted = [...data.eclipses].sort((a, b) => a.tdMs - b.tdMs);
+        [...container.querySelectorAll('.ek-card .ek-where')].forEach((where, i) => {
+            const e = sorted[i];
+            if (e.kind.endsWith('-lunar')) {
+                // NOT where you'd watch from — where the Moon is overhead.
+                expect(where.textContent).toContain('Moon overhead at');
+                expect(where.textContent).not.toContain('there');
+            } else {
+                // Solar cards add the path's own wall clock — the zone the
+                // deep-linked apps open in. NBSP before "there" (no widow).
+                expect(where.textContent).toContain('Greatest at');
+                expect(where.textContent).toContain(`· ${formatSiteTime(utcMsForTdMs(e.tdMs), e.tz)} there`);
+            }
+        });
+    });
+
+    test('a zone Intl rejects drops the site time, not the card', () => {
+        // The same '+'-decodes-to-space hazard the deep links guard against,
+        // hitting the display path: the card must degrade to bare labeled
+        // coords — no "null", no dangling separator, no thrown render.
+        const bad = { ...data.eclipses[0], kind: 'partial-solar', tz: 'Etc/GMT 5' } as EclipseRecord;
+        const { container } = render(NOW_MS, { meta: data.meta, eclipses: [bad] });
+        expect(container.querySelector('.ek-where')!.textContent).toBe(
+            `Greatest at ${formatCoords(bad.lat, bad.lon)}`,
+        );
     });
 
     test('central solar cards describe the path; others the visibility region', () => {
@@ -309,6 +385,50 @@ describe('globe thumbnails', () => {
         const first = calls.length;
         hydrateGlobes(container, renderer);   // e.g. after "Show all years"
         expect(calls.length).toBe(first);     // already-hydrated cards untouched
+    });
+});
+
+describe('today recenter wiring', () => {
+    // A fresh EventTarget per test stands in for window, so listeners can't
+    // leak between tests; the marker lives in the shared jsdom document.
+    const arm = () => {
+        const win = new EventTarget() as unknown as Pick<Window, 'addEventListener'> & EventTarget;
+        document.body.innerHTML = '<div id="today"></div>';
+        const scroll = vi.fn();
+        (document.getElementById('today') as HTMLElement).scrollIntoView = scroll;
+        armTodayRecenter(win, document);
+        return { win, scroll };
+    };
+
+    test('centers immediately, again at load, and on every resize', () => {
+        const { win, scroll } = arm();
+        expect(scroll).toHaveBeenCalledTimes(1);
+        win.dispatchEvent(new Event('load'));
+        expect(scroll).toHaveBeenCalledTimes(2);
+        // Post-load resizes (rotation, responsive-mode/device-emulator size
+        // switches) reflow every card height and strand the kept pixel
+        // offset far above the marker — each one must re-center.
+        win.dispatchEvent(new Event('resize'));
+        win.dispatchEvent(new Event('resize'));
+        expect(scroll).toHaveBeenCalledTimes(4);
+        expect(scroll).toHaveBeenLastCalledWith({ block: 'center' });
+    });
+
+    test('first user interaction ends all re-centering — the page is theirs', () => {
+        for (const interaction of ['wheel', 'pointerdown', 'keydown']) {
+            const { win, scroll } = arm();
+            win.dispatchEvent(new Event(interaction));
+            win.dispatchEvent(new Event('resize'));
+            win.dispatchEvent(new Event('load'));
+            expect(scroll, interaction).toHaveBeenCalledTimes(1);   // initial only
+        }
+    });
+
+    test('a missing marker is a no-op, not a throw', () => {
+        const win = new EventTarget() as unknown as Pick<Window, 'addEventListener'> & EventTarget;
+        document.body.innerHTML = '';
+        armTodayRecenter(win, document);
+        win.dispatchEvent(new Event('resize'));
     });
 });
 

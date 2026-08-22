@@ -81,6 +81,58 @@ function roundToMinute(ms: number): number {
     return Math.round(ms / 60000) * 60000;
 }
 
+/** Gregorian calendar year of the instant in `timeZone` (browser's if omitted). */
+function yearIn(d: Date, timeZone?: string): number {
+    return Number(new Intl.DateTimeFormat('en-US', { year: 'numeric', timeZone }).format(d));
+}
+
+/**
+ * "Thu, Aug 27, 9:07 PM PDT" — the same instant on the viewer's own clock.
+ * The zone is always named explicitly (never the word "local", which a
+ * solar-eclipse reader could take to mean the path's zone — the zone the app
+ * links actually open in). The weekday appears only on this side, where
+ * weekday reasoning is valid; the UTC lead stays weekday-less so nobody
+ * anchors to "Friday" for an eclipse that is Thursday evening where they
+ * live. The year is added only when it differs from the UTC year (a card
+ * near the Dec 31/Jan 1 boundary), so "Dec 31" can't read as the group's
+ * year. `locale`/`timeZone` are test seams; the page passes neither.
+ */
+export function formatViewerDateTime(utcMs: number, locale?: string, timeZone?: string): string {
+    const d = new Date(roundToMinute(utcMs));
+    const opts: Intl.DateTimeFormatOptions = {
+        weekday: 'short', month: 'short', day: 'numeric',
+        hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+    };
+    if (timeZone) opts.timeZone = timeZone;
+    if (yearIn(d, timeZone) !== d.getUTCFullYear()) opts.year = 'numeric';
+    return d.toLocaleString(locale, opts);
+}
+
+/**
+ * "5:20 PM" — the wall clock at the greatest-eclipse point, in the zone the
+ * deep links open the apps in (`e.tz`). When the site's calendar date
+ * differs from the UTC date (a path near the dateline), the site's month and
+ * day are included so the time can't be misread onto the card's UTC date.
+ * Null if Intl rejects the zone: the card then omits the site time rather
+ * than losing the whole render.
+ */
+export function formatSiteTime(utcMs: number, tz: string, locale?: string): string | null {
+    const d = new Date(roundToMinute(utcMs));
+    try {
+        const dateIn = (zone: string): string =>
+            new Intl.DateTimeFormat('en-US', {
+                year: 'numeric', month: 'numeric', day: 'numeric', timeZone: zone,
+            }).format(d);
+        const sameDate = dateIn(tz) === dateIn('UTC');
+        return d.toLocaleString(locale, {
+            ...(sameDate ? {} : { month: 'short', day: 'numeric' }),
+            hour: 'numeric', minute: '2-digit', timeZone: tz,
+        });
+    } catch {
+        return null;
+    }
+}
+
 export function formatCoords(lat: number, lon: number): string {
     const latStr = `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? 'N' : 'S'}`;
     const lonStr = `${Math.abs(lon).toFixed(2)}°${lon >= 0 ? 'E' : 'W'}`;
@@ -181,7 +233,13 @@ function buildCard(doc: Document, e: EclipseRecord, utcMs: number, past: boolean
     const time = doc.createElement('span');
     time.className = 'ek-time';
     time.textContent = formatUtcTime(utcMs);
-    when.append(date, ' ', time);
+    const local = doc.createElement('span');
+    local.className = 'ek-local';
+    // NBSP throughout: the viewer time is one unbreakable piece, so it sits
+    // on its own line unless it fits beside the UTC lead — never "9:07 / PM
+    // PDT" — and the leading dot travels with it.
+    local.textContent = `· ${formatViewerDateTime(utcMs)}`.replace(/ /g, ' ');
+    when.append(date, ' ', time, ' ', local);
 
     const desc = doc.createElement('div');
     desc.className = 'ek-desc';
@@ -189,9 +247,20 @@ function buildCard(doc: Document, e: EclipseRecord, utcMs: number, past: boolean
     // never markup.
     desc.textContent = `${kindLabel(e.kind)} — ${e.pathRegion ?? e.region}`;
 
+    // Name the point the links jump to, right where the confusion strikes:
+    // for a lunar eclipse it is NOT where you'd watch from, it's where the
+    // Moon is overhead. Solar cards add the site's own wall time — the number
+    // that matters on the path, and the clock the deep-linked apps show.
     const where = doc.createElement('div');
     where.className = 'ek-where';
-    where.textContent = formatCoords(e.lat, e.lon);
+    if (e.kind.endsWith('-lunar')) {
+        where.textContent = `Moon overhead at ${formatCoords(e.lat, e.lon)}`;
+    } else {
+        const siteTime = formatSiteTime(utcMs, e.tz);
+        // NBSP so "there" can't widow onto its own line on narrow screens.
+        where.textContent =
+            `Greatest at ${formatCoords(e.lat, e.lon)}` + (siteTime ? ` · ${siteTime} there` : '');
+    }
 
     main.append(when, desc, where);
     card.appendChild(main);
@@ -415,6 +484,29 @@ export function renderMeta(data: EclipseData, doc: Document, nowMs: number): voi
     }
 }
 
+/**
+ * Center the today marker, and keep it centered while the page is still
+ * untouched. The initial synchronous scroll can be silently undone with no
+ * further script running: the browser clamps it if the viewport resizes
+ * before full load (mobile browser chrome settling, embedded panes), and a
+ * resize AFTER load — rotation, split view, a responsive-mode or
+ * device-emulator size switch — reflows every card height while keeping the
+ * old pixel offset, stranding the view several hundred pixels above the
+ * marker. So re-center at load and on every resize, until the visitor first
+ * interacts: after a wheel, pointer, or key the page is theirs and is never
+ * yanked. Exported for tests; the page passes window/document.
+ */
+export function armTodayRecenter(win: Pick<Window, 'addEventListener'>, doc: Document): void {
+    const recenter = () => doc.getElementById('today')?.scrollIntoView({ block: 'center' });
+    recenter();
+    let userScrolled = false;
+    for (const evt of ['wheel', 'pointerdown', 'keydown']) {
+        win.addEventListener(evt, () => { userScrolled = true; }, { once: true, passive: true });
+    }
+    win.addEventListener('load', () => { if (!userScrolled) recenter(); }, { once: true });
+    win.addEventListener('resize', () => { if (!userScrolled) recenter(); });
+}
+
 // ---------------------------------------------------------------------------
 // Page bootstrap (no-op under tests: the block only exists on the real page)
 // ---------------------------------------------------------------------------
@@ -453,19 +545,7 @@ function initPage(): void {
     // fire; the cards have no images or webfonts, so layout is already stable.
     const nav = performance.getEntriesByType?.('navigation')?.[0] as PerformanceNavigationTiming | undefined;
     const isReload = nav?.type === 'reload' || nav?.type === 'back_forward';
-    if (!location.hash && !isReload) {
-        const recenter = () => document.getElementById('today')?.scrollIntoView({ block: 'center' });
-        recenter();
-        // If the viewport resizes between this scroll and full load (mobile
-        // browser chrome settling, embedded panes), the browser clamps the
-        // position we just set. Re-center once at load — but never yank the
-        // page away from a visitor who has already started scrolling.
-        let userScrolled = false;
-        for (const evt of ['wheel', 'pointerdown', 'keydown']) {
-            window.addEventListener(evt, () => { userScrolled = true; }, { once: true, passive: true });
-        }
-        window.addEventListener('load', () => { if (!userScrolled) recenter(); }, { once: true });
-    }
+    if (!location.hash && !isReload) armTodayRecenter(window, document);
 }
 
 if (typeof document !== 'undefined') initPage();
