@@ -374,6 +374,43 @@
   function roundToMinute(ms) {
     return Math.round(ms / 6e4) * 6e4;
   }
+  function yearIn(d, timeZone) {
+    return Number(new Intl.DateTimeFormat("en-US", { year: "numeric", timeZone }).format(d));
+  }
+  function formatViewerDateTime(utcMs, locale, timeZone) {
+    const d = new Date(roundToMinute(utcMs));
+    const opts = {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZoneName: "short"
+    };
+    if (timeZone) opts.timeZone = timeZone;
+    if (yearIn(d, timeZone) !== d.getUTCFullYear()) opts.year = "numeric";
+    return d.toLocaleString(locale, opts);
+  }
+  function formatSiteTime(utcMs, tz, locale) {
+    const d = new Date(roundToMinute(utcMs));
+    try {
+      const dateIn = (zone) => new Intl.DateTimeFormat("en-US", {
+        year: "numeric",
+        month: "numeric",
+        day: "numeric",
+        timeZone: zone
+      }).format(d);
+      const sameDate = dateIn(tz) === dateIn("UTC");
+      return d.toLocaleString(locale, {
+        ...sameDate ? {} : { month: "short", day: "numeric" },
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: tz
+      });
+    } catch {
+      return null;
+    }
+  }
   function formatCoords(lat, lon) {
     const latStr = `${Math.abs(lat).toFixed(2)}\xB0${lat >= 0 ? "N" : "S"}`;
     const lonStr = `${Math.abs(lon).toFixed(2)}\xB0${lon >= 0 ? "E" : "W"}`;
@@ -432,13 +469,21 @@
     const time = doc.createElement("span");
     time.className = "ek-time";
     time.textContent = formatUtcTime(utcMs);
-    when.append(date, " ", time);
+    const local = doc.createElement("span");
+    local.className = "ek-local";
+    local.textContent = `\xB7 ${formatViewerDateTime(utcMs)}`.replace(/ /g, "\xA0");
+    when.append(date, " ", time, " ", local);
     const desc = doc.createElement("div");
     desc.className = "ek-desc";
     desc.textContent = `${kindLabel(e.kind)} \u2014 ${e.pathRegion ?? e.region}`;
     const where = doc.createElement("div");
     where.className = "ek-where";
-    where.textContent = formatCoords(e.lat, e.lon);
+    if (e.kind.endsWith("-lunar")) {
+      where.textContent = `Moon overhead at ${formatCoords(e.lat, e.lon)}`;
+    } else {
+      const siteTime = formatSiteTime(utcMs, e.tz);
+      where.textContent = `Greatest at ${formatCoords(e.lat, e.lon)}` + (siteTime ? ` \xB7 ${siteTime}\xA0there` : "");
+    }
     main.append(when, desc, where);
     card.appendChild(main);
     const links = doc.createElement("div");
@@ -599,6 +644,22 @@
       }
     }
   }
+  function armTodayRecenter(win, doc) {
+    const recenter = () => doc.getElementById("today")?.scrollIntoView({ block: "center" });
+    recenter();
+    let userScrolled = false;
+    for (const evt of ["wheel", "pointerdown", "keydown"]) {
+      win.addEventListener(evt, () => {
+        userScrolled = true;
+      }, { once: true, passive: true });
+    }
+    win.addEventListener("load", () => {
+      if (!userScrolled) recenter();
+    }, { once: true });
+    win.addEventListener("resize", () => {
+      if (!userScrolled) recenter();
+    });
+  }
   function initPage() {
     const block = document.getElementById("eclipse-data");
     const container = document.getElementById("eclipse-list");
@@ -623,19 +684,7 @@
     });
     const nav = performance.getEntriesByType?.("navigation")?.[0];
     const isReload = nav?.type === "reload" || nav?.type === "back_forward";
-    if (!location.hash && !isReload) {
-      const recenter = () => document.getElementById("today")?.scrollIntoView({ block: "center" });
-      recenter();
-      let userScrolled = false;
-      for (const evt of ["wheel", "pointerdown", "keydown"]) {
-        window.addEventListener(evt, () => {
-          userScrolled = true;
-        }, { once: true, passive: true });
-      }
-      window.addEventListener("load", () => {
-        if (!userScrolled) recenter();
-      }, { once: true });
-    }
+    if (!location.hash && !isReload) armTodayRecenter(window, document);
   }
   if (typeof document !== "undefined") initPage();
 })();

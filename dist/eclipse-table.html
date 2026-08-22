@@ -6,8 +6,8 @@
     <!-- No <base target="_blank"> here (unlike help.html): it would hijack the
          internal #today / show-all anchors. External links opt in per-link. -->
     <title>Emerald Eclipses</title>
-    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
-    <link rel="icon" type="image/png" href="apple-touch-icon.png" />
+    <link rel="apple-touch-icon" sizes="400x400" href="thumb-eclipses.png" />
+    <link rel="icon" type="image/png" href="thumb-eclipses.png" />
     <style>
       *,
       *::before,
@@ -148,6 +148,13 @@
         font-variant-numeric: tabular-nums;
         margin-left: 6px;
       }
+      /* Unit-wrapping comes from the NBSPs in the span's text, not CSS —
+         see buildCard. */
+      .ek-local {
+        color: #99a;
+        font-variant-numeric: tabular-nums;
+        margin-left: 6px;
+      }
       .ek-desc {
         margin-top: 1px;
       }
@@ -258,7 +265,8 @@
       <p>
         Every solar and lunar eclipse from <span id="ek-span">2011 through 2041</span> &mdash;
         <span id="ek-counts">solar and lunar eclipses</span>, listed by the moment of
-        <b>maximum eclipse</b> in UTC. The location is where the eclipse is greatest: for a solar
+        <b>maximum eclipse</b> in UTC, with the same instant on your own clock beside it.
+        The location is where the eclipse is greatest: for a solar
         eclipse that point sees the deepest coverage of the Sun (for partial eclipses it always
         falls at sunrise or sunset along the day/night line); for a lunar eclipse it is where the
         Moon is straight overhead &mdash; the whole night side of Earth sees a lunar eclipse.
@@ -268,7 +276,8 @@
         The <b>Observatory</b> link opens that instant and place in the Observatory, with its
         eclipse simulator active; the <b>Chronometer</b> link opens the Basel, Venezia, and Selene
         watch faces there (Venezia showing the Sun for solar eclipses, the Moon for lunar ones).
-        Both arrive with time frozen at maximum &mdash; press play to watch the eclipse unfold.
+        Both arrive with time frozen at maximum, in the eclipse location&rsquo;s own time zone
+        &mdash; press play to watch the eclipse unfold.
         <b>Details</b> opens the eclipse&rsquo;s page on EclipseWise.
       </p>
       <p>
@@ -1728,7 +1737,7 @@
       </script>
       <script src="eclipse-table-page.js"></script>
 
-      <div class="ek-version">v2.0.99</div>
+      <div class="ek-version">v2.0.100</div>
     </div>
   </body>
 </html>
