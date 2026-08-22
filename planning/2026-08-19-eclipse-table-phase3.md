@@ -1,15 +1,14 @@
 # Eclipse Table phase 3 — wiring + "Predicting" → "Understanding"
 
-**Status**: IMPLEMENTED (2026-08-19) — both commits' content is in the
-working tree awaiting Steve: commit 1 (links/wiring + docs) is staged in
-the git index; commit 2 (section revision, five regenerated screenshots at
-2041 Apr 30 / 2040 Nov 18, seven retired PNGs) is unstaged on top. All §7
-verification passed (flavor voices, links, anchor, images, 8683 tests,
-tsc). Q1–Q5 resolved (Steve, 2026-08-19; §6). Child of
+**Status**: IMPLEMENTED and COMMITTED (2026-08-19) — commit 1
+(links/wiring + docs) landed as 5092340; commit 2 (section revision, five
+regenerated screenshots at 2041 Apr 30 / 2040 Nov 18, seven retired PNGs)
+as a784e70. All §7 verification passed (flavor voices, links, anchor,
+images, 8683 tests, tsc). Q1–Q5 resolved (Steve, 2026-08-19; §6). Child of
 [2026-08-16-eclipse-table-page.md](2026-08-16-eclipse-table-page.md) §11
 (re-scoped 2026-08-19: the standalone page is the primary, bookmarkable
-entry; the help system points at it and never hosts the content). Phases 1–2
-are implemented and in the working tree awaiting commit.
+entry; the help system points at it and never hosts the content). Phases
+1–2 landed earlier as 5708e4b + a5dcd02.
 **Created**: 2026-08-19
 **Baseline**: ed35394 + uncommitted phase 2
 

@@ -1,6 +1,7 @@
 # Hybrid eclipses: why the table's links show "total", never "annular"
 
-**Status**: approved, implemented this session.
+**Status**: IMPLEMENTED and COMMITTED (2026-08-19) — landed as c50fd6c
+(the table page's hybrid paragraph + the help section's).
 **Created**: 2026-08-19
 **Baseline**: 3ec3638 (eclipse table page complete; topocentric fix 2f756b8 and
 apparent-horizon fix f5c7a75 already in).

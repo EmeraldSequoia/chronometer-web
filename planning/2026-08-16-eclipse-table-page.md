@@ -1,11 +1,42 @@
 # Eclipse Table Page — plan
 
-**Status**: IMPLEMENTED (2026-08-19) — all phases complete. Phases 1–2
-committed as a5dcd02; phase 3 (help-system wiring + "Understanding
-Eclipses" revision + regenerated Basel screenshots, per
+**Status**: IMPLEMENTED and COMMITTED (2026-08-21) — every phase and
+follow-on is in git. Phases 1–2 landed as 5708e4b + a5dcd02; phase 3
+(help-system wiring + "Understanding Eclipses" revision + regenerated
+Basel screenshots, per
 [2026-08-19-eclipse-table-phase3.md](2026-08-19-eclipse-table-phase3.md))
-is in the working tree awaiting Steve's two commits. The Eclipse Table
-effort closes with this phase.
+as 5092340 then a784e70; the index-page card as 3ec3638
+([2026-08-19-eclipse-table-index-card.md](2026-08-19-eclipse-table-index-card.md));
+the hybrid-eclipse note as c50fd6c
+([2026-08-19-hybrid-eclipse-note.md](2026-08-19-hybrid-eclipse-note.md)).
+Rev 6 (2026-08-21) — Steve's misreadability round, committed as 5825002
+(dist built in 5a4d420, build 2.0.100); refinements to §6/§8, no new
+scope. (a) Every card now carries the maximum instant on the **reader's
+own clock** beside the UTC lead — "· Thu, Aug 27, 9:13 PM PDT": the zone
+is always named and the word "local" never appears (for a solar eclipse
+"local" is ambiguous, and the app links open in the *path's* zone, not
+the reader's), the weekday shows only on the reader's side so nobody
+anchors to the UTC weekday, the year only when it differs from the UTC
+year, and the span is NBSP-joined throughout so it wraps as one piece or
+not at all. (b) The coordinates line names the point the links jump to:
+"Moon overhead at …" on lunar rows — emphatically *not* where you would
+watch from — and "Greatest at …" on solar rows, with the site's own wall
+clock appended there ("· 5:46 PM there", carrying month + day when the
+site's calendar date differs from the UTC date, and omitted entirely if
+Intl rejects the zone, so one bad `tz` can't cost the whole render).
+(c) The today marker re-centers on viewport **resize** until the
+visitor's first interaction (§8) — rotation and responsive-mode/device-
+emulator size switches otherwise strand the view above it. The page's
+favicon and apple-touch-icon became the index card's `thumb-eclipses.png`,
+and the intro now says the app links open in the eclipse location's own
+time zone. Considered and rejected in discussion: a bold "UTC" prefix
+alone (flags the trap without resolving it) and a UTC/local table toggle
+(grouping must stay UTC, so local view would straddle year groups).
+Renderer suite 31 tests; full suite 8692 green.
+Docs (2026-08-22, uncommitted): the page's permanent reference moved out of
+`docs/help-system.md` into its own [docs/eclipse-table.md](../docs/eclipse-table.md)
+— §11 put it under the help system, which predated the re-scoping that made
+the page standalone; help-system.md now records only the links out to it.
 Previously: rev 5 (2026-08-19) — Steve's post-review tweak round applied:
 lunar icons re-hued to the simulator's umbra orange, total-solar icon
 restyled as the simulator's totality (black disc + asymmetric blue corona),
@@ -29,11 +60,12 @@ whole-degree coordinates miss narrow umbral paths), and EclipseWise links are
 **not** HEAD-verified (the site bot-blocks automation; the URL rule was
 validated against 96 of mreclipse's own published links instead). 115 eclipses
 generated for 2011–2041; 17 tests; full suite 8606 passing.
-**⚠ New for commits 2–3 (2026-08-18)**: the leap-second ΔT change landed and
-introduced a *stale-epoch* problem in this page's data and deep links — §9a
-below, and §14. Read it before building the cards.
+Historical (2026-08-18): the leap-second ΔT change introduced a *stale-epoch*
+problem in this page's data and deep links; resolved 2026-08-19 in ed35394,
+which regenerated the dataset on the `tdMs` schema — §9a and §14.
 **Created**: 2026-08-16
-**Last Updated**: 2026-08-18 (rev 3 + §9a, the ΔT epoch note)
+**Last Updated**: 2026-08-22 (rev 6 — misreadability round 5825002, §6/§8
+refreshed, §9a folded to past tense, docs split out)
 **Baseline**: e2c7b43
 
 ## 1. Goal
@@ -232,20 +264,29 @@ src/, called out here so it's a decision, not an accident.
 
 Same facts as rev 1's columns, recomposed:
 
-- **Line 1**: kind icon (`<use>`, with `title`/`aria-label`) · **bold date**
-  `2028 Jul 22` · `02:56 UTC` — date leads so a scanning eye falls down a date
-  column even in card form. **Round to the nearest minute**, don't truncate:
-  the data carries seconds, and rounding is what reproduces the times NASA
-  and everyone else publish (2017 Aug 21 is 18:25:32 → "18:26").
+- **Line 1**: kind icon (`<use>`, `aria-hidden` — line 2 names the kind, so
+  the icon is decorative) · **bold date** `2028 Jul 22` · `02:56 UTC` — date
+  leads so a scanning eye falls down a date column even in card form.
+  **Round to the nearest minute**, don't truncate: the data carries seconds,
+  and rounding is what reproduces the times NASA and everyone else publish
+  (2017 Aug 21 is 18:25:32 → "18:26"). **As shipped (rev 6)** the line ends
+  with the same instant on the reader's clock — `· Thu, Aug 27, 9:13 PM PDT`,
+  `formatViewerDateTime`, NBSP-joined so it wraps as one piece; the rationale
+  is in the Status block above.
 - **Line 2**: kind + region. For central solar eclipses prefer `pathRegion`
   (the path itself — "Mexico, central US, eastern Canada") and fall back to
   `region` for partials and lunar eclipses ("Americas, Europe, Africa");
   this is what gets closest to Steve's "total solar eclipse crossing
   Australia". Region strings are third-party text — render via `textContent`,
   never innerHTML.
-- **Line 3** (wraps up beside line 2 on wide screens): `15.6°S 126.7°E`
-  (for lunar rows the zenith point — the intro explains the whole night side
-  sees a lunar eclipse) · links: **Observatory · Chronometer · Details**
+- **Line 3** (wraps up beside line 2 on wide screens): the coordinates,
+  `formatCoords` to two decimals. **As shipped (rev 6)** they are labeled by
+  what the point means, because a bare pair invites the wrong reading:
+  `Moon overhead at 9.00°S 63.00°W` on lunar rows (the zenith point — the
+  whole night side sees the eclipse) and `Greatest at 65.22°N 25.24°W ·
+  5:46 PM there` on solar rows, where the trailing wall clock is the site's
+  own and `formatSiteTime` drops it if `Intl` rejects the zone ·
+  links: **Observatory · Chronometer · Details**
   (Details = EclipseWise, marked with the house `img.extlink` icon —
   `help/images/extlink.png` is already copied to dist).
 
@@ -323,6 +364,30 @@ All computed at render time by the page module (Date + DOM only):
   the latter because **Safari's find-in-page does not auto-expand collapsed
   `<details>`** (Chrome/Firefox do), so Cmd-F "2034" needs an expand-all
   escape hatch on Steve's primary platform.
+- **Re-center on resize** (rev 6, `armTodayRecenter`): the scroll is
+  re-applied at `load` and on every `resize`, until the visitor's first
+  wheel / pointerdown / keydown — after that the page is theirs and is
+  never yanked. A post-load viewport change (rotation, split view, Safari
+  responsive mode, Chrome's device emulator) reflows every card into the
+  ≤480 px layout while the browser keeps the old pixel offset; all that
+  growth is above the marker, so without this the view lands hundreds of
+  pixels high, right around the first open row.
+- **Reload stays un-re-centered**, and what that actually produces was
+  measured 2026-08-21 (Steve's field report + a Chromium repro). The
+  browser restores a raw pixel offset into a document the module has
+  meanwhile rebuilt with the *default* open set, so any position inside a
+  year group the visitor opened no longer exists, and the restore is
+  clamped to the new, shorter document. Desktop's collapsed document is
+  short enough (~3.1 k px) that the clamp lands within a viewport of the
+  marker — refresh *looks* like "back to today", but the marker sits near
+  an edge rather than centered, which is the tell that our code did not
+  run. Mobile's document is 2–3× taller and the same clamp lands visibly
+  wrong (first open row). Decision (Steve, 2026-08-21): **live with it** —
+  restore-my-position and show-me-today are competing intents on refresh
+  and neither is clearly right. If it ever needs fixing, the proportionate
+  fix is a width stamp (store `innerWidth` beside the scroll position;
+  on reload re-center only when the stored width disagrees with the
+  current one), not wholesale manual restoration.
 - Past cards get a dimmed class (opacity ≈ 0.75).
 - Edge cases: **all rows past** → marker + a visible "this table has run
   out — regenerate (see the source note)" line rendered *outside/after* the
@@ -390,9 +455,15 @@ a single rAF, so the canvas stayed black — the known frozen-rAF pane
 limitation. Visual confirmation moves to commit 2's headless pass (in a
 session where rAF runs) or Steve's on-device flow.
 
-### 9a. Deep-link epochs are stale for post-2027 rows (2026-08-18)
+### 9a. Deep-link epochs are stale for post-2027 rows (2026-08-18) — RESOLVED
 
-**Read this before building the cards.** `utcMs` in eclipse-data.json is
+**Resolved 2026-08-19 in ed35394**: the data was regenerated on the `tdMs`
+schema described at the end of this section, `utcMs` is gone from every
+record, and the `EPOCH_AMBIGUOUS` test exemption was deleted rather than
+merely planned. The rest of the section is kept as the reasoning that
+produced that schema; read it in the past tense.
+
+`utcMs` in eclipse-data.json was
 NASA's UT of greatest eclipse, which they formed as `TD − ΔT` using the
 Espenak polynomial. As of
 [planning/2026-08-18-leap-second-deltat.md](2026-08-18-leap-second-deltat.md)
@@ -637,11 +708,10 @@ display/list-item (§7), `</script` assertion (§3). Remaining:
   see it once on device before blessing the UX.
 - Test builds auto-bump version.txt; use the fresh-port dist server +
   build-stamp check for verification runs.
-- **Post-2027 deep links point a few seconds off maximum** since the
-  leap-second ΔT change (2026-08-18) — harmless for all but the narrowest
-  annulars, one of which (2032 May 09) already mislabels. Cause, blast
-  radius and the fix are in §9a; the test exemption guarding it is
-  `EPOCH_AMBIGUOUS` in `src/__tests__/eclipse-data.test.ts`.
+- ~~**Post-2027 deep links point a few seconds off maximum**~~ — fixed
+  2026-08-19 in ed35394: storing `tdMs` and deriving UT at view time made
+  every row land on *our* maximum, and the 2032 May 09 `EPOCH_AMBIGUOUS`
+  test exemption was deleted rather than kept. Cause and reasoning: §9a.
 
 ## 15. Decisions (resolved 2026-08-16)
 

@@ -5,7 +5,7 @@ The help system has two layers:
 1. **General Help Topics** — Six topic sections in `src/help.html` (Complications, Accuracy, Eclipses, Astro Stepping, Physics, Keyboard Shortcuts) available from every page via an embedded iframe.
 2. **Per-Face Help** — Face-specific help content injected into each page at build time.
 
-Alongside (not inside) those layers sits the **Eclipse Table** (`eclipse-table.html`), a standalone, bookmarkable page listing every eclipse from 15 years back to 15 years ahead with deep links into both apps. The help system points at it and never hosts the content — see [Eclipse Table — Standalone Page](#eclipse-table--standalone-page).
+Alongside (not inside) those layers sits the **Eclipse Table** (`eclipse-table.html`), a standalone, bookmarkable page listing every eclipse from 15 years back to 15 years ahead with deep links into both apps. It is not part of the help system: the help pages link to it and never host its content. It has its own doc — [Eclipse Table](eclipse-table.md).
 
 Both are accessed through the ℹ info popup. When the user clicks the ℹ button, the popup shows:
 - Generic project info (title, GitHub links)
@@ -92,7 +92,7 @@ The general help content in `src/help.html` was ported from four sources:
 
 | Section | Source | Adaptations |
 |---------|--------|-------------|
-| Complications | iOS XML `<!-- COMPLICATIONS -->` blocks via `.chronometer-ref/scripts/genHelp.pl` logic | Built table for 13 web faces; mapped iOS front/back sides to web face names |
+| Complications | iOS XML `<!-- COMPLICATIONS -->` blocks via `.chronometer-ref/scripts/genHelp.pl` logic | Built the table (13 web faces then, all 16 today); mapped iOS front/back sides to web face names |
 | Astronomical Accuracy | `.chronometer-ref/Help/AstroAccuracy.html` | Removed iPhone-specific language; updated "Geneva" → "Basel" where appropriate |
 | Understanding Eclipses | `.chronometer-ref/Help/Geneva/PredictingEclipses.html` | Changed all "Geneva" → "Basel"; replaced crown/pusher language with time controller; retitled and re-centered on the Eclipse Table in 2026-08 (worked examples now reference table rows: 2041 Apr 30 solar, 2040 Nov 18 lunar) |
 | The Physics | `https://emeraldsequoia.com/h/mmm.html` | Inlined directly; no external dependency |
@@ -131,18 +131,9 @@ This auto-resize approach avoids a fixed iframe height, so the General Help Topi
 
 **Eclipse indicator link**: The "Eclipse indicator" row in the complications table links to `#eclipses`, which opens and scrolls to the eclipses section.
 
-### Eclipse Table — Standalone Page
+### Links Out to the Eclipse Table
 
-`eclipse-table.html` is the primary, bookmarkable entry for "when is the next eclipse?": every solar and lunar eclipse from 15 years back to 15 years ahead (currently 2011–2041), each with deep links that open the moment and place of maximum eclipse in the Observatory and the Chronometer (Basel + Venezia + Selene via `selected.html`), plus a per-eclipse EclipseWise "Details" link. The renderer and URL builders live in `src/eclipse-table-page.ts` (tested by `src/__tests__/eclipse-table-page.test.ts`); the page is the **single generator** of those deep links — no other page hardcodes them, and prose elsewhere names table rows instead.
-
-The help system links **to** the page from six places, and never embeds its content:
-
-- index.html has an "Eclipse Table" face-card (third in the grid, `thumb-eclipses.png` — a center-crop of the Observatory simulator's totality photo, `src/shared/assets/totalEclipse.png`)
-- help.html's `#eclipses` section opens with a pointer paragraph (works in embed mode through `<base target="_blank">`)
-- help.html's standalone `.help-nav` has an "Eclipse table" entry (nav is removed in embed mode)
-- the Basel, Observatory, Selene, and Chandra help fragments each carry a one-sentence link with explicit `target="_blank"` — the face-page popover retargets only `http…` links (help-popover.ts), so a bare relative link would navigate the running app away
-
-Build flow (build.sh): `src/eclipse-table-page.ts` is bundled by esbuild to `dist/eclipse-table-page.js`, and `src/eclipse-table.html` is emitted through `inject_partials`, which inlines the committed `src/help/eclipse-data.json` verbatim into the page's `<script type="application/json" id="eclipse-data">` block via the `{{ECLIPSE_DATA}}` token (a build guard refuses data containing `</script` or `<!--`). The dataset stores TT instants; UTC labels and deep-link times are derived at view time through the engine's ΔT, so they self-correct as the leap-second table evolves. To extend the coverage window, re-run `scripts/scrape-eclipses.mjs` (regeneration procedure in the script header) and rebuild.
+The help system points at the standalone [Eclipse Table](eclipse-table.md) and never embeds its content. `help.html` links to it from the standalone `.help-nav` (removed in embed mode) and from four places in the "Understanding Eclipses" worked examples, which reach it in embed mode through `<base target="_blank">`. The Basel, Observatory, Selene, and Chandra help fragments each carry a one-sentence link with explicit `target="_blank"` — the face-page popover retargets only `http…` links (`help-popover.ts`), so a bare relative link would navigate the running app away. The index page's face-card is the remaining entry point; the full list lives in [Eclipse Table — Entry points](eclipse-table.md#entry-points).
 
 ### Per-Face Help — Build-Time Injection
 
@@ -204,11 +195,12 @@ src/help/images/
 ├── chandra/                   # Chandra + Selene images
 ├── mauna_kea/                 # Mauna Kea images
 ├── geneva/                    # Geneva + Basel images
-├── basel/                     # Eclipse prediction images (8 files)
+├── basel/                     # Eclipse prediction images (6 files)
 ├── babylon/                   # Babylon images
+├── haleakala/                 # Haleakalā images
+├── observatory/               # Observatory images
 ├── terra/                     # Terra + Gaia images + SlotRules images
-├── miami/                     # Miami images
-└── firenze/                   # (empty — Firenze has no inline images)
+└── miami/                     # Miami images
 ```
 
 During build, these are copied to `dist/help/images/`.
@@ -218,11 +210,8 @@ During build, these are copied to `dist/help/images/`.
 | File | Purpose |
 |------|---------|
 | `src/help.html` | General help page (Complications, Accuracy, Eclipses, Astro Stepping, Physics, Keyboard Shortcuts) |
-| `src/eclipse-table.html` | Eclipse Table page shell (markup, styles, kind icons, `{{ECLIPSE_DATA}}` block) |
-| `src/eclipse-table-page.ts` | Eclipse Table renderer + deep-link builders (tested by `src/__tests__/eclipse-table-page.test.ts`) |
-| `src/help/eclipse-data.json` | Committed eclipse dataset (TT instants), regenerated by `scripts/scrape-eclipses.mjs` |
-| `src/help/<face>.html` | Per-face help HTML fragments (13 files, one per face) |
-| `src/help/images/` | Inline help images (55+ files across 9 subdirectories) |
+| `src/help/<face>.html` | Per-face help HTML fragments (18 files — one per face for all 16 faces, plus `inspector.html` and `observatory.html` for the two non-face apps) |
+| `src/help/images/` | Inline help images (57 files across 9 subdirectories) |
 | `src/face-template.html` | Contains Other Apps + General Help iframe, `#help-content` div, `<template>`, and help CSS |
 | `src/index.html` | Contains Other Apps + General Help iframe (no per-face help) |
 | `src/partials/other-apps.html` | "Other Apps" popup section (all three entries; current app removed at runtime) |
@@ -243,5 +232,6 @@ When adding a new face, also:
 
 ## Related Docs
 
+- [Eclipse Table](eclipse-table.md) — The standalone page the help links out to
 - [Face Porting Guide](face-porting-guide.md) — Step-by-step porting procedure (includes help step)
 - [Build System](build-system.md) — How the build injects help content

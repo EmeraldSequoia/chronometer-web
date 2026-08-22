@@ -1,7 +1,7 @@
 # Eclipse Table card on the index page — quick plan
 
-**Status**: IMPLEMENTED (2026-08-19) — in the working tree awaiting
-Steve's commit. Card verified live third in the grid (desktop + 375 px,
+**Status**: IMPLEMENTED and COMMITTED (2026-08-19) — landed as 3ec3638.
+Card verified live third in the grid (desktop + 375 px,
 no overflow); thumb centered on the Moon disc itself (disc center
 (156,160), measured by edge-walking the dark disc; crop r=69 = the
 maximum circle inside the photo's exposed region) so the disc lands in
@@ -10,6 +10,8 @@ asymmetric, that's the photograph; suite 8683 green. Follow-on to
 [2026-08-19-eclipse-table-phase3.md](2026-08-19-eclipse-table-phase3.md);
 supersedes the parent plan's §4 "explicitly not: … no links from
 privacy/support/index cards" for the index card only (Steve asked for it).
+Since 5825002 this same `thumb-eclipses.png` is also the Eclipse Table
+page's favicon and apple-touch-icon (parent plan rev 6).
 **Created**: 2026-08-19
 
 ## What
