@@ -165,6 +165,16 @@ with its own visible-behavior surface. Bundling it into a cache-semantics change
 would muddy both the goldens and the perf gate. Accepting +1.8 ms/s (~0.2% of one
 core, one face, 1× only) until then.
 
+> **Follow-up LANDED (2026-08-23).** The alphas are now ObsValue-backed exactly as
+> sketched: `OBS_ALPHA_SENTINELS` in hand-values.ts maps the two indicator-valid
+> expressions to `EC_UPDATE_NEXT_SUNRISE_OR_MIDNIGHT` / `…SUNSET_OR_MIDNIGHT`
+> (discrete, `lightweight`-guarded); the renderer's `drawImageHand` reads
+> `part._obsAlpha.currentValue` with the old `evalAttr` path as fallback.
+> Verified: full suite green with no golden diffs, plus
+> [verify-mk-alpha-obsvalue.ts](verify-mk-alpha-obsvalue.ts) (78.2°N polar-onset
+> drive: both hands hide at the local midnight starting the first no-sun day,
+> 2026-10-27, and the alpha schedule stays finite through onset).
+
 ## 6. DECIDED — the change list
 
 1. **Exact re-keying**: drop `ASTRO_SLOP_RAW` and the `slop` parameter entirely;
@@ -209,6 +219,7 @@ core, one face, 1× only) until then.
 
 ## 8. Follow-ups (not this change)
 
-- Mauna Kea alpha ObsValue with `…OrMidnight` sentinel (§5).
+- ~~Mauna Kea alpha ObsValue with `…OrMidnight` sentinel (§5)~~ — DONE 2026-08-23
+  (see the landed note in §5).
 - docs/astronomy.md still documents the deleted `PlanetRiseSetCache` Map
   (~lines 250–267) — stale independently of this change.

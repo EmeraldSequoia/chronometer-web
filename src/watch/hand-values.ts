@@ -35,6 +35,10 @@ import { Updater } from '../shared/updater.js';
 import {
     type ObsValue, createObsValue,
 } from '../shared/obs-value.js';
+import {
+    EC_UPDATE_NEXT_SUNRISE_OR_MIDNIGHT,
+    EC_UPDATE_NEXT_SUNSET_OR_MIDNIGHT,
+} from '../shared/animation.js';
 
 /** Base angular animation speed (rad/s) — must match kECGLAngleAnimationSpeed. */
 const ANGLE_BASE_SPEED = 2.0;
@@ -60,15 +64,35 @@ const LINEAR_BASE_SPEED = 60.0;
 const ON_BEAT = true;
 
 /**
+ * Alpha expressions backed by an ObsValue instead of the renderer's per-render
+ * `evalAttr` (Mauna Kea's dawn/dusk hands — the only render-time-evaluated
+ * astronomy in the faces; per-render eval re-keys the exact-keyed astro pool
+ * ~bps×/s at 1×; planning/2026-08-22-astro-slop-zero.md §5).
+ *
+ * Each maps to its `…OrMidnight` update sentinel, NOT the part's own
+ * `updateAtNextSunset`/`Sunrise` sentinel: "today's sunrise/sunset exists" can
+ * only flip at local midnight, and the `…OrMidnight` sentinel still fires at
+ * every midnight when the referenced event stops existing (polar onset) —
+ * the part's own sentinel freezes at Infinity there, which would leave the
+ * stale hand visible for months. `discrete`: visibility is 0/1, interpolation
+ * would show nonexistent in-between opacities.
+ */
+const OBS_ALPHA_SENTINELS = new Map<string, number>([
+    ['sunriseIndicatorValid()', EC_UPDATE_NEXT_SUNRISE_OR_MIDNIGHT],
+    ['sunsetIndicatorValid()', EC_UPDATE_NEXT_SUNSET_OR_MIDNIGHT],
+]);
+
+/**
  * Build the per-face `Updater` and wire ObsValue handles onto every dynamic part.
  * Mirrors the part selection of the legacy `collectDynamicParts`.
  *
  * `lightweight` (default false) skips the per-wedge day/night-ring ObsValues
- * (keeping only the ring's masterOffset). The headless regression bench uses it:
+ * (keeping only the ring's masterOffset) and the indicator-valid alpha values
+ * (see {@link OBS_ALPHA_SENTINELS}). The headless regression bench uses it:
  * the bench only snapshots hand/dial/cover/masterOffset values, so building the
  * (24–75 × 2) wedge ObsValues per ring would be pure cost with no coverage. Wedge
- * values are independent of the hands, so omitting them never changes a hand
- * snapshot. The engine always builds the full set (lightweight = false).
+ * and alpha values are independent of the hands, so omitting them never changes
+ * a hand snapshot. The engine always builds the full set (lightweight = false).
  */
 export function buildHandValues(
     faceName: string,
@@ -92,7 +116,7 @@ function collectValues(
 ): void {
     for (const part of parts) {
         if (part.type === 'QHand' || part.type === 'Wheel' || part.type === 'QWedge') {
-            buildHandPart(part, faceName, env, perfNow, updater);
+            buildHandPart(part, faceName, env, perfNow, updater, lightweight);
         } else if (part.type === 'QDial' && part.animSpeed) {
             // QDials with animSpeed participate in the animation system
             // (e.g. Vienna 24-hour number dial with angle='dialFlip').
@@ -144,6 +168,7 @@ function addLinearValue(
 function buildHandPart(
     part: QHandPart | WheelPart | QWedgePart,
     faceName: string, env: Environment, perfNow: number, updater: Updater,
+    lightweight: boolean,
 ): void {
     const key = (prop: string) => `${faceName}.${part.name}.${prop}`;
     const animS = xmlAnimSpeed(part, env);
@@ -170,6 +195,20 @@ function buildHandPart(
         if (part.yMotion) {
             part._obsYMotion = addLinearValue(
                 updater, key('yMotion'), part.yMotion, env, perfNow, interval, LINEAR_BASE_SPEED * animS);
+        }
+
+        // alpha (Mauna Kea dawn/dusk indicator validity) — see OBS_ALPHA_SENTINELS.
+        // Skipped in lightweight mode so the bench's value set is unchanged.
+        if (part.alpha && !lightweight) {
+            const sentinel = OBS_ALPHA_SENTINELS.get(part.alpha.trim());
+            if (sentinel !== undefined) {
+                part._obsAlpha = updater.add(createObsValue({
+                    name: key('alpha'), expr: part.alpha,
+                    updateInterval: sentinel,
+                    linear: true,
+                    discrete: true,
+                }, env, perfNow));
+            }
         }
     }
 }

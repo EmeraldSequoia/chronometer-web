@@ -82,7 +82,7 @@ ObsValue per animated quantity, storing a direct handle on the part:
 
 | Part | ObsValue handles |
 |------|-------------------|
-| QHand / Wheel / QWedge / QDial | `_obsAngle`, plus `_obsOffsetAngle` (orbit hands), `_obsXMotion` / `_obsYMotion` (calendar wires) |
+| QHand / Wheel / QWedge / QDial | `_obsAngle`, plus `_obsOffsetAngle` (orbit hands), `_obsXMotion` / `_obsYMotion` (calendar wires), `_obsAlpha` (Mauna Kea's indicator-valid alphas: discrete, on the `…OrMidnight` sentinels so the hand still hides at local midnight when the referenced rise/set event stops existing at polar onset — see `OBS_ALPHA_SENTINELS`) |
 | QDayNightRing | `_obsMasterOffset` + `_obsWedgeAngles[]` (+ `_obsWedgeSlides[]` for wadokei) |
 | CalendarRowCover | `_obsXMotion` (the cover slide) |
 | Terminator leaf | `_obsAngle` per leaf + one shared `_obsRotation` |

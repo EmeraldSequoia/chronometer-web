@@ -89,6 +89,7 @@ export interface PartBase {
     _obsOffsetAngle?: import('../shared/obs-value.js').ObsValue;
     _obsXMotion?: import('../shared/obs-value.js').ObsValue;
     _obsYMotion?: import('../shared/obs-value.js').ObsValue;
+    _obsAlpha?: import('../shared/obs-value.js').ObsValue;
 }
 
 // ============================================================================

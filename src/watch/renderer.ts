@@ -2611,8 +2611,13 @@ function drawImageHand(
     const loaded = images.get(part.src);
     if (!loaded) return;
 
-    // Support alpha expression for visibility control (e.g. dawn/dusk polar hiding)
-    const alpha = part.alpha !== undefined ? evalAttr(part.alpha, env) : 1;
+    // Alpha expression for visibility control (e.g. dawn/dusk polar hiding).
+    // Indicator-valid alphas are ObsValue-backed so their astronomy isn't
+    // re-evaluated per render (see OBS_ALPHA_SENTINELS in hand-values.ts);
+    // other alpha expressions still eval here.
+    const alpha = part._obsAlpha
+        ? part._obsAlpha.currentValue
+        : (part.alpha !== undefined ? evalAttr(part.alpha, env) : 1);
     if (alpha <= 0) return;  // Fully transparent — skip rendering
 
     const x = evalAttr(part.x, env);
