@@ -1886,6 +1886,65 @@ async function main() {
         rafId = requestAnimationFrame(frame);
     }
 
+    /**
+     * Rebuild every enabled face for a change in the inputs its Environment
+     * captures: body selection, observer location, Terra/Gaia slot assignments,
+     * a DST or system-timezone shift. The watch and its parts are kept, so hand
+     * states and terminator leaves survive and animate to their new targets
+     * instead of snapping.
+     *
+     * Frozen: an env rebuild plus a static-cache build is an eval storm (init
+     * blocks, leaf angles, ObsValue construction), and in live mode an unfrozen
+     * clock would advance between them — splitting one rebuild's astronomy
+     * across cache eras under exact-match re-keying (see buildCache). The
+     * freeze lives in here so no caller can copy the loop and forget it.
+     * Callers already inside a frozen frame may still use this: withFrozenFrame
+     * is re-entrant and keeps the outer instant.
+     *
+     * @param opts.beforeEnvRebuild Per-face hook run before the new env is
+     *        created, for callers that must first update what it reads (e.g.
+     *        re-derived Terra slot overrides on a location change).
+     * @param opts.preserveKnockout Carry the Terra city-name knockout cache
+     *        onto the new env. It is keyed by slot assignments, not by time, so
+     *        a rebuild that cannot change the slots (DST) keeps it; one that
+     *        might must let it rebuild lazily on the next draw.
+     * @param opts.restartScheduler Kick the render loop when done (default
+     *        true). Pass false when the caller has more work to do first and
+     *        kicks it itself.
+     */
+    function rebuildFacesForEnvChange(opts: {
+        beforeEnvRebuild?: (face: FaceInstance) => void;
+        preserveKnockout?: boolean;
+        restartScheduler?: boolean;
+    } = {}): void {
+        timeController.withFrozenFrame(() => {
+            for (const face of faces) {
+                if (!face.enabled) continue;
+                opts.beforeEnvRebuild?.(face);
+                const oldKnockout = opts.preserveKnockout ? (face.env as any)._terraCityKnockout : undefined;
+                // Fresh environment — same watch/parts.
+                face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
+                restoreKyotoState(face);
+                if (oldKnockout) (face.env as any)._terraCityKnockout = oldKnockout;
+                // Re-aim the existing terminator leaves rather than recreating
+                // them: their ObsValues carry the state the Updater interpolates.
+                if (face.terminatorLeaves.length > 0) {
+                    updateLeafAngles(face.terminatorLeaves, face.env);
+                }
+                // Rebuild static caches (background, marks, windows, day/night rings).
+                const { canvas, watch, env, images, scale } = face;
+                buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
+                // Reset hand schedules so they re-evaluate immediately and
+                // animate to the new targets.
+                face.updater.reset();
+            }
+        });
+        if (opts.restartScheduler !== false) {
+            stopScheduler();
+            startScheduler();
+        }
+    }
+
     // =========================================================================
     // DST transition detection
     // =========================================================================
@@ -1916,19 +1975,9 @@ async function main() {
         // be in a different DST state than the real date.
         tzDeltaMs = computeTzDeltaMs(locationTimezone, rawGetNow());
 
-        for (const face of faces) {
-            if (!face.enabled) continue;
-            const oldKnockout = (face.env as any)._terraCityKnockout;
-            face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
-                    restoreKyotoState(face);
-            if (oldKnockout) (face.env as any)._terraCityKnockout = oldKnockout;
-            if (face.terminatorLeaves.length > 0) {
-                updateLeafAngles(face.terminatorLeaves, face.env);
-            }
-            const { canvas, watch, env, images, scale } = face;
-            buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-            face.updater.reset();
-        }
+        // Slot assignments can't change on a clock shift, so the Terra
+        // city-name knockout carries over instead of being rebuilt.
+        rebuildFacesForEnvChange({ preserveKnockout: true, restartScheduler: false });
 
         timeUI?.updateTimezoneDisplay();
         stopScheduler();
@@ -2284,41 +2333,33 @@ async function main() {
     function rebuildAllForLocationFrozen(newLat: number, newLon: number) {
         lat = newLat;
         lon = newLon;
-        for (const face of faces) {
-            if (!face.enabled) continue;
-            // Re-run slot overrides for Terra (worldTimeRing) faces — the global
-            // location slot may change when the user changes their location.
-            if (face.watch.worldTimeRing) {
-                const slotResult = buildSlotOverrides(face.watch);
-                face.terraSlotOverrides = slotResult?.overrides;
-                face.globalLocationSlot = slotResult?.globalLocationSlot;
-            }
-            // Update Gaia slot 1 to match new observer location
-            if (face.watch.worldTimeSubdials && face.terraSlotOverrides) {
-                let obsName = locationSource;
-                if (!obsName && isCityDataLoaded() && (newLat !== 0 || newLon !== 0)) {
-                    const closest = findClosestCity(newLat, newLon);
-                    if (closest) obsName = closest.shortLabel;
+        // The new position is already in lat/lon, which the rebuild reads; the
+        // per-face hook only has to refresh the slot data it reads alongside them.
+        rebuildFacesForEnvChange({
+            restartScheduler: false,
+            beforeEnvRebuild: (face) => {
+                // Re-run slot overrides for Terra (worldTimeRing) faces — the global
+                // location slot may change when the user changes their location.
+                if (face.watch.worldTimeRing) {
+                    const slotResult = buildSlotOverrides(face.watch);
+                    face.terraSlotOverrides = slotResult?.overrides;
+                    face.globalLocationSlot = slotResult?.globalLocationSlot;
                 }
-                face.terraSlotOverrides[1] = {
-                    cityName: obsName || 'Observer',
-                    olsonId: locationTimezone || '',
-                    lat: newLat, lon: newLon,
-                };
-            }
-            // Fresh environment with new lat/lon/tz — same watch/parts
-            face.env = createWatchEnvironment(face.watch, newLat, newLon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
-            restoreKyotoState(face);
-            // Update terminator leaves (preserve for animation interpolation)
-            if (face.terminatorLeaves.length > 0) {
-                updateLeafAngles(face.terminatorLeaves, face.env);
-            }
-            // Rebuild static caches (day/night rings, sunrise marks, etc.)
-            const { canvas, watch, env, images, scale } = face;
-            buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-            // Reset hand schedules so they re-evaluate immediately and animate to new targets
-            face.updater.reset();
-        }
+                // Update Gaia slot 1 to match new observer location
+                if (face.watch.worldTimeSubdials && face.terraSlotOverrides) {
+                    let obsName = locationSource;
+                    if (!obsName && isCityDataLoaded() && (newLat !== 0 || newLon !== 0)) {
+                        const closest = findClosestCity(newLat, newLon);
+                        if (closest) obsName = closest.shortLabel;
+                    }
+                    face.terraSlotOverrides[1] = {
+                        cityName: obsName || 'Observer',
+                        olsonId: locationTimezone || '',
+                        lat: newLat, lon: newLon,
+                    };
+                }
+            },
+        });
         updateLocationDisplay();
         timeUI?.updateTimezoneDisplay();
         // The location panel may have changed height (e.g. city name now shown).
@@ -3161,29 +3202,9 @@ async function main() {
                 // Keep navigation links in sync (carries the param in URL-fallback mode).
                 updateNavigationLinks();
 
-                // Rebuild face with new body — preserve hand states for smooth animation.
-                // Frozen: env rebuild + static-cache eval storm — see buildCache.
-                timeController.withFrozenFrame(() => {
-                    for (const face of faces) {
-                        if (!face.enabled) continue;
-                        // Rebuild environment (picks up new body URL param)
-                        face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
-                        restoreKyotoState(face);
-                        // Update terminator leaf angles for the new planet's phase
-                        // (keep existing leaves so the animation system can interpolate)
-                        if (face.terminatorLeaves.length > 0) {
-                            updateLeafAngles(face.terminatorLeaves, face.env);
-                        }
-                        // Rebuild static caches (background, marks, windows)
-                        const { canvas, watch, env, images, scale } = face;
-                        buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-                        // Force all hands to re-evaluate immediately (reset update timers)
-                        face.updater.reset();
-                    }
-                });
-                // Kick the scheduler immediately so animations start without delay
-                stopScheduler();
-                startScheduler();
+                // Rebuild every face for the new body (the fresh envs pick it up
+                // from the URL param), preserving hand states for smooth animation.
+                rebuildFacesForEnvChange();
             }
 
             prevBtn.addEventListener('click', () => {
@@ -3450,23 +3471,10 @@ async function main() {
                     terraFace!.terraSlotOverrides = slotResult.overrides;
                     terraFace!.globalLocationSlot = slotResult.globalLocationSlot;
                 }
-                // Frozen: env rebuild + static-cache eval storm — see buildCache.
-                timeController.withFrozenFrame(() => {
-                    for (const face of faces) {
-                        if (!face.enabled) continue;
-                        face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
-                        restoreKyotoState(face);
-                        if (face.terminatorLeaves.length > 0) {
-                            updateLeafAngles(face.terminatorLeaves, face.env);
-                        }
-                        (face.env as any)._terraCityKnockout = null;
-                        const { canvas, watch, env, images, scale } = face;
-                        buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-                        face.updater.reset();
-                    }
-                });
-                stopScheduler();
-                startScheduler();
+                // The slots just changed, so the city-name knockout must not be
+                // preserved: the fresh envs start without one and rebuild it on
+                // the next draw.
+                rebuildFacesForEnvChange();
             }
 
             /** Assign a city to a slot */
@@ -3759,22 +3767,7 @@ async function main() {
 
             /** Rebuild Gaia after a slot change */
             function rebuildGaiaForSlotChange() {
-                // Frozen: env rebuild + static-cache eval storm — see buildCache.
-                timeController.withFrozenFrame(() => {
-                    for (const face of faces) {
-                        if (!face.enabled) continue;
-                        face.env = createWatchEnvironment(face.watch, lat, lon, makeGetNow(face.watch.beatsPerSecond, face.getNow), locationTimezone, face.terraSlotOverrides, face.globalLocationSlot);
-                        restoreKyotoState(face);
-                        if (face.terminatorLeaves.length > 0) {
-                            updateLeafAngles(face.terminatorLeaves, face.env);
-                        }
-                        const { canvas, watch, env, images, scale } = face;
-                        buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
-                        face.updater.reset();
-                    }
-                });
-                stopScheduler();
-                startScheduler();
+                rebuildFacesForEnvChange();
             }
 
             function assignCityToGaiaSlot(slot: number, city: CityResult) {
