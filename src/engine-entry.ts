@@ -41,6 +41,7 @@ import { installWakeTriggers } from './shared/wake-triggers.js';
 import { requestBrowserLocation, watchBrowserLocation, systemTimezone, BLOC_REFRESH_STALE_MS } from './shared/geolocation.js';
 import { Updater, makeOverridableGetNow, timingContextForFrame, tickProfile, resetTickProfile, setTickProfiling, type WithDisplayTime } from './shared/updater.js';
 import { astroProfile, resetAstroProfile, setAstroProfiling, envTzStateStale } from './shared/astro-env.js';
+import { cacheStats } from './astronomy/astro-cache.js';
 import { buildHandValues } from './watch/hand-values.js';
 import type { Watch } from './watch/types.js';
 import type { Environment } from './expr/env.js';
@@ -1143,6 +1144,19 @@ async function main() {
     let _scrubProcessedTicks = 0;
     let _scrubLostTicks = 0;
 
+    /**
+     * Astro-cache invalidation warn threshold (per tick per face) for the
+     * [scrub-perf] tripwire — planning/2026-08-22-slop-hardening.md §1.
+     * Calibrated 2026-08-22 on the 1-day/tick bench: legitimate counts ranged
+     * 0–938/tick/face (worst: Kyoto, whose wadokei slide runs a rise/set search
+     * per wedge — solver-trial refinement pushes dominate and are intrinsic).
+     * The regressions this guards against — a broken eval-group contiguity
+     * re-keying finalCache per wedge, or an unfrozen eval storm — land in the
+     * thousands, so 2000 warns on those without ever flagging a legitimate
+     * single-face Kyoto session.
+     */
+    const INVALIDATIONS_WARN_PER_TICK_FACE = 2000;
+
     // Animation FPS tracking per update interval:
     let _intervalUpdateFrameTime: number | null = null;
     let _intervalFrameCount = 0;
@@ -1278,7 +1292,23 @@ async function main() {
     /** One-shot: fires the load-progress bar's __appReady handoff on first paint. */
     let firstFramePainted = false;
 
+    /**
+     * rAF callback: delegates to frameBody with an unconditional endFrame
+     * backstop. If any eval/draw threw mid-frame, the frame snapshot would
+     * otherwise stick forever — getDisplayTime() frozen at the stuck instant,
+     * and every withFrozenFrame silently no-oping at the stale time. endFrame
+     * is idempotent, so the extra call after a normal frame is a no-op.
+     * See planning/2026-08-22-slop-hardening.md §2.
+     */
     function frame() {
+        try {
+            frameBody();
+        } finally {
+            timeController.endFrame();
+        }
+    }
+
+    function frameBody() {
         rafId = null;
         _frameCounter++;
         const now = performance.now();
@@ -1534,6 +1564,26 @@ async function main() {
                         `\n  - Memory: ${canvasMemoryReport()}`;
                 })()
             );
+
+            // Astro-cache invalidation tripwire (planning/2026-08-22-slop-hardening.md §1).
+            // Expected magnitude per tick per face is the pool bump + a few
+            // eval-time-group re-keys + the solver-trial refinement churn of that
+            // face's rise/set searches (see the calibration note on the constant).
+            // A big jump means an unfrozen eval storm or broken eval-group
+            // contiguity — warn (colored) so it stands out.
+            {
+                const ticks = _scrubProcessedTicks || 1;
+                const builtCount = faces.filter(f => f.enabled && f.cachesBuilt).length || 1;
+                const invPerTickFace = cacheStats.invalidations / ticks / builtCount;
+                const invLine = `[scrub-perf] Astro cache invalidations: ${cacheStats.invalidations} ` +
+                    `(${invPerTickFace.toFixed(1)}/tick/face over ${ticks} ticks × ${builtCount} faces)`;
+                if (invPerTickFace > INVALIDATIONS_WARN_PER_TICK_FACE) {
+                    console.warn(`${invLine} — exceeds the expected ≤${INVALIDATIONS_WARN_PER_TICK_FACE}/tick/face; ` +
+                        `suspect an unfrozen eval storm or broken eval-group contiguity`);
+                } else {
+                    console.log(invLine);
+                }
+            }
         }
 
         // Check for quantized tick boundary

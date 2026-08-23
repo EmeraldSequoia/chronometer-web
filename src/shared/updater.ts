@@ -863,16 +863,20 @@ export function anyObsAnimating(values: ObsValue[]): boolean {
 /**
  * Stable comparator that groups ObsValues by their scrub eval *time class*:
  * `now` (rank 0: discrete/scrub-compress), `next-tick` (rank 1: eval-ahead), and
- * `boundary` (rank 2: on-beat, sub-grouped by `updateInterval` since each interval
- * resolves to a distinct boundary). Within a leaf group every value evaluates at
- * the same display time, so they share one astro cache. (`envSlot`/`updateOffset`
- * refinements can join the key later; today they're 0/observer for ~all parts.)
+ * `boundary` (rank 2: on-beat). Ranks 1 and 2 are sub-grouped by
+ * `updateInterval`: at 1× each interval resolves to a distinct per-value
+ * boundary, so mixed-cadence values firing on the same frame would otherwise
+ * interleave push times and re-key the astro cache per alternation (during
+ * scrub all rank-1 evals share one next-tick time, where the sub-sort is
+ * inert). Within a leaf group every value evaluates at the same display time,
+ * so they share one astro cache. (`envSlot`/`updateOffset` refinements can
+ * join the key later; today they're 0/observer for ~all parts.)
  */
 function byEvalTimeClass(a: ObsValue, b: ObsValue): number {
     const rank = (v: ObsValue): number => (v.onBeat ? 2 : v.evalAhead ? 1 : 0);
     const ra = rank(a), rb = rank(b);
     if (ra !== rb) return ra - rb;
-    if (ra === 2 && a.updateInterval !== b.updateInterval) return a.updateInterval - b.updateInterval;
+    if (ra !== 0 && a.updateInterval !== b.updateInterval) return a.updateInterval - b.updateInterval;
     return 0;
 }
 

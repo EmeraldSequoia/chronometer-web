@@ -35,7 +35,7 @@ import {
 } from './animation.js';
 import {
     AstroCache, AstroCachePool, CacheSlot, initializeCachePool, releaseCachePool,
-    invalidateCachePool, pushECAstroCacheInPool,
+    cacheStats, invalidateCachePool, pushECAstroCacheInPool,
     popECAstroCacheToInPool,
 } from '../astronomy/astro-cache.js';
 import {
@@ -2296,6 +2296,7 @@ export function resetAstroProfile(): void {
     astroProfile.masterMs = 0;
     astroProfile.leafCalls = 0;
     astroProfile.leafMs = 0;
+    cacheStats.invalidations = 0;
 }
 
 // Cheap integer counters (masterCalls/Computes, leafCalls) stay always-on; the

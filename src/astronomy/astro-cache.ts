@@ -358,6 +358,23 @@ export const enum CacheSlot {
 }
 
 // ============================================================================
+// Cache statistics
+// ============================================================================
+
+/**
+ * Always-on invalidation counter (the astroProfile pattern — one integer add
+ * per re-key, kept cheap for the hot path). Under exact-match re-keying an
+ * unfrozen eval storm has no functional symptom — every value is individually
+ * correct, just recomputed per elapsed-ms cohort — so this counter is what
+ * makes such a regression visible: it is reset by resetAstroProfile() and
+ * reported (with a warn threshold) in the [scrub-perf] block.
+ * See planning/2026-08-22-slop-hardening.md §1.
+ */
+export const cacheStats = {
+    invalidations: 0,
+};
+
+// ============================================================================
 // AstroCache class
 // ============================================================================
 
@@ -537,6 +554,7 @@ export function pushECAstroCacheInPool(
     }
 
     if (needsInvalidation) {
+        cacheStats.invalidations++;
         valueCache.invalidate();
         valueCache.dateInterval = dateInterval;
     }
@@ -572,6 +590,7 @@ export function releaseCachePool(pool: AstroCachePool): void {
  * tick's eval-ahead boundary) can be served for the current tick.
  */
 export function invalidateCachePool(pool: AstroCachePool): void {
+    cacheStats.invalidations++;  // one deliberate whole-pool invalidation, counted once
     pool.finalCache.invalidate();
     pool.refinementCache.invalidate();
     pool.midnightCache.invalidate();

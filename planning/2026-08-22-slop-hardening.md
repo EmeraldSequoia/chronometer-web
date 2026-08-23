@@ -1,8 +1,22 @@
 # Hardening After Slop Removal: Invalidation Counter, Safe Frame Brackets, Rank-1 Sort
 
 **Date:** 2026-08-22
-**Status:** Proposed — awaiting Steve's approval (expanded from the review
-follow-up chip so the design can be judged before any code changes).
+**Status:** ✅ **Implemented 2026-08-23** (approved by Steve with one
+modification: the invalidation output prints as a **console.warn** — colored —
+when the per-tick count is unexpectedly large, `console.log` otherwise).
+**Bit-identical**: full suite green (41 files, 8692 tests, zero golden diffs).
+Perf: interleaved A/B vs HEAD (two rounds, order swapped) showed a sign-flipping
+±2% gap — noise; the diff's hot-path cost is one integer increment per
+invalidation (~0.05% of a Kyoto tick, the worst case). Threshold calibration and
+the per-face baseline are recorded in §1 below. Note: the in-browser
+`[scrub-perf]` print itself was not exercised in-session (browser-pane rAF is
+unreliable per the established protocol) — it is plain string code; the next
+native scrub session will show the new line.
+**Incidental fix (out of plan, required for verification):** `vitest.config.ts`
+now excludes `**/.claude/**` — background-task worktrees under
+`.claude/worktrees/` are separate checkouts whose test copies (with no
+gitignored goldens) the default glob otherwise runs and mass-fails (observed:
+123 files / 16,380 failures until excluded).
 **Parent:** [2026-08-22-astro-slop-zero.md](2026-08-22-astro-slop-zero.md) —
 these are the three "skipped" findings from that change's review that harden the
 machinery the slop removal now leans on. None is urgent; none changes any
@@ -60,6 +74,24 @@ counter itself must live in astro-cache. Concretely:
 becomes the baseline for "expected"). A missed wrap or a future regression that
 starts thrashing shows up as an order-of-magnitude jump in a number that is
 already part of every pasted `[scrub-perf]` block.
+
+**Warn threshold (Steve's approval modification).** The invalidation figure
+prints as its own line after the report: `console.log` normally, **`console.warn`**
+when invalidations-per-tick-per-face exceeds `INVALIDATIONS_WARN_PER_TICK_FACE`,
+so the anomalous case stands out in a different color.
+
+**Calibration (measured 2026-08-23, 1-day/tick bench, 1000 ticks/face).**
+Legitimate counts are dominated by solver-trial refinement pushes — intrinsic
+per-iteration re-keys of `refinementCache` — and vary enormously by face:
+babylon/milano/terra 0 · chandra/firenze 1 · vienna 24 · basel 25 · haleakala 42
+· miami 83 · selene 93 · venezia 108 · mauna-kea 113 · hana 128 · geneva 132 ·
+gaia 493 · **kyoto 938** (the wadokei slide runs a rise/set search per wedge).
+The regressions this tripwire exists for — broken eval-group contiguity
+re-keying `finalCache` per wedge, or an unfrozen storm — land in the thousands,
+so the threshold is **2000/tick/face**: it warns on those while never flagging a
+legitimate single-face Kyoto session. (These are the reference baselines the
+Verification section asked to record; the bench excludes the +1/tick pool bump
+of real scrub, which is negligible at this scale.)
 
 **Known blind spot (honest limit).** The report prints only at scrub end, so a
 gesture-time storm at 1× (the `setNoonOnTop` shape) still prints nothing by

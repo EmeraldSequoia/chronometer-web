@@ -783,7 +783,23 @@ function scheduleFrame(): void {
 /** One-shot: fires the load-progress bar's __appReady handoff on first paint. */
 let firstFramePainted = false;
 
+/**
+ * rAF callback: delegates to tickBody with an unconditional cleanup backstop —
+ * a thrown frame would otherwise stick the frame snapshot forever (clock
+ * frozen, withFrozenFrame no-oping at the stale time) AND leave the inTick
+ * re-entry guard wedged. Both resets are idempotent after a normal frame.
+ * See planning/2026-08-22-slop-hardening.md §2.
+ */
 function tick(): void {
+    try {
+        tickBody();
+    } finally {
+        inTick = false;
+        timeController.endFrame();
+    }
+}
+
+function tickBody(): void {
     rafId = null;
     inTick = true;
     frameRequestedDuringTick = false;
