@@ -3,7 +3,7 @@
 #
 # Subcommands:
 #   list              Show all files grouped by category
-#   archive DEST      Archive category-2 and category-5 files (excl. node_modules)
+#   archive DEST      Archive category-5 files (minus archiveExclude)
 #   restore SRC       Restore archived files into the project
 #   archive-golden DEST  Archive test golden files (category 2)
 #   restore-golden SRC   Restore test golden files
@@ -149,6 +149,11 @@ cmd_list() {
     git_files_tmp=$(mktemp)
     git ls-files > "$git_files_tmp"
 
+    # Build set of gitignored paths (directories collapsed to "dir/")
+    local ignored_tmp
+    ignored_tmp=$(mktemp)
+    git ls-files --others --ignored --exclude-standard --directory > "$ignored_tmp"
+
     # Collect all FILES only (excluding .git/, .DS_Store, and directories)
     local all_files_tmp
     all_files_tmp=$(mktemp)
@@ -161,6 +166,7 @@ cmd_list() {
         const path = require('path');
         const cfg = JSON.parse(fs.readFileSync('$CATEGORIES_FILE', 'utf8'));
         const gitFiles = new Set(fs.readFileSync('$git_files_tmp', 'utf8').trim().split('\n'));
+        const ignoredPaths = fs.readFileSync('$ignored_tmp', 'utf8').trim().split('\n').filter(p => p);
         const allFiles = fs.readFileSync('$all_files_tmp', 'utf8').trim().split('\n').filter(f => f);
 
         const catNames = {
@@ -190,6 +196,18 @@ cmd_list() {
             return fp === pattern;
         }
 
+        // Is this path gitignored? ignoredPaths holds files plus collapsed \"dir/\" entries.
+        function isIgnored(fp) {
+            for (const ig of ignoredPaths) {
+                if (ig.endsWith('/')) {
+                    if (fp === ig.slice(0, -1) || fp.startsWith(ig)) return true;
+                } else if (fp === ig) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         function categorize(fp) {
             // Check ignore
             for (const ig of cfg.ignore || []) {
@@ -211,11 +229,13 @@ cmd_list() {
             // Fallback: git-tracked → category 3
             if (gitFiles.has(fp)) return '3';
 
-            // Untracked files that are in the working tree: treat as category 3
-            // (they are source files that will be committed, or newly created files).
-            // Only report UNKNOWN for files we truly can't categorize.
-            // Check if the file is gitignored — if so, it's suspicious.
-            // For simplicity, treat all remaining files as category 3 (working tree).
+            // Gitignored and untracked: it will never be committed, so calling it
+            // category 3 (\"Git-tracked\") would be a lie. These are exactly the files
+            // archival has to reason about, so every one needs an explicit rule (or an
+            // 'ignore' entry) in file-categories.json — report the gaps instead.
+            if (isIgnored(fp)) return 'UNKNOWN';
+
+            // Untracked but not ignored: a new working-tree file on its way into git.
             return '3';
         }
 
@@ -357,21 +377,19 @@ cmd_list() {
                     const sz = fileSize(entry.path);
                     if (sz) line += '  (' + sz + ')';
                 }
-                // Flag dist/ specially
-                if (entry.path === 'dist/' || entry.path.startsWith('dist/')) {
-                    if (cat === '3' && entry.path === 'dist/') {
-                        line += '  [git-tracked build output]';
-                    }
-                }
                 console.log(line);
             }
         }
 
         if (unknowns.length > 0) {
             console.log();
-            console.log('UNCATEGORIZED (errors — every file must belong to a category):');
-            for (const u of unknowns) {
+            console.log('UNCATEGORIZED (errors — every gitignored file needs a rule in');
+            console.log('file-categories.json, or an entry in its \"ignore\" list):');
+            for (const u of unknowns.slice(0, 20)) {
                 console.log('  ' + u);
+            }
+            if (unknowns.length > 20) {
+                console.log('  ... and ' + (unknowns.length - 20) + ' more');
             }
             process.exit(1);
         }
@@ -380,7 +398,7 @@ cmd_list() {
         console.log('All files categorized successfully.');
     "
 
-    rm -f "$git_files_tmp" "$all_files_tmp"
+    rm -f "$git_files_tmp" "$ignored_tmp" "$all_files_tmp"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -823,7 +841,7 @@ case "${1:-}" in
         echo
         echo "Commands:"
         echo "  list                    Show all files grouped by category"
-        echo "  archive <dest>          Archive category-5 files (excl. node_modules) to <dest>.tar.gz"
+        echo "  archive <dest>          Archive category-5 files (minus archiveExclude) to <dest>.tar.gz"
         echo "  restore <src>           Restore archived files from <src> (.tar.gz or directory)"
         echo "  archive-golden <dest>   Archive test golden files to <dest>.tar.gz"
         echo "  restore-golden <src>    Restore test golden files from <src> (.tar.gz or directory)"

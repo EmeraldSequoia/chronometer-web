@@ -21,15 +21,23 @@
       ]
     },
     {
+      "category": 4,
+      "comment": "Mutable iOS/Android back-port working clones (see docs/ios-backports.md)",
+      "paths": [
+        "ios-backports/"
+      ]
+    },
+    {
       "category": 5,
-      "comment": "Files that must be downloaded from the Internet",
+      "comment": "Files that must be downloaded from the Internet (package-lock.json is written by `npm install`)",
       "paths": [
         "node_modules/",
         "scripts/geonames-data/cities1000.zip",
         "scripts/geonames-data/alternateNamesV2.zip",
         "scripts/geonames-data/allCountries.zip",
         "scripts/geonames-data/admin1CodesASCII.txt",
-        "scripts/geonames-data/admin2Codes.txt"
+        "scripts/geonames-data/admin2Codes.txt",
+        "package-lock.json"
       ]
     },
     {
@@ -43,22 +51,29 @@
       "category": 1,
       "comment": "Regenerated every build or derived from other files",
       "paths": [
+        "dist/",
+        "dist.zip",
+        "harness/*.mjs",
         "src/faces/generated/",
         "scripts/geonames-data/cities1000.txt",
         "scripts/geonames-data/alternateNamesV2.txt",
-        "scripts/geonames-data/allCountries.txt"
+        "scripts/geonames-data/allCountries.txt",
+        "scripts/extra-cities-temp.js"
       ]
     }
   ],
   "archiveExclude": [
-    "node_modules/"
+    "node_modules/",
+    "package-lock.json"
   ],
   "ignore": [
     ".git/",
-    ".DS_Store"
+    ".DS_Store",
+    ".claude/settings.local.json",
+    ".claude/worktrees/"
   ],
   "notes": {
-    "fallback": "Any file tracked by git (git ls-files) and not matched by an explicit rule above is category 3.",
-    "dist": "dist/ is git-tracked (category 3) but flagged in listing output as 'git-tracked build output'."
+    "fallback": "Any file tracked by git (git ls-files) and not matched by an explicit rule above is category 3. An untracked file that git ignores is NOT category 3 — it needs an explicit rule here, or an entry in `ignore`; file-manager.sh reports it as uncategorized.",
+    "dist": "dist/ and dist.zip are build output (category 1), not tracked by git. Built output reaches users only as the dist.zip archive attached to a GitHub release."
   }
 }

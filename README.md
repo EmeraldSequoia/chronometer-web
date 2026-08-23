@@ -21,12 +21,12 @@ Every page links to the other apps via the icons in the top-right corner, and yo
 ### Option 1: Run from a server that serves the static files needed:
 * https://spucci.us/ecweb (Chronometer)
 * https://spucci.us/ecweb/observatory.html (Observatory)
-* Add your server here! We're looking for volunteers to host mirror sites to host the static files. All we need is a directory on your server to host the files in dist/ and serve them over https. (See option 3 for details on how to do this).
+* Add your server here! We're looking for volunteers to host mirror sites to host the static files. All we need is a directory on your server to host the files from the `dist.zip` release archive and serve them over https. (See option 3 for details on how to do this).
 
 ### Option 2: Download and open locally
 
-1. Download the `dist/` directory from this repository. The easiest way is to download the `dist.zip` archive from the [latest release](https://github.com/emeraldsequoia/chronometer-web/releases), or clone the repo and use the `dist/` directory directly.
-2. Unzip (if needed) and double-click **`index.html`** to open it in your browser — or open `observatory.html`, `inspector.html`, or any of the individual face HTML files (e.g. `mauna-kea.html`). Your location and other settings are saved in the browser's local storage on your device and shared by all three apps, so you only set them once. (On `file://` pages where local storage is unavailable, the apps fall back to keeping settings in the URL — bookmark the page to keep them.)
+1. Download the `dist.zip` archive from the [latest release](https://github.com/emeraldsequoia/chronometer-web/releases). Built output is published only through releases — it is not checked into the repository — so if you'd rather build it yourself, see [Building from source](#building-from-source).
+2. Unzip it and, in the resulting `dist/` folder, double-click **`index.html`** to open it in your browser — or open `observatory.html`, `inspector.html`, or any of the individual face HTML files (e.g. `mauna-kea.html`). Your location and other settings are saved in the browser's local storage on your device and shared by all three apps, so you only set them once. (On `file://` pages where local storage is unavailable, the apps fall back to keeping settings in the URL — bookmark the page to keep them.)
 
 Almost everything works when opened via `file://` URLs. The exceptions are:
 
@@ -37,7 +37,7 @@ See [file-url-limitations.md](planning/file-url-limitations.md) for full details
 
 ### Option 3: Run from your own local web server
 
-Serve all files in the `dist/` directory from any static web server. To support browser-based location detection, the files must be served over **`https:`**.
+Serve all files in the `dist/` directory — from the `dist.zip` release archive or from your own build — from any static web server. To support browser-based location detection, the files must be served over **`https:`**.
 
 ### Building from source
 
@@ -47,7 +47,7 @@ The build requires **Node.js ≥ 22** (pinned in `package.json` `engines` and `.
 ./build.sh
 ```
 
-This produces the `dist/` directory containing all HTML, JS, and image assets.
+This produces the `dist/` directory containing all HTML, JS, and image assets. `dist/` is not tracked in git; it is published to users only as the `dist.zip` archive attached to each release.
 
 ### Session storage
 

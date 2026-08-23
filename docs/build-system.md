@@ -128,7 +128,7 @@ Note: Help HTML fragments are injected directly into each face's HTML file at bu
 
 The app is designed to work from `file://` URLs:
 - No web server required
-- Users can download `dist/` and double-click `index.html`
+- Users can download the `dist.zip` release archive, unzip it, and double-click `index.html`
 - Settings persist in LocalStorage; where it's unavailable on `file://`, the app
   falls back to keeping settings in the URL (bookmark to preserve them)
 - See [Location & Cities — file:// Limitations](location-and-cities.md#file-url-limitations) for the few features that don't work without a server
@@ -181,10 +181,12 @@ Every file in the project directory belongs to exactly one of five categories:
 | 1 | **Ephemeral** | Intermediate build output regenerated every build | No |
 | 2 | **Rebuildable (offline)** | Can be rebuilt without Internet but rarely changes | Yes (golden) |
 | 3 | **Git-tracked** | Committed to the GitHub repository | No (git handles) |
-| 4 | **Reference** | iOS/Android reference repos; not build sources | No |
+| 4 | **Reference** | iOS/Android reference snapshots and back-port clones; not build sources | No |
 | 5 | **Internet-downloaded** | Must be downloaded from the Internet | Yes (main) |
 
-The canonical registry of categorization rules lives in [`file-categories.json`](../file-categories.json) at the project root. Rules are evaluated in order; first match wins. Files tracked by `git ls-files` that don't match any explicit rule default to category 3.
+The canonical registry of categorization rules lives in [`file-categories.json`](../file-categories.json) at the project root. Rules are evaluated in order; first match wins. A file tracked by `git ls-files` that matches no explicit rule defaults to category 3, and so does an untracked file that git would let you commit (a new source file on its way in).
+
+A file that git **ignores**, however, is never category 3 — it will never be committed — so it needs an explicit rule, or an entry in the registry's `ignore` list for things that aren't project files at all (`.DS_Store`, `.claude/worktrees/`). `list` reports any gitignored file it can't place under **UNCATEGORIZED** and exits non-zero; the fix is to add the rule. This is what keeps the registry honest as `.gitignore` grows.
 
 ### `file-manager.sh` CLI Tool
 
@@ -222,12 +224,12 @@ cd chronometer-web
 npm install                                          # category 5: node_modules
 bash scripts/file-manager.sh restore /path/to/archive  # category 5: geonames data
 bash scripts/file-manager.sh restore-golden /path/to/golden  # category 2: test snapshots
-bash build.sh                                        # generates category 1 files + dist
+bash build.sh                                        # generates category 1 files, including dist/
 ```
 
 ### `dist/` Special Case
 
-`dist/` is committed to git (category 3) even though it contains build output. This is intentional — it allows deploy tooling outside the VM to access built files and lets GitHub repo browsers see the output structure. The `list` command flags it as "git-tracked build output".
+`dist/` and the `dist.zip` archive built from it are category 1 (ephemeral build output) and are **not** tracked in git — both are gitignored. Built output reaches users only through the [release mechanism](https://github.com/emeraldsequoia/chronometer-web/releases), where `dist.zip` is attached to each release. A fresh clone therefore contains no `dist/` until you run `bash build.sh`.
 
 ## Related Docs
 
