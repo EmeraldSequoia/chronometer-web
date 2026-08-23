@@ -17,3 +17,4 @@ src/faces/generated/
 dist.zip
 # iOS back-port working clones (see docs/ios-backports.md)
 ios-backports/
+dist/
