@@ -4,7 +4,9 @@ Web ports of [Emerald Chronometer](https://github.com/EmeraldSequoia/Chronometer
 
 The original iOS apps were developed by Steve Pucci and Bill Arnett of [Emerald Sequoia LLC](https://emeraldsequoia.com). Emerald Chronometer was one of the first 500 apps in the App Store in 2008, and Observatory was one of the first apps for the iPad. The iOS apps have **new owners** and the owner for Emerald Chronometer can be found [here](https://www.scapaflowllc.com/new-page-1).
 
-This project (the web version here) is under very active development as of May 2026.
+This project (the web version here) is under very active development as of August 2026.
+
+**How accurate is it?** The astronomical positions come from two Willmann-Bell series published in 1986 and 1991, and their authors printed accuracy tables on the back covers. [Accuracy of the Astronomical Algorithms](docs/accuracy.md) sets those promises beside measurements taken against NASA/JPL's DE441 ephemeris today, and reports what the engine achieves on the hardest thing it computes: eclipse timing. Short version — for every eclipse in the app's table, the length of totality is right to hundredths of a second and its start time to about a second.
 
 ## The apps
 

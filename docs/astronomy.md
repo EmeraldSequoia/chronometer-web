@@ -138,6 +138,13 @@ and [planning/2026-08-17-eclipse-precision-and-verification.md](../planning/2026
 
 ### Measured Accuracy: Engine vs JPL Horizons
 
+> **See [Accuracy of the Astronomical Algorithms](accuracy.md)** for the
+> full picture: the two Willmann-Bell books' published error envelopes
+> annotated with what the engine measures against DE441 today, and
+> eclipse contact/interval timing across the whole eclipse table. The
+> section below is the earlier, narrower measurement of solar-eclipse
+> geometry that came first.
+
 **2026-08-18.** `scripts/verify-eclipse-horizons.mjs` (manual, never in
 build/CI — JPL asks for strictly sequential requests) measures the engine's
 topocentric Sun/Moon geometry against JPL Horizons at all 70 solar
@@ -234,6 +241,8 @@ The Willmann-Bell series tables have finite validity:
 - **Lunar tables** (Chapront-Touzé): 4000 BCE – 8000 CE
 
 The limiting factor is the planetary/sun tables: **4000 BCE to 2800 CE**. Outside this range, inner-planet polynomial series and sun position functions produce incorrect results.
+
+For how accurate the series are *inside* that range — which degrades steadily as you move away from the present — see [Accuracy of the Astronomical Algorithms](accuracy.md).
 
 The `TimeController.clampDisplayTime()` method enforces this range, mirroring the iOS `ESWatchTime::checkAndConstrainAbsoluteTime()` function. When the display time reaches a boundary:
 
