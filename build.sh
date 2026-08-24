@@ -32,7 +32,12 @@ ESBUILD="npx --yes esbuild"
 DIST="dist"
 SRC="src"
 LOADER_FLAGS="--loader:.xml=text --loader:.png=dataurl --loader:.jpg=dataurl --loader:.bin=dataurl"
-COMMON_FLAGS="--format=iife --target=es2020"
+# --log-level=warning drops esbuild's per-output size summary, which flags
+# every bundle over 1 MB with a yellow warning icon. These bundles are
+# expected to be large (inlined face XML, images, and altitude table), so
+# the icon is pure noise. Real esbuild warnings and errors still print;
+# final sizes are listed by the "ls -lh" at the end of this script.
+COMMON_FLAGS="--format=iife --target=es2020 --log-level=warning"
 
 mkdir -p "$DIST"
 
