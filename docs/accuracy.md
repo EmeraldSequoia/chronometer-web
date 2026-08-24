@@ -231,6 +231,68 @@ eclipse contact should not be trusted. ΔT is the larger uncertainty at
 those epochs in any case: it is only known to within minutes for the
 classical era, and each second of ΔT error moves the Moon 0.55″.
 
+## 3. What the tables cost
+
+The accuracy in §1 is bought with data. `lunar-tables.ts` and
+`planet-tables.ts` are nothing but coefficients transcribed from the two
+books, and they are by a wide margin the largest thing in the astronomy
+engine — the price of needing no network connection to know where the
+planets are.
+
+### Download
+
+| Module | Raw JS | gzip | brotli |
+|---|---|---|---|
+| `lunar-tables` | 94.0 KB | 28.4 KB | 20.2 KB |
+| `planet-tables` | 904.0 KB | 265.9 KB | 198.1 KB |
+| **Both** | **997.8 KB** | **294.9 KB** | **218.2 KB** |
+
+Bundled the way `build.sh` bundles them (esbuild, `es2020`, not
+minified). Inside the shipped `chronometer-engine.js` the two modules
+account for **1011 KB of 1667 KB — 60.6% of the engine bundle**,
+attributed with esbuild's own metafile rather than estimated. Any server
+with compression enabled sends about 295 KB of it; a static host serving
+raw files sends the megabyte.
+
+The planetary tables are 10× the lunar ones despite the Moon being the
+harder body, because they store *piecewise* rather than *analytic* data:
+Jupiter and Saturn each carry 1,360 five-year blocks — 21 degree-6
+polynomial coefficients per block, seven each for longitude, latitude and
+radius — which is exactly what it takes to tile −4000 to +2800. Uranus
+and Neptune have 240 blocks apiece, covering only +1600 to +2800. The
+Moon, by contrast, is a few hundred periodic terms that evaluate at any
+date, so its table does not grow with the span it covers.
+
+### Memory
+
+| What is being counted | Size | Detail |
+|---|---|---|
+| The numbers themselves | 626.2 KB | 80,152 distinct float64 values |
+| As JavaScript objects and arrays | 2.0 MB | 3.3× the payload — 7,978 objects, 9,644 arrays |
+| Heap growth on import | 4.3 MB | the above, plus compiled code and retained source |
+
+Measured under V8 (Node, Chrome, Edge) with forced garbage collection
+between readings; JavaScriptCore and SpiderMonkey lay these structures
+out differently. The 626 KB of coefficients is the figure comparable to
+the original C, which held the same values as packed structs — close to,
+though somewhat above, the "about 500 kilobytes" the app's own help
+quotes for the iOS version.
+
+The 3.3× spread between the coefficients and their in-memory
+representation is structural, not waste in the ordinary sense: the outer
+planets are stored as 3,200 objects each holding three seven-element
+arrays, and in JavaScript every one of those small arrays carries its own
+header and backing store. Flattening them into a handful of
+`Float64Array`s would recover most of the difference and shrink the
+download too, at the cost of replacing readable table literals with
+opaque binary blobs. Nothing in the app is short of memory, so this is
+recorded as a fact rather than a plan — but it is the obvious lever if
+that ever changes.
+
+Everything is loaded eagerly, as part of the engine bundle: any
+astronomical value needs the tables, so there is nothing to defer. Once
+loaded, no further data is ever fetched — the tables *are* the ephemeris.
+
 ## Reproducing
 
 Both harnesses are manual and evidence-generating — never part of the
@@ -254,6 +316,14 @@ node scripts/verify-eclipse-intervals.mjs
 
 Measures §2. Add `--decompose` for the per-contact attribution table,
 `--only YYYY-MM-DD` or `--kind total-solar` to narrow it.
+
+```bash
+node --expose-gc scripts/measure-astro-tables.mjs
+```
+
+Measures §3 — bundle sizes under each compression scheme, the tables'
+share of the engine bundle, and the heap cost of loading them. Needs no
+network access.
 
 Working notes, including the method traps that had to be fixed before the
 numbers meant anything, are in

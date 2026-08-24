@@ -6,7 +6,7 @@ The original iOS apps were developed by Steve Pucci and Bill Arnett of [Emerald 
 
 This project (the web version here) is under very active development as of August 2026.
 
-**How accurate is it?** The astronomical positions come from two Willmann-Bell series published in 1986 and 1991, and their authors printed accuracy tables on the back covers. [Accuracy of the Astronomical Algorithms](docs/accuracy.md) sets those promises beside measurements taken against NASA/JPL's DE441 ephemeris today, and reports what the engine achieves on the hardest thing it computes: eclipse timing. Short version — for every eclipse in the app's table, the length of totality is right to hundredths of a second and its start time to about a second.
+**How accurate is it?** The astronomical positions come from two Willmann-Bell series published in 1986 and 1991, and their authors printed accuracy tables on the back covers. [Accuracy of the Astronomical Algorithms](docs/accuracy.md) sets those promises beside measurements taken against NASA/JPL's DE441 ephemeris today, and reports what the engine achieves on the hardest thing it computes: eclipse timing. Short version — for every eclipse in the app's table, the length of totality is right to hundredths of a second and its start time to about a second. All of that precision ships with the app rather than arriving from a server: the coefficient tables are about 295 KB compressed, which is why placing a planet never needs the network.
 
 ## The apps
 
