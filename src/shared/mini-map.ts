@@ -11,6 +11,11 @@ let textureCanvas: HTMLCanvasElement | null = null;
 let textureCtx: CanvasRenderingContext2D | null = null;
 let textureLoaded = false;
 
+/** Estimated backing-store bytes of the sampling texture — for the [mem] ledger. */
+export function miniMapTextureSizeBytes(): number {
+    return textureCanvas ? textureCanvas.width * textureCanvas.height * 4 : 0;
+}
+
 /** Load the Blue Marble texture (only once). */
 function ensureTexture(): Promise<void> {
     if (textureLoaded) return Promise.resolve();

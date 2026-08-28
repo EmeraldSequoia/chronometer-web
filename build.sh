@@ -142,6 +142,7 @@ echo "  → inspector-engine.js"
 
 echo "=== Building Observatory engine ==="
 $ESBUILD "$SRC/observatory/observatory-entry.ts" --bundle $LOADER_FLAGS $COMMON_FLAGS \
+  --define:__BUILD_VERSION__="\"$NEW_VERSION\"" \
   --outfile="$DIST/observatory-engine.js"
 echo "  → observatory-engine.js"
 

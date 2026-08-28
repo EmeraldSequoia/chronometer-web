@@ -849,6 +849,8 @@ function assemble(a: AssembleArgs): LayoutParams {
         sidCX: subs.sidCX, sidCY: subs.sidCY,
         moonCX: a.moonCX, moonCY: a.moonCY, moonR: a.moonR,
         earthCX: a.earthCX, earthCY: a.earthCY, earthW: a.earthW, earthH: a.earthH,
+        // alt/az/eot radii must stay equal: static-cache.ts keys on altR
+        // alone — if these ever diverge, extend that key.
         altCX: a.altCX, altCY: a.altCY, altR: a.extR,
         azCX: a.azCX, azCY: a.azCY, azR: a.extR,
         eclipseCX: a.eclipseCX, eclipseCY: a.eclipseCY,

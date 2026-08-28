@@ -12,7 +12,8 @@
  * behavior so the (portrait) image needs the least scaling in either
  * orientation.
  *
- * Cached to an OffscreenCanvas at DPR resolution; rebuilt only on resize.
+ * Drawn into the merged static cache (static-cache.ts) at DPR resolution;
+ * rebuilt only on resize / image arrival.
  */
 
 import type { LayoutParams } from './layout.js';
@@ -44,39 +45,23 @@ function loadImage(): Promise<void> {
 const imageLoadPromise = loadImage();
 
 // ---------------------------------------------------------------------------
-// Static cache
+// Drawing (into the merged static cache — see static-cache.ts)
 // ---------------------------------------------------------------------------
 
-let staticCache: OffscreenCanvas | null = null;
-let cacheLayoutKey = '';
-
-function layoutKey(L: LayoutParams): string {
-    return `${L.viewW}x${L.viewH}:${L.dpr}`;
+/** True once the starfield image is usable (loaded with real pixels). */
+export function isBackgroundReady(): boolean {
+    return imageLoaded && !!backgroundImg && backgroundImg.naturalWidth > 0;
 }
 
 /**
- * Get the cached starfield background for the current viewport.
- * Returns null while the image is still loading (the entry point's black
- * clear shows in the meantime, same as the main dial cache).
+ * Draw the cover-scaled starfield over the full viewport.
+ * Draws in raw device pixels — the caller must NOT have applied a dpr scale.
+ * The caller gates on isBackgroundReady().
  */
-export function getBackgroundCache(L: LayoutParams): OffscreenCanvas | null {
-    const key = layoutKey(L);
-    if (staticCache && key === cacheLayoutKey) {
-        return staticCache;
-    }
-
-    if (!imageLoaded || !backgroundImg || backgroundImg.naturalWidth === 0) {
-        return null;
-    }
-
+export function drawBackground(ctx: OffscreenCanvasRenderingContext2D, L: LayoutParams): void {
     const dpr = L.dpr;
     const w = L.viewW * dpr;
     const h = L.viewH * dpr;
-
-    staticCache = new OffscreenCanvas(w, h);
-    cacheLayoutKey = key;
-
-    const ctx = staticCache.getContext('2d')!;
 
     // Black base, as on iOS (the image itself is opaque black, but cover
     // rounding can leave sub-pixel slivers at the edges).
@@ -89,8 +74,8 @@ export function getBackgroundCache(L: LayoutParams): OffscreenCanvas | null {
     const targetW = landscape ? h : w;
     const targetH = landscape ? w : h;
 
-    const imgW = backgroundImg.naturalWidth;
-    const imgH = backgroundImg.naturalHeight;
+    const imgW = backgroundImg!.naturalWidth;
+    const imgH = backgroundImg!.naturalHeight;
     const scale = Math.max(targetW / imgW, targetH / imgH);
     const drawW = imgW * scale;
     const drawH = imgH * scale;
@@ -102,17 +87,8 @@ export function getBackgroundCache(L: LayoutParams): OffscreenCanvas | null {
         ctx.translate(-h / 2, -w / 2);
     }
     // Center-crop the cover overflow.
-    ctx.drawImage(backgroundImg, (targetW - drawW) / 2, (targetH - drawH) / 2, drawW, drawH);
+    ctx.drawImage(backgroundImg!, (targetW - drawW) / 2, (targetH - drawH) / 2, drawW, drawH);
     ctx.restore();
-
-    return staticCache;
-}
-
-/**
- * Force cache rebuild on next call (e.g., on resize or after the image loads).
- */
-export function invalidateBackgroundCache(): void {
-    cacheLayoutKey = '';
 }
 
 /**

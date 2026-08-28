@@ -9,15 +9,16 @@ hands, rise/set rings, and a sun altitude ring.
 ```
 src/observatory/
 ├── observatory-entry.ts   Main tick loop, init, draw orchestration
-├── background.ts          Starfield background image (static cache)
-├── main-dial.ts           Central orrery dial background (static cache)
+├── static-cache.ts        Merged static layer (starfield + dials) in one cache
+├── background.ts          Starfield background image (drawn into static-cache)
+├── main-dial.ts           Central orrery dial background (drawn into static-cache)
 ├── obs-values.ts          Observatory ObsValue catalog (ObsValueName, defs, buildObsValues)
 ├── hand-views.ts          Clock hands + sun event hands + subdial hands
 ├── planet-hands.ts        Planet hands on the orrery
 ├── ring-view.ts           Rise/set rings (sun altitude ring + planet arcs)
 ├── earth-view.ts          Earth map with day/night terminator
 ├── moon-view.ts           Moon phase display (apparent size, terminator)
-├── peripheral-dials.ts    Alt/Az/EOT/Eclipse dial backgrounds (static cache)
+├── peripheral-dials.ts    Alt/Az/EOT/Eclipse dial backgrounds (drawn into static-cache)
 ├── peripheral-hands.ts    Alt/Az/EOT hands + selected-body labels
 ├── eclipse-view.ts        Eclipse simulator disc + status labels + ring hands
 ├── date-view.ts           Header date display (weekday/date/year/leap/tz)
@@ -548,17 +549,18 @@ which is never a build input) and is bundled as a data URL by esbuild.
 
 The three corner dials — **Altitude**, **Azimuth**, **Equation of Time** —
 live in `peripheral-dials.ts` (static backgrounds) and `peripheral-hands.ts`
-(hands + labels). The eclipse-simulator slot (`eclipseCX/CY/R1/R2`) is
-intentionally empty, deferred to its own future plan.
+(hands + labels). The eclipse-simulator slot (`eclipseCX/CY/R1/R2`) gets its
+static ring annulus here too (`drawEclipseDial`); the disc contents and ring
+hands live in `eclipse-view.ts` (see Eclipse Simulator).
 
 ### Architecture
 
 ```
-getPeripheralDialsCache(L)   — full-viewport OffscreenCanvas @ DPR, like main-dial
+drawPeripheralDials(ctx, L)   — drawn into the merged static cache (static-cache.ts)
  ├── drawAltitudeDial   (port EOShuffleView.mm EOAltitudeDialShuffleView)
  ├── drawAzimuthDial    (port EOShuffleView.mm EOAzimuthDialShuffleView)
- └── drawEOTDial        (asymmetric real-range design, see below)
-invalidatePeripheralDialsCache()  — called on resize
+ ├── drawEOTDial        (asymmetric real-range design, see below)
+ └── drawEclipseDial    (static ring annulus, port EOEclipseDialShuffleView)
 
 drawPeripheralHands(ctx, L, u, selectedPlanet)  [per frame]
  ├── altitude triangle hand  ({body}Alt)  + body name label
@@ -632,9 +634,9 @@ Toggling sets the `noonOnTop` env variable (0/1) and calls `updater.reset()`:
 every expression carrying a `+ pi * noonOnTop` term (24h hand, sun-event hands,
 planet rings, sun-ring gradient stops) re-evaluates against its moved target, so
 all moving parts **animate** half a turn to the flipped positions — the same
-sweep as a location change. The main-dial static cache keys on `noonOnTop`
-(`getMainDialCache(L, noonOnTop)`), so the dial numerals rebuild (snap) on the
-next frame.
+sweep as a location change. The merged static cache keys on `noonOnTop`
+(`getStaticCache(L, noonOnTop)` in `static-cache.ts`), so the dial numerals
+rebuild (snap) on the next frame — no explicit invalidate call is needed.
 
 **Footer wrap:** when the centered toggle would collide with the time-bar
 contents or the location controls (narrow windows, or when the red offset label

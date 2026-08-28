@@ -101,6 +101,12 @@ let dayMaskCtx: OffscreenCanvasRenderingContext2D | null = null;
 let imagesReady = false;
 let tableReady = false;
 
+/** Estimated backing-store bytes of the mask canvases — for the [mem] ledger. */
+export function earthMaskSizeBytes(): number {
+    const sz = (c: OffscreenCanvas | null) => (c ? c.width * c.height * 4 : 0);
+    return sz(maskCanvas) + sz(dayMaskCanvas);
+}
+
 // ============================================================================
 // Initialization
 // ============================================================================

@@ -227,6 +227,8 @@ function a2OuterDials(
         const d = Math.hypot(exC - L.mainCX, eyC - L.mainCY) || 1;
         return { x: L.mainCX + (exC - L.mainCX) * rho / d, y: L.mainCY + (eyC - L.mainCY) * rho / d, r: er2 };
     };
+    // alt/az/eot radii must stay equal (place() returns the shared er2):
+    // static-cache.ts keys on altR alone — if these ever diverge, extend that key.
     let m = place(L.altCX, L.altCY, L.altR); L.altCX = m.x; L.altCY = m.y; L.altR = m.r;
     m = place(L.azCX, L.azCY, L.azR); L.azCX = m.x; L.azCY = m.y; L.azR = m.r;
     m = place(L.eotCX, L.eotCY, L.eotR); L.eotCX = m.x; L.eotCY = m.y; L.eotR = m.r;
@@ -305,6 +307,8 @@ function applyA3Dials(L: LayoutParams, bounds: Bounds, o: ResolvedOptions): void
         gMain = lo;
     }
     const az = place(dAz, gMain), eot = place(dEot, gMain);
+    // alt/az/eot radii must stay equal: static-cache.ts keys on altR alone —
+    // if these ever diverge, extend that key.
     L.azCX = az.x; L.azCY = az.y; L.azR = er;
     L.eotCX = eot.x; L.eotCY = eot.y; L.eotR = er;
     L.altCX = az.x; L.altCY = 2 * cy - az.y; L.altR = er;       // mirror to the top
@@ -426,6 +430,8 @@ function applyA5(
     L.moonCY = topRow + moonR;
     const cyL = ((L.moonCY + moonR) + dateTop) / 2;    // alt/az: moon↔date centre
 
+    // alt/az/eot radii must stay equal: static-cache.ts keys on altR alone —
+    // if these ever diverge, extend that key.
     L.altR = L.azR = L.eotR = r;
     L.eotCX = W - halfPad - r; L.eotCY = cyR;
     L.eclipseCX = W - 2 * halfPad - 3 * r; L.eclipseCY = cyR;   // ECL draws at L.altR = r
@@ -569,6 +575,8 @@ function applyAwide(
         const mapCXs = eotCXs + erSbs + g + mapH;
 
         rescaleMain(L, dialCXs, cy, mainR);
+        // alt/az/eot radii must stay equal: static-cache.ts keys on altR
+        // alone — if these ever diverge, extend that key.
         L.altR = L.azR = L.eotR = erSbs;
         L.altCX = altCXs; L.altCY = cy;
         L.azCX = azCXs; L.azCY = cy;
@@ -633,6 +641,8 @@ function applyAwide(
 
     // Commit.
     rescaleMain(L, pos.dialCX, cy, mainR);
+    // alt/az/eot radii must stay equal: static-cache.ts keys on altR alone —
+    // if these ever diverge, extend that key.
     L.altR = er; L.azR = er; L.eotR = er;
     L.altCX = pos.altazX; L.altCY = aCY - Dy; L.azCX = pos.altazX; L.azCY = aCY + Dy;
     L.eclipseCX = pos.ecletX; L.eclipseCY = cy - Dy; L.eotCX = pos.ecletX; L.eotCY = cy + Dy;
@@ -680,6 +690,8 @@ function applyAsq(L: LayoutParams, bounds: Bounds, _headerH: number, _footerH: n
     const vlen = Math.hypot(vx, vy);
     const dist = mainR + t * (vlen - mainR);
     const azCX = cx + dist * vx / vlen, azCY = dialCY + dist * vy / vlen;
+    // alt/az/eot radii must stay equal: static-cache.ts keys on altR alone —
+    // if these ever diverge, extend that key.
     L.altR = subR; L.azR = subR; L.eotR = subR;
     L.azCX = azCX; L.azCY = azCY;                                 // lower-left (anchor)
     L.eotCX = 2 * cx - azCX; L.eotCY = azCY;                      // lower-right (mirror x)
@@ -777,6 +789,8 @@ function applyA1(
     }
 
     L.moonR = outerR; L.moonCX = cx; L.moonCY = cyc[0];
+    // alt/az/eot radii must stay equal: static-cache.ts keys on altR alone —
+    // if these ever diverge, extend that key.
     L.altR = outerR; L.altCX = cx; L.altCY = cyc[1];   // ECL also draws at altR
     L.azR = outerR; L.azCX = cx; L.azCY = cyc[2];
     rescaleMain(L, cx, cyc[3], R);
@@ -828,6 +842,8 @@ function applyA6(
 
     L.moonR = outerR; L.moonCX = place(2 * outerR); L.moonCY = cy;
     L.dateCX = place(weekdayW); L.dateCY = cy; L.dateW = weekdayW + 4; L.dateH = hr;
+    // alt/az/eot radii must stay equal: static-cache.ts keys on altR alone —
+    // if these ever diverge, extend that key.
     L.altR = outerR; L.altCX = place(2 * outerR); L.altCY = cy;
     L.azR = outerR; L.azCX = place(2 * outerR); L.azCY = cy;
     rescaleMain(L, place(dialW), cy, R);
@@ -869,6 +885,10 @@ export function applyAnchor(
     // outer-dial radius — `eclipseR2` (the visible outer ring) = `altR`, with the
     // disc `eclipseR1` keeping the authored 49/63 proportion. (The harness draws
     // ECL directly at `altR`, so this keeps the real renderer in step with it.)
+    // This unconditional tail is also what lets static-cache.ts key on altR
+    // alone: eclipseR1/R2 and the ext/eclipse/eot font sizes below are pure
+    // functions of the final altR. If any of them ever gets an independent
+    // input, extend that key.
     L.eclipseR2 = L.altR;
     L.eclipseR1 = L.altR * (ECLIPSE_R1_RATIO);
 

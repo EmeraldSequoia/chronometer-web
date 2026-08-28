@@ -1,8 +1,8 @@
 /**
  * Observatory main orrery dial — static background layer.
  *
- * Renders the central 24-hour clock dial background to an OffscreenCanvas.
- * This cache is redrawn only on resize or noonOnTop change.
+ * Renders the central 24-hour clock dial background into the merged static
+ * cache (static-cache.ts), redrawn only on resize or noonOnTop change.
  *
  * Port of: EORingsAndPlanetsShuffleView.drawRect: (EOShuffleView.mm L103–256)
  * with parameters from EOClock.mm L1646–1674.
@@ -71,57 +71,12 @@ function loadImages(): Promise<void> {
 const imageLoadPromise = loadImages();
 
 // ---------------------------------------------------------------------------
-// Static cache
+// Readiness (consulted by static-cache.ts before drawing this layer)
 // ---------------------------------------------------------------------------
 
-let staticCache: OffscreenCanvas | null = null;
-let cacheNoonOnTop = false;
-let cacheLayoutKey = '';
-
-/**
- * Get the layout key for cache invalidation.
- */
-function layoutKey(L: LayoutParams, noonOnTop: boolean): string {
-    return `${L.viewW}x${L.viewH}:${L.mainR.toFixed(1)}:${noonOnTop}`;
-}
-
-/**
- * Draw the static main dial to an OffscreenCanvas.
- * Returns the cached canvas. Rebuilds only when layout or noonOnTop changes.
- */
-export function getMainDialCache(L: LayoutParams, noonOnTop: boolean): OffscreenCanvas | null {
-    const key = layoutKey(L, noonOnTop);
-    if (staticCache && key === cacheLayoutKey) {
-        return staticCache;
-    }
-
-    if (!imagesLoaded) {
-        // Images still loading; return null and let entry point retry
-        return null;
-    }
-
-    // Allocate at device pixel ratio for crisp rendering
-    const dpr = L.dpr;
-    const w = L.viewW * dpr;
-    const h = L.viewH * dpr;
-
-    staticCache = new OffscreenCanvas(w, h);
-    cacheLayoutKey = key;
-    cacheNoonOnTop = noonOnTop;
-
-    const ctx = staticCache.getContext('2d')!;
-    ctx.scale(dpr, dpr);
-
-    drawMainDial(ctx, L, noonOnTop);
-
-    return staticCache;
-}
-
-/**
- * Force cache rebuild on next call (e.g., after images finish loading).
- */
-export function invalidateMainDialCache(): void {
-    cacheLayoutKey = '';
+/** True once all three dial images have settled (loaded or errored). */
+export function areDialImagesReady(): boolean {
+    return imagesLoaded;
 }
 
 /**
@@ -135,7 +90,7 @@ export function waitForImages(): Promise<void> {
 // Main drawing function
 // ---------------------------------------------------------------------------
 
-function drawMainDial(
+export function drawMainDial(
     ctx: OffscreenCanvasRenderingContext2D,
     L: LayoutParams,
     noonOnTop: boolean,

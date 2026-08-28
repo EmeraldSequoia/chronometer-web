@@ -31,14 +31,15 @@ import type { TimeControlsAPI } from '../shared/time-controls-ui.js';
 import { updateDynamicCompositeIcon } from '../shared/composite-icon.js';
 import { type LayoutParams } from './layout.js';
 import { computeLayout, type ObsChrome } from './anchor-layout.js';
-import { getBackgroundCache, invalidateBackgroundCache, waitForBackgroundImage } from './background.js';
-import { getMainDialCache, invalidateMainDialCache, waitForImages } from './main-dial.js';
+import { waitForBackgroundImage } from './background.js';
+import { waitForImages } from './main-dial.js';
+import { getStaticCache, invalidateStaticCache, staticCacheSizeBytes } from './static-cache.js';
 import { drawPlanetHands, waitForPlanetImages } from './planet-hands.js';
 import { drawRiseSetRings, invalidateRingCache } from './ring-view.js';
 import { drawClockHands, drawSubdialHands } from './hand-views.js';
-import { initEarthView, drawEarthView, isInsideEarthMap, earthPixelToLatLon, drawDragCrosshair, drawDragMagnifier, resetDragMagnifier, endDragMagnifier, drawObserverDot } from './earth-view.js';
+import { initEarthView, drawEarthView, isInsideEarthMap, earthPixelToLatLon, drawDragCrosshair, drawDragMagnifier, resetDragMagnifier, endDragMagnifier, drawObserverDot, earthMaskSizeBytes } from './earth-view.js';
 import { initMoonView, drawMoonView } from './moon-view.js';
-import { getPeripheralDialsCache, invalidatePeripheralDialsCache } from './peripheral-dials.js';
+import { miniMapTextureSizeBytes } from '../shared/mini-map.js';
 import { drawPeripheralHands, cycleSelectablePlanet } from './peripheral-hands.js';
 import { drawDateView } from './date-view.js';
 import { initEclipseView, drawEclipseView } from './eclipse-view.js';
@@ -47,6 +48,10 @@ import { type ObsValueName, buildObsValues } from './obs-values.js';
 import { Updater, makeOverridableGetNow, timingContextForFrame } from '../shared/updater.js';
 import { installWakeTriggers } from '../shared/wake-triggers.js';
 import { createFpsIndicator, type FpsIndicator } from '../shared/fps-indicator.js';
+
+// Injected by build.sh via esbuild --define; scratch/esbuild-only builds (no
+// define) report 'dev'. Same pattern as engine-entry.ts.
+declare const __BUILD_VERSION__: string | undefined;
 
 // ============================================================================
 // State
@@ -344,16 +349,11 @@ function resizeCanvas(): void {
     }
 
     // Invalidate static caches so they rebuild at new size
-    invalidateBackgroundCache();
-    invalidateMainDialCache();
+    invalidateStaticCache();
     invalidateRingCache();
-    invalidatePeripheralDialsCache();
-    needsStaticRedraw = true;
     // The loop may be idle (stopped); a resize must trigger a redraw.
     scheduleFrame();
 }
-
-let needsStaticRedraw = true;
 
 // Debounced relayout — coalesces viewport resizes, orientation changes, and
 // footer-row wraps into a single resizeCanvas() (which re-reserves the footer
@@ -379,35 +379,16 @@ const ro = new ResizeObserver(scheduleResize);
  */
 function drawFrame(): void {
     const dpr = devicePixelRatio || 1;
-    const w = canvas.width;
-    const h = canvas.height;
-
-    // Clear to black
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, w, h);
 
     const L = layout;
 
     // ================================================================
-    // 0. Starfield background (static, full-viewport cache) — the iOS
-    //    EOBaseView base layer; everything else draws on top of it.
+    // 0/1. Merged static layer (starfield + main dial + peripheral dial
+    //    backgrounds) — one full-viewport cache blit at DPR resolution.
+    //    Never null and fully opaque edge-to-edge, so it doubles as the
+    //    frame clear (see static-cache.ts).
     // ================================================================
-    const bgCache = getBackgroundCache(L);
-    if (bgCache) {
-        ctx.drawImage(bgCache, 0, 0);
-    }
-
-    // ================================================================
-    // 1. Draw static main dial cache (composited at native resolution)
-    // ================================================================
-    const dialCache = getMainDialCache(L, noonOnTop);
-    if (dialCache) {
-        // Cache is already at DPR resolution — draw 1:1 into the canvas
-        ctx.drawImage(dialCache, 0, 0);
-    }
-
-    // Peripheral dial backgrounds (static, DPR-resolution full-viewport cache).
-    ctx.drawImage(getPeripheralDialsCache(L), 0, 0);
+    ctx.drawImage(getStaticCache(L, noonOnTop), 0, 0);
 
     // Scale for DPR for all remaining drawing
     ctx.save();
@@ -711,7 +692,6 @@ function rebuildEnvFrozen(): void {
     env.variables.set('noonOnTop', noonOnTop ? 1 : 0);
     env.variables.set('dialPlanet', selectedPlanet);
     invalidateRingCache();
-    needsStaticRedraw = true;
     // The date-region geometry of some anchors (A1/A5/A6/Awide) is sized in the
     // location's timezone, so a timezone change must re-solve the layout. Guard
     // on the tz so scrubbing (which fires rebuildEnv every tick) doesn't relayout
@@ -1487,13 +1467,34 @@ function init(): void {
     // Page-level FPS overlay (enabled via ?fps) — shared with Chronometer.
     fpsIndicator = createFpsIndicator(urlState.fps);
 
-    // Wait for images to load, then invalidate cache so first real draw occurs
+    // Wait for images to load, then invalidate the merged static cache so the
+    // starfield + dial layers get painted in. This call is load-bearing: it is
+    // the sole image-arrival rebuild trigger (readiness is not in the cache
+    // key — see static-cache.ts).
     Promise.all([waitForImages(), waitForPlanetImages(), waitForBackgroundImage()]).then(() => {
-        invalidateMainDialCache();
+        invalidateStaticCache();
         // Image load can complete after the loop has idled — kick it so the
         // first real frame draws.
         scheduleFrame();
         console.log('[Observatory] All images loaded');
+        // One-shot canvas-memory ledger, printed a beat after the
+        // image-arrival rebuild so sizes are final — the delay also lets the
+        // lazily-allocated earth-view masks (created on the first frame after
+        // the earth images arrive, a separate load) show up in the numbers.
+        setTimeout(() => {
+            const MB = (b: number) => (b / (1024 * 1024)).toFixed(1);
+            const screenB = canvas.width * canvas.height * 4;
+            const staticB = staticCacheSizeBytes();
+            const earthB = earthMaskSizeBytes();
+            const mapB = miniMapTextureSizeBytes();
+            const mem = (performance as unknown as { memory?: { usedJSHeapSize: number; totalJSHeapSize: number } }).memory;
+            const jsHeap = mem ? ` · JS heap (Chrome-only): ${MB(mem.usedJSHeapSize)}/${MB(mem.totalJSHeapSize)}MB` : '';
+            const build = typeof __BUILD_VERSION__ === 'string' ? __BUILD_VERSION__ : 'dev';
+            console.log(`[mem] build ${build} · observatory canvas est TOTAL ` +
+                `${MB(screenB + staticB + earthB + mapB)}MB: screen ${MB(screenB)} · ` +
+                `static cache ${MB(staticB)} · earth masks ${MB(earthB)} · ` +
+                `minimap texture ${MB(mapB)}${jsHeap}`);
+        }, 3000);
     });
 
     // Listen for Alt key transitions during active map dragging to dynamically

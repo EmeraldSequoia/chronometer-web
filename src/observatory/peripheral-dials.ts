@@ -1,8 +1,8 @@
 /**
  * Observatory peripheral dial backgrounds — static layer.
  *
- * Renders the Altitude, Azimuth and Equation-of-Time dial backgrounds into a
- * full-viewport OffscreenCanvas cache (redrawn only on resize), mirroring
+ * Renders the Altitude, Azimuth and Equation-of-Time dial backgrounds into the
+ * merged static cache (static-cache.ts, redrawn only on resize), like
  * `main-dial.ts`. The hands and planet labels are drawn dynamically each frame
  * by `peripheral-hands.ts`.
  *
@@ -307,38 +307,16 @@ function drawEclipseDial(ctx: Ctx2D, L: LayoutParams): void {
 }
 
 // ---------------------------------------------------------------------------
-// Static cache (full-viewport OffscreenCanvas at DPR), mirroring main-dial.ts
+// Combined draw (into the merged static cache — see static-cache.ts)
 // ---------------------------------------------------------------------------
 
-let staticCache: OffscreenCanvas | null = null;
-let cacheKey = '';
-
-function layoutKey(L: LayoutParams): string {
-    return `${L.viewW}x${L.viewH}:${L.altR.toFixed(1)}:${L.eotR.toFixed(1)}`;
-}
-
-/** Build/return the cached peripheral-dial background canvas. */
-export function getPeripheralDialsCache(L: LayoutParams): OffscreenCanvas {
-    const key = layoutKey(L);
-    if (staticCache && key === cacheKey) return staticCache;
-
-    const dpr = L.dpr;
-    staticCache = new OffscreenCanvas(L.viewW * dpr, L.viewH * dpr);
-    cacheKey = key;
-
-    const ctx = staticCache.getContext('2d')!;
-    ctx.scale(dpr, dpr);
-
+/**
+ * Draw all four peripheral dial backgrounds. Pure vector, no image or font
+ * loading — always ready. The caller has already applied the dpr scale.
+ */
+export function drawPeripheralDials(ctx: Ctx2D, L: LayoutParams): void {
     drawAltitudeDial(ctx, L);
     drawAzimuthDial(ctx, L);
     drawEOTDial(ctx, L);
     drawEclipseDial(ctx, L);
-
-    return staticCache;
-}
-
-/** Invalidate the cache (call on resize). */
-export function invalidatePeripheralDialsCache(): void {
-    staticCache = null;
-    cacheKey = '';
 }
