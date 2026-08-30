@@ -705,13 +705,13 @@ Simulator" caption:
   clipped to the Moon) drawn over it, plus the shadow outline.
 
 A translucent green overlay (`rgba(0,76,0,0.5)`) marks any below-horizon portion
-(see below); when the eclipse itself is below the horizon a "Below horizon" label
+(see below); once the eclipsed body has fully set a "Below horizon" label
 replaces the caption. Around the disc, five image markers ride the ring at
 RA-derived clock angles: Sun, Moon, Earth-shadow (anti-solar), and the
 ascending/descending lunar nodes. When the Sun and Moon markers coincide near a
 node, an eclipse is imminent.
 
-### Below-horizon overlay: apparent horizon + kind-gated caption (deliberate iOS divergence)
+### Below-horizon overlay: body-anchored apparent horizon + closure-gated caption (deliberate iOS divergence)
 
 **2026-08-18.** The disc is an angular map — bodies sit at their true relative
 alt/az offsets around the scene midpoint, and the horizon line is drawn at the
@@ -728,24 +728,49 @@ already geometrically right. Two things were not:
   links land in constantly — greatest eclipse for a partial is always on the
   terminator, so ~12 of the eclipse table's 70 solar rows sit in it.
 
-`horizonOverlayState(avgAlt, kind)` (exported from `eclipse-view.ts`, unit-tested
-in `src/observatory/__tests__/eclipse.test.ts`) fixes both:
+`horizonOverlayState(avgAlt, bodyAlt, bodyAngularRadius)` (exported from
+`eclipse-view.ts`, unit-tested in `src/observatory/__tests__/eclipse.test.ts`)
+fixes both:
 
-- **Overlay** — the line is drawn at the **apparent** altitude,
-  `avgAlt + kECRefractionAtHorizonX` (34′), in both the solar and lunar branches.
-  The constant, not an altitude-dependent formula (Sæmundsson/Bennett), because
-  34′ is the refraction convention the rest of the engine lives by:
-  `altitudeAtRiseSet`, and hence `calculateEclipse`'s "not up" test. That makes
-  the consequences exact by construction — at the engine's rise/set instant the
-  disc sits tangent above the line; at the caption flip the wash has *just*
-  closed over the top limb (apparent center = −SD), so there are no
-  sliver-visible-but-captioned states; and true altitude −34′ draws the line
-  through the disc center, i.e. halfway looks halfway.
-- **Caption** — gated on the eclipse kind (`SolarNotUp`/`LunarNotUp`) rather than
-  the pixel position, so EO's label and Basel's wheel flip on the same tick of
-  the same `calculateEclipse` classification, with the same topocentric
-  altitudes. The wash keeps its own independent life: it can cover part of a disc
-  with no caption — that is the point of it.
+- **Overlay** — the line is drawn at the **apparent** horizon, **anchored to
+  the drawn primary body** (2026-08-30, after a field report; previously the
+  scene-midpoint altitude):
+  `horizonPixelY = −(bodyAlt + kECRefractionAtHorizonX)·ppar − bodyPixelY` in
+  both branches — wherever the composition drew the Sun/Moon *is* its true
+  altitude. The 34′ constant, not an altitude-dependent formula
+  (Sæmundsson/Bennett), because it is the refraction convention the rest of
+  the engine lives by: `altitudeAtRiseSet`, and hence `calculateEclipse`'s
+  "not up" test. Body-anchoring makes the consequences exact by construction
+  in *both* branches — `bodyPixelY` cancels out of the closure test, so the
+  drawn top limb meets the line exactly at `bodyAlt = −(34′ + SD)`: at the
+  engine's rise/set instant the drawn body sits tangent above the line; at
+  the caption flip the wash has *just* closed over it (no
+  sliver-visible-but-captioned states, pixel-exactly); and true body altitude
+  −34′ draws the line through the body's center, i.e. halfway looks halfway.
+  The midpoint anchor had let the lunar composition offset (next paragraph)
+  push a drawn sliver of Moon above the wash while the caption was up —
+  observed in the field at 2026-08-28T02:35:54Z within hours of the caption
+  fix.
+- **Caption** — shown exactly when the wash has fully closed over the *primary*
+  body (the Sun on the solar side, the Moon on the lunar):
+  `bodyAlt + 34′ + bodyAngularRadius ≤ 0`, which is the engine's topocentric
+  rise/set altitude (`altitudeAtRiseSet`, `wantGeocentricAltitude=false`) — the
+  Sun captions below ≈ −0.83°…−0.84° true altitude, the Moon below
+  ≈ −0.81°…−0.85°. The wash keeps its own independent life: during the rise/set
+  transition it can cover part of a disc with no caption — that is the point of
+  it.
+
+  **2026-08-28.** The caption was originally (2026-08-18) gated on the eclipse
+  *kind* (`SolarNotUp`/`LunarNotUp`) for exact parity with Basel's wheel. That
+  was the wrong anchor: `EclipseKind` is a wheel **display value**, and
+  `calculateEclipse` ends with the needle-pegging override (iOS "override
+  possible not-up if needle is pegged") that rewrites `SolarNotUp`/`LunarNotUp`
+  to `NoneSolar`/`NoneLunar` whenever `abstractSeparation` pegs at 3 — above
+  separation ≈ 1.06° (solar) / 1.48° (lunar), while the disc keeps drawing to
+  ≈ 1.91° / 2.59°. In that dead band the caption was structurally impossible:
+  fully-green discs sat uncaptioned for hours (at San Jose the caption showed
+  for only 68 of the ~1300 min/yr the scene was fully set). See
+  [planning/2026-08-28-eclipse-below-horizon-caption.md](../planning/2026-08-28-eclipse-below-horizon-caption.md).
 
 Accepted approximations: the uniform 34′ lift overstates refraction away from
 the horizon (real refraction at +1° true altitude is ~21′, so a disc a degree up
@@ -754,14 +779,26 @@ vanishing exactly at rise/set tangency and the caption flip; one straight line a
 the *average* apparent altitude, ignoring differential refraction across the ≤1°
 scene; and no refracted flattening (the real setting Sun is ~20% vertically
 squashed). The existing placement fudges (`az×cos(alt)`, linear alt/az mapping)
-are unchanged.
+are unchanged — including the lunar branch's composition offset: the Moon is
+drawn at `sinθ·(sep − shadowR)·ppar/2` (the action centered, not the altitude
+map). Under the body anchor that offset is absorbed entirely by the **umbra
+outline** — a geometric construct nobody can see in the sky — which can sit up
+to `sinθ·shadowR` (~50 px at reference scale, worst inclination) off its
+altitude-map position relative to the wash; the Moon's own coverage is exact.
+In the solar branch the dark Moon silhouette absorbs a sub-pixel error the
+same way. And the caption's topocentric radii differ from the engine's
+geocentric not-up test by ≤ ~0.3′ (Moon), so around moonset the Basel wheel
+can read "Moon not up" for up to about a minute while the disc still shows —
+correctly — a last sliver above the wash.
 
-iOS `EOEclipseView.mm:292–308` has the original fill and `horizonPixelY > 0`
-label logic and needs the mirror change. Like the topocentric eclipse sizes and
-the ΔT work, this is the original author correcting the shared algorithm here
-first, not a port simplification (see
+iOS received the 2026-08-18 wash + kind-gated caption via the horizon back-port
+(Observatory `1f0bf05`, 2026-08-20), so it now carries the kind-gate bug and
+needs a follow-up mirror of the closure gate. Like the topocentric eclipse
+sizes and the ΔT work, this is the original author correcting the shared
+algorithm here first, not a port simplification (see
 [Development Rules §2](development-rules.md#2-never-simplify-ios-algorithms)).
-See [planning/2026-08-18-eclipse-horizon-indicator.md](../planning/2026-08-18-eclipse-horizon-indicator.md).
+See [planning/2026-08-18-eclipse-horizon-indicator.md](../planning/2026-08-18-eclipse-horizon-indicator.md)
+and [planning/2026-08-28-eclipse-below-horizon-caption.md](../planning/2026-08-28-eclipse-below-horizon-caption.md).
 
 ### Animation-friendly via shared-sentinel obs-values
 

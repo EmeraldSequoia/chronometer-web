@@ -1,6 +1,12 @@
 # EO eclipse simulator: physical horizon + Basel-matched "Below horizon"
 
-**Status**: **IMPLEMENTED 2026-08-18** (commit f5c7a75) — landed as §9
+**Status**: **IMPLEMENTED 2026-08-18** (commit f5c7a75); **§3b (the
+kind-gated caption) superseded 2026-08-28** — the kind gate inherited
+`calculateEclipse`'s needle-pegging override, which made the caption
+unreachable across a wide band where the disc still draws; replaced by a
+wash-closure gate, see
+[2026-08-28-eclipse-below-horizon-caption.md](2026-08-28-eclipse-below-horizon-caption.md).
+§3a (the wash geometry) stands. — landed as §9
 specified: `horizonOverlayState` helper exactly per §3c (engine-constant
 refraction, caption gated on `SolarNotUp`/`LunarNotUp`), unit tests with the
 §8 fixture table added to `src/observatory/__tests__/eclipse.test.ts`, and

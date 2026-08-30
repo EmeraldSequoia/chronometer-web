@@ -1,6 +1,12 @@
 # iOS back-port: Observatory eclipse-simulator horizon indicator
 
-**Status**: **implemented in the clones 2026-08-20** (§7 — Observatory
+**Status**: **implemented in the clones 2026-08-20**; **caption half
+superseded 2026-08-28** — the web replaced the kind-gated caption with a
+wash-closure gate (see
+[2026-08-28-eclipse-below-horizon-caption.md](2026-08-28-eclipse-below-horizon-caption.md)),
+so Observatory `1f0bf05` needs a follow-up mirror covering both halves:
+the caption gate and (2026-08-30, plan §12) the wash anchor, now the drawn
+primary body rather than the scene midpoint — (§7 — Observatory
 plus a small esastro header move Steve requested); committed by Steve
 (Observatory `1f0bf05`, esastro `cec5f1c`) and pushed to the `transfer`
 bare repos. Originally: proposed — **for

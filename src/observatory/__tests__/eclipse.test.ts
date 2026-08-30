@@ -7,9 +7,14 @@
  *  (b) the EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION resolver: ~1 s while the
  *      disc is shown (separation < 10°), and a capped (≤1 h) interval that never
  *      overshoots the threshold crossing while only the caption is up.
- *  (c) horizonOverlayState: the refraction lift the green below-horizon wash is
- *      drawn at, and the kind-gated "Below horizon" caption
- *      (planning/2026-08-18-eclipse-horizon-indicator.md).
+ *  (c) horizonOverlayState: the refraction lift the green below-horizon wash
+ *      is drawn at (planning/2026-08-18-eclipse-horizon-indicator.md), the
+ *      body-anchored wash line that makes caption ⟺ painted closure an exact
+ *      identity (plan-08-28 §12), and the "Below horizon" caption that flips
+ *      exactly when the wash closes over the eclipsed body — NOT on the
+ *      eclipse kind, whose needle-pegging override made the caption
+ *      unreachable while the disc still drew
+ *      (planning/2026-08-28-eclipse-below-horizon-caption.md).
  */
 import { describe, test, expect } from 'vitest';
 import {
@@ -25,7 +30,13 @@ import { createAstroEnvironment } from '../../shared/astro-env';
 import { makeOverridableGetNow, type TimingContext } from '../../shared/updater';
 import { buildObsValues } from '../obs-values';
 import { horizonOverlayState } from '../eclipse-view';
-import { kECRefractionAtHorizonX } from '../../astronomy/astro-constants';
+import { kECRefractionAtHorizonX, ECPlanetNumber } from '../../astronomy/astro-constants';
+import {
+    altitudeAtRiseSet,
+    distanceOfPlanetInAU,
+    planetSizeAndParallax,
+} from '../../astronomy/es-coordinates';
+import { julianCenturiesSince2000EpochForDateInterval } from '../../astronomy/es-time';
 
 function appleEpoch(date: Date): number {
     return date.getTime() / 1000 - 978307200;
@@ -35,6 +46,37 @@ function toRad(deg: number): number {
 }
 
 const THRESHOLD = Math.PI / 18;  // 10°
+
+const SUN_SD_DEG = 0.271;              // solar semidiameter, ≈ 16.3′
+const SUN_SD = toRad(SUN_SD_DEG);
+
+// Port constants + the angular-radius mirror of eclipse-view.ts:82-85 —
+// deliberately duplicated rather than imported: the mirror IS the assertion
+// that the view's math is what these tests think it is.
+const AU_KM = 149600000.0;
+const LUNAR_RADIUS_KM = 1737.10;
+const SOLAR_RADIUS_KM = 695500;
+const moonAngR = (distAU: number) => Math.atan(LUNAR_RADIUS_KM / (distAU * AU_KM));
+const sunAngR = (distAU: number) => Math.atan(SOLAR_RADIUS_KM / (distAU * AU_KM));
+
+/**
+ * Build the real Observatory obs-value updater at a frozen instant and run one
+ * 1×-forward tick (mirrors observatory-entry's bootstrap). Shared by the
+ * sentinel, disc-radius, and caption-regression describes.
+ */
+function tickedObsValues(iso: string, latDeg: number, lonDeg: number) {
+    const base = () => new Date(iso);
+    const { getNow, withDisplayTime } = makeOverridableGetNow(base);
+    const env = createAstroEnvironment(latDeg, lonDeg, getNow);
+    // Variables other Observatory defs reference (mirrors observatory-entry).
+    env.variables.set('noonOnTop', 0);
+    env.variables.set('dialPlanet', 0);
+    const perfNow = performance.now();
+    const updater = buildObsValues(env, perfNow, getNow);
+    const ctx: TimingContext = { tickIntervalMs: null, displayDeltaSec: 0, direction: 1 };
+    updater.tick(env, perfNow, getNow, withDisplayTime, ctx);
+    return { updater, getNow };
+}
 
 describe('calculateEclipse — known events', () => {
     test('2026-08-12 total solar eclipse: small separation, solar kind', () => {
@@ -114,23 +156,10 @@ describe('eclipse sentinel — end-to-end through the updater', () => {
     // Schedule eclSeparation once at a given time/location and return the gap
     // (ms) between its next-update display time and "now".
     function scheduledGapMs(iso: string, latDeg: number, lonDeg: number): number {
-        const base = () => new Date(iso);
-        const { getNow, withDisplayTime } = makeOverridableGetNow(base);
-        const env = createAstroEnvironment(latDeg, lonDeg, getNow);
-        // Variables other Observatory defs reference (mirrors observatory-entry).
-        env.variables.set('noonOnTop', 0);
-        env.variables.set('dialPlanet', 0);
-        const perfNow = performance.now();
-        const updater = buildObsValues(env, perfNow, getNow);
-
-        // Sanity: the value really is registered on the eclipse sentinel.
+        const { updater, getNow } = tickedObsValues(iso, latDeg, lonDeg);
         const v = updater.get('eclSeparation');
+        // Sanity: the value really is registered on the eclipse sentinel.
         expect(v.updateInterval).toBe(EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION);
-
-        // One 1×-forward tick (no scrub) — schedules nextUpdateDisplayTime.
-        const ctx: TimingContext = { tickIntervalMs: null, displayDeltaSec: 0, direction: 1 };
-        updater.tick(env, perfNow, getNow, withDisplayTime, ctx);
-
         return v.nextUpdateDisplayTime - getNow().getTime();
     }
 
@@ -155,26 +184,12 @@ describe('simulator discs are sized topocentrically', () => {
     // has already labelled Total — an annulus at a total eclipse
     // (planning/2026-08-16-topocentric-eclipse-sizes.md). Geocentrically the
     // hybrids below give moon/sun ≈ 0.998–0.9998; topocentrically ≈ 1.014–1.016.
-    const AU_KM = 149600000.0;              // as eclipse-view.ts:80-82
-    const LUNAR_RADIUS_KM = 1737.10;
-    const SOLAR_RADIUS_KM = 695500;
-
     /** Drive the real obs-values once and reproduce eclipse-view's disc radii. */
     function discRadii(iso: string, latDeg: number, lonDeg: number) {
-        const base = () => new Date(iso);
-        const { getNow, withDisplayTime } = makeOverridableGetNow(base);
-        const env = createAstroEnvironment(latDeg, lonDeg, getNow);
-        env.variables.set('noonOnTop', 0);
-        env.variables.set('dialPlanet', 0);
-        const perfNow = performance.now();
-        const updater = buildObsValues(env, perfNow, getNow);
-        const ctx: TimingContext = { tickIntervalMs: null, displayDeltaSec: 0, direction: 1 };
-        updater.tick(env, perfNow, getNow, withDisplayTime, ctx);
-        const moonDist = updater.get('eclMoonDist').currentValue;
-        const sunDist = updater.get('eclSunDist').currentValue;
+        const { updater } = tickedObsValues(iso, latDeg, lonDeg);
         return {
-            moonR: Math.atan(LUNAR_RADIUS_KM / (moonDist * AU_KM)),   // eclipse-view.ts:233-234
-            sunR: Math.atan(SOLAR_RADIUS_KM / (sunDist * AU_KM)),
+            moonR: moonAngR(updater.get('eclMoonDist').currentValue),
+            sunR: sunAngR(updater.get('eclSunDist').currentValue),
             kind: Math.round(updater.get('eclKind').currentValue) as EclipseKind,
         };
     }
@@ -207,85 +222,138 @@ describe('simulator discs are sized topocentrically', () => {
 describe('horizonOverlayState — refraction lift', () => {
     const toDeg = (rad: number) => rad * 180 / Math.PI;
     const REFRACTION_DEG = 34 / 60;        // 0.5667° — the engine's convention
-    const SUN_SD_DEG = 0.271;              // solar semidiameter, ≈ 16.3′
+    const SD = SUN_SD;                     // body radius arg (lift ignores it)
 
-    // The §8 fixture table of planning/2026-08-18-eclipse-horizon-indicator.md.
-    // "apparent" is what the wash is drawn at; positive = line below the disc
-    // center (part of the scene still up), negative = line above it.
+    // The §8 fixture table of planning/2026-08-18-eclipse-horizon-indicator.md,
+    // re-anchored to the primary body (plan-08-28 §12): trueAlt is the BODY's
+    // altitude, and "apparent" is where the wash line sits relative to the
+    // drawn body; positive = line below the body (still up), negative = above.
     test.each([
         ['2014-04-29 row: fully visible, small gap below', -0.202, 0.365],
         ['2011-01-04 row: bottom limb ~1′ above the line', -0.274, 0.293],
-        ['halfway: line through the disc center', -0.567, 0.000],
+        ['halfway: line through the body center', -0.567, 0.000],
         ['caption flip: wash just closes over the top limb', -0.838, -0.271],
         ['well set: fully green', -1.500, -0.933],
     ])('%s', (_label, trueAltDeg, expectedApparentDeg) => {
-        const { apparentAvgAlt } = horizonOverlayState(
-            (trueAltDeg as number) * Math.PI / 180, EclipseKind.PartialSolar);
-        expect(toDeg(apparentAvgAlt)).toBeCloseTo(expectedApparentDeg as number, 2);
+        const bodyAlt = (trueAltDeg as number) * Math.PI / 180;
+        const { apparentBodyAlt } = horizonOverlayState(bodyAlt, SD);
+        expect(toDeg(apparentBodyAlt)).toBeCloseTo(expectedApparentDeg as number, 2);
     });
 
-    test('true alt −34′ maps exactly to the disc center (half covered)', () => {
-        const { apparentAvgAlt } = horizonOverlayState(
-            -kECRefractionAtHorizonX, EclipseKind.PartialSolar);
-        expect(apparentAvgAlt).toBeCloseTo(0, 12);
-    });
-
-    test('at the kind-flip altitude the line sits exactly one semidiameter above center', () => {
-        // calculateEclipse calls the Sun "not up" below −(34′ + SD)
-        // (altitudeAtRiseSet). The wash must have *just* closed over the top
-        // limb there — i.e. apparent center = −SD — so no sliver is visible
-        // under a "Below horizon" caption, and none is hidden without one.
-        const sd = SUN_SD_DEG * Math.PI / 180;
-        const { apparentAvgAlt } = horizonOverlayState(
-            -(kECRefractionAtHorizonX + sd), EclipseKind.SolarNotUp);
-        expect(apparentAvgAlt).toBeCloseTo(-sd, 12);
+    test('true alt −34′ puts the line exactly through the body center (half covered)', () => {
+        const { apparentBodyAlt } = horizonOverlayState(-kECRefractionAtHorizonX, SD);
+        expect(apparentBodyAlt).toBeCloseTo(0, 12);
     });
 
     test('the lift is unconditional (high altitudes shift too, harmlessly off-disc)', () => {
         const high = 45 * Math.PI / 180;
-        const { apparentAvgAlt } = horizonOverlayState(high, EclipseKind.NoneSolar);
-        expect(toDeg(apparentAvgAlt)).toBeCloseTo(45 + REFRACTION_DEG, 6);
-    });
-
-    test('lunar branch: same lift (the shadow/Moon midpoint is fed the same way)', () => {
-        // e.g. Moon at +0.30°, anti-solar shadow point at −0.90° → midpoint −0.30°.
-        const mid = ((0.30 + -0.90) / 2) * Math.PI / 180;
-        const { apparentAvgAlt } = horizonOverlayState(mid, EclipseKind.PartialLunar);
-        expect(toDeg(apparentAvgAlt)).toBeCloseTo(-0.30 + REFRACTION_DEG, 6);
+        const { apparentBodyAlt } = horizonOverlayState(high, SD);
+        expect(toDeg(apparentBodyAlt)).toBeCloseTo(45 + REFRACTION_DEG, 6);
     });
 });
 
-describe('horizonOverlayState — "Below horizon" tracks the eclipse kind', () => {
-    // The caption is gated on the same calculateEclipse classification Basel's
-    // wheel renders (legacyEclipseKind), not on the wash's pixel position — so
-    // the two apps flip on the same tick of the same function.
-    test.each([
-        [EclipseKind.SolarNotUp, true],
-        [EclipseKind.LunarNotUp, true],
-        [EclipseKind.NoneSolar, false],
-        [EclipseKind.NoneLunar, false],
-        [EclipseKind.PartialSolar, false],
-        [EclipseKind.AnnularSolar, false],
-        [EclipseKind.TotalSolar, false],
-        [EclipseKind.PartialLunar, false],
-        [EclipseKind.TotalLunar, false],
-    ])('kind %s → showLabel %s', (kind, expected) => {
-        expect(horizonOverlayState(0, kind as EclipseKind).showLabel).toBe(expected);
+describe('horizonOverlayState — "Below horizon" flips at wash closure over the body', () => {
+    // Caption predicate: bodyAlt + 34′ + bodyRadius ≤ 0 — the engine's
+    // topocentric rise/set altitude. Why it is deliberately NOT gated on the
+    // EclipseKind: see the horizonOverlayState docstring and
+    // planning/2026-08-28-eclipse-below-horizon-caption.md.
+    const SD = SUN_SD;
+    const FLIP = -(kECRefractionAtHorizonX + SD);   // ≈ −0.838° true altitude
+    const EPS = 1e-6;
+
+    test('the flip altitude is pinned to the engine rise/set convention', () => {
+        // The predicate re-derives altitudeAtRiseSet(…, geocentric=false) =
+        // −34′ − angularDiameter/2. If that convention ever changes shape (a
+        // new refraction model, a parallax/dip term), the caption must move
+        // with it: fed the engine's own radius, the flip must sit exactly at
+        // the engine's rise/set altitude.
+        const t = appleEpoch(new Date('2026-08-28T01:00:00Z'));
+        const { julianCenturiesSince2000Epoch: jcse } =
+            julianCenturiesSince2000EpochForDateInterval(t, null);
+        for (const planet of [ECPlanetNumber.Sun, ECPlanetNumber.Moon]) {
+            const altRS = altitudeAtRiseSet(jcse, planet, false, null);
+            const dist = distanceOfPlanetInAU(planet, jcse, null);
+            const angR = planetSizeAndParallax(planet, dist).angularSize / 2;
+            expect(-(kECRefractionAtHorizonX + angR)).toBeCloseTo(altRS, 15);
+            expect(horizonOverlayState(altRS - 1e-9, angR).showLabel).toBe(true);
+            expect(horizonOverlayState(altRS + 1e-9, angR).showLabel).toBe(false);
+        }
+    });
+
+    test('at −(34′+SD) the line sits one semidiameter above the body and the caption just flips', () => {
+        // The wash has *just* closed over the top limb — apparent body center
+        // = −SD — at the same altitude the caption appears: no sliver is
+        // visible under a "Below horizon" caption, and none is hidden without one.
+        const { apparentBodyAlt, showLabel } = horizonOverlayState(FLIP, SD);
+        expect(apparentBodyAlt).toBeCloseTo(-SD, 12);
+        expect(showLabel).toBe(true);
+        expect(horizonOverlayState(FLIP + EPS, SD).showLabel).toBe(false);
+        expect(horizonOverlayState(FLIP - EPS, SD).showLabel).toBe(true);
     });
 
     test('the wash and the caption are independent: partly covered, no caption', () => {
-        // Sun half set (apparent center on the line) is still a Partial to the
-        // engine — the green covers half the disc with no "Below horizon".
-        const { apparentAvgAlt, showLabel } = horizonOverlayState(
-            -kECRefractionAtHorizonX, EclipseKind.PartialSolar);
-        expect(apparentAvgAlt).toBeCloseTo(0, 12);
+        // Body half set (apparent center on the line): the green covers half
+        // of it with no "Below horizon" — the transition band keeps its life.
+        const { apparentBodyAlt, showLabel } = horizonOverlayState(
+            -kECRefractionAtHorizonX, SD);
+        expect(apparentBodyAlt).toBeCloseTo(0, 12);
         expect(showLabel).toBe(false);
     });
 
-    test('a below-horizon kind captions regardless of the midpoint altitude', () => {
-        // The Sun can be below its rise/set altitude while the Sun+Moon midpoint
-        // still computes above it (the Moon is the higher of the pair). The
-        // caption follows the kind; the wash follows the geometry.
-        expect(horizonOverlayState(0.5 * Math.PI / 180, EclipseKind.SolarNotUp).showLabel).toBe(true);
+    test('caption ⟺ drawn closure, wherever the composition put the body (plan §12)', () => {
+        // The call sites anchor the wash line to the drawn body:
+        //   washLineY = apparentBodyAlt·ppar + bodyPixelY
+        // so the drawn top limb (bodyPixelY − r) reaches the line exactly when
+        // the caption predicate flips — bodyPixelY cancels. Assert the identity
+        // in pixel space across composition offsets (the lunar branch draws the
+        // Moon up to sinθ·shadowR/2 off the altitude map) and altitudes.
+        const ppar = 20 / Math.atan(1737.10 / 355000.0);   // eclipse-view.ts:87-91
+        const r = SD * ppar;
+        for (const bodyPixelY of [-30, -8.5, 0, 8.5, 30]) {
+            for (const dAlt of [-0.05, -0.002, 0, 0.002, 0.05]) {
+                const bodyAlt = FLIP + toRad(dAlt);
+                const h = horizonOverlayState(bodyAlt, SD);
+                const washLineY = h.apparentBodyAlt * ppar + bodyPixelY;
+                const drawnClosed = bodyPixelY - r >= washLineY - 1e-9;
+                expect(drawnClosed).toBe(h.showLabel);
+            }
+        }
+    });
+});
+
+describe('caption regression — the kind gate broke on the needle-pegging override', () => {
+    // Two fully-green discs the old kind-gated caption missed (the pegging
+    // override — see the horizonOverlayState docstring — had rewritten the
+    // NotUp kinds to None… while the disc still drew). Guards against
+    // re-anchoring the caption to the kind. Values cross-checked against a
+    // probe replay of drawEclipseView (plan doc §1).
+
+    /** Drive the real obs-values once and mirror the drawEclipseView call sites. */
+    function captionInputs(iso: string, latDeg: number, lonDeg: number) {
+        const { updater } = tickedObsValues(iso, latDeg, lonDeg);
+        return {
+            kind: Math.round(updater.get('eclKind').currentValue) as EclipseKind,
+            separation: updater.get('eclSeparation').currentValue,
+            sunAlt: updater.get('eclSunAlt').currentValue,
+            moonAlt: updater.get('eclMoonAlt').currentValue,
+            sunAngR: sunAngR(updater.get('eclSunDist').currentValue),
+            moonAngR: moonAngR(updater.get('eclMoonDist').currentValue),
+        };
+    }
+
+    test('lunar branch: Moon 19° down, kind pegged to NoneLunar — caption ON', () => {
+        const v = captionInputs('2026-08-28T01:00:00Z', 37.2, -121.9);
+        expect(v.kind).toBe(EclipseKind.NoneLunar);            // pegged, NOT LunarNotUp
+        expect(v.separation).toBeLessThan(THRESHOLD);          // the disc is drawn
+        expect(v.moonAlt).toBeLessThan(toRad(-15));
+        expect(horizonOverlayState(v.moonAlt, v.moonAngR).showLabel).toBe(true);
+    });
+
+    test('solar branch: Sun set all night, kind pegged to NoneSolar — caption ON', () => {
+        const v = captionInputs('2026-03-19T02:20:00Z', 37.2, -121.9);
+        expect(v.kind).toBe(EclipseKind.NoneSolar);            // pegged, NOT SolarNotUp
+        expect(v.separation).toBeLessThan(THRESHOLD);
+        expect(v.sunAlt).toBeLessThan(toRad(-1));
+        expect(horizonOverlayState(v.sunAlt, v.sunAngR).showLabel).toBe(true);
     });
 });

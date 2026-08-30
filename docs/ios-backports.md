@@ -155,7 +155,14 @@ committed esastro 0a6023b and Chronometer beed32a, both pushed to
 `transfer`.
 **All four planned back-ports have now landed** in the clones and the
 `transfer` bare repos, so the batched outside GitHub push and on-device
-testing (deferred by decision of 2026-08-20) are unblocked. Remaining
+testing (deferred by decision of 2026-08-20) are unblocked.
+*2026-08-28 caveat*: the caption half of the horizon back-port is now
+superseded — the web replaced the kind-gated "Below horizon" caption with
+a wash-closure gate
+([planning/2026-08-28-eclipse-below-horizon-caption.md](../planning/2026-08-28-eclipse-below-horizon-caption.md)),
+so Observatory `1f0bf05` carries the kind-gate bug and needs a follow-up
+mirror; 2026-08-30 the wash anchor also moved (scene midpoint → drawn
+primary body, plan §12), so the follow-up mirrors both halves. Remaining
 steps, all Steve's, all outside the VM: re-copy the esastro,
 Chronometer, and Observatory bare repos out (their earlier copies
 predate their latest commits; estime's copy is current, eslocation has
