@@ -16,7 +16,7 @@ import { initAppState, getState, setState } from './shared/app-state.js';
 import { locationSourceOf } from './shared/url-state.js';
 import type { LocationSource } from './shared/url-state.js';
 import { registerHotkey } from './shared/hotkeys.js';
-import { initAppNavLinks, registerAppNavHotkeys } from './shared/app-nav.js';
+import { initAppNavLinks, markChronometerPage, registerAppNavHotkeys } from './shared/app-nav.js';
 import { openGeneralHelpTopic } from './shared/help-popover.js';
 import { requestBrowserLocation, watchBrowserLocation } from './shared/geolocation.js';
 
@@ -435,6 +435,7 @@ document.querySelectorAll('#other-apps-section .other-app[data-app="chronometer"
 
 // No time controller here, so there is no state to flush before navigating.
 // Key table: help.html#hotkeys.
+markChronometerPage();
 initAppNavLinks();
 registerAppNavHotkeys();
 registerHotkey('h', () => document.getElementById('info-btn')?.click());

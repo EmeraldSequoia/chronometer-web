@@ -16,12 +16,13 @@
 import { FACES } from './faces/generated/faces-list.js';
 import { updateDynamicCompositeIcon } from './shared/composite-icon.js';
 import { initAppState, getState, setState } from './shared/app-state.js';
-import { registerAppNavHotkeys } from './shared/app-nav.js';
+import { markChronometerPage, registerAppNavHotkeys } from './shared/app-nav.js';
 
 initAppState({ app: 'pick' });
 
 // Cross-app navigation hotkeys (i/o/c/a) only — the pick page has no header
 // app icons, time controller, or help popup. Key table: help.html#hotkeys.
+markChronometerPage();
 registerAppNavHotkeys();
 
 const faceByAbbrev = new Map(FACES.map(f => [f.abbrev, f]));

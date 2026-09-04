@@ -181,7 +181,10 @@ Every app is reachable from every other app (see [help-system.md](help-system.md
   data-page="<app-name>.html"`) to the top-right cluster of the other apps'
   pages, and give the new page its own cluster. Hrefs and the pre-navigation
   time-state flush are wired by `initAppNavLinks()` in `src/shared/app-nav.ts`
-  (clean URLs in storage mode — see that module's header comment).
+  (clean URLs in storage mode — see that module's header comment). Note the
+  Chronometer target is special: `appNavHref('index.html')` substitutes the
+  tab's last-viewed Chronometer page, recorded via `markChronometerPage()` —
+  a multi-page app added later would follow that pattern.
 - **Hotkey** — register a navigation key in `registerAppNavHotkeys()`
   (`src/shared/app-nav.ts`) and document it in `help.html`'s Keyboard
   Shortcuts section and the README table. Wire the page-local keys

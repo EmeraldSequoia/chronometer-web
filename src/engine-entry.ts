@@ -61,7 +61,7 @@ import { getState, setState, initAppState, onSharedChange, getSlotOverrides, set
 import { createFpsIndicator } from './shared/fps-indicator.js';
 import { initHelpPopover, openGeneralHelpTopic } from './shared/help-popover.js';
 import { registerHotkey } from './shared/hotkeys.js';
-import { initAppNavLinks, registerAppNavHotkeys } from './shared/app-nav.js';
+import { initAppNavLinks, markChronometerPage, registerAppNavHotkeys } from './shared/app-nav.js';
 import { initFullscreenToggle } from './shared/fullscreen.js';
 import { initShareButton } from './shared/share-button.js';
 import { loadCityData, prefetchCityData, releaseCityData, searchCities, findClosestCity, isCityDataLoaded, loadError } from './shared/city-search.js';
@@ -3058,6 +3058,7 @@ async function main() {
     // Skipped in embed mode: the chrome is removed and hotkeys must not
     // navigate the host page's iframe. Key table: help.html#hotkeys.
     if (!isEmbedMode) {
+        markChronometerPage();
         initAppNavLinks(writeTimeState);
         registerAppNavHotkeys(writeTimeState);
         registerHotkey('h', () => document.getElementById('info-btn')?.click());
