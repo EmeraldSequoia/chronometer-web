@@ -110,6 +110,23 @@ default `writeTimeState` persists `t`/`off`/`dir` via `app-state` (LocalStorage,
 shared with the other apps), so Observatory shares the time as well as the
 location — and shared links round-trip both.
 
+### Location timezone and the city database
+
+Startup resolves the location's zone with `resolveTimezoneProvisional`: a
+stored/link `tz` or the nearest database city is confident; with the database
+not resident (it is parsed lazily) the browser's zone is used as a
+*provisional* backstop and `ensureTzResolved()` corrects it once the database
+is available (from the location-name reverse-geocode's own parse when there is
+one, otherwise a parse of its own), then `updater.reset()` + `rebuildEnv()` —
+the same apply sequence as a dialog pick — and persists the corrected zone
+when storage has none. See [Timezone & DST](timezone-and-dst.md).
+
+Parsed-database residency follows one-shot use: the reverse-geocode releases
+it after labelling the location; drag-to-explore parses it on the first press
+and keeps it through the Keep/Revert modal (a map press while the modal is up
+resumes the drag), and `dismissKeepDialog` — the only transition back to idle
+— releases it. The location dialog owns it while open.
+
 ### Render loop idling
 
 `tick()` re-requests `requestAnimationFrame` only while the loop is doing useful

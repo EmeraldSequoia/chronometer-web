@@ -1,36 +1,61 @@
 /**
  * Timezone resolver — determines the IANA timezone for a given location.
  *
- * Two tiers:
+ * Tiers:
  *  1. If a city was selected from search, use its known timezone.
  *  2. Otherwise, use the closest city in our GeoNames database.
- *  3. Last resort: browser timezone.
+ *  3. Last resort: the browser's zone.
+ *
+ * Tier 3 is a GUESS, not a property of the location: the city database is
+ * parsed lazily, so a location resolved while it is not resident gets the
+ * browser's zone. Such a result is *provisional* — it must never be persisted
+ * as the location's tz (a stored browser zone would poison every later load)
+ * and must be re-resolved once the database is available (see
+ * resolveTimezoneFromDb and each app's ensureTzResolved). resolveTimezone()
+ * is the convenience form for callers that only need the zone;
+ * resolveTimezoneProvisional() also says whether it is a guess.
  */
 
 import { findClosestCity, loadCityData, isCityDataLoaded } from './city-search';
 
+export interface TzResolution {
+    /** IANA timezone string (e.g. "America/Los_Angeles"). */
+    tz: string;
+    /** True when `tz` is the browser-zone fallback (tier 3) — do not persist. */
+    provisional: boolean;
+}
+
 /**
- * Resolve the IANA timezone for a location.
+ * Resolve the IANA timezone for a location, reporting whether the answer is a
+ * confident one (city pick / nearest DB city) or the browser-zone fallback.
  *
  * @param lat       Latitude in degrees
  * @param lon       Longitude in degrees
  * @param cityTz    If the user selected a city from search, that city's timezone; otherwise null
- * @returns         IANA timezone string (e.g. "America/Los_Angeles")
+ */
+export function resolveTimezoneProvisional(lat: number, lon: number, cityTz: string | null): TzResolution {
+    // Tier 1: explicit city timezone from search selection
+    if (cityTz) return { tz: cityTz, provisional: false };
+
+    // Tier 2: closest city in our 167K-city database (null while unparsed)
+    const closest = findClosestCity(lat, lon);
+    if (closest?.timezone) return { tz: closest.timezone, provisional: false };
+
+    // Tier 3: browser timezone fallback — a guess
+    try {
+        return { tz: Intl.DateTimeFormat().resolvedOptions().timeZone, provisional: true };
+    } catch {
+        return { tz: 'Etc/UTC', provisional: true };
+    }
+}
+
+/**
+ * Resolve the IANA timezone for a location (see resolveTimezoneProvisional for
+ * the tiers). Callers that persist the result must check `provisional` via
+ * resolveTimezoneProvisional instead.
  */
 export function resolveTimezone(lat: number, lon: number, cityTz: string | null): string {
-    // Tier 1: explicit city timezone from search selection
-    if (cityTz) return cityTz;
-
-    // Tier 2: closest city in our 167K-city database
-    const closest = findClosestCity(lat, lon);
-    if (closest?.timezone) return closest.timezone;
-
-    // Tier 3: browser timezone fallback
-    try {
-        return Intl.DateTimeFormat().resolvedOptions().timeZone;
-    } catch {
-        return 'Etc/UTC';
-    }
+    return resolveTimezoneProvisional(lat, lon, cityTz).tz;
 }
 
 /**

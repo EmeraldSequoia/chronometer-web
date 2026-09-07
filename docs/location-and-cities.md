@@ -20,11 +20,33 @@ location, the system checks in this order:
 detected from the browser's `Intl.DateTimeFormat` API. No geolocation prompt
 is shown and the city database is not loaded. See [Embedding](embedding.md).
 
+### Timezone resolution
+
+The location's timezone comes, in order, from the stored/link `tz`, a city
+pick's own zone, or the nearest database city. When none of those is available
+at startup — a lat/lon-only link, or stored coordinates without a zone, with
+the city database not yet parsed — the browser's zone is used as a
+*provisional* backstop (`resolveTimezoneProvisional` reports this) and each
+app's `ensureTzResolved()` corrects it from the database as soon as it is
+parsed, applying it as a location change (Terra/Gaia re-derive their observer
+slots) and persisting only the database-derived zone, in persistent mode, when
+storage has none. This applies to Chronometer, Observatory and Inspector alike;
+the index page deliberately leaves `tz` unset when it cannot be confident and
+lets the face resolve it. Details in [Timezone & DST](timezone-and-dst.md).
+
 The resolved city name follows this priority:
 1. `locationSource` (from city-picker or URL `city=` param)
 2. `findClosestCity()` (once the city database loads)
 3. `olsonIdToCityName()` (e.g., "Los Angeles" from "America/Los_Angeles")
 4. Fallback: "Local"
+
+The city database is parsed lazily, so an unnamed location (browser fix,
+manual coordinates, a lat/lon-only link) is first shown with priority 3 and
+upgraded to priority 2 when the parse lands — in the location bar and, for
+Terra/Gaia, in the observer slot of the live face (see
+[World-Time Slots](world-time-slots.md)). The reverse-geocode runs one parse
+at a time and releases the parsed database afterwards unless the location
+dialog needs it.
 
 ## City Search
 
@@ -126,22 +148,33 @@ When opened via `file://` protocol (double-clicking HTML):
 When a location is set (from any source), the system:
 1. Persists `lat`, `lon`, and `timezone` via `setState()` (LocalStorage in the
    normal case; the URL only in fallback mode)
-2. Calls `rebuildAllForLocation()` which re-runs `buildSlotOverrides()` for world-time faces
+2. Calls `rebuildAllForLocation()` which re-runs `buildSlotOverrides()` for
+   both world-time faces (Terra's ring and Gaia's observer subdial)
 3. Creates fresh `Environment` objects with new lat/lon
 4. Resets hand schedules and rebuilds static caches
+5. Re-renders the location bar (`updateLocationDisplay()`); for an unnamed
+   location with the city database not yet parsed, this starts the on-demand
+   reverse-geocode: one parse at a time (`reverseGeocodeInFlight`), then the
+   nearest city is shown, pushed into the live Terra/Gaia observer slots
+   (`backfillObserverSlots` → `relabelTerraSlot`), persisted as `city` only in
+   persistent mode when none is stored, and the parsed database is released
+   (in a `finally`) unless the location dialog is open. At startup this call
+   runs after the faces are constructed so the callback can label them.
 
 ## Key Source Files
 
 | File | Purpose |
 |------|---------|
-| `src/city-search.ts` | City/airport search engine |
+| `src/shared/city-search.ts` | City/airport search engine |
 | `src/cities-data.js` | Bundled city database (generated, tracked in git) |
 | `src/cities-data.d.ts` | TypeScript declarations for city data |
 | `src/engine-entry.ts` | Location update handling, `rebuildAllForLocation()` |
 | `src/shared/app-state.ts` | State persistence front door (`getState`/`setState`) |
-| `src/url-state.ts` | URL serializer for location (sharing + URL fallback) |
-| `src/mini-map.ts` | Blue Marble globe and OSM tile map |
-| `src/tz-resolve.ts` | Timezone resolution utilities |
+| `src/shared/url-state.ts` | URL serializer for location (sharing + URL fallback) |
+| `src/shared/mini-map.ts` | Blue Marble globe and OSM tile map |
+| `src/shared/tz-resolve.ts` | Timezone resolution utilities |
+| `src/watch/terra-slots.ts` | Terra ring slot validation; `parseTerraUserOverrides` / `serializeTerraOverrides` |
+| `src/watch/watch-env.ts` | Environment creation with slot data; `relabelTerraSlot` |
 | `scripts/build-cities.js` | GeoNames → JS data pipeline |
 
 ## Related Docs

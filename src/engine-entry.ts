@@ -29,10 +29,11 @@ declare global {
 declare const __BUILD_VERSION__: string | undefined;
 
 import { parseWatchXML } from './watch/xml-parser.js';
-import { createWatchEnvironment, computeTzDeltaMs, GAIA_SUBDIAL_DEFAULTS } from './watch/watch-env.js';
+import { createWatchEnvironment, computeTzDeltaMs, GAIA_SUBDIAL_DEFAULTS, relabelTerraSlot } from './watch/watch-env.js';
 import type { TerraSlot } from './watch/watch-env.js';
 import { TERRA_RING_DEFAULTS } from './watch/watch-env.js';
-import { validSlotsForTz, formatSlotOffset, getStandardOffsetMinutes, olsonIdToCityName } from './watch/terra-slots.js';
+import { validSlotsForTz, formatSlotOffset, serializeTerraOverrides } from './watch/terra-slots.js';
+import { deriveObserverSlots, type SlotOverrideResult } from './watch/observer-slots.js';
 import { buildStaticBlockCaches, renderFrame, BEZEL_THICKNESS_XML, setPartProfiling, resetPartProfile, getPartProfile, setWheelCacheDisabled, setHandCacheDisabled, rendererCacheMemoryBytes } from './watch/renderer.js';
 import type { LoadedImage } from './watch/image-loader.js';
 import { makeReDecodableImage, decodeLoadedImageForScale } from './watch/image-loader.js';
@@ -68,7 +69,8 @@ import { loadCityData, prefetchCityData, releaseCityData, searchCities, findClos
 import { showStorageWarning } from './shared/incoming-settings-dialog.js';
 import type { CityResult } from './shared/city-search.js';
 import { renderGlobe, loadOSMTile } from './shared/mini-map.js';
-import { resolveTimezone, resolveTimezoneFromDb } from './shared/tz-resolve.js';
+import { resolveTimezone } from './shared/tz-resolve.js';
+import { createTzResolver } from './shared/tz-ensure.js';
 import { findNextDstTransition, findPrevDstTransition } from './shared/dst-detect.js';
 
 import { initTimeControls, flushTimeState } from './shared/time-controls-ui.js';
@@ -275,8 +277,19 @@ interface FaceInstance {
     terminatorLeaves: TerminatorLeafState[];
     analemmaState: AnalemmaState | null;
     faceDataIndex: number;
-    /** Per-face slot overrides for Terra/Gaia world-clock faces. */
+    /**
+     * Per-face slot overrides for Terra/Gaia world-clock faces — the DISPLAY
+     * table: the user's overrides plus the auto-injected observer slot.
+     */
     terraSlotOverrides?: Record<number, TerraSlot>;
+    /**
+     * For worldTimeRing faces: the user's own slot overrides (from ec:slots)
+     * WITHOUT the injected observer slot — what the Terra city dialog persists
+     * (writeTerraOverridesToUrl). Rebuilds re-derive BOTH tables from the
+     * persisted slot map (getSlotOverrides) via buildSlotOverrides, so an
+     * in-memory edit here must be written before any rebuild or it is lost.
+     */
+    terraUserOverrides?: Record<number, TerraSlot>;
     /** For worldTimeRing faces: which ring slot holds the global location (1–24). */
     globalLocationSlot?: number;
     /** ?ablate=facebuffers: whole-face buffer + the tick epoch it was rendered at. */
@@ -370,7 +383,8 @@ async function main() {
     // parsed on demand) unless the user asked to conserve data. Embed mode never
     // touches the DB. The DB is parsed lazily — when the dialog opens, or when an
     // unnamed observer location needs reverse-geocoding (see updateLocationDisplay
-    // / backfillObserverSlots). See planning/2026-06-14-observatory-cities-lazy-load.md.
+    // / backfillObserverSlots; one parse in flight at a time, released after use).
+    // See planning/2026-06-14-observatory-cities-lazy-load.md.
     if (!isEmbedMode && !(navigator as any).connection?.saveData) {
         prefetchCityData();
     }
@@ -481,25 +495,48 @@ async function main() {
         return !!lp && lp.style.display !== 'none';
     }
 
+    /** True while updateLocationDisplay's on-demand DB parse is in flight. */
+    let reverseGeocodeInFlight = false;
+
     /**
      * Label the Terra/Gaia observer slot(s) with the nearest-city name once the
      * DB is parsed (coords unchanged — label only). Only for an *unnamed*
      * observer; named locations already carry their name via locationSource.
+     *
+     * Two targets, both required: the face-side overrides (future env rebuilds
+     * re-copy from them) and the LIVE env — createWatchEnvironment copies the
+     * slot table into env._terraSlots and Terra bakes the ring names into a
+     * cached knockout, so a face-side write alone never reaches the screen
+     * (relabelTerraSlot updates the copy and drops the knockout). Display-only:
+     * not gated on isPersistentMode(); the storage write stays with the caller.
      * Replaces the old eager post-load "backfill" pass, now run on demand.
      */
     function backfillObserverSlots(): void {
         if (locationSource || (lat === 0 && lon === 0) || !isCityDataLoaded()) return;
         const closest = findClosestCity(lat, lon);
         if (!closest) return;
+        let relabeled = false;
         for (const face of faces) {
             if (face.watch.worldTimeSubdials && face.terraSlotOverrides?.[1]) {
                 face.terraSlotOverrides[1].cityName = closest.shortLabel;
+                if (relabelTerraSlot(face.env, 1, closest.shortLabel)) { face.renderDirty = true; relabeled = true; }
             }
             if (face.watch.worldTimeRing && face.globalLocationSlot !== undefined) {
                 const glSlot = face.terraSlotOverrides?.[face.globalLocationSlot];
-                if (glSlot) glSlot.cityName = closest.shortLabel;
+                if (glSlot) {
+                    glSlot.cityName = closest.shortLabel;
+                    if (relabelTerraSlot(face.env, face.globalLocationSlot, closest.shortLabel)) { face.renderDirty = true; relabeled = true; }
+                }
             }
         }
+        // A dirty face only repaints when a frame runs — make sure one does even
+        // if the loop is idle (e.g. a stopped clock). Never before the first
+        // frame has painted: at startup the render loop is started by the
+        // initial cache build's completion, and a frame run earlier would skip
+        // every unbuilt face yet still fire the load-progress-bar handoff over
+        // blank canvases. That first scheduled start marks all faces dirty and
+        // draws the relabeled env anyway.
+        if (relabeled && firstFramePainted) ensureSchedulerRunning();
     }
 
     function updateLocationDisplay() {
@@ -530,21 +567,36 @@ async function main() {
         } else if (!isCityDataLoaded() && (lat !== 0 || lon !== 0) && !isEmbedMode) {
             // DB not parsed yet — show coords-only for now and resolve in the
             // background (parse on demand), then re-render, label the observer
-            // slots, and persist the derived city so future loads skip the DB.
-            sourceLabel.textContent = '';
+            // slots (face-side overrides AND the live envs), and persist the
+            // derived city so future loads skip the DB. One handler at a time:
+            // it reads the live lat/lon/locationSource when the parse lands, so a
+            // location that changes mid-parse still resolves to the newest
+            // coordinates, and a second caller must not attach a second handler
+            // (the first releases the DB, so the second would re-parse the
+            // ~22 MB DB and blank the label in between).
+            sourceLabel.textContent = '';   // a named label no longer describes these coords
+            if (reverseGeocodeInFlight) return;
+            reverseGeocodeInFlight = true;
             loadCityData().then(() => {
-                if (locationSource) return;       // a named location was set meanwhile
-                updateLocationDisplay();          // now loaded → renders nearest city
-                backfillObserverSlots();
-                const c = findClosestCity(lat, lon);
-                if (c && isPersistentMode() && !getState().city) setState({ city: c.shortLabel });
-                if (!dialogOpen()) releaseCityData();
-            }).catch(() => {});
+                try {
+                    if (locationSource) return;       // a named location was set meanwhile
+                    updateLocationDisplay();          // now loaded → renders nearest city
+                    backfillObserverSlots();
+                    ensureTzResolved();               // DB resident: synchronous, no second parse
+                    const c = findClosestCity(lat, lon);
+                    if (c && isPersistentMode() && !getState().city) setState({ city: c.shortLabel });
+                } finally {
+                    // Never leave the parsed DB resident because something above threw.
+                    if (!dialogOpen()) releaseCityData();
+                }
+            }).catch((err) => console.error('[location] reverse-geocode failed:', err))
+              .finally(() => { reverseGeocodeInFlight = false; });
         } else {
             sourceLabel.textContent = '';
         }
     }
-    updateLocationDisplay();
+    // The initial updateLocationDisplay() call is deferred until the faces
+    // exist (see below): its DB-load callback labels the observer slots.
 
     // --- Load per-face images and parse watches ---
     const parsedWatches: Watch[] = [];
@@ -651,132 +703,18 @@ async function main() {
     // - worldTimeSubdials: reads d2..dN from URL, slot 1 = observer (Gaia-style)
     // Other faces get no overrides.
     // URL prefixes: 'r' = ring, 'd' = dial/subdial (avoids collision).
-    interface SlotOverrideResult {
-        overrides: Record<number, TerraSlot>;
-        globalLocationSlot?: number;
-    }
+    /**
+     * Derive the slot tables for a world-time face from the persisted slot map
+     * plus the observer's current location — see watch/observer-slots.ts (pure;
+     * one derivation shared by startup and every in-session location/timezone
+     * change, and unit-tested there).
+     */
     function buildSlotOverrides(watch: Watch): SlotOverrideResult | undefined {
-        const slotParams = getSlotOverrides();
-        if (watch.worldTimeRing) {
-            // Collect user overrides from persisted slot state
-            const userOverrides: Record<number, TerraSlot> = {};
-            for (let slot = 1; slot <= 24; slot++) {
-                const name = slotParams[`r${slot}`] ?? null;
-                const tz = slotParams[`r${slot}tz`] ?? null;
-                const latStr = slotParams[`r${slot}lat`] ?? null;
-                const lonStr = slotParams[`r${slot}lon`] ?? null;
-                if (name && tz) {
-                    userOverrides[slot] = {
-                        cityName: name,
-                        olsonId: tz,
-                        lat: latStr ? parseFloat(latStr) : 0,
-                        lon: lonStr ? parseFloat(lonStr) : 0,
-                    };
-                }
-            }
-
-            // Start with user overrides
-            const overrides: Record<number, TerraSlot> = { ...userOverrides };
-
-            // Determine which slot to use for the global location
-            let globalSlot: number | undefined;
-            if (locationTimezone && (lat !== 0 || lon !== 0)) {
-                const validSlots = validSlotsForTz(locationTimezone);
-                if (validSlots.length === 1) {
-                    globalSlot = validSlots[0];
-                } else if (validSlots.length > 1) {
-                    // Tie-break: prefer the slot NOT overridden by the user
-                    const nonOverridden = validSlots.filter(s => !(s in userOverrides));
-                    const overridden = validSlots.filter(s => s in userOverrides);
-                    if (nonOverridden.length >= 1 && overridden.length >= 1) {
-                        // Only one is non-overridden → pick it
-                        globalSlot = nonOverridden[0];
-                    } else {
-                        // Neither or both overridden → pick by standard-time match
-                        const globalStdOff = getStandardOffsetMinutes(locationTimezone);
-                        let bestSlot = validSlots[0];
-                        let bestDiff = Infinity;
-                        for (const s of validSlots) {
-                            const slotCity = userOverrides[s] || TERRA_RING_DEFAULTS[s];
-                            if (!slotCity) continue;
-                            const slotStdOff = getStandardOffsetMinutes(slotCity.olsonId);
-                            const diff = Math.abs(slotStdOff - globalStdOff);
-                            if (diff < bestDiff) {
-                                bestDiff = diff;
-                                bestSlot = s;
-                            }
-                        }
-                        globalSlot = bestSlot;
-                    }
-                } else if (validSlots.length === 0) {
-                    // Shouldn't happen for real timezones — fall back to offset match
-                    console.warn(`[Terra] No valid slot for timezone ${locationTimezone}`);
-                }
-
-                // Inject the global location into the chosen slot
-                if (globalSlot !== undefined) {
-                    let cityName = locationSource;
-                    if (!cityName && isCityDataLoaded() && (lat !== 0 || lon !== 0)) {
-                        const closest = findClosestCity(lat, lon);
-                        if (closest) cityName = closest.shortLabel;
-                    }
-                    if (!cityName && locationTimezone) {
-                        cityName = olsonIdToCityName(locationTimezone);
-                    }
-                    overrides[globalSlot] = {
-                        cityName: cityName || 'Local',
-                        olsonId: locationTimezone,
-                        lat, lon,
-                    };
-                }
-            }
-
-            return {
-                overrides: Object.keys(overrides).length > 0 ? overrides : {},
-                globalLocationSlot: globalSlot,
-            };
-        }
-        if (watch.worldTimeSubdials) {
-            const nSubdials = watch.maxSeparateLoc || 4;
-            const overrides: Record<number, TerraSlot> = {};
-            // Slot 1 = observer location — use city name from URL or closest city
-            let observerName = locationSource;
-            if (!observerName && isCityDataLoaded() && (lat !== 0 || lon !== 0)) {
-                const closest = findClosestCity(lat, lon);
-                if (closest) observerName = closest.shortLabel;
-            }
-            // No-DB fallback to the timezone's representative city (matching the
-            // Terra global slot), so lazy-loading shows e.g. "Los Angeles" rather
-            // than the bare "Observer" placeholder before any reverse-geocode.
-            if (!observerName && locationTimezone) {
-                observerName = olsonIdToCityName(locationTimezone);
-            }
-            overrides[1] = {
-                cityName: observerName || 'Observer',
-                olsonId: locationTimezone || '',
-                lat, lon,
-            };
-            // Slots 2–N: user overrides or defaults
-            for (let slot = 2; slot <= nSubdials; slot++) {
-                const name = slotParams[`d${slot}`] ?? null;
-                const tz = slotParams[`d${slot}tz`] ?? null;
-                const latStr = slotParams[`d${slot}lat`] ?? null;
-                const lonStr = slotParams[`d${slot}lon`] ?? null;
-                if (name && tz) {
-                    overrides[slot] = {
-                        cityName: name,
-                        olsonId: tz,
-                        lat: latStr ? parseFloat(latStr) : 0,
-                        lon: lonStr ? parseFloat(lonStr) : 0,
-                    };
-                } else {
-                    const def = GAIA_SUBDIAL_DEFAULTS[slot];
-                    if (def) overrides[slot] = { ...def };
-                }
-            }
-            return { overrides };
-        }
-        return undefined;
+        return deriveObserverSlots(watch, {
+            lat, lon, locationTimezone, locationSource,
+            slotParams: getSlotOverrides(),
+            nearestCityName: () => isCityDataLoaded() ? (findClosestCity(lat, lon)?.shortLabel ?? null) : null,
+        });
     }
 
     // --- Build the DOM: one cell + canvas per face ---
@@ -835,10 +773,17 @@ async function main() {
             analemmaState: null,
             faceDataIndex: i,
             terraSlotOverrides: faceOverrides,
+            terraUserOverrides: slotResult?.userOverrides,
             globalLocationSlot: slotResult?.globalLocationSlot,
         };
         faces.push(face);
     }
+
+    // Location bar + on-demand reverse-geocode. Must run AFTER the faces exist:
+    // its DB-load callback labels the observer slots via backfillObserverSlots,
+    // which iterates `faces`. Nothing is visible any later — the app sits behind
+    // the load-progress bar until the first frame paints.
+    updateLocationDisplay();
 
     // On multi-face pages (all.html, selected.html), make each face clickable → navigate to its page
     const isMultiFace = faceDataArray.length > 1;
@@ -1911,11 +1856,16 @@ async function main() {
      * @param opts.restartScheduler Kick the render loop when done (default
      *        true). Pass false when the caller has more work to do first and
      *        kicks it itself.
+     * @param opts.skipUnbuiltCaches Leave faces whose initial static caches are
+     *        not built yet alone (their pending initial build reads the fresh
+     *        env when its turn comes). For startup-time env changes that land
+     *        before the first frame.
      */
     function rebuildFacesForEnvChange(opts: {
         beforeEnvRebuild?: (face: FaceInstance) => void;
         preserveKnockout?: boolean;
         restartScheduler?: boolean;
+        skipUnbuiltCaches?: boolean;
     } = {}): void {
         timeController.withFrozenFrame(() => {
             for (const face of faces) {
@@ -1932,8 +1882,10 @@ async function main() {
                     updateLeafAngles(face.terminatorLeaves, face.env);
                 }
                 // Rebuild static caches (background, marks, windows, day/night rings).
-                const { canvas, watch, env, images, scale } = face;
-                buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
+                if (!(opts.skipUnbuiltCaches && !face.cachesBuilt)) {
+                    const { canvas, watch, env, images, scale } = face;
+                    buildStaticBlockCaches(watch, env, canvas.width, canvas.height, scale, images, face.terminatorLeaves);
+                }
                 // Reset hand schedules so they re-evaluate immediately and
                 // animate to the new targets.
                 face.updater.reset();
@@ -1975,8 +1927,12 @@ async function main() {
         // be in a different DST state than the real date.
         tzDeltaMs = computeTzDeltaMs(locationTimezone, rawGetNow());
 
-        // Slot assignments can't change on a clock shift, so the Terra
-        // city-name knockout carries over instead of being rebuilt.
+        // DST / browser-zone shift only: slot assignments depend on
+        // locationTimezone, which this path never changes, so the Terra
+        // city-name knockout carries over instead of being rebuilt. A change
+        // of locationTimezone is a location-class change and must go through
+        // applyResolvedTimezone / rebuildAllForLocation, which re-derive the
+        // observer slots.
         rebuildFacesForEnvChange({ preserveKnockout: true, restartScheduler: false });
 
         timeUI?.updateTimezoneDisplay();
@@ -2325,6 +2281,74 @@ async function main() {
     // Location change / prompt
     // =========================================================================
 
+    /**
+     * Re-derive the slot tables of a Terra (worldTimeRing) / Gaia
+     * (worldTimeSubdials) face through the one derivation used at startup:
+     * the Terra global slot may move with the timezone, and the observer
+     * slot's name/zone/coords follow the location. buildSlotOverrides reads
+     * the module-level lat/lon, locationSource and locationTimezone, so the
+     * caller sets those first. No-op for other faces.
+     */
+    function reDeriveSlotTables(face: FaceInstance): void {
+        if (!(face.watch.worldTimeRing || face.watch.worldTimeSubdials)) return;
+        const slotResult = buildSlotOverrides(face.watch);
+        face.terraSlotOverrides = slotResult?.overrides;
+        face.terraUserOverrides = slotResult?.userOverrides;
+        face.globalLocationSlot = slotResult?.globalLocationSlot;
+    }
+
+    /**
+     * Apply a corrected timezone for the CURRENT location (the DB-backed
+     * re-resolution of a provisional browser-zone guess). A timezone change is a
+     * location-class change: the observer slots derive from it (Terra's ring
+     * sector, both faces' observer olsonId), so it goes through the location
+     * rebuild, never the DST path (which preserves slots by design).
+     *
+     * Before the first frame has painted the render loop must not be started
+     * (the load-progress-bar handoff fires on the first frame and would drop
+     * the bar over unbuilt faces), and the initial static caches may still be
+     * building. In that window the environments and slot tables are swapped in
+     * place: faces whose initial caches are already built get theirs rebuilt
+     * from the new env; the pending initial build reads the fresh env for the
+     * rest, and its completion starts the loop and draws everything.
+     */
+    function applyResolvedTimezone(tz: string): void {
+        locationTimezone = tz;
+        tzDeltaMs = computeTzDeltaMs(tz);
+        if (firstFramePainted) {
+            rebuildAllForLocation(lat, lon);
+        } else {
+            rebuildFacesForEnvChange({ restartScheduler: false, skipUnbuiltCaches: true, beforeEnvRebuild: reDeriveSlotTables });
+            updateLocationDisplay();
+            timeUI?.updateTimezoneDisplay();
+        }
+        scheduleDstRebuild();
+    }
+
+    /**
+     * Correct a provisional (browser-zone) timezone from the city DB — the
+     * shared contract in shared/tz-ensure.ts, with this app's hooks. Armed by
+     * `tzNeedsResolution` (the startup lat/lon branch guessed); the flag is
+     * cleared only by an answer that lands for the current coordinates, so a
+     * stale answer (location changed meanwhile, or a named location arriving
+     * mid-parse) leaves it armed and the next unnamed location's
+     * reverse-geocode corrects that location's guess too. A corrected zone is a
+     * location-class change (applyResolvedTimezone re-derives the observer
+     * slots); it is persisted only in persistent mode, only when storage has
+     * no tz yet, and never as a browser guess.
+     */
+    const ensureTzResolved = createTzResolver({
+        getLocation: () => ({ lat, lon }),
+        needsResolution: () => tzNeedsResolution,
+        setNeedsResolution: (v) => { tzNeedsResolution = v; },
+        getTimezone: () => locationTimezone,
+        applyTimezone: applyResolvedTimezone,
+        persistTimezone: (tz) => { if (isPersistentMode() && !getState().tz) setState({ tz }); },
+        parseInFlight: () => reverseGeocodeInFlight,
+        release: () => { if (!dialogOpen()) releaseCityData(); },   // drop the ~22 MB unless the dialog needs it
+        onError: (err) => console.error('[tz] timezone correction failed:', err),
+    });
+
     function rebuildAllForLocation(newLat: number, newLon: number) {
         // Frozen: env rebuilds + static-cache builds are eval storms — see buildCache.
         timeController.withFrozenFrame(() => rebuildAllForLocationFrozen(newLat, newLon));
@@ -2335,31 +2359,7 @@ async function main() {
         lon = newLon;
         // The new position is already in lat/lon, which the rebuild reads; the
         // per-face hook only has to refresh the slot data it reads alongside them.
-        rebuildFacesForEnvChange({
-            restartScheduler: false,
-            beforeEnvRebuild: (face) => {
-                // Re-run slot overrides for Terra (worldTimeRing) faces — the global
-                // location slot may change when the user changes their location.
-                if (face.watch.worldTimeRing) {
-                    const slotResult = buildSlotOverrides(face.watch);
-                    face.terraSlotOverrides = slotResult?.overrides;
-                    face.globalLocationSlot = slotResult?.globalLocationSlot;
-                }
-                // Update Gaia slot 1 to match new observer location
-                if (face.watch.worldTimeSubdials && face.terraSlotOverrides) {
-                    let obsName = locationSource;
-                    if (!obsName && isCityDataLoaded() && (newLat !== 0 || newLon !== 0)) {
-                        const closest = findClosestCity(newLat, newLon);
-                        if (closest) obsName = closest.shortLabel;
-                    }
-                    face.terraSlotOverrides[1] = {
-                        cityName: obsName || 'Observer',
-                        olsonId: locationTimezone || '',
-                        lat: newLat, lon: newLon,
-                    };
-                }
-            },
-        });
+        rebuildFacesForEnvChange({ restartScheduler: false, beforeEnvRebuild: reDeriveSlotTables });
         updateLocationDisplay();
         timeUI?.updateTimezoneDisplay();
         // The location panel may have changed height (e.g. city name now shown).
@@ -2997,21 +2997,12 @@ async function main() {
     // --- Backstop timezone re-resolution ---
     // If startup fell back to the browser zone because the city DB wasn't loaded
     // (e.g. a shared link carrying lat/lon but no tz), correct it once the DB is
-    // available. resolveTimezoneFromDb awaits the load and tolerates a racing
-    // releaseCityData() from the location-name path (there is no refcount), then
-    // we rebuild the env and persist only the corrected, DB-derived zone.
-    if (tzNeedsResolution) {
-        resolveTimezoneFromDb(lat, lon).then(resolved => {
-            tzNeedsResolution = false;
-            if (resolved && resolved !== locationTimezone) {
-                locationTimezone = resolved;
-                handleDstTransition();   // rebuild envs + refresh tz display + restart scheduler
-                scheduleDstRebuild();
-                if (isPersistentMode()) setState({ tz: locationTimezone });
-            }
-            if (!dialogOpen()) releaseCityData();  // drop the ~22 MB unless the dialog needs it
-        });
-    }
+    // available. The location-name path calls this from inside its own DB-load
+    // handler while the DB is resident (synchronous fast path — no second
+    // parse); this startup call covers the case where that path never parses
+    // (a stored city name). resolveTimezoneFromDb tolerates a racing
+    // releaseCityData() from the name path (there is no refcount).
+    ensureTzResolved();
 
     // --- Info button & popup (shared wiring + face-specific fixups) ---
     initHelpPopover({
@@ -3441,25 +3432,19 @@ async function main() {
                 return slots;
             }
 
-            /** Persist Terra ring slot overrides via app-state. */
+            /**
+             * Persist Terra ring slot overrides via app-state — the USER's
+             * overrides only. The display table (terraSlotOverrides) also holds
+             * the auto-injected observer slot, which is recomputed from the
+             * current location on every rebuild and must never be stored: a
+             * stored copy would become a ghost "user override" of that sector
+             * once the observer moves to another zone, and it would replace a
+             * genuine user override of that same slot. A user override OF the
+             * observer slot is a user override and is persisted like any other
+             * (it shows again once the observer moves elsewhere).
+             */
             function writeTerraOverridesToUrl() {
-                const changes: Record<string, string | null> = {};
-                // Clear all ring slot keys, then set the current overrides.
-                for (let slot = 1; slot <= 24; slot++) {
-                    changes[`r${slot}`] = null;
-                    changes[`r${slot}tz`] = null;
-                    changes[`r${slot}lat`] = null;
-                    changes[`r${slot}lon`] = null;
-                }
-                if (terraFace!.terraSlotOverrides) {
-                    for (const [slotStr, data] of Object.entries(terraFace!.terraSlotOverrides)) {
-                        changes[`r${slotStr}`] = data.cityName;
-                        changes[`r${slotStr}tz`] = data.olsonId;
-                        changes[`r${slotStr}lat`] = data.lat.toFixed(3);
-                        changes[`r${slotStr}lon`] = data.lon.toFixed(3);
-                    }
-                }
-                setSlotOverrides(changes);
+                setSlotOverrides(serializeTerraOverrides(terraFace!.terraUserOverrides));
                 updateNavigationLinks();
             }
 
@@ -3470,6 +3455,7 @@ async function main() {
                 const slotResult = buildSlotOverrides(terraFace!.watch);
                 if (slotResult) {
                     terraFace!.terraSlotOverrides = slotResult.overrides;
+                    terraFace!.terraUserOverrides = slotResult.userOverrides;
                     terraFace!.globalLocationSlot = slotResult.globalLocationSlot;
                 }
                 // The slots just changed, so the city-name knockout must not be
@@ -3484,15 +3470,19 @@ async function main() {
                 const previousCity = currentSlots[slot]?.cityName || 'Unknown';
                 // Check if this is the global-location slot BEFORE rebuild changes it
                 const isGlobalSlot = slot === terraFace!.globalLocationSlot;
-                if (!terraFace!.terraSlotOverrides) {
-                    terraFace!.terraSlotOverrides = {};
-                }
-                terraFace!.terraSlotOverrides[slot] = {
+                const pick: TerraSlot = {
                     cityName: city.shortLabel,
                     olsonId: city.timezone,
                     lat: city.lat,
                     lon: city.lon,
                 };
+                // The user's override map is what gets persisted; the display
+                // table gets the pick too for the immediate rebuild (which
+                // re-injects the observer on the global slot if that is `slot`).
+                if (!terraFace!.terraUserOverrides) terraFace!.terraUserOverrides = {};
+                terraFace!.terraUserOverrides[slot] = pick;
+                if (!terraFace!.terraSlotOverrides) terraFace!.terraSlotOverrides = {};
+                terraFace!.terraSlotOverrides[slot] = { ...pick };
                 writeTerraOverridesToUrl();
                 rebuildTerraForSlotChange();
                 if (isGlobalSlot) {
@@ -3561,6 +3551,7 @@ async function main() {
                 confirmYes.addEventListener('click', () => {
                     confirmOverlay.style.display = 'none';
                     terraFace!.terraSlotOverrides = undefined;
+                    terraFace!.terraUserOverrides = undefined;
                     writeTerraOverridesToUrl();
                     rebuildTerraForSlotChange();
                     showTcMessage('All cities reset to defaults', 'info');
@@ -4034,10 +4025,13 @@ async function main() {
             if (result.status !== 'success') { notifyBlocRefreshFailed(); return; }
             if (haversineKm(lat, lon, result.lat, result.lon) <= 16) return;  // stationary
             applyLocation(result.lat, result.lon, '', '', 'browser', false, null);
-            // Moved: reseed and clear the stale city so updateLocationDisplay
-            // reverse-geocodes the new spot.
+            // Moved: reseed and clear the stale city so the reverse-geocode
+            // started by applyLocation (rebuildAllForLocationFrozen calls
+            // updateLocationDisplay) persists the new spot's name — it checks
+            // getState().city when the parse lands, after this synchronous write.
+            // Do not call updateLocationDisplay() again here: a second call
+            // would attach a second handler to the same DB-load promise.
             if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat: result.lat, lon: result.lon, city: null, tz: locationTimezone || null });
-            updateLocationDisplay();
         }).catch(() => notifyBlocRefreshFailed()).finally(() => {
             if (sourceLabel) sourceLabel.style.color = '';
         });

@@ -15,7 +15,8 @@ import { createAstroEnvironment, computeTzDeltaMs } from '../shared/astro-env.js
 import type { Environment } from '../expr/env.js';
 import { getState, setState, initAppState, onSharedChange, isPersistentMode } from '../shared/app-state.js';
 import { locationSourceOf } from '../shared/url-state.js';
-import { resolveTimezone } from '../shared/tz-resolve.js';
+import { resolveTimezone, resolveTimezoneProvisional } from '../shared/tz-resolve.js';
+import { createTzResolver } from '../shared/tz-ensure.js';
 import { findClosestCity, findLargestCityNear, prefetchCityData, loadCityData, releaseCityData, isCityDataLoaded } from '../shared/city-search.js';
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
 import { systemTimezone, BLOC_REFRESH_STALE_MS } from '../shared/geolocation.js';
@@ -150,9 +151,17 @@ if (urlState.off !== null && !isNaN(urlState.off)) {
 // Restore the noon-on-top choice from the URL (?onoon=1).
 noonOnTop = urlState.onoon;
 
-// If no timezone in URL, resolve it from lat/lon (only if we have a location)
+// If no timezone in URL/state, resolve it from lat/lon (only if we have a
+// location). The nearest-city zone is confident; with the city DB not resident
+// (the normal http(s) case — it is parsed lazily) the answer is the browser
+// zone, a TRANSIENT backstop that must not be persisted and is re-resolved once
+// the DB loads (see ensureTzResolved) — a direct link at lat/lon should end up
+// on the *location's* zone, not the browser's.
+let tzNeedsResolution = false;
 if (!locationTimezone && hasUrlLocation) {
-    locationTimezone = resolveTimezone(lat, lon, null);
+    const r = resolveTimezoneProvisional(lat, lon, null);
+    locationTimezone = r.tz;
+    tzNeedsResolution = r.provisional;
 }
 
 let tzDeltaMs = computeTzDeltaMs(locationTimezone);
@@ -654,12 +663,48 @@ function updateLocationDisplay(): void {
     if (isCityDataLoaded() && applyClosest()) return;
 
     nameEl.textContent = `${lat.toFixed(3)}°, ${lon.toFixed(3)}°`;
+    cityParseInFlight = true;
     loadCityData().then(() => {
-        if (getState().city) return;            // a named location was set meanwhile
-        applyClosest();
+        if (!getState().city) applyClosest();   // skip the name if one was set meanwhile — but still release below
+        ensureTzResolved();                     // DB resident: synchronous, no second parse (deferred while dragging)
         if (!dialogShown() && dragState === 'idle') releaseCityData();   // one-shot: drop unless dialog open or dragging
-    }).catch(() => {});
+    }).catch((err) => console.error('[location] reverse-geocode failed:', err))
+      .finally(() => { cityParseInFlight = false; });
 }
+
+/** True while updateLocationDisplay's on-demand DB parse is in flight. */
+let cityParseInFlight = false;
+
+/**
+ * Backstop timezone re-resolution — the shared contract in shared/tz-ensure.ts
+ * with this app's hooks (see there): armed by `tzNeedsResolution` when startup
+ * had to guess the browser zone; cleared only by an answer that lands for the
+ * current coordinates. Suspended during drag-to-explore: the live lat/lon are
+ * the transient drag position then, so resolving (let alone persisting) against
+ * them would attach the dragged spot's zone to the stored location —
+ * dismissKeepDialog re-runs this once the coordinates are settled (Keep or
+ * Revert). A corrected zone follows the dialog-pick apply sequence and is
+ * persisted only in persistent mode when storage has no tz yet.
+ */
+const ensureTzResolved = createTzResolver({
+    getLocation: () => ({ lat, lon }),
+    needsResolution: () => tzNeedsResolution,
+    setNeedsResolution: (v) => { tzNeedsResolution = v; },
+    getTimezone: () => locationTimezone,
+    applyTimezone: (tz) => {
+        locationTimezone = tz;
+        // Same apply sequence as a dialog pick: sentinel-scheduled values
+        // (Sun/planet rings) hold a nextUpdateTime for the old zone.
+        updater?.reset();
+        rebuildEnv();            // recomputes tzDeltaMs, relayouts for the new zone, schedules a frame
+        timeUI?.updateTimezoneDisplay();
+    },
+    persistTimezone: (tz) => { if (isPersistentMode() && !getState().tz) setState({ tz }); },
+    parseInFlight: () => cityParseInFlight,
+    suspended: () => dragState !== 'idle',
+    release: () => { if (!dialogShown() && dragState === 'idle') releaseCityData(); },
+    onError: (err) => console.error('[tz] timezone correction failed:', err),
+});
 
 /** True while the location dialog/prompt is on screen. */
 function dialogShown(): boolean {
@@ -1291,6 +1336,17 @@ function dismissKeepDialog(keep: boolean): void {
 
     dragState = 'idle';
     canvas.style.cursor = '';
+    // A timezone correction that was suspended during the drag (or pre-empted
+    // by it) completes now, for the settled coordinates, while the DB is still
+    // resident: Revert restored the provisional startup guess, Keep resolved a
+    // zone of its own (then this is a no-op that just disarms the flag).
+    ensureTzResolved();
+    // The parsed city DB was loaded for the drag (startDragAt) and kept
+    // resident through the Keep/Revert modal — a map press while it is up
+    // resumes the drag. This is the only transition back to idle, so it is the
+    // one release point; the next drag re-parses from the resident compressed
+    // blob (CPU only). Keep it if the location dialog is open (it owns it).
+    if (!dialogShown()) releaseCityData();
 }
 
 // ============================================================================
@@ -1447,6 +1503,13 @@ function init(): void {
             scheduleFrame();
         },
     });
+
+    // Backstop timezone re-resolution for a provisional (browser-zone) startup
+    // zone — after the updater and time controls exist, so the correction can
+    // reset schedules and refresh the tz label. For an unnamed location the
+    // name path is already parsing (updateLocationDisplay ran above) and calls
+    // this from its handler; this call parses only when the location is named.
+    ensureTzResolved();
 
     // Show time controller if URL says so
     if (urlState.tc) {

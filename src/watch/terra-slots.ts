@@ -145,3 +145,57 @@ export function olsonIdToCityName(olsonId: string): string {
     const city = parts[parts.length - 1];
     return city.replace(/_/g, ' ');
 }
+
+/** Number of Terra worldtime ring slots (env slots 1–24). */
+export const TERRA_RING_SLOT_COUNT = 24;
+
+/**
+ * Parse the user's Terra ring overrides from the flat persisted slot map
+ * (`r{slot}`, `r{slot}tz`, `r{slot}lat`, `r{slot}lon` — see app-state
+ * getSlotOverrides). A slot needs at least a name and a timezone; missing
+ * coordinates read as 0.
+ */
+export function parseTerraUserOverrides(slotParams: Record<string, string>): Record<number, TerraSlot> {
+    const userOverrides: Record<number, TerraSlot> = {};
+    for (let slot = 1; slot <= TERRA_RING_SLOT_COUNT; slot++) {
+        const name = slotParams[`r${slot}`] ?? null;
+        const tz = slotParams[`r${slot}tz`] ?? null;
+        const latStr = slotParams[`r${slot}lat`] ?? null;
+        const lonStr = slotParams[`r${slot}lon`] ?? null;
+        if (name && tz) {
+            userOverrides[slot] = {
+                cityName: name,
+                olsonId: tz,
+                lat: latStr ? parseFloat(latStr) : 0,
+                lon: lonStr ? parseFloat(lonStr) : 0,
+            };
+        }
+    }
+    return userOverrides;
+}
+
+/**
+ * Serialize the user's Terra ring overrides into a flat slot-map change set
+ * for app-state setSlotOverrides: every ring key is cleared (null), then the
+ * given slots are set (coordinates to 3 dp). Callers pass the USER overrides
+ * only — never the display table, which also carries the auto-injected
+ * observer slot (recomputed from the location on every rebuild, never stored).
+ */
+export function serializeTerraOverrides(userOverrides: Record<number, TerraSlot> | undefined): Record<string, string | null> {
+    const changes: Record<string, string | null> = {};
+    for (let slot = 1; slot <= TERRA_RING_SLOT_COUNT; slot++) {
+        changes[`r${slot}`] = null;
+        changes[`r${slot}tz`] = null;
+        changes[`r${slot}lat`] = null;
+        changes[`r${slot}lon`] = null;
+    }
+    if (userOverrides) {
+        for (const [slotStr, data] of Object.entries(userOverrides)) {
+            changes[`r${slotStr}`] = data.cityName;
+            changes[`r${slotStr}tz`] = data.olsonId;
+            changes[`r${slotStr}lat`] = data.lat.toFixed(3);
+            changes[`r${slotStr}lon`] = data.lon.toFixed(3);
+        }
+    }
+    return changes;
+}

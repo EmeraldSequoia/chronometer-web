@@ -72,9 +72,55 @@ For unanticipated timezone changes (user manually changes OS timezone), a 1-seco
 
 This poll only checks the string name — it's extremely lightweight. It does **not** detect DST transitions within the same timezone (that's the precision timer's job).
 
+## Timezone Resolution (provisional → corrected)
+
+`resolveTimezoneProvisional(lat, lon, cityTz)` in `src/shared/tz-resolve.ts`
+answers in three tiers and says which one it used: a city pick's own zone
+(tier 1) and the nearest city in the GeoNames database (tier 2) are
+*confident*; the browser's zone (tier 3) is a **provisional** guess, returned
+whenever the city database is not resident — the normal case, since it is
+parsed lazily. `resolveTimezone()` is the convenience form that returns only
+the zone.
+
+A provisional zone must never be persisted as the location's `tz` (a stored
+browser zone would poison every later load) and must be corrected once the
+database is available. Each app has one `ensureTzResolved()` for that, built
+by `createTzResolver()` in `src/shared/tz-ensure.ts` from the app's hooks
+(`src/engine-entry.ts`, `src/observatory/observatory-entry.ts`,
+`src/inspector/inspector-entry.ts`), armed by `tzNeedsResolution` when startup
+had to guess. The contract (unit-tested once, in `tz-ensure.test.ts`):
+
+- resident database → resolve synchronously (no parse); otherwise
+  `resolveTimezoneFromDb()` parses on demand and releases afterwards (in a
+  `finally`) unless the location dialog — or, in the Observatory, a map drag —
+  still needs it; a parse already in flight for the same coordinates (the
+  location-name path's reverse-geocode) is reused rather than duplicated, so
+  startup parses once;
+- the answer is stamped with the coordinates it was asked for and ignored if
+  the location changed meanwhile (a newer location owns its own resolution).
+  The flag is cleared only by an answer that lands for the current
+  coordinates, so a stale answer leaves it armed and the next unnamed
+  location's reverse-geocode corrects that location's guess too;
+- it is suspended while the app says the live coordinates are transient — the
+  Observatory's drag-to-explore, whose `dismissKeepDialog` re-runs it once the
+  coordinates are settled (Keep or Revert), while the database is still
+  resident;
+- it is persisted only in persistent mode and only when storage has no `tz`
+  yet — whether or not the in-memory zone changed, so the common "the browser
+  zone happened to be right" case does not re-parse on every load;
+- a changed zone is applied as a **location-class** change. In Chronometer that
+  is `applyResolvedTimezone()` → `rebuildAllForLocation()`, which re-derives
+  the Terra/Gaia observer slots (their ring sector and `olsonId` follow the
+  zone; the DST path below deliberately preserves slots and would leave the
+  observer clock on the guessed zone). Before the first frame has painted it
+  swaps environments and slot tables in place without starting the render
+  loop — the load-progress-bar handoff fires on the first frame.
+
 ## Environment Rebuild (`handleDstTransition`)
 
-When a DST transition is detected, the rebuild follows the animation-preserving pattern (§3 from development rules):
+For clock shifts only — a DST transition or a browser-zone change — never for
+a change of the location's timezone (see above). When one is detected, the
+rebuild follows the animation-preserving pattern (§3 from development rules):
 
 1. Recompute `tzDeltaMs` using the **displayed** time as reference
 2. For each face:
@@ -125,7 +171,11 @@ Month and year steps remain calendar-aware (variable-length arithmetic).
 |------|---------|
 | `src/dst-detect.ts` | `findNextDstTransition`, `findPrevDstTransition`, `getTimezoneOffsetMinutes` |
 | `src/__tests__/dst-detect.test.ts` | 70 tests covering forward/backward search, 30+ timezones, Lord Howe Island |
-| `src/engine-entry.ts` | `handleDstTransition`, `scheduleDstRebuild`, browser TZ poll, `formatTimezoneDisplay` |
+| `src/engine-entry.ts` | `handleDstTransition`, `scheduleDstRebuild`, browser TZ poll, `formatTimezoneDisplay`, `ensureTzResolved` / `applyResolvedTimezone` |
+| `src/shared/tz-resolve.ts` | `resolveTimezoneProvisional`, `resolveTimezone`, `resolveTimezoneFromDb` |
+| `src/shared/tz-ensure.ts` | `createTzResolver` — the shared `ensureTzResolved` contract |
+| `src/observatory/observatory-entry.ts`, `src/inspector/inspector-entry.ts` | each app's `ensureTzResolved` |
+| `src/watch/observer-slots.ts` | `deriveObserverSlots` — the observer slots a timezone correction re-derives |
 | `src/watch/watch-env.ts` | `computeTzDeltaMs`, `registerTimeFunctions` (captures `tzDeltaMs`/`tzOffsetSec`) |
 | `src/time-controller.ts` | `advanceByUnit` (absolute ms arithmetic), `TimeController` |
 

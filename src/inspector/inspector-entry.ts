@@ -24,7 +24,8 @@ import { getState, setState, initAppState, onSharedChange, isPersistentMode } fr
 import { locationSourceOf } from '../shared/url-state.js';
 import { initShareButton } from '../shared/share-button.js';
 import { initHelpPopover, openGeneralHelpTopic } from '../shared/help-popover.js';
-import { resolveTimezone, resolveTimezoneFromDb } from '../shared/tz-resolve.js';
+import { resolveTimezone } from '../shared/tz-resolve.js';
+import { createTzResolver } from '../shared/tz-ensure.js';
 import { findClosestCity, prefetchCityData, loadCityData, releaseCityData, isCityDataLoaded } from '../shared/city-search.js';
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
 import { showStorageWarning } from '../shared/incoming-settings-dialog.js';
@@ -112,6 +113,41 @@ if (!locationTimezone && hasUrlLocation) {
 
 let tzDeltaMs = computeTzDeltaMs(locationTimezone);
 
+/**
+ * True while updateLocationDisplay's on-demand DB parse is in flight. Declared
+ * before updateLocationDisplay's first (module-level) call — a `let` after it
+ * would be a temporal-dead-zone throw that kills the page.
+ */
+let cityParseInFlight = false;
+
+/**
+ * Backstop timezone re-resolution — the shared contract in shared/tz-ensure.ts
+ * with this app's hooks (see there): armed by `tzNeedsResolution` when startup
+ * had to guess the browser zone; cleared only by an answer that lands for the
+ * current coordinates; a corrected zone rebuilds the env, refreshes the
+ * displays and re-evaluates the catalog (mirroring onLocationChange), and is
+ * persisted only in persistent mode when storage has no tz yet.
+ */
+const ensureTzResolved = createTzResolver({
+    getLocation: () => ({ lat, lon }),
+    needsResolution: () => tzNeedsResolution,
+    setNeedsResolution: (v) => { tzNeedsResolution = v; },
+    getTimezone: () => locationTimezone,
+    applyTimezone: (tz) => {
+        locationTimezone = tz;
+        tzDeltaMs = computeTzDeltaMs(locationTimezone);
+        env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
+        updateLocationDisplay();
+        updateTimeDisplay();
+        resetAllSchedules();   // re-evaluate the catalog against the new env
+        scheduleFrame();
+    },
+    persistTimezone: (tz) => { if (isPersistentMode() && !getState().tz) setState({ tz }); },
+    parseInFlight: () => cityParseInFlight,
+    release: () => { if (!dialogShown()) releaseCityData(); },   // drop the parsed DB unless the dialog needs it
+    onError: (err) => console.error('[tz] timezone correction failed:', err),
+});
+
 /** Format timezone abbreviation and UTC offset, e.g. "(PDT) UTC-7:00". */
 function formatTimezoneInfo(olsonId: string | undefined, referenceDate?: Date): string {
     if (!olsonId) return '';
@@ -165,6 +201,7 @@ function updateLocationDisplay(): void {
         // DB not parsed yet — show coords and resolve in the background (parse on
         // demand), persisting the derived city so future loads skip the DB.
         locationName.textContent = `${lat.toFixed(3)}°, ${lon.toFixed(3)}°`;
+        cityParseInFlight = true;
         loadCityData().then(() => {
             if (!getState().city) {
                 const c = findClosestCity(lat, lon);
@@ -173,8 +210,10 @@ function updateLocationDisplay(): void {
                     if (isPersistentMode()) setState({ city: c.shortLabel });
                 }
             }
+            ensureTzResolved();   // DB resident: synchronous, no second parse
             if (!dialogShown()) releaseCityData();
-        }).catch(() => {});
+        }).catch((err) => console.error('[location] reverse-geocode failed:', err))
+          .finally(() => { cityParseInFlight = false; });
     }
     const tzInfo = formatTimezoneInfo(locationTimezone);
     const tzDisplayStr = locationTimezone || 'Browser TZ';
@@ -965,27 +1004,11 @@ scheduleFrame();
 requestAnimationFrame(() => layoutTopChrome());
 document.fonts?.ready.then(() => layoutTopChrome());
 
-// Backstop timezone re-resolution: if startup fell back to the browser zone
-// because the city DB wasn't loaded (a direct link with lat/lon but no tz),
-// correct it once the DB is available. resolveTimezoneFromDb awaits the load and
-// tolerates a racing releaseCityData() (there is no refcount). On a change we
-// rebuild the env and refresh the catalog, mirroring onLocationChange.
-if (tzNeedsResolution) {
-    resolveTimezoneFromDb(lat, lon).then(resolved => {
-        tzNeedsResolution = false;
-        if (resolved && resolved !== locationTimezone) {
-            locationTimezone = resolved;
-            tzDeltaMs = computeTzDeltaMs(locationTimezone);
-            env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
-            if (isPersistentMode()) setState({ tz: locationTimezone });
-            updateLocationDisplay();
-            updateTimeDisplay();
-            resetAllSchedules();   // re-evaluate the catalog against the new env
-            scheduleFrame();
-        }
-        if (!dialogShown()) releaseCityData();  // drop the parsed DB unless the dialog needs it
-    });
-}
+// Backstop timezone re-resolution for a provisional startup zone (see the
+// resolver's definition near the top). For an unnamed location the name path
+// is already parsing (updateLocationDisplay ran at module load) and calls
+// this from its handler; this call parses only when the location is named.
+ensureTzResolved();
 
 console.log('[Inspector] Initialized — lat:', lat, 'lon:', lon, 'tz:', locationTimezone,
     '— catalog values:', updater.all.length);

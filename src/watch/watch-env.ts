@@ -583,6 +583,28 @@ function localTimeFormatter(olsonId: string): Intl.DateTimeFormat {
     return fmt;
 }
 
+/**
+ * Label-only update of a slot the env already holds (coords/tz unchanged).
+ *
+ * registerTerraFunctions copies the caller's slot overrides into the env's own
+ * table (env._terraSlots) — the only thing the renderer reads — and the Terra
+ * ring bakes those names into a cached knockout (env._terraCityKnockout). So a
+ * later edit of the caller's override objects never reaches the screen. The
+ * engine's on-demand reverse-geocode (backfillObserverSlots) uses this to push
+ * the nearest-city name into the live env without a full env rebuild.
+ *
+ * @returns true if the label changed (the caller should mark the face dirty).
+ */
+export function relabelTerraSlot(env: Environment, slot: number, cityName: string): boolean {
+    const slots = (env as any)._terraSlots as Record<number, TerraSlot> | undefined;
+    const entry = slots?.[slot];
+    if (!entry || entry.cityName === cityName) return false;
+    entry.cityName = cityName;
+    // The knockout is rebuilt lazily from _terraSlots on the next draw.
+    (env as any)._terraCityKnockout = null;
+    return true;
+}
+
 function registerTerraFunctions(
     env: Environment,
     OBSERVER_LAT: number,
