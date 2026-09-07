@@ -21,10 +21,27 @@ export interface HelpPopoverOptions {
      * as the face pages' thumbnail/reorder pass.
      */
     onFirstOpen?: (helpContent: HTMLElement) => void;
+    /**
+     * Called on every open/close of the overlay (not just the first). Observatory
+     * uses this to park its render loop while help is up: the overlay carries a
+     * full-screen backdrop-filter, and re-blurring a canvas that repaints every
+     * frame intermittently composites one frame with the filter dropped —
+     * a flash of the live screen through the help page (seen in Chrome). A
+     * backdrop that never changes has nothing to re-blur, so it can't flash.
+     */
+    onOpen?: () => void;
+    /** Counterpart to onOpen — the resume/catch-up hook. */
+    onClose?: () => void;
 }
 
 /** The URL initHelpPopover configured, for openGeneralHelpTopic's lazy load. */
 let activeGeneralHelpUrl = 'help.html?embed=1';
+
+/**
+ * initHelpPopover's visibility setter, hoisted so closeHelpPopover() can reach
+ * it. Null until the popover is wired (embed mode never wires one).
+ */
+let activeSetOverlayVisible: ((visible: boolean) => void) | null = null;
 
 export function initHelpPopover(options: HelpPopoverOptions = {}): void {
     const generalHelpUrl = options.generalHelpUrl ?? 'help.html?embed=1';
@@ -42,12 +59,22 @@ export function initHelpPopover(options: HelpPopoverOptions = {}): void {
     const helpTemplate = document.getElementById('help-template') as HTMLTemplateElement | null;
     let helpLoaded = false;
     if (infoBtn && infoOverlay && infoClose) {
+        // Single choke point for visibility so every open/close path (button,
+        // backdrop click, Escape, the iframe's forwarded 'help-escape') fires
+        // the onOpen/onClose hooks exactly once.
+        const setOverlayVisible = (visible: boolean): void => {
+            if (infoOverlay.classList.contains('visible') === visible) return;
+            infoOverlay.classList.toggle('visible', visible);
+            (visible ? options.onOpen : options.onClose)?.();
+        };
+        activeSetOverlayVisible = setOverlayVisible;
+
         infoBtn.addEventListener('click', () => {
             const slider = document.getElementById('info-slider');
             const popup = document.getElementById('info-popup');
             if (slider) slider.style.transform = 'translateX(0)';
             if (popup) popup.style.height = 'auto';
-            infoOverlay.classList.add('visible');
+            setOverlayVisible(true);
             // Clone help template into DOM on first open
             // (images only start loading once cloned into the live DOM)
             if (!helpLoaded && helpContent && helpTemplate?.content) {
@@ -62,11 +89,11 @@ export function initHelpPopover(options: HelpPopoverOptions = {}): void {
             }
         });
         infoClose.addEventListener('click', () => {
-            infoOverlay.classList.remove('visible');
+            setOverlayVisible(false);
         });
         infoOverlay.addEventListener('click', (e) => {
             if (e.target === infoOverlay) {
-                infoOverlay.classList.remove('visible');
+                setOverlayVisible(false);
             }
         });
         // Escape closes the popup (matching the share popover and location
@@ -75,12 +102,12 @@ export function initHelpPopover(options: HelpPopoverOptions = {}): void {
         // 'help-escape' message.
         document.addEventListener('keydown', (e: KeyboardEvent) => {
             if (e.key === 'Escape' && infoOverlay.classList.contains('visible')) {
-                infoOverlay.classList.remove('visible');
+                setOverlayVisible(false);
             }
         });
         window.addEventListener('message', (e) => {
             if (e.data?.type === 'help-escape' && infoOverlay.classList.contains('visible')) {
-                infoOverlay.classList.remove('visible');
+                setOverlayVisible(false);
             }
         });
 
@@ -167,4 +194,17 @@ export function openGeneralHelpTopic(hash: string): void {
         if (w) w.location.hash = hash;
     }
     section.open = true;
+}
+
+/**
+ * Close the popover if it is open, returning whether it was. Exists for the
+ * face pages' Escape ladder, which closes the topmost of several dialogs and so
+ * cannot use the module's own Escape handler — going through here keeps the
+ * onClose hook (render-loop resume) on every close path.
+ */
+export function closeHelpPopover(): boolean {
+    const overlay = document.getElementById('info-overlay');
+    if (!overlay?.classList.contains('visible')) return false;
+    activeSetOverlayVisible?.(false);
+    return true;
 }

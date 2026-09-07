@@ -79,6 +79,17 @@ let inTick = false;
 /** Set when scheduleFrame() is called during a tick, so the tick re-arms even if it would otherwise idle. */
 let frameRequestedDuringTick = false;
 
+/**
+ * True while the ℹ help overlay is up. The loop parks for the duration (see
+ * `continuous` in tickBody): the overlay is a full-screen backdrop-filter, and
+ * a canvas repainting under it every frame intermittently composites one frame
+ * with the filter dropped — a flash of the live screen through the help page
+ * (Chrome; the same defect the Keep/Revert dialog dodges by holding display
+ * time). Nothing under the overlay is legible anyway, and closing it runs the
+ * same catch-up as a sleep/wake gap.
+ */
+let helpOverlayOpen = false;
+
 /** Page-level FPS indicator overlay (created when the ?fps URL param is set). */
 let fpsIndicator: FpsIndicator | null = null;
 
@@ -588,8 +599,11 @@ function tickBody(): void {
     // dialog: per-frame repaints under its backdrop-filter intermittently
     // composite one frame unblurred (WebKit); a static backdrop can't flash.
     // Map moves, dismissal, resume, and resize all wake via scheduleFrame().
+    // The help overlay carries the same backdrop-filter and gets the same
+    // treatment — see helpOverlayOpen.
     const continuous = (!timeController.isStopped || animating)
-        && (dragState === 'idle' || animating);
+        && (dragState === 'idle' || animating)
+        && !helpOverlayOpen;
     fpsIndicator?.recordFrame(continuous, performance.now() - perfNow);
     inTick = false;
     if (continuous || frameRequestedDuringTick) {
@@ -600,13 +614,26 @@ function tickBody(): void {
 // ============================================================================
 // Sleep/wake & tab-return catch-up
 // ============================================================================
+/**
+ * Rebuild + resettle everything after the loop has been parked across a gap in
+ * wall time — a sleep/tab-return (installWakeTriggers below) or a spell with
+ * the help overlay up. Same sequence the Keep/Revert and location-change paths
+ * use: rebuild the env (recomputing tzDeltaMs — the gap may have crossed a DST
+ * transition), settle in-flight animations, reset schedules so every value
+ * re-evaluates at the current display time, and wake the parked loop.
+ */
+function resyncAfterGap(): void {
+    if (!updater) return;
+    rebuildEnv();
+    updater.finish();
+    updater.reset();
+    timeUI?.updateTimezoneDisplay();
+    scheduleFrame();
+}
+
 // Resync to the current display time after a gap (tab return, system wake,
 // clock change) — see shared/wake-triggers.ts for why the triggers exist and
-// how the thresholds were chosen. The kick is the same sequence the Keep/
-// Revert and location-change paths use: rebuild the env (recomputing
-// tzDeltaMs — the gap may have crossed a DST transition), settle in-flight
-// animations, reset schedules so every value re-evaluates at the current
-// display time, and wake the parked loop.
+// how the thresholds were chosen.
 installWakeTriggers({
     // Only wall-anchored 1×/−1× goes stale across a gap: quantized playback is
     // self-anchored (a gap merely pauses it), a stopped clock is frozen, and
@@ -616,13 +643,7 @@ installWakeTriggers({
         && dragState === 'idle'
         && !timeController.isStopped
         && !timeController.needsContinuousRender,
-    catchUp: () => {
-        rebuildEnv();
-        updater!.finish();
-        updater!.reset();
-        timeUI?.updateTimezoneDisplay();
-        scheduleFrame();
-    },
+    catchUp: resyncAfterGap,
     // Location staleness check, independent of the time resync above: in bloc
     // ("follow the device") mode, a wake/tab-return after travel is the
     // moment the displayed location goes wrong. Re-check when the last
@@ -1446,7 +1467,24 @@ function init(): void {
 
     // Help ("ℹ") popover — shared wiring; the General Help iframe drops the
     // Chronometer-only sections via the app=observatory param (see help.html).
-    initHelpPopover({ generalHelpUrl: 'help.html?embed=1&app=observatory', app: 'observatory' });
+    initHelpPopover({
+        generalHelpUrl: 'help.html?embed=1&app=observatory',
+        app: 'observatory',
+        // Park the render loop while help is up so the overlay's backdrop-filter
+        // has a static backdrop to blur (see helpOverlayOpen), then catch the
+        // display back up to live time on close exactly as a wake would.
+        onOpen: () => {
+            helpOverlayOpen = true;
+            // Drop the frame already armed for this tick — it would otherwise
+            // repaint the canvas in the very frame the overlay first paints,
+            // which is one repaint under a brand-new backdrop snapshot.
+            if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+        },
+        onClose: () => {
+            helpOverlayOpen = false;
+            resyncAfterGap();
+        },
+    });
     initShareButton({ getState });
 
     // --- Cross-app navigation (header icons + i/o/c/a) and page hotkeys ---

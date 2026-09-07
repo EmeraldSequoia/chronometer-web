@@ -60,7 +60,7 @@ import { initNavigationLinks, updateNavigationLinks, locationSourceOf } from './
 import type { LocationSource } from './shared/url-state.js';
 import { getState, setState, initAppState, onSharedChange, onAdoptedAsDefault, getSlotOverrides, setSlotOverrides, isPersistentMode } from './shared/app-state.js';
 import { createFpsIndicator } from './shared/fps-indicator.js';
-import { initHelpPopover, openGeneralHelpTopic } from './shared/help-popover.js';
+import { closeHelpPopover, initHelpPopover, openGeneralHelpTopic } from './shared/help-popover.js';
 import { registerHotkey } from './shared/hotkeys.js';
 import { initAppNavLinks, markChronometerPage, registerAppNavHotkeys } from './shared/app-nav.js';
 import { initFullscreenToggle } from './shared/fullscreen.js';
@@ -1096,6 +1096,17 @@ async function main() {
     let idleTimerId: ReturnType<typeof setTimeout> | null = null;
     let rafId: number | null = null;
 
+    /**
+     * True while the ℹ help overlay is up. The scheduler parks outright for the
+     * duration — no rAF loop AND no idle wakeup (see frame()'s tail). The
+     * overlay is a full-screen backdrop-filter, and re-blurring a grid that
+     * repaints underneath it intermittently composites one frame with the
+     * filter dropped: a flash of the live faces through the help page (Chrome).
+     * A backdrop that never changes has nothing to re-blur. Closing the overlay
+     * runs the same catch-up as a sleep/wake gap (resyncAfterGap).
+     */
+    let helpOverlayOpen = false;
+
     // --- FPS indicator (page-level, enabled via the ?fps URL parameter) ---
     // One readout for the whole page: every face renders in a single frame()
     // call, so frames-per-second is a page metric, not a per-face one. The
@@ -1819,12 +1830,15 @@ async function main() {
             (window as { __appReady?: () => void }).__appReady?.();
         }
 
-        // Decide whether to keep the RAF loop running
-        const willContinue = timeController.needsContinuousRender || stillAnimating;
+        // Decide whether to keep the RAF loop running. The help overlay parks
+        // the scheduler completely (see helpOverlayOpen) — armIdle() is skipped
+        // too, since an idle wakeup is still a repaint under the blur.
+        const willContinue = (timeController.needsContinuousRender || stillAnimating)
+            && !helpOverlayOpen;
         _fps?.recordFrame(willContinue, performance.now() - frameStart);
         if (willContinue) {
             rafId = requestAnimationFrame(frame);
-        } else {
+        } else if (!helpOverlayOpen) {
             armIdle();
         }
     }
@@ -2072,6 +2086,22 @@ async function main() {
     // each on-beat value takes the "respond instantly" path — one eval at the
     // current display time, a quick settle sweep, and the beat cadence re-arms
     // from fresh state.
+    /**
+     * Rebuild + resettle every face after the scheduler has been parked across a
+     * gap in wall time — a sleep/tab-return (installWakeTriggers below) or a
+     * spell with the help overlay up. The gap may have crossed a DST transition
+     * while the precise DST timer was itself suspended, so rebuildEnvironments()
+     * re-checks now (O(1) when tz state is unchanged) and reschedules that timer
+     * from the current display time.
+     */
+    function resyncAfterGap(): void {
+        rebuildEnvironments();
+        finishAllAnimations();
+        resetAllSchedules();
+        stopScheduler();
+        startScheduler();
+    }
+
     installWakeTriggers({
         // Only wall-anchored 1×/−1× goes stale across a gap: quantized playback
         // is self-anchored (display advances per rendered tick, so a gap merely
@@ -2093,16 +2123,7 @@ async function main() {
             console.log(`[Geolocation] wake location refresh (${reason}${tzChanged ? '; system tz changed' : ''})`);
             refreshBlocLocation();
         },
-        catchUp: () => {
-            // The gap may have crossed a DST transition while the precise DST
-            // timer was itself suspended — re-check now (O(1) when tz state is
-            // unchanged) and reschedule that timer from the current display time.
-            rebuildEnvironments();
-            finishAllAnimations();
-            resetAllSchedules();
-            stopScheduler();
-            startScheduler();
-        },
+        catchUp: resyncAfterGap,
     });
 
     // =========================================================================
@@ -2742,12 +2763,9 @@ async function main() {
             return;
         }
 
-        // 3. Info overlay
-        const infoOverlay = document.getElementById('info-overlay');
-        if (infoOverlay && infoOverlay.classList.contains('visible')) {
-            infoOverlay.classList.remove('visible');
-            return;
-        }
+        // 3. Info overlay. Via the shared closer, not classList directly, so the
+        // onClose hook (scheduler resume) fires on this path too.
+        if (closeHelpPopover()) return;
 
         // 4. Location prompt
         if (locationPrompt.style.display !== 'none') {
@@ -3079,6 +3097,17 @@ async function main() {
     // --- Info button & popup (shared wiring + face-specific fixups) ---
     initHelpPopover({
         app: 'chronometer',
+        // Park the scheduler while help is up so the overlay's backdrop-filter
+        // has a static backdrop to blur (see helpOverlayOpen), then catch the
+        // faces back up to live time on close exactly as a wake would.
+        onOpen: () => {
+            helpOverlayOpen = true;
+            stopScheduler();
+        },
+        onClose: () => {
+            helpOverlayOpen = false;
+            resyncAfterGap();
+        },
         onFirstOpen: (helpContent) => {
             // Add thumbnail images to per-face help section summaries
             helpContent.querySelectorAll('.face-help-section[data-face]').forEach(el => {

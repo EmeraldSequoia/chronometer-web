@@ -469,7 +469,23 @@ initShareButton({ getState });
 
 // Help ("ℹ") popover — shared wiring; the General Help iframe drops the
 // topics that don't apply via the app=inspector param (see help.html).
-initHelpPopover({ generalHelpUrl: 'help.html?embed=1&app=inspector', app: 'inspector' });
+initHelpPopover({
+    generalHelpUrl: 'help.html?embed=1&app=inspector',
+    app: 'inspector',
+    // Park the loop while help is up so the overlay's backdrop-filter has a
+    // static backdrop to blur (see helpOverlayOpen), then re-evaluate the
+    // catalog at live time on close.
+    onOpen: () => {
+        helpOverlayOpen = true;
+        // Drop the frame already armed — it would otherwise repaint in the very
+        // frame the overlay first paints, under a brand-new backdrop snapshot.
+        if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+    },
+    onClose: () => {
+        helpOverlayOpen = false;
+        resyncAfterGap();
+    },
+});
 
 // Live cross-tab sync: when another tab (or app) changes the shared location
 // or time, apply it here without a reload.
@@ -861,6 +877,31 @@ let rafId: number | null = null;
 let inTick = false;
 let frameRequestedDuringTick = false;
 
+/**
+ * True while the ℹ help overlay is up; the loop parks for the duration (see
+ * `continuous` in tickBody). The overlay is a full-screen backdrop-filter, and
+ * every catalog repaint underneath it forces Chrome to re-blur the whole
+ * viewport — a re-composite that intermittently lands with the filter dropped,
+ * flashing the live page through the help page. A backdrop that never changes
+ * has nothing to re-blur. Observatory hit this first; the catalog churns far
+ * less than a canvas, but the defect surface is the same and parking is free.
+ */
+let helpOverlayOpen = false;
+
+/**
+ * Rebuild + re-evaluate after the loop has been parked across a gap in wall
+ * time (today: a spell with the help overlay up). Mirrors the location/timezone
+ * paths — rebuild the env, since the gap may have crossed a DST transition,
+ * then re-evaluate the catalog at the current display time and wake the loop.
+ */
+function resyncAfterGap(): void {
+    tzDeltaMs = computeTzDeltaMs(locationTimezone);
+    env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
+    updateTimeDisplay();
+    resetAllSchedules();
+    scheduleFrame();
+}
+
 function scheduleFrame(): void {
     if (inTick) { frameRequestedDuringTick = true; return; }
     if (rafId === null) rafId = requestAnimationFrame(tick);
@@ -913,7 +954,8 @@ function tickBody(): void {
     timeController.clampDisplayTime();
     timeController.endFrame();
 
-    const continuous = !timeController.isStopped || updater.anyAnimating();
+    const continuous = (!timeController.isStopped || updater.anyAnimating())
+        && !helpOverlayOpen;
     fpsIndicator?.recordFrame(continuous, performance.now() - perfNow);
 
     inTick = false;
