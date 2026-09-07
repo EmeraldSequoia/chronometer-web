@@ -119,7 +119,11 @@ not resident (it is parsed lazily) the browser's zone is used as a
 is available (from the location-name reverse-geocode's own parse when there is
 one, otherwise a parse of its own), then `updater.reset()` + `rebuildEnv()` —
 the same apply sequence as a dialog pick — and persists the corrected zone
-when storage has none. See [Timezone & DST](timezone-and-dst.md).
+when storage has none. Every later location change — a dialog pick, the bloc
+fix and its quiet refresh, a kept map drag, a cross-tab write — re-runs the
+same resolution and re-arms the backstop, and stores
+`persistableTz(tz, provisional)` so a browser guess never reaches `ec:shared`.
+See [Timezone & DST](timezone-and-dst.md).
 
 Parsed-database residency follows one-shot use: the reverse-geocode releases
 it after labelling the location; drag-to-explore parses it on the first press
@@ -899,14 +903,17 @@ idle → dragging → confirming → idle
   cursor as a hint.
 - **dragging**: active drag in progress. `pointerdown` inside the earth map
   rectangle (hit-tested via `isInsideEarthMap()`) saves the current
-  `lat`/`lon`/`tz`/`city`, then on every `pointermove` inside the map:
+  `lat`/`lon`/`tz`/`city` (and whether that `tz` is still a provisional guess,
+  so Revert and the Alt-drag "keep the old timezone" checkbox restore the two
+  together), then on every `pointermove` inside the map:
   1. Convert CSS-pixel position to lat/lon via `earthPixelToLatLon()` (inverse
      Mercator, clamped to [-90,90] / [-180,180]).
   2. Apply shift-key axis lock: if Shift is held, constrain to whichever of
      latitude or longitude has the larger absolute delta from the saved position.
      Re-evaluated per move (no sticky axis).
-  3. Call `applyTemporaryLocation(lat, lon)` → `resolveTimezone()` → `rebuildEnv()`
-     → `updater.reset()` → `scheduleFrame()`. No `setState()` (no persistence).
+  3. Call `applyTemporaryLocation(lat, lon)` → nearest-city zone →
+     `rebuildEnv()` → `updater.reset()` → `scheduleFrame()`. No `setState()`
+     (no persistence).
   4. The observer dot stays at the saved (home) location (via `dotOverrideLat`/
      `dotOverrideLon` on `drawEarthView`). A 1px red crosshair at 50% opacity
      (`drawDragCrosshair`) marks the rendered (temporary) location.
@@ -937,7 +944,7 @@ the earth map rect are ignored (the location stays at the last in-map position).
 
 ### Performance
 
-`resolveTimezone()` calls `findClosestCity()` which scans ~167K cities. This
+Resolving the zone calls `findClosestCity()`, which scans ~167K cities. This
 runs on every `pointermove` during drag (no throttling) to keep the displayed
 timezone fully in sync with lat/lon. Empirical testing shows this adds < 5 ms
 per event. If performance becomes an issue, throttling to every N ms is a

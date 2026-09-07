@@ -3,7 +3,7 @@
  * tz-resolve — provisional vs confident timezone answers, and the DB-backed
  * re-resolution that corrects a provisional one.
  *
- * The city DB is parsed lazily; while it is not resident, resolveTimezone()
+ * The city DB is parsed lazily; while it is not resident, resolution
  * can only return the browser's zone. That answer is a guess and must never be
  * persisted as the location's timezone — every app's ensureTzResolved()
  * corrects it from the DB. These tests pin the contract those paths rely on.
@@ -14,7 +14,7 @@
  */
 import { describe, test, expect, beforeEach } from 'vitest';
 import { loadCityData, releaseCityData, isCityDataLoaded } from '../shared/city-search.js';
-import { resolveTimezone, resolveTimezoneProvisional, resolveTimezoneFromDb } from '../shared/tz-resolve.js';
+import { resolveTimezoneProvisional, resolveTimezoneFromDb, persistableTz } from '../shared/tz-resolve.js';
 
 function packB64(arr: ArrayBufferView): string {
     return Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength).toString('base64');
@@ -53,11 +53,10 @@ beforeEach(() => {
 });
 
 describe('resolveTimezoneProvisional', () => {
-    test('DB not resident → the browser zone, flagged provisional; resolveTimezone agrees', () => {
+    test('DB not resident → the browser zone, flagged provisional', () => {
         expect(isCityDataLoaded()).toBe(false);
         const r = resolveTimezoneProvisional(SAN_JOSE.lat, SAN_JOSE.lon, null);
         expect(r).toEqual({ tz: browserZone(), provisional: true });
-        expect(resolveTimezone(SAN_JOSE.lat, SAN_JOSE.lon, null)).toBe(r.tz);
     });
 
     test('DB resident → the nearest city\'s zone, confident', async () => {
@@ -68,6 +67,32 @@ describe('resolveTimezoneProvisional', () => {
 
     test('a city pick is confident regardless of the DB', () => {
         expect(resolveTimezoneProvisional(0, 0, 'Asia/Tokyo')).toEqual({ tz: 'Asia/Tokyo', provisional: false });
+    });
+});
+
+describe('persistableTz', () => {
+    test('a confident zone is stored as itself', () => {
+        expect(persistableTz('Asia/Tokyo', false)).toBe('Asia/Tokyo');
+    });
+
+    test('a provisional zone is stored as null, never as the guessed string', () => {
+        expect(persistableTz(browserZone(), true)).toBeNull();
+    });
+
+    test('null (not undefined) for an absent zone — setState must CLEAR the field, not skip it', () => {
+        // `undefined` would leave a previous location's zone standing beside the
+        // new coordinates; mergeNamespace deletes the key only for null.
+        expect(persistableTz(undefined, false)).toBeNull();
+        expect(persistableTz('', false)).toBeNull();
+        expect(persistableTz(undefined, true)).toBeNull();
+    });
+
+    test('composes with resolveTimezoneProvisional at a persist site', async () => {
+        const guess = resolveTimezoneProvisional(SAN_JOSE.lat, SAN_JOSE.lon, null);
+        expect(persistableTz(guess.tz, guess.provisional)).toBeNull();
+        await loadCityData();
+        const confident = resolveTimezoneProvisional(SAN_JOSE.lat, SAN_JOSE.lon, null);
+        expect(persistableTz(confident.tz, confident.provisional)).toBe('America/Los_Angeles');
     });
 });
 

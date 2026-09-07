@@ -79,16 +79,31 @@ answers in three tiers and says which one it used: a city pick's own zone
 (tier 1) and the nearest city in the GeoNames database (tier 2) are
 *confident*; the browser's zone (tier 3) is a **provisional** guess, returned
 whenever the city database is not resident — the normal case, since it is
-parsed lazily. `resolveTimezone()` is the convenience form that returns only
-the zone.
+parsed lazily. There is deliberately no zone-only convenience form: every
+caller resolves a zone in order to show *and* store it, so every caller has to
+know whether the answer is a guess.
 
 A provisional zone must never be persisted as the location's `tz` (a stored
 browser zone would poison every later load) and must be corrected once the
-database is available. Each app has one `ensureTzResolved()` for that, built
+database is available. Two rules follow, and every location path obeys both:
+
+1. **Store through `persistableTz(tz, provisional)`** (also in
+   `tz-resolve.ts`): a confident zone stores itself, a guess stores `null`.
+   `null`, not "omit the field" — the stored zone belongs to the *previous*
+   location, and leaving it beside new coordinates is the stale-timezone bug.
+   `grep persistableTz` is the inventory of `setState({ tz })` sites: the
+   startup branches, `applyLocation` and the location dialog's
+   `onLocationChange`, the bloc fix / quiet refresh, the Observatory's kept map
+   drag, and `index.html`'s launcher. The shared dialog reports the flag as
+   `LocationChangeInfo.provisional`.
+2. **Arm `tzNeedsResolution`** with the same `provisional` so the backstop
+   below fills the field in.
+
+Each app has one `ensureTzResolved()` for that, built
 by `createTzResolver()` in `src/shared/tz-ensure.ts` from the app's hooks
 (`src/engine-entry.ts`, `src/observatory/observatory-entry.ts`,
-`src/inspector/inspector-entry.ts`), armed by `tzNeedsResolution` when startup
-had to guess. The contract (unit-tested once, in `tz-ensure.test.ts`):
+`src/inspector/inspector-entry.ts`). The contract (unit-tested once, in
+`tz-ensure.test.ts`):
 
 - resident database → resolve synchronously (no parse); otherwise
   `resolveTimezoneFromDb()` parses on demand and releases afterwards (in a
@@ -172,7 +187,7 @@ Month and year steps remain calendar-aware (variable-length arithmetic).
 | `src/dst-detect.ts` | `findNextDstTransition`, `findPrevDstTransition`, `getTimezoneOffsetMinutes` |
 | `src/__tests__/dst-detect.test.ts` | 70 tests covering forward/backward search, 30+ timezones, Lord Howe Island |
 | `src/engine-entry.ts` | `handleDstTransition`, `scheduleDstRebuild`, browser TZ poll, `formatTimezoneDisplay`, `ensureTzResolved` / `applyResolvedTimezone` |
-| `src/shared/tz-resolve.ts` | `resolveTimezoneProvisional`, `resolveTimezone`, `resolveTimezoneFromDb` |
+| `src/shared/tz-resolve.ts` | `resolveTimezoneProvisional`, `persistableTz`, `resolveTimezoneFromDb` |
 | `src/shared/tz-ensure.ts` | `createTzResolver` — the shared `ensureTzResolved` contract |
 | `src/observatory/observatory-entry.ts`, `src/inspector/inspector-entry.ts` | each app's `ensureTzResolved` |
 | `src/watch/observer-slots.ts` | `deriveObserverSlots` — the observer slots a timezone correction re-derives |

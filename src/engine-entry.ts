@@ -58,7 +58,7 @@ import type { ChromeItem, ChromeLayoutResult, CornerGroup } from './shared/chrom
 
 import { initNavigationLinks, updateNavigationLinks, locationSourceOf } from './shared/url-state.js';
 import type { LocationSource } from './shared/url-state.js';
-import { getState, setState, initAppState, onSharedChange, getSlotOverrides, setSlotOverrides, isPersistentMode } from './shared/app-state.js';
+import { getState, setState, initAppState, onSharedChange, onAdoptedAsDefault, getSlotOverrides, setSlotOverrides, isPersistentMode } from './shared/app-state.js';
 import { createFpsIndicator } from './shared/fps-indicator.js';
 import { initHelpPopover, openGeneralHelpTopic } from './shared/help-popover.js';
 import { registerHotkey } from './shared/hotkeys.js';
@@ -69,7 +69,7 @@ import { loadCityData, prefetchCityData, releaseCityData, searchCities, findClos
 import { showStorageWarning } from './shared/incoming-settings-dialog.js';
 import type { CityResult } from './shared/city-search.js';
 import { renderGlobe, loadOSMTile } from './shared/mini-map.js';
-import { resolveTimezone } from './shared/tz-resolve.js';
+import { resolveTimezoneProvisional, persistableTz } from './shared/tz-resolve.js';
 import { createTzResolver } from './shared/tz-ensure.js';
 import { findNextDstTransition, findPrevDstTransition } from './shared/dst-detect.js';
 
@@ -431,15 +431,17 @@ async function main() {
         // zone as a TRANSIENT backstop — don't persist it (that would poison
         // future loads) — and re-resolve once the DB loads (see ensureTzResolved).
         if (!locationTimezone) {
-            if (isCityDataLoaded()) {
-                locationTimezone = resolveTimezone(lat, lon, null);
-                tzDeltaMs = computeTzDeltaMs(locationTimezone);
-                setState({ tz: locationTimezone });
-            } else {
-                locationTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-                tzDeltaMs = computeTzDeltaMs(locationTimezone);
-                tzNeedsResolution = true;
-            }
+            const tzRes = resolveTimezoneProvisional(lat, lon, null);
+            locationTimezone = tzRes.tz;
+            tzNeedsResolution = tzRes.provisional;
+            tzDeltaMs = computeTzDeltaMs(locationTimezone);
+            // Only a confident answer is written, and only where it will stick:
+            // this is an automatic write like every other. persistableTz would
+            // give null here, but this is the one site that must not *clear* a
+            // stored tz — we are inside `!locationTimezone`, so there is
+            // nothing to clear. (Unreachable today: nothing parses the city DB
+            // before this line. It is future-proofing for a preload that does.)
+            if (!tzRes.provisional && isPersistentMode()) setState({ tz: locationTimezone });
         }
         // We haven't tried geolocation — check the Permissions API if available
         if (navigator.permissions) {
@@ -457,13 +459,18 @@ async function main() {
             locationSource = '';
             locationSourceType = 'browser';
             geoPermission = 'granted';
-            locationTimezone = resolveTimezone(lat, lon, null);
+            // The DB is not resident on a fresh bloc load, so this is normally the
+            // browser-zone guess: keep it on screen, never store it, and let the
+            // startup ensureTzResolved() below correct it from the DB.
+            const tzRes = resolveTimezoneProvisional(lat, lon, null);
+            locationTimezone = tzRes.tz;
+            tzNeedsResolution = tzRes.provisional;
             tzDeltaMs = computeTzDeltaMs(locationTimezone);
             // Seed the fix so the next reload shows it immediately (no 0,0 flash)
             // and can skip the DB while stationary. Automatic write — gated on
             // persistent mode; the city name is filled by updateLocationDisplay's
             // on-demand reverse-geocode.
-            if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat, lon, tz: locationTimezone || null });
+            if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat, lon, tz: persistableTz(tzRes.tz, tzRes.provisional) });
         } else if (result.status === 'denied') {
             // User explicitly denied — show prompt with button disabled
             lat = 0; lon = 0;
@@ -497,6 +504,14 @@ async function main() {
 
     /** True while updateLocationDisplay's on-demand DB parse is in flight. */
     let reverseGeocodeInFlight = false;
+    /**
+     * The nearest-city `shortLabel` behind the label currently on screen for an
+     * *unnamed* location, or null when there is none (no location, a named one,
+     * or the DB has not answered for these coordinates yet). Kept because the
+     * DB is released after each use: it lets the adoption hook persist the name
+     * the user is already looking at without re-parsing ~22 MB.
+     */
+    let derivedCityName: string | null = null;
 
     /**
      * Label the Terra/Gaia observer slot(s) with the nearest-city name once the
@@ -548,6 +563,7 @@ async function main() {
         } else if (isCityDataLoaded() && (lat !== 0 || lon !== 0)) {
             // Manual or browser location — find closest city and describe
             const closest = findClosestCity(lat, lon);
+            derivedCityName = closest?.shortLabel ?? null;
             if (closest) {
                 const distKm = haversineKm(lat, lon, closest.lat, closest.lon);
                 const THRESHOLD_KM = 16; // ~10 miles
@@ -575,6 +591,7 @@ async function main() {
             // (the first releases the DB, so the second would re-parse the
             // ~22 MB DB and blank the label in between).
             sourceLabel.textContent = '';   // a named label no longer describes these coords
+            derivedCityName = null;         // and neither does the name behind it
             if (reverseGeocodeInFlight) return;
             reverseGeocodeInFlight = true;
             loadCityData().then(() => {
@@ -595,6 +612,21 @@ async function main() {
             sourceLabel.textContent = '';
         }
     }
+    /**
+     * Persist the reverse-geocoded city for an unnamed location. The automatic
+     * write inside updateLocationDisplay is gated on isPersistentMode(), so a
+     * session that only *becomes* persistent (Save as my default) has a name on
+     * screen that never reached storage — and the adopted location group now
+     * carries no `city` at all. Uses the name already derived when we have it;
+     * otherwise re-enters the on-demand path, whose guards now pass.
+     */
+    function persistDerivedCity(): void {
+        if (locationSource || isEmbedMode || (lat === 0 && lon === 0)) return;
+        if (getState().city) return;
+        if (derivedCityName) setState({ city: derivedCityName });
+        else updateLocationDisplay();
+    }
+
     // The initial updateLocationDisplay() call is deferred until the faces
     // exist (see below): its DB-load callback labels the observer slots.
 
@@ -2328,8 +2360,11 @@ async function main() {
     /**
      * Correct a provisional (browser-zone) timezone from the city DB — the
      * shared contract in shared/tz-ensure.ts, with this app's hooks. Armed by
-     * `tzNeedsResolution` (the startup lat/lon branch guessed); the flag is
-     * cleared only by an answer that lands for the current coordinates, so a
+     * `tzNeedsResolution`, which every path that resolves a zone sets from
+     * resolveTimezoneProvisional (startup, applyLocation, the bloc fix and
+     * refresh, cross-tab sync) — those paths also write `tz: null` rather than
+     * store a guess, so this is what fills storage in. The flag is cleared only
+     * by an answer that lands for the current coordinates, so a
      * stale answer (location changed meanwhile, or a named location arriving
      * mid-parse) leaves it armed and the next unnamed location's
      * reverse-geocode corrects that location's guess too. A corrected zone is a
@@ -2568,16 +2603,28 @@ async function main() {
         locationSource = source;
         locationFullLabel = fullLabel;
         locationSourceType = sourceType;
-        // Resolve timezone for this location
-        locationTimezone = resolveTimezone(newLat, newLon, cityTz);
+        // Resolve timezone for this location. A city pick carries its own zone;
+        // typed coordinates fall back to the browser zone whenever the city DB
+        // isn't resident — and this dialog only parses it on the first search
+        // keystroke, so that is the common case. Such a zone is a GUESS: show
+        // it, never store it, and arm ensureTzResolved() to correct it.
+        const tzRes = resolveTimezoneProvisional(newLat, newLon, cityTz);
+        locationTimezone = tzRes.tz;
+        tzNeedsResolution = tzRes.provisional;
         tzDeltaMs = computeTzDeltaMs(locationTimezone);
         rebuildAllForLocation(newLat, newLon);
         // Reschedule DST timer — location timezone may have changed
         scheduleDstRebuild();
         if (writeToUrl) {
             // Explicit non-browser location → clear any prior bloc intent.
-            setState({ bloc: false, lsrc: sourceType, lat: newLat, lon: newLon, city: source || null, tz: locationTimezone || null });
+            setState({ bloc: false, lsrc: sourceType, lat: newLat, lon: newLon, city: source || null, tz: persistableTz(locationTimezone, tzNeedsResolution) });
         }
+        // Correct a guessed zone from the DB. Runs after rebuildAllForLocation's
+        // updateLocationDisplay so an unnamed location's reverse-geocode already
+        // owns the parse (this call then defers to it — no second parse).
+        // Callers that persist after we return read `tzNeedsResolution` for the
+        // tz they write, so it must be settled by now.
+        ensureTzResolved();
         // Update the map preview and show Done button
         updateMapPreview(newLat, newLon);
         lpDialogFooter.classList.add('visible');
@@ -2632,7 +2679,7 @@ async function main() {
                 // Persist bloc intent *with* the fix as a seed, so a reload shows it
                 // immediately (no 0,0 flash) and can skip the DB while stationary.
                 const derived = isCityDataLoaded() ? (findClosestCity(fixLat, fixLon)?.shortLabel ?? null) : null;
-                setState({ bloc: true, lsrc: 'browser', lat: fixLat, lon: fixLon, city: derived, tz: locationTimezone || null });
+                setState({ bloc: true, lsrc: 'browser', lat: fixLat, lon: fixLon, city: derived, tz: persistableTz(locationTimezone, tzNeedsResolution) });
                 // Explicit confirmation: a stationary refresh changes nothing
                 // else visible, and success-by-silence reads as failure.
                 if (lpBrowserError) {
@@ -2976,10 +3023,16 @@ async function main() {
             locationSource = s.city || '';
             locationFullLabel = s.city || '';
             locationSourceType = locationSourceOf(s);
-            locationTimezone = resolveTimezone(s.lat, s.lon, s.tz || null);
+            // The writing tab may not have had a confident zone either (it stores
+            // none until the DB gives it one), so fall back the same way it does
+            // and arm our own backstop when the answer is only the browser guess.
+            const tzRes = resolveTimezoneProvisional(s.lat, s.lon, s.tz || null);
+            locationTimezone = tzRes.tz;
+            tzNeedsResolution = tzRes.provisional;
             tzDeltaMs = computeTzDeltaMs(locationTimezone);
             rebuildAllForLocation(s.lat, s.lon);  // sets lat/lon, rebuilds, updates display, kicks scheduler
             scheduleDstRebuild();
+            ensureTzResolved();   // after the display update, so the name path owns any parse
             needsPrompt = false;
             changed = true;
         }
@@ -3003,6 +3056,25 @@ async function main() {
     // (a stored city name). resolveTimezoneFromDb tolerates a racing
     // releaseCityData() from the name path (there is no refcount).
     ensureTzResolved();
+
+    // --- Adopting a shared link mid-session ---
+    // Everything Chronometer derives automatically is gated on persistent mode,
+    // so a Save has to replay those writes for the location already on screen.
+    // Registered here, after every `await` in main(): the dialog can be answered
+    // while main() is still suspended (a `bloc=1` link waiting on geolocation),
+    // and ensureTzResolved is a const declared above — earlier registration
+    // could fire it in its temporal dead zone. Nothing is lost by being late:
+    // an adoption before this point simply leaves the startup derivations to run
+    // in persistent mode, which is exactly what the hook would have replayed.
+    onAdoptedAsDefault(() => {
+        persistDerivedCity();
+        if (!getState().tz && locationTimezone && (lat !== 0 || lon !== 0)) {
+            // A confident zone is already in hand — store it. A guess is not
+            // storable, so let the backstop resolve one (it is still armed).
+            if (tzNeedsResolution) ensureTzResolved();
+            else setState({ tz: locationTimezone });
+        }
+    });
 
     // --- Info button & popup (shared wiring + face-specific fixups) ---
     initHelpPopover({
@@ -4031,7 +4103,7 @@ async function main() {
             // getState().city when the parse lands, after this synchronous write.
             // Do not call updateLocationDisplay() again here: a second call
             // would attach a second handler to the same DB-load promise.
-            if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat: result.lat, lon: result.lon, city: null, tz: locationTimezone || null });
+            if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat: result.lat, lon: result.lon, city: null, tz: persistableTz(locationTimezone, tzNeedsResolution) });
         }).catch(() => notifyBlocRefreshFailed()).finally(() => {
             if (sourceLabel) sourceLabel.style.color = '';
         });

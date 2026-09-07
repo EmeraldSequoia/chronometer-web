@@ -18,7 +18,7 @@
 import { loadCityData, releaseCityData, searchCities, findClosestCity, isCityDataLoaded, loadError } from './city-search.js';
 import type { CityResult } from './city-search.js';
 import { renderGlobe, loadOSMTile } from './mini-map.js';
-import { resolveTimezone } from './tz-resolve.js';
+import { resolveTimezoneProvisional } from './tz-resolve.js';
 import type { LocationSource } from './url-state.js';
 import { watchBrowserLocation } from './geolocation.js';
 
@@ -79,7 +79,14 @@ export interface LocationChangeInfo {
     sourceType: LocationSource;
     /** Resolved Olson timezone ID, e.g. "America/Los_Angeles". */
     timezone: string;
-    /** City timezone from the database, if available (used as hint for resolveTimezone). */
+    /**
+     * True when `timezone` is the browser-zone guess (the city DB was not
+     * resident and no city pick supplied a zone — see tz-resolve.ts). The
+     * consumer must not persist it; it arms that app's `ensureTzResolved()`
+     * backstop instead.
+     */
+    provisional: boolean;
+    /** City timezone from the database, if available (tier 1 of the resolution). */
     cityTimezone: string | null;
 }
 
@@ -273,7 +280,7 @@ export function initLocationDialog(config: LocationDialogConfig): LocationDialog
         locationFullLabel = fullLabel;
         locationSourceType = sourceType;
 
-        const timezone = resolveTimezone(newLat, newLon, cityTz);
+        const { tz: timezone, provisional } = resolveTimezoneProvisional(newLat, newLon, cityTz);
 
         // Notify consumer
         config.onLocationChange({
@@ -283,6 +290,7 @@ export function initLocationDialog(config: LocationDialogConfig): LocationDialog
             fullLabel,
             sourceType,
             timezone,
+            provisional,
             cityTimezone: cityTz,
         });
 

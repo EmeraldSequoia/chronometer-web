@@ -153,6 +153,28 @@ shows the ugly `'Observer'` placeholder.
 3. No `ec:slots` schema change needed: the observer slot is computed from the
    observer location + the persisted `city`, not stored as a slot override.
 
+**Amended 2026-09-06/07** (see
+[2026-09-05-location-city-tz-staleness.md](2026-09-05-location-city-tz-staleness.md)
+§5 steps 1, 1b and 2):
+
+- Point 1's "set `locationSource`" is superseded. Re-running the derivation is
+  not enough on its own: `createWatchEnvironment` copies the slot table into
+  `env._terraSlots` and Terra bakes the ring names into a cached knockout, so a
+  face-side write never reaches the screen. `backfillObserverSlots()` writes
+  **both** — the face-side overrides *and* the live env, via
+  `relabelTerraSlot()` — and marks the face dirty.
+- Point 2 landed, but the fallback had been applied only inside
+  `buildSlotOverrides`; the in-session location-change path built Gaia's slot by
+  hand and still emitted the literal `'Observer'`. Both paths now go through the
+  one derivation (`deriveObserverSlots`), whose last-resort literal is `'Local'`.
+- Point 3 still holds, and is now enforced: only *user* overrides are
+  serialized (`terraUserOverrides`), so the injected observer can never reach
+  `ec:slots`.
+- A timezone correction re-runs pass 1: the observer slot's ring sector and
+  `olsonId` derive from `locationTimezone`, so it goes through
+  `applyResolvedTimezone` → the location rebuild, never the DST path (which
+  preserves slots by design).
+
 ### 2. Decouple download from parse, prefetch into a resident compressed blob
 
 Today's `<script>` tag fuses download and parse. The split is **protocol-aware**,
@@ -310,6 +332,8 @@ Implemented across all four decisions. Key deviations/notes:
 - **Observer-slot unification** (`engine-entry.ts`): the eager pass-2 backfill is
   gone; `backfillObserverSlots()` runs after the on-demand reverse-geocode, and
   Gaia's no-DB fallback now uses `olsonIdToCityName` (matching Terra).
+  (2026-09-06: the backfill also relabels the **live env** — see the amendment
+  above; a face-side write alone never reached the screen.)
 - **`bloc` seed**: browser-location writes now persist `lat/lon/(city)/tz`
   alongside `bloc:true` (user edits unconditional; automatic startup-fix /
   background-refresh writes gated on the new `isPersistentMode()` so they neither

@@ -11,12 +11,12 @@
 import { loadCityData, searchCities, findClosestCity, isCityDataLoaded, loadError } from './shared/city-search.js';
 import type { CityResult } from './shared/city-search.js';
 import { renderGlobe, loadOSMTile } from './shared/mini-map.js';
-import { resolveTimezone } from './shared/tz-resolve.js';
-import { initAppState, getState, setState } from './shared/app-state.js';
+import { resolveTimezoneProvisional, persistableTz } from './shared/tz-resolve.js';
+import { initAppState, getState, setState, onAdoptedAsDefault } from './shared/app-state.js';
 import { locationSourceOf } from './shared/url-state.js';
 import type { LocationSource } from './shared/url-state.js';
 import { registerHotkey } from './shared/hotkeys.js';
-import { initAppNavLinks, markChronometerPage, registerAppNavHotkeys } from './shared/app-nav.js';
+import { initAppNavLinks, markChronometerPage, registerAppNavHotkeys, navSearch } from './shared/app-nav.js';
 import { openGeneralHelpTopic } from './shared/help-popover.js';
 import { requestBrowserLocation, watchBrowserLocation } from './shared/geolocation.js';
 
@@ -41,9 +41,17 @@ loadCityData().catch(() => {});
 // Navigation link updates
 // ============================================================================
 
-/** Update all face-card links to include the current URL search params. */
+/**
+ * Point every face card (and the pick card) at the right page with the right
+ * query string. `navSearch()` rather than `window.location.search`: in
+ * persistent mode the state travels through localStorage and the link must be
+ * clean, or the face page prompts to adopt settings it already has. Re-run
+ * whenever the URL or the mode changes — including on adoption, which clears
+ * the query string out from under links already built (see the subscriber
+ * below).
+ */
 function updateLinks() {
-    const search = window.location.search;
+    const search = navSearch();
     document.querySelectorAll('a.face-card').forEach(a => {
         const baseHref = a.getAttribute('data-base-href') || a.getAttribute('href')!;
         if (!a.hasAttribute('data-base-href')) a.setAttribute('data-base-href', baseHref);
@@ -192,16 +200,16 @@ function applyLocation(newLat: number, newLon: number, source: string, fullLabel
     if (writeToUrl) {
         // Persist the location's timezone so a face opened from here reads it
         // straight from shared state — no DB-load race, no nearest-city
-        // approximation. Only persist a *confident* tz: a city pick carries its
-        // exact zone; a manual pick uses nearest-city ONLY if the DB is already
-        // loaded. Otherwise leave tz unset and let the face resolve+persist it
-        // once its own DB loads (backstop-then-update). Never persist a bare
-        // browser fallback as the location's tz.
-        const tz = cityTz
-            ? cityTz
-            : (isCityDataLoaded() ? resolveTimezone(newLat, newLon, null) : null);
+        // approximation. Only a *confident* tz is storable: a city pick carries
+        // its exact zone, a manual pick uses nearest-city ONLY if the DB is
+        // already loaded, and a browser-zone guess stores null (persistableTz).
+        // Null, not "leave as is": the stored zone belongs to the PREVIOUS
+        // location, and keeping it beside new coordinates is exactly the stale-tz
+        // bug. The face resolves and persists the real zone on its next load
+        // (index.html has no ensureTzResolved backstop of its own).
+        const tzRes = resolveTimezoneProvisional(newLat, newLon, cityTz);
         // Explicit non-browser location → clear any prior bloc intent.
-        setState({ bloc: false, lsrc: sourceType, lat: newLat, lon: newLon, city: source || null, ...(tz ? { tz } : {}) });
+        setState({ bloc: false, lsrc: sourceType, lat: newLat, lon: newLon, city: source || null, tz: persistableTz(tzRes.tz, tzRes.provisional) });
     }
     updateLinks();
     updateMapPreview(newLat, newLon);
@@ -257,7 +265,9 @@ lpUseBrowser.addEventListener('click', () => {
             // Write bloc=1 and clear lat/lon/city so next reload asks browser again.
             // lsrc: null — with lat/lon cleared there is no stored fix to describe;
             // the next load's fetch writes lsrc: 'browser' with the fix.
-            setState({ bloc: true, lsrc: null, lat: null, lon: null, city: null });
+            // tz: null for the same reason as above — the cleared fix's zone must
+            // not describe whatever the next load's geolocation returns.
+            setState({ bloc: true, lsrc: null, lat: null, lon: null, city: null, tz: null });
             updateLinks();
             // Explicit confirmation: a stationary refresh changes nothing
             // else visible, and success-by-silence reads as failure.
@@ -441,6 +451,11 @@ registerAppNavHotkeys();
 registerHotkey('h', () => document.getElementById('info-btn')?.click());
 registerHotkey('?', () => openGeneralHelpTopic('#hotkeys'));
 registerHotkey('l', () => showPrompt(false));
+
+// Adopting a shared link mid-session clears the query string from under links
+// that were built with it; rebuild them (and re-derive the persistent-mode
+// clean form) so the face page opens without prompting for what was just saved.
+onAdoptedAsDefault(() => updateLinks());
 
 (async function init() {
     const urlState = getState();

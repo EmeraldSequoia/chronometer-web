@@ -13,9 +13,9 @@
 
 import { createAstroEnvironment, computeTzDeltaMs } from '../shared/astro-env.js';
 import type { Environment } from '../expr/env.js';
-import { getState, setState, initAppState, onSharedChange, isPersistentMode } from '../shared/app-state.js';
+import { getState, setState, initAppState, onSharedChange, onAdoptedAsDefault, isPersistentMode } from '../shared/app-state.js';
 import { locationSourceOf } from '../shared/url-state.js';
-import { resolveTimezone, resolveTimezoneProvisional } from '../shared/tz-resolve.js';
+import { resolveTimezoneProvisional, persistableTz } from '../shared/tz-resolve.js';
 import { createTzResolver } from '../shared/tz-ensure.js';
 import { findClosestCity, findLargestCityNear, prefetchCityData, loadCityData, releaseCityData, isCityDataLoaded } from '../shared/city-search.js';
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
@@ -106,6 +106,14 @@ let lat = urlState.lat ?? 0;
 let lon = urlState.lon ?? 0;
 let locationTimezone: string | undefined = urlState.tz || undefined;
 let needsPrompt = !hasUrlLocation && !urlState.bloc;
+/**
+ * The name shown for the current coordinates — the in-memory counterpart of the
+ * stored `city`. Every path that moves the observer must update it, because the
+ * storage write that carries the new name is *gated* (automatic writes only
+ * happen in persistent mode): reading `getState().city` for the display instead
+ * would keep painting the previous spot's name in session-only mode.
+ */
+let locationCityName: string | null = urlState.city || null;
 
 // Yellow tint for the location name while a seeded-bloc geolocation refresh is
 // in flight (a lightweight stand-in for a fuller "updating location" indicator).
@@ -202,6 +210,9 @@ let dragState: 'idle' | 'dragging' | 'confirming' = 'idle';
 let savedLat = 0;
 let savedLon = 0;
 let savedTz: string | undefined;
+/** `tzNeedsResolution` as it stood at the start of the drag (restored on Revert
+ *  and by the "keep the old timezone" checkbox — the flag travels with savedTz). */
+let savedTzProvisional = false;
 let savedCity: string | null = null;
 /** Current shift-key axis constraint during drag. */
 let dragAxisLock: 'none' | 'lat' | 'lon' = 'none';
@@ -642,13 +653,12 @@ function updateLocationDisplay(): void {
         nameEl.textContent = 'No location set';
         return;
     }
-    const cityName = getState().city || null;
-    if (cityName) {
-        nameEl.textContent = cityName;
+    if (locationCityName) {
+        nameEl.textContent = locationCityName;
         return;
     }
 
-    // No stored name for these coordinates. Show the nearest city if the DB is
+    // No name for these coordinates yet. Show the nearest city if the DB is
     // already parsed; otherwise show coordinates and resolve in the background
     // (parsing on demand). Persist the derived name only in persistent mode, so
     // a future load skips the DB; never persist in session-only/in-memory mode.
@@ -656,6 +666,7 @@ function updateLocationDisplay(): void {
         const closest = findClosestCity(lat, lon);
         if (!closest) return false;
         nameEl.textContent = closest.shortLabel;
+        locationCityName = closest.shortLabel;
         if (isPersistentMode() && !getState().city) setState({ city: closest.shortLabel });
         return true;
     };
@@ -665,7 +676,13 @@ function updateLocationDisplay(): void {
     nameEl.textContent = `${lat.toFixed(3)}°, ${lon.toFixed(3)}°`;
     cityParseInFlight = true;
     loadCityData().then(() => {
-        if (!getState().city) applyClosest();   // skip the name if one was set meanwhile — but still release below
+        // Skip the name if one was set meanwhile, or if a drag started while we
+        // were parsing — the live lat/lon are the transient drag position then,
+        // and naming (let alone persisting) against them would attach the
+        // dragged spot's city to the stored location. Same reason ensureTzResolved
+        // suspends; dismissKeepDialog's updateLocationDisplay() does the work once
+        // the coordinates are settled (Keep or Revert). Release below regardless.
+        if (!locationCityName && dragState === 'idle') applyClosest();
         ensureTzResolved();                     // DB resident: synchronous, no second parse (deferred while dragging)
         if (!dialogShown() && dragState === 'idle') releaseCityData();   // one-shot: drop unless dialog open or dragging
     }).catch((err) => console.error('[location] reverse-geocode failed:', err))
@@ -676,10 +693,27 @@ function updateLocationDisplay(): void {
 let cityParseInFlight = false;
 
 /**
+ * Persist what this session derived but could not store. Every automatic write
+ * is gated on isPersistentMode(), so a session that only *becomes* persistent
+ * (Save as my default) has a city name on screen that never reached storage —
+ * and the adopted location group carries no `city` at all. Uses the in-memory
+ * name when we have one; otherwise re-enters the on-demand reverse-geocode,
+ * whose guards now pass.
+ */
+function persistDerivedCity(): void {
+    if (getState().city || (lat === 0 && lon === 0)) return;
+    if (locationCityName) setState({ city: locationCityName });
+    else updateLocationDisplay();
+}
+
+/**
  * Backstop timezone re-resolution — the shared contract in shared/tz-ensure.ts
- * with this app's hooks (see there): armed by `tzNeedsResolution` when startup
- * had to guess the browser zone; cleared only by an answer that lands for the
- * current coordinates. Suspended during drag-to-explore: the live lat/lon are
+ * with this app's hooks (see there): armed by `tzNeedsResolution`, which every
+ * path that resolves a zone sets from resolveTimezoneProvisional (startup, the
+ * dialog, the bloc fix and refresh, a kept map drag, cross-tab sync) — those
+ * paths also write `tz: null` rather than store a guess, so this is what fills
+ * storage in. Cleared only by an answer that lands for the current
+ * coordinates. Suspended during drag-to-explore: the live lat/lon are
  * the transient drag position then, so resolving (let alone persisting) against
  * them would attach the dragged spot's zone to the stored location —
  * dismissKeepDialog re-runs this once the coordinates are settled (Keep or
@@ -767,6 +801,10 @@ function setupLocationDialog(): void {
             lat = info.lat;
             lon = info.lon;
             locationTimezone = info.timezone;
+            // A browser-zone guess (typed coordinates with the DB unparsed) is
+            // shown but never stored; ensureTzResolved() below corrects it.
+            tzNeedsResolution = info.provisional;
+            const tz = persistableTz(info.timezone, info.provisional);
             needsPrompt = false;
 
             if (info.sourceType === 'browser') {
@@ -774,9 +812,11 @@ function setupLocationDialog(): void {
                 // Persist bloc intent *with* the fix, so a reload seeds the
                 // display (no 0,0 flash) and can skip the DB while stationary.
                 const derived = isCityDataLoaded() ? findClosestCity(info.lat, info.lon)?.shortLabel : null;
-                setState({ bloc: true, lsrc: 'browser', lat: info.lat, lon: info.lon, city: derived ?? null, tz: info.timezone || null });
+                locationCityName = derived ?? null;
+                setState({ bloc: true, lsrc: 'browser', lat: info.lat, lon: info.lon, city: locationCityName, tz });
             } else {
-                setState({ bloc: false, lsrc: info.sourceType, lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
+                locationCityName = info.source || null;
+                setState({ bloc: false, lsrc: info.sourceType, lat: info.lat, lon: info.lon, city: locationCityName, tz });
             }
 
             // Re-evaluate all values at the new location: sentinel-scheduled
@@ -787,6 +827,7 @@ function setupLocationDialog(): void {
             rebuildEnv();
             updateLocationDisplay();
             timeUI?.updateTimezoneDisplay();
+            ensureTzResolved();   // after the display update, so the name path owns any parse
         },
     });
 
@@ -794,7 +835,9 @@ function setupLocationDialog(): void {
         setLocationBtn.addEventListener('click', () => {
             const s = getState();
             if (s.lat !== null && s.lon !== null) {
-                locationDialog.updateState(s.lat, s.lon, locationSourceOf(s), s.city || '', s.city || '');
+                // Coordinates and provenance come from state; the NAME comes from
+                // memory (a session-only move leaves the stored name stale).
+                locationDialog.updateState(lat, lon, locationSourceOf(s), locationCityName || '', locationCityName || '');
             }
             locationDialog.show();
         });
@@ -820,18 +863,23 @@ function setupLocationDialog(): void {
             requestBrowserLocation(10000).then(result => {
                 if (result.status !== 'success') { notifyBlocRefreshFailed(); return; }
                 if (haversineKm(lat, lon, result.lat, result.lon) <= 16) return;  // stationary
-                const tz = resolveTimezone(result.lat, result.lon, null);
+                const tzRes = resolveTimezoneProvisional(result.lat, result.lon, null);
                 lat = result.lat;
                 lon = result.lon;
-                locationTimezone = tz;
-                // Moved: the stored city name is stale — clear it so
-                // updateLocationDisplay reverse-geocodes the new spot; reseed.
-                if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat, lon, city: null, tz });
+                locationTimezone = tzRes.tz;
+                tzNeedsResolution = tzRes.provisional;
+                // Moved: the old name is stale. Clear it in memory unconditionally
+                // (otherwise session-only mode keeps painting the previous spot's
+                // name at the new coordinates) so updateLocationDisplay
+                // reverse-geocodes the new spot; the reseed write stays gated.
+                locationCityName = null;
+                if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat, lon, city: null, tz: persistableTz(tzRes.tz, tzRes.provisional) });
                 dialog.updateState(lat, lon, 'browser', '', '');
                 updater?.reset();
                 rebuildEnv();
                 updateLocationDisplay();
                 timeUI?.updateTimezoneDisplay();
+                ensureTzResolved();   // after the display update, so the name path owns any parse
             }).catch(() => notifyBlocRefreshFailed()).finally(() => {
                 if (blocNameEl) blocNameEl.style.color = '';
             });
@@ -875,16 +923,19 @@ function setupLocationDialog(): void {
                         // If we showed the panel and the user switched to manual
                         // entry, don't override their flow with the late result.
                         if (shownAt !== null && !locationDialog.isLocating()) return;
-                        const tz = resolveTimezone(result.lat, result.lon, null);
+                        const tzRes = resolveTimezoneProvisional(result.lat, result.lon, null);
                         lat = result.lat;
                         lon = result.lon;
-                        locationTimezone = tz;
+                        locationTimezone = tzRes.tz;
+                        tzNeedsResolution = tzRes.provisional;
+                        locationCityName = null;   // a brand-new fix has no name; the reverse-geocode fills it
                         needsPrompt = false;
                         // Seed the fix so the next reload shows it immediately and
                         // can skip the DB while stationary (automatic write — gated
                         // on persistent mode; the city name is filled by
-                        // updateLocationDisplay's reverse-geocode).
-                        if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat, lon, tz });
+                        // updateLocationDisplay's reverse-geocode). The zone is the
+                        // browser's guess until the DB answers, so store none yet.
+                        if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat, lon, tz: persistableTz(tzRes.tz, tzRes.provisional) });
                         locationDialog.updateState(lat, lon, 'browser', '', '');
                         // Async location arrived after buildObsValues ran at the
                         // startup default — re-evaluate everything (esp. the
@@ -893,6 +944,7 @@ function setupLocationDialog(): void {
                         rebuildEnv();
                         updateLocationDisplay();
                         locationDialog.dismiss();
+                        ensureTzResolved();   // after the display update, so the name path owns any parse
                     });
                 } else {
                     afterMinVisible(() => {
@@ -1080,7 +1132,8 @@ function setupMapDrag(): void {
         savedLat = lat;
         savedLon = lon;
         savedTz = locationTimezone;
-        savedCity = getState().city;
+        savedTzProvisional = tzNeedsResolution;
+        savedCity = locationCityName;
 
         // Freeze the displayed time for the whole interaction (drag, dialog,
         // resumed drags): every change on the face is then attributable to
@@ -1153,8 +1206,12 @@ function setupMapDrag(): void {
             // Hide checkbox
             if (tzLabel) tzLabel.style.display = 'none';
 
-            // Standard resolution (if dragging without Alt, timezone is already resolved at coordinates)
-            locationTimezone = resolveTimezone(lat, lon, null);
+            // Standard resolution (if dragging without Alt, timezone is already resolved at coordinates).
+            // The drag parsed the DB (startDragAt), so this is normally confident;
+            // it is only a guess if that load failed, and Keep must not store it.
+            const tzRes = resolveTimezoneProvisional(lat, lon, null);
+            locationTimezone = tzRes.tz;
+            tzNeedsResolution = tzRes.provisional;
             // Still 'dragging' here on purpose: rebuildEnv then defers the
             // tz relayout, so the dialog and the final crosshair paint
             // immediately. The relayout runs on Keep (dismissKeepDialog);
@@ -1299,9 +1356,13 @@ function dismissKeepDialog(keep: boolean): void {
         // If the timezone checkbox was displayed, read its state.
         if (tzLabel && tzLabel.style.display !== 'none' && tzCheckbox) {
             if (tzCheckbox.checked) {
-                locationTimezone = resolveTimezone(lat, lon, null);
+                const tzRes = resolveTimezoneProvisional(lat, lon, null);
+                locationTimezone = tzRes.tz;
+                tzNeedsResolution = tzRes.provisional;
             } else {
+                // Keeping the pre-drag zone keeps its provisional-ness with it.
                 locationTimezone = savedTz;
+                tzNeedsResolution = savedTzProvisional;
             }
         }
         // Persist the new location as a map pick. Clear bloc: a kept map pick
@@ -1309,7 +1370,8 @@ function dismissKeepDialog(keep: boolean): void {
         // geolocation and overwrite the pick. lsrc records the provenance for
         // the location dialog ("from map"); the nearest-city name is backfilled
         // into `city` by updateLocationDisplay for display only.
-        setState({ bloc: false, lsrc: 'map', lat, lon, city: null, tz: locationTimezone || null });
+        locationCityName = null;
+        setState({ bloc: false, lsrc: 'map', lat, lon, city: null, tz: persistableTz(locationTimezone, tzNeedsResolution) });
         updateLocationDisplay();
         timeUI?.updateTimezoneDisplay();
         // Transition values back to normal scheduling and trigger redraw
@@ -1322,11 +1384,13 @@ function dismissKeepDialog(keep: boolean): void {
         lat = savedLat;
         lon = savedLon;
         locationTimezone = savedTz;
+        tzNeedsResolution = savedTzProvisional;
         rebuildEnv();
         updater?.reset();
         scheduleFrame();
         // Restore the city name (setState may have cleared it on a previous Keep;
         // if the user never kept, savedCity is still correct).
+        locationCityName = savedCity;
         if (savedCity !== getState().city) {
             setState({ city: savedCity });
         }
@@ -1411,11 +1475,17 @@ function init(): void {
             (s.lat !== lat || s.lon !== lon || (s.tz || undefined) !== locationTimezone)) {
             lat = s.lat;
             lon = s.lon;
-            locationTimezone = s.tz || resolveTimezone(lat, lon, null);
+            // The writing tab stores no zone until the DB gives it a confident
+            // one, so fall back the same way it does and arm our own backstop
+            // when the answer is only the browser guess.
+            const tzRes = resolveTimezoneProvisional(lat, lon, s.tz || null);
+            locationTimezone = tzRes.tz;
+            tzNeedsResolution = tzRes.provisional;
             needsPrompt = false;
-            urlState.city = s.city;
+            locationCityName = s.city || null;
             updateLocationDisplay();
             timeUI?.updateTimezoneDisplay();
+            ensureTzResolved();   // after the display update, so the name path owns any parse
             changed = true;
         }
 
@@ -1510,6 +1580,18 @@ function init(): void {
     // name path is already parsing (updateLocationDisplay ran above) and calls
     // this from its handler; this call parses only when the location is named.
     ensureTzResolved();
+
+    // Adopting a shared link mid-session ("Save as my default") turns the gated
+    // automatic writes on; replay them for the location already on screen.
+    onAdoptedAsDefault(() => {
+        persistDerivedCity();
+        if (!getState().tz && locationTimezone && (lat !== 0 || lon !== 0)) {
+            // A confident zone is already in hand — store it. A guess is not
+            // storable, so let the backstop resolve one (it is still armed).
+            if (tzNeedsResolution) ensureTzResolved();
+            else setState({ tz: locationTimezone });
+        }
+    });
 
     // Show time controller if URL says so
     if (urlState.tc) {

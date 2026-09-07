@@ -55,14 +55,25 @@ function lastChronometerPage(): string | null {
     }
 }
 
+/**
+ * The query string a link out of this page should carry, per the state rule
+ * above: nothing but the `fps` diagnostic in persistent mode (state travels
+ * through localStorage, and shareable params would re-prompt on arrival), the
+ * whole current query string in the non-persistent fallbacks, where the URL is
+ * the only carrier. Includes the leading `?`, or is empty.
+ */
+export function navSearch(): string {
+    if (!isPersistentMode()) return window.location.search;
+    const fps = new URLSearchParams(window.location.search).get('fps');
+    return fps !== null ? `?fps=${encodeURIComponent(fps)}` : '';
+}
+
 /** Href for a cross-app link to `page`, per the state rule above. */
 export function appNavHref(page: string): string {
     if (page === 'index.html' && !onChronometerPage) {
         page = lastChronometerPage() ?? page;
     }
-    if (!isPersistentMode()) return page + window.location.search;
-    const fps = new URLSearchParams(window.location.search).get('fps');
-    return fps !== null ? `${page}?fps=${encodeURIComponent(fps)}` : page;
+    return page + navSearch();
 }
 
 /**

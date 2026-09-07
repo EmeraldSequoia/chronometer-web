@@ -20,19 +20,48 @@ location, the system checks in this order:
 detected from the browser's `Intl.DateTimeFormat` API. No geolocation prompt
 is shown and the city database is not loaded. See [Embedding](embedding.md).
 
+### Adopting an incoming location
+
+A link whose settings differ from the stored ones prompts: *Save as my default*
+or *Use for this visit only*. Saving merges the link's fields into storage —
+field by field for slots, picks and time, but **`lat/lon/city/tz/bloc/lsrc` are
+adopted as one group**. They describe a single place and every other writer sets
+them together, so a link that carries coordinates carries the whole location: a
+hand-typed `?lat=…&lon=…` adopts with no name, no timezone and
+follow-the-device off, rather than pairing new coordinates with the previous
+location's name, zone and `bloc` flag. Provenance is written explicitly
+(`lsrc: 'manual'` for bare coordinates) so a name backfilled later is not read
+back as a deliberate city pick. Full Share links carry all six fields and adopt
+unchanged.
+
+Saving also *turns on* the automatic writes, which are gated on
+`isPersistentMode()`. Everything the session derived while they were off — the
+reverse-geocoded city, the database-resolved timezone — was never stored, and
+navigation links were built from a query string that adoption then clears. Each
+app subscribes to `onAdoptedAsDefault()` to replay those writes for the location
+already on screen (no second database parse: the derived name and zone are
+still in memory) and to rebuild its links.
+
 ### Timezone resolution
 
 The location's timezone comes, in order, from the stored/link `tz`, a city
-pick's own zone, or the nearest database city. When none of those is available
-at startup — a lat/lon-only link, or stored coordinates without a zone, with
-the city database not yet parsed — the browser's zone is used as a
-*provisional* backstop (`resolveTimezoneProvisional` reports this) and each
-app's `ensureTzResolved()` corrects it from the database as soon as it is
-parsed, applying it as a location change (Terra/Gaia re-derive their observer
-slots) and persisting only the database-derived zone, in persistent mode, when
-storage has none. This applies to Chronometer, Observatory and Inspector alike;
-the index page deliberately leaves `tz` unset when it cannot be confident and
-lets the face resolve it. Details in [Timezone & DST](timezone-and-dst.md).
+pick's own zone, or the nearest database city. When none of those is available —
+a lat/lon-only link, stored coordinates without a zone, or (just as commonly)
+typed coordinates and browser fixes *mid-session*, since the database is
+released after each use — the browser's zone is used as a *provisional*
+backstop (`resolveTimezoneProvisional` reports this) and each app's
+`ensureTzResolved()` corrects it from the database as soon as it is parsed,
+applying it as a location change (Terra/Gaia re-derive their observer slots)
+and persisting only the database-derived zone, in persistent mode, when storage
+has none.
+
+A provisional zone is never written to storage: every location write stores
+`persistableTz(tz, provisional)`, which is the zone when confident and `null`
+when not — clearing the field rather than leaving the *previous* location's
+zone standing beside the new coordinates. This applies to Chronometer,
+Observatory and Inspector alike; the index page uses the same rule and, having
+no backstop of its own, leaves `tz` unset for the face to resolve. Details in
+[Timezone & DST](timezone-and-dst.md).
 
 The resolved city name follows this priority:
 1. `locationSource` (from city-picker or URL `city=` param)
@@ -47,6 +76,14 @@ Terra/Gaia, in the observer slot of the live face (see
 [World-Time Slots](world-time-slots.md)). The reverse-geocode runs one parse
 at a time and releases the parsed database afterwards unless the location
 dialog needs it.
+
+The displayed name lives in memory (Chronometer's `locationSource`, the
+Observatory's and Inspector's `locationCityName`), not in `getState().city`.
+The storage write that carries a new name is *gated* on persistent mode, so a
+session-only visit that moves the observer — a quiet `bloc` refresh after a
+drive, say — would otherwise keep painting the previous spot's name at the new
+coordinates. Every path that moves the observer clears or replaces the
+in-memory name unconditionally and gates only the write.
 
 ## City Search
 

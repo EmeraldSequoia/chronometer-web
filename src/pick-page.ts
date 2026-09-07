@@ -15,8 +15,8 @@
 
 import { FACES } from './faces/generated/faces-list.js';
 import { updateDynamicCompositeIcon } from './shared/composite-icon.js';
-import { initAppState, getState, setState } from './shared/app-state.js';
-import { markChronometerPage, registerAppNavHotkeys } from './shared/app-nav.js';
+import { initAppState, getState, setState, onAdoptedAsDefault } from './shared/app-state.js';
+import { markChronometerPage, registerAppNavHotkeys, navSearch } from './shared/app-nav.js';
 
 initAppState({ app: 'pick' });
 
@@ -67,10 +67,14 @@ function readPicks(): string[] {
     return result;
 }
 
-/** Update the home link to preserve query params. */
+/**
+ * Point the home link at index.html with the query string this mode needs —
+ * empty in persistent mode (state travels through localStorage; carrying
+ * shareable params would prompt on arrival), the current one otherwise. None of
+ * the generic link updaters touch `#pick-home-link`, so it has its own.
+ */
 function updateHomeLink(): void {
-    const url = new URL('index.html', window.location.href);
-    url.search = window.location.search;
+    const url = new URL('index.html' + navSearch(), window.location.href);
     homeLink.href = url.toString();
 }
 
@@ -403,4 +407,8 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
     }
     updateUI();
     updateHomeLink();
+
+    // Adopting a shared link mid-session clears the query string from under the
+    // home link, and switches it to the clean persistent-mode form.
+    onAdoptedAsDefault(() => updateHomeLink());
 })();

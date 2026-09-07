@@ -11,9 +11,10 @@
  * browser's zone. Such a result is *provisional* — it must never be persisted
  * as the location's tz (a stored browser zone would poison every later load)
  * and must be re-resolved once the database is available (see
- * resolveTimezoneFromDb and each app's ensureTzResolved). resolveTimezone()
- * is the convenience form for callers that only need the zone;
- * resolveTimezoneProvisional() also says whether it is a guess.
+ * resolveTimezoneFromDb and each app's ensureTzResolved). There is deliberately
+ * no zone-only convenience form: every caller resolves a zone in order to show
+ * AND store it, so every caller has to know whether the answer is a guess —
+ * resolveTimezoneProvisional() to resolve, persistableTz() to store.
  */
 
 import { findClosestCity, loadCityData, isCityDataLoaded } from './city-search';
@@ -50,17 +51,20 @@ export function resolveTimezoneProvisional(lat: number, lon: number, cityTz: str
 }
 
 /**
- * Resolve the IANA timezone for a location (see resolveTimezoneProvisional for
- * the tiers). Callers that persist the result must check `provisional` via
- * resolveTimezoneProvisional instead.
+ * The value to STORE for a resolved zone: the zone itself when it is confident,
+ * and `null` — not "leave the field alone" — when it is the browser-zone guess.
+ * Every `setState({ tz })` on a location path goes through this, so `grep
+ * persistableTz` finds them all; storing null lets the app's ensureTzResolved()
+ * backstop fill the field in once the city DB answers, and keeps a previous
+ * location's zone from lingering beside new coordinates.
  */
-export function resolveTimezone(lat: number, lon: number, cityTz: string | null): string {
-    return resolveTimezoneProvisional(lat, lon, cityTz).tz;
+export function persistableTz(tz: string | undefined, provisional: boolean): string | null {
+    return provisional ? null : (tz || null);
 }
 
 /**
  * Resolve the nearest-city IANA timezone, loading the city DB if it isn't
- * resident yet. Unlike {@link resolveTimezone} (which returns the browser zone
+ * resident yet. Unlike {@link resolveTimezoneProvisional} (which returns the browser zone
  * when the DB isn't loaded), this awaits the load — so a page opened directly at
  * lat/lon with no `tz` still gets the *location's* zone rather than the browser's.
  *

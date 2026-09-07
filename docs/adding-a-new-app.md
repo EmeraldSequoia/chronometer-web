@@ -87,7 +87,7 @@ The shared location dialog handles city search, geolocation, and the mini-map gl
 ```typescript
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
 import { initAppState, getState, setState } from '../shared/app-state.js';
-import { resolveTimezone } from '../shared/tz-resolve.js';
+import { persistableTz } from '../shared/tz-resolve.js';
 import { findClosestCity } from '../shared/city-search.js';
 
 // Select the state backend (LocalStorage by default; URL/in-memory fallback).
@@ -100,11 +100,21 @@ let lat = urlState.lat ?? 0;
 let lon = urlState.lon ?? 0;
 
 // Initialize the location dialog with a callback for when location changes
-initLocationDialog(document.body, (newLat, newLon, tz, cityName) => {
-    lat = newLat;
-    lon = newLon;
-    // Rebuild environment, update display, persist...
-    setState({ lat: newLat, lon: newLon, tz });
+initLocationDialog({
+    initialLat: lat, initialLon: lon, needsPrompt,
+    onLocationChange: (info) => {
+        lat = info.lat;
+        lon = info.lon;
+        // info.provisional === true means info.timezone is only the BROWSER's
+        // zone (the city database wasn't resident). Show it, never store it:
+        // persistableTz writes null instead, and ensureTzResolved() fills the
+        // real zone in once the database answers. See timezone-and-dst.md.
+        tzNeedsResolution = info.provisional;
+        setState({ lat: info.lat, lon: info.lon, city: info.source || null,
+                   tz: persistableTz(info.timezone, info.provisional) });
+        // Rebuild environment, update display...
+        ensureTzResolved();
+    },
 });
 
 // If no location is stored, prompt for one:
@@ -225,7 +235,8 @@ Key patterns from Inspector:
 | `shared/app-state.ts` | State persistence (LocalStorage/URL/in-memory) | `initAppState()`, `getState()`, `setState()`, `onSharedChange()` |
 | `shared/url-state.ts` | URL serializer (sharing + URL fallback) | `readUrlState()`, `writeUrlState()`, `buildShareUrl()` |
 | `shared/mini-map.ts` | Globe renderer | `MiniMap` class |
-| `shared/tz-resolve.ts` | Timezone resolution | `resolveTimezone()` |
+| `shared/tz-resolve.ts` | Timezone resolution | `resolveTimezoneProvisional()`, `persistableTz()` |
+| `shared/tz-ensure.ts` | Backstop that corrects a provisional zone | `createTzResolver()` |
 | `shared/dst-detect.ts` | DST detection | `findDSTTransitions()` |
 | `expr/compile.ts` | Expression compilation | `compileExpr()`, `runInit()`, `referencedNames()` |
 | `expr/env.ts` | Expression environment | `createDefaultEnvironment()`, `Environment`/`ExprFunction` types |

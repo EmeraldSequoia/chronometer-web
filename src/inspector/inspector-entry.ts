@@ -20,11 +20,11 @@ import { initTimeControls, flushTimeState, type TimeControlsAPI } from '../share
 import { registerHotkey } from '../shared/hotkeys.js';
 import { initAppNavLinks, registerAppNavHotkeys } from '../shared/app-nav.js';
 import { createFpsIndicator } from '../shared/fps-indicator.js';
-import { getState, setState, initAppState, onSharedChange, isPersistentMode } from '../shared/app-state.js';
+import { getState, setState, initAppState, onSharedChange, onAdoptedAsDefault, isPersistentMode } from '../shared/app-state.js';
 import { locationSourceOf } from '../shared/url-state.js';
 import { initShareButton } from '../shared/share-button.js';
 import { initHelpPopover, openGeneralHelpTopic } from '../shared/help-popover.js';
-import { resolveTimezone } from '../shared/tz-resolve.js';
+import { resolveTimezoneProvisional, persistableTz } from '../shared/tz-resolve.js';
 import { createTzResolver } from '../shared/tz-ensure.js';
 import { findClosestCity, prefetchCityData, loadCityData, releaseCityData, isCityDataLoaded } from '../shared/city-search.js';
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
@@ -61,6 +61,14 @@ let lat = urlState.lat ?? 0;
 let lon = urlState.lon ?? 0;
 let locationTimezone: string | undefined = urlState.tz || undefined;
 let needsPrompt = !hasUrlLocation && !urlState.bloc;
+/**
+ * The name shown for the current coordinates — the in-memory counterpart of the
+ * stored `city`. Every path that moves the observer must update it, because the
+ * storage write that carries the new name is *gated* (automatic writes only
+ * happen in persistent mode): reading `getState().city` for the display instead
+ * would keep painting the previous spot's name in session-only mode.
+ */
+let locationCityName: string | null = urlState.city || null;
 
 // Prefetch the city DB in the background (held as a ~7.5 MB compressed blob,
 // parsed on demand) unless the user asked to conserve data. See
@@ -103,12 +111,9 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
 // at lat/lon should end up on the *location's* zone, not the browser's.
 let tzNeedsResolution = false;
 if (!locationTimezone && hasUrlLocation) {
-    if (isCityDataLoaded()) {
-        locationTimezone = resolveTimezone(lat, lon, null);
-    } else {
-        locationTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        tzNeedsResolution = true;
-    }
+    const r = resolveTimezoneProvisional(lat, lon, null);
+    locationTimezone = r.tz;
+    tzNeedsResolution = r.provisional;
 }
 
 let tzDeltaMs = computeTzDeltaMs(locationTimezone);
@@ -122,9 +127,12 @@ let cityParseInFlight = false;
 
 /**
  * Backstop timezone re-resolution — the shared contract in shared/tz-ensure.ts
- * with this app's hooks (see there): armed by `tzNeedsResolution` when startup
- * had to guess the browser zone; cleared only by an answer that lands for the
- * current coordinates; a corrected zone rebuilds the env, refreshes the
+ * with this app's hooks (see there): armed by `tzNeedsResolution`, which every
+ * path that resolves a zone sets from resolveTimezoneProvisional (startup, the
+ * dialog, the bloc fix and refresh, cross-tab sync) — those paths also write
+ * `tz: null` rather than store a guess, so this is what fills storage in.
+ * Cleared only by an answer that lands for the current
+ * coordinates; a corrected zone rebuilds the env, refreshes the
  * displays and re-evaluates the catalog (mirroring onLocationChange), and is
  * persisted only in persistent mode when storage has no tz yet.
  */
@@ -186,13 +194,13 @@ function updateLocationDisplay(): void {
         locationDetail.textContent = 'Use the Set button to choose a location';
         return;
     }
-    const cityName = getState().city || null;
-    if (cityName) {
-        locationName.textContent = cityName;
+    if (locationCityName) {
+        locationName.textContent = locationCityName;
     } else if (isCityDataLoaded()) {
         const closest = findClosestCity(lat, lon);
         if (closest) {
             locationName.textContent = closest.shortLabel;
+            locationCityName = closest.shortLabel;
             if (isPersistentMode() && !getState().city) setState({ city: closest.shortLabel });
         } else {
             locationName.textContent = `${lat.toFixed(3)}°, ${lon.toFixed(3)}°`;
@@ -203,11 +211,12 @@ function updateLocationDisplay(): void {
         locationName.textContent = `${lat.toFixed(3)}°, ${lon.toFixed(3)}°`;
         cityParseInFlight = true;
         loadCityData().then(() => {
-            if (!getState().city) {
+            if (!locationCityName) {
                 const c = findClosestCity(lat, lon);
                 if (c) {
                     locationName.textContent = c.shortLabel;
-                    if (isPersistentMode()) setState({ city: c.shortLabel });
+                    locationCityName = c.shortLabel;
+                    if (isPersistentMode() && !getState().city) setState({ city: c.shortLabel });
                 }
             }
             ensureTzResolved();   // DB resident: synchronous, no second parse
@@ -224,6 +233,20 @@ function updateLocationDisplay(): void {
 }
 updateLocationDisplay();
 
+/**
+ * Persist what this session derived but could not store. Every automatic write
+ * is gated on isPersistentMode(), so a session that only *becomes* persistent
+ * (Save as my default) has a city name on screen that never reached storage —
+ * and the adopted location group carries no `city` at all. Uses the in-memory
+ * name when we have one; otherwise re-enters the on-demand reverse-geocode,
+ * whose guards now pass.
+ */
+function persistDerivedCity(): void {
+    if (getState().city || (lat === 0 && lon === 0)) return;
+    if (locationCityName) setState({ city: locationCityName });
+    else updateLocationDisplay();
+}
+
 // --- Location dialog (shared module) ---
 const locationDialog = initLocationDialog({
     initialLat: lat,
@@ -234,6 +257,10 @@ const locationDialog = initLocationDialog({
         lat = info.lat;
         lon = info.lon;
         locationTimezone = info.timezone;
+        // A browser-zone guess (typed coordinates with the DB unparsed) is shown
+        // but never stored; ensureTzResolved() below corrects it.
+        tzNeedsResolution = info.provisional;
+        const tz = persistableTz(info.timezone, info.provisional);
         tzDeltaMs = computeTzDeltaMs(locationTimezone);
         needsPrompt = false;
 
@@ -242,9 +269,11 @@ const locationDialog = initLocationDialog({
             // Persist bloc intent *with* the fix, so a reload seeds the display
             // (no 0,0 flash) and can skip the DB while stationary.
             const derived = isCityDataLoaded() ? (findClosestCity(info.lat, info.lon)?.shortLabel ?? null) : null;
-            setState({ bloc: true, lsrc: 'browser', lat: info.lat, lon: info.lon, city: derived, tz: info.timezone || null });
+            locationCityName = derived;
+            setState({ bloc: true, lsrc: 'browser', lat: info.lat, lon: info.lon, city: derived, tz });
         } else {
-            setState({ bloc: false, lsrc: info.sourceType, lat: info.lat, lon: info.lon, city: info.source || null, tz: info.timezone || null });
+            locationCityName = info.source || null;
+            setState({ bloc: false, lsrc: info.sourceType, lat: info.lat, lon: info.lon, city: locationCityName, tz });
         }
 
         // Rebuild the astronomy environment with new location
@@ -255,6 +284,7 @@ const locationDialog = initLocationDialog({
         updateTimeDisplay();
         resetAllSchedules();   // re-evaluate the catalog against the new env
         scheduleFrame();
+        ensureTzResolved();   // after the display update, so the name path owns any parse
     },
 });
 
@@ -262,7 +292,9 @@ if (locationDialog) {
     setLocationBtn.addEventListener('click', () => {
         const s = getState();
         if (s.lat !== null && s.lon !== null) {
-            locationDialog.updateState(s.lat, s.lon, locationSourceOf(s), s.city || '', s.city || '');
+            // Coordinates and provenance come from state; the NAME comes from
+            // memory (a session-only move leaves the stored name stale).
+            locationDialog.updateState(lat, lon, locationSourceOf(s), locationCityName || '', locationCityName || '');
         }
         locationDialog.show();
     });
@@ -277,22 +309,26 @@ if (locationDialog) {
         requestBrowserLocation(10000).then(result => {
             if (result.status === 'success') {
                 // Apply via the same path as the dialog's onLocationChange
-                const tz = resolveTimezone(result.lat, result.lon, null);
+                const tzRes = resolveTimezoneProvisional(result.lat, result.lon, null);
                 lat = result.lat;
                 lon = result.lon;
-                locationTimezone = tz;
+                locationTimezone = tzRes.tz;
+                tzNeedsResolution = tzRes.provisional;
                 tzDeltaMs = computeTzDeltaMs(locationTimezone);
+                locationCityName = null;   // a brand-new fix has no name; the reverse-geocode fills it
                 needsPrompt = false;
                 // Seed the fix so the next reload shows it immediately (no 0,0
                 // flash) and can skip the DB while stationary; the city name is
-                // filled by updateLocationDisplay's reverse-geocode.
-                if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat, lon, tz: locationTimezone || null });
+                // filled by updateLocationDisplay's reverse-geocode. The zone is
+                // the browser's guess until the DB answers, so store none yet.
+                if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat, lon, tz: persistableTz(tzRes.tz, tzRes.provisional) });
                 locationDialog.updateState(lat, lon, 'browser', '', '');
                 env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
                 updateLocationDisplay();
                 updateTimeDisplay();
                 resetAllSchedules();   // re-evaluate the catalog against the new env
                 scheduleFrame();
+                ensureTzResolved();   // after the display update, so the name path owns any parse
             } else {
                 // Browser denied or timed out — show location prompt
                 needsPrompt = true;
@@ -313,20 +349,25 @@ if (locationDialog) {
         requestBrowserLocation(10000).then(result => {
             if (result.status !== 'success') { notifyBlocRefreshFailed(); return; }
             if (haversineKm(lat, lon, result.lat, result.lon) <= 16) return;  // stationary
-            const tz = resolveTimezone(result.lat, result.lon, null);
+            const tzRes = resolveTimezoneProvisional(result.lat, result.lon, null);
             lat = result.lat;
             lon = result.lon;
-            locationTimezone = tz;
+            locationTimezone = tzRes.tz;
+            tzNeedsResolution = tzRes.provisional;
             tzDeltaMs = computeTzDeltaMs(locationTimezone);
-            // Moved: reseed and clear the stale city so updateLocationDisplay
-            // reverse-geocodes the new spot.
-            if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat, lon, city: null, tz });
+            // Moved: the old name is stale. Clear it in memory unconditionally
+            // (otherwise session-only mode keeps painting the previous spot's name
+            // at the new coordinates) so updateLocationDisplay reverse-geocodes the
+            // new spot; the reseed write stays gated on persistent mode.
+            locationCityName = null;
+            if (isPersistentMode()) setState({ bloc: true, lsrc: 'browser', lat, lon, city: null, tz: persistableTz(tzRes.tz, tzRes.provisional) });
             locationDialog.updateState(lat, lon, 'browser', '', '');
             env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
             updateLocationDisplay();
             updateTimeDisplay();
             resetAllSchedules();
             scheduleFrame();
+            ensureTzResolved();   // after the display update, so the name path owns any parse
         }).catch(() => notifyBlocRefreshFailed()).finally(() => {
             if (locationName) locationName.style.color = '';
         });
@@ -451,13 +492,19 @@ onSharedChange((s) => {
         (s.lat !== lat || s.lon !== lon || (s.tz || undefined) !== locationTimezone)) {
         lat = s.lat;
         lon = s.lon;
-        locationTimezone = s.tz || resolveTimezone(lat, lon, null);
+        // The writing tab stores no zone until the DB gives it a confident one,
+        // so fall back the same way it does and arm our own backstop when the
+        // answer is only the browser guess.
+        const tzRes = resolveTimezoneProvisional(lat, lon, s.tz || null);
+        locationTimezone = tzRes.tz;
+        tzNeedsResolution = tzRes.provisional;
         tzDeltaMs = computeTzDeltaMs(locationTimezone);
         needsPrompt = false;
-        urlState.city = s.city;
+        locationCityName = s.city || null;
         env = createAstroEnvironment(lat, lon, getNow, locationTimezone);
         updateLocationDisplay();
         resetAllSchedules();
+        ensureTzResolved();   // after the display update, so the name path owns any parse
         changed = true;
     }
     if (applyTimeFromState(s)) changed = true;
@@ -1009,6 +1056,18 @@ document.fonts?.ready.then(() => layoutTopChrome());
 // is already parsing (updateLocationDisplay ran at module load) and calls
 // this from its handler; this call parses only when the location is named.
 ensureTzResolved();
+
+// Adopting a shared link mid-session ("Save as my default") turns the gated
+// automatic writes on; replay them for the location already on screen.
+onAdoptedAsDefault(() => {
+    persistDerivedCity();
+    if (!getState().tz && locationTimezone && (lat !== 0 || lon !== 0)) {
+        // A confident zone is already in hand — store it. A guess is not
+        // storable, so let the backstop resolve one (it is still armed).
+        if (tzNeedsResolution) ensureTzResolved();
+        else setState({ tz: locationTimezone });
+    }
+});
 
 console.log('[Inspector] Initialized — lat:', lat, 'lon:', lon, 'tz:', locationTimezone,
     '— catalog values:', updater.all.length);

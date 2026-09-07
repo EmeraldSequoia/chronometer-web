@@ -21,7 +21,7 @@
  * See planning/2026-06-13-localstorage-state-and-sharing.md.
  */
 
-import { readUrlState, writeUrlState, setPicksProvider, type UrlState } from './url-state.js';
+import { readUrlState, writeUrlState, setPicksProvider, updateNavigationLinks, locationSourceOf, type UrlState } from './url-state.js';
 import { showIncomingSettingsDialog, showStorageWarning, showParadigmNotice, showUrlModeBadge } from './incoming-settings-dialog.js';
 
 // ============================================================================
@@ -382,6 +382,15 @@ function shareableUrlEqualsStored(ls: LocalStorageBackend): boolean {
  * The subset of scalar shareable fields actually *present* in the URL, with
  * their parsed values. Used when adopting a shared link so absent fields don't
  * clobber existing stored defaults (a partial link merges, it doesn't replace).
+ *
+ * **The location group is the exception.** `lat/lon/city/tz/bloc/lsrc` describe
+ * one place, and every other writer sets them together; merging them field by
+ * field is what leaves a hand-typed `?lat&lon` link wearing the *previous*
+ * location's city name, timezone and follow-the-device flag. So a link that
+ * carries coordinates carries the whole location: the absent fields adopt as
+ * null / false, which mergeNamespace deletes, and the next load re-derives the
+ * name and zone through each app's backstops. Full Share links carry all six
+ * and are unaffected; slots-only, picks-only and time-only links still merge.
  */
 function urlScalarOverrides(): Partial<UrlState> {
     const params = new URLSearchParams(window.location.search);
@@ -394,6 +403,18 @@ function urlScalarOverrides(): Partial<UrlState> {
     if (has('tz')) out.tz = url.tz;
     if (has('bloc')) out.bloc = url.bloc;
     if (has('lsrc')) out.lsrc = url.lsrc;
+    if (has('lat') || has('lon', 'long')) {
+        out.lat = url.lat;
+        out.lon = url.lon;
+        out.city = url.city;
+        out.tz = url.tz;
+        // Saving a specific location means the user does not want the next
+        // device fix to replace it; `bloc` only survives if the link asked for it.
+        out.bloc = url.bloc;
+        // Write provenance explicitly: the legacy inference in locationSourceOf
+        // would later read a backfilled `city` as a deliberate "city" pick.
+        out.lsrc = locationSourceOf(url);
+    }
     if (has('t')) out.t = url.t;
     if (has('off')) out.off = url.off;
     if (has('dir')) out.dir = url.dir;
@@ -415,6 +436,10 @@ function clearShareableParamsFromUrl(): void {
     for (const k of [...params.keys()]) if (SLOT_KEY_RE.test(k)) params.delete(k);
     const qs = params.toString();
     history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
+    // Navigation links were built from the old query string; re-derive them so
+    // the next page doesn't receive params we just adopted (and re-prompt for
+    // them). writeUrlState does the same after its own replaceState.
+    updateNavigationLinks();
 }
 
 // ============================================================================
@@ -429,6 +454,8 @@ let sessionRePromptArmed = false;
 let warnedNoPersistence = false;
 /** Terra/Gaia slot overrides held in memory under the InMemoryBackend. */
 let inMemorySlots: Record<string, string> = {};
+/** Subscribers to "this session just became persistent" (see onAdoptedAsDefault). */
+const adoptedListeners = new Set<() => void>();
 
 export interface InitAppStateOptions {
     /** Which app is running (selects the per-app storage namespace). */
@@ -488,8 +515,11 @@ export function initAppState(options: InitAppStateOptions): void {
     // The URL carries shareable params (a shared link or a legacy bookmark).
     if (shareableUrlEqualsStored(ls)) {
         // Identical to stored defaults — silently adopt and clean the URL.
-        clearShareableParamsFromUrl();
+        // Backend first: clearing the URL re-syncs the navigation links, and
+        // the selected-faces link routes on getState().picks — which must come
+        // from storage, not from the params being removed.
         activeBackend = ls;
+        clearShareableParamsFromUrl();
         maybeShowParadigmNotice();
         return;
     }
@@ -523,6 +553,28 @@ function adoptCurrentStateAsDefault(ls: LocalStorageBackend): void {
     if (Object.keys(slots).length > 0) setSlotOverrides(slots);
     clearShareableParamsFromUrl();
     sessionRePromptArmed = false;
+    // Announce it: everything an app derives automatically is gated on
+    // isPersistentMode(), so derivations that ran while it was false (the
+    // reverse-geocoded city, the DB-resolved timezone) were never written, and
+    // links built from the now-cleared query string are stale.
+    for (const cb of [...adoptedListeners]) {
+        try { cb(); } catch (err) { console.error('[app-state] onAdoptedAsDefault listener failed:', err); }
+    }
+}
+
+/**
+ * Subscribe to "the session just became persistent" — the user chose
+ * *Save as my default*, from either the incoming-settings prompt or the
+ * first-edit re-prompt. Fires after storage has been written and the URL
+ * cleaned, so a listener sees the adopted state through getState().
+ *
+ * Register one wherever the app skipped an automatic write because
+ * `isPersistentMode()` was false, or built links from the query string.
+ * Returns an unsubscribe function.
+ */
+export function onAdoptedAsDefault(cb: () => void): () => void {
+    adoptedListeners.add(cb);
+    return () => { adoptedListeners.delete(cb); };
 }
 
 function warnNoPersistence(): void {
@@ -601,6 +653,12 @@ export function setState(changes: Partial<UrlState>): void {
  * actually stick, and writing them in session-only mode would mutate the shared
  * URL and could spuriously trip the first-edit re-prompt. Genuine user edits
  * should call `setState` unconditionally.
+ *
+ * The corollary: a gated write that was skipped is *lost*, and nothing replays
+ * it if the session later becomes persistent. Whatever you gate on this, also
+ * keep in memory and re-write from an `onAdoptedAsDefault` subscriber — and
+ * never let the display read the gated field back from storage, or it will keep
+ * showing the value the write was meant to replace.
  */
 export function isPersistentMode(): boolean {
     return backend() instanceof LocalStorageBackend;
@@ -658,6 +716,15 @@ export function setSlotOverrides(changes: Record<string, string | null>): void {
     }
     const qs = params.toString();
     history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
+
+    // Slot edits bypass setState, so they need their own copy of its
+    // first-edit re-prompt: assigning a city to a Terra/Gaia sector is as much
+    // a configuration change as any other, and without this it is the one edit
+    // a session-only visitor can make that is never offered a home.
+    if (sessionRePromptArmed) {
+        sessionRePromptArmed = false;
+        void promptSessionReprompt();
+    }
 }
 
 async function promptSessionReprompt(): Promise<void> {

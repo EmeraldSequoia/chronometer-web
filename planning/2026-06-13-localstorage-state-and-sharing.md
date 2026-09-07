@@ -39,6 +39,17 @@ Addendum (2026-06-14, after the notes above):
     link now merges only the fields *present* in the URL (`urlScalarOverrides()` +
     present slot keys) instead of writing the full `UrlState`, so a partial link
     (e.g. slots-only) no longer clobbers existing stored location/config.
+    - **Amended 2026-09-07** (see
+      [2026-09-05-location-city-tz-staleness.md](2026-09-05-location-city-tz-staleness.md)
+      §5 step 5): the per-field merge is right for slots, picks and time but
+      wrong for the **location group**. `lat/lon/city/tz/bloc/lsrc` describe one
+      place and every other writer sets them together; merging them left a
+      hand-typed `?lat&lon` link adopting new coordinates beside the previous
+      location's city name, timezone and `bloc` flag (and the surviving `bloc`
+      then let the next device fix silently replace the link's location).
+      `urlScalarOverrides()` now adopts the whole group whenever the URL carries
+      `lat` or `lon`, writing an explicit `lsrc` so a later backfilled `city` is
+      not read back as a deliberate city pick.
 - `embed` and `fps` remain intentionally URL-only (deployment / diagnostic flags).
 
 ## Goal
@@ -263,10 +274,24 @@ When the user chooses "session only," the app runs URL-authoritative (like the
 fallback) with a `pendingFirstEditPrompt` flag. The first **location/config**
 edit shows a dialog:
 
-- **Save these as my default** → switch to LocalStorageBackend, write the full
+- **Save these as my default** → switch to LocalStorageBackend, write the
   current state to storage, clear the URL.
 - **Keep this session-only** → stay in URL mode, disarm the prompt; subsequent
   edits just update the URL.
+
+**Amended 2026-09-07** (2026-09-05 plan §5 steps 5 and 6):
+
+- The Save writes what `urlScalarOverrides()` yields — the fields present in the
+  URL, plus the whole location group when it carries coordinates — not "the full
+  current state".
+- Both Saves (this one and the incoming prompt) go through
+  `adoptCurrentStateAsDefault`, which now fires **`onAdoptedAsDefault()`**.
+  Adoption used to be unobservable, so everything an app derives automatically —
+  gated on `isPersistentMode()` — stayed unwritten, and links built from the
+  query string kept params that adoption had just cleared. Each app subscribes.
+- The first-edit trigger now includes Terra/Gaia slot picks: they go through
+  `setSlotOverrides`, not `setState`, and so were the one session-only edit that
+  was never offered a home.
 
 **Time is excluded from the re-prompt.** A pure time change (scrub/step) does
 *not* trigger the prompt and is *not* persisted — only location/config edits do.
