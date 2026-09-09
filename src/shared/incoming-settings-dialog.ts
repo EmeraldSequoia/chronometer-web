@@ -23,9 +23,12 @@ const CSS = `
     background: rgba(0, 0, 0, 0.5);
 }
 .ec-modal {
+    /* No backdrop-filter here — deliberate: a pixel-moving filter with content
+       inside it can drop its quad for one composited frame and flash the live
+       screen. This panel is 98% opaque so the blur was invisible anyway.
+       See the #info-overlay comment in observatory.html. */
     position: relative;
     background: rgba(26, 26, 46, 0.98);
-    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
     border: 1px solid #3a3a5e; border-radius: 14px;
     padding: 26px 30px; min-width: 300px; max-width: 400px; width: 100%;
     box-shadow: 0 8px 48px rgba(0, 0, 0, 0.6);

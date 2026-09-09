@@ -398,9 +398,36 @@
           position: fixed;
           inset: 0;
           z-index: 100;
+          /* No backdrop-filter here, and none on any child — deliberate, please
+             don't add one back. The frosted look is produced by blurring the
+             page content itself (the body.help-open rule below), not by
+             filtering the backdrop through this element.
+
+             Why: a full-viewport `backdrop-filter` makes the compositor re-read
+             the live destination and re-blur it on EVERY frame produced while
+             the overlay is up, and it intermittently composites one such frame
+             with the filter missing — the screen flashes sharp through the help
+             page (Chrome on macOS; once in Safari). The blur's input never
+             actually changes here (the render loop is parked, see
+             helpOverlayOpen), but the compositor recomputes it regardless, so
+             the trigger is simply "a frame was produced at all". Scrolling the
+             help text produces frames; so does the elastic overscroll bounce,
+             which was the most reliable trigger of all.
+
+             Things that did NOT fix it, so nobody re-tries them: parking the
+             render loop (necessary, not sufficient — scroll still makes
+             frames); moving the filter onto an inert child so the scroller is
+             no longer inside it (reduced it to overscroll-only, and left the
+             wash behind so the residual flash was merely darker).
+
+             What did fix it: no pixel-moving filter on the live compositing
+             path at all. A forward `filter` on the parked content below is
+             cached with that static layer and needs no destination readback.
+             The face pages have quietly done this for years — see
+             #watch-grid.blurred for the city dialog. Verified by the author on
+             a real 4K Chrome: overscrolling repeatedly no longer flashes, and
+             the look is indistinguishable. */
           background: rgba(0, 0, 0, 0.6);
-          backdrop-filter: blur(6px);
-          -webkit-backdrop-filter: blur(6px);
           align-items: center;
           justify-content: center;
       }
@@ -409,8 +436,20 @@
           display: flex;
       }
 
+      /* The frosted backdrop: blur the page content itself rather than filtering
+         it through #info-overlay — see the comment on that rule. Only applied
+         while help is up, and the render loop is parked for exactly that window,
+         so these layers rasterize once instead of every frame. #info-overlay is
+         excluded so the help panel stays sharp. */
+      body.help-open > *:not(#info-overlay) {
+          filter: blur(6px);
+      }
+
       #info-popup {
-          background: rgba(30, 30, 50, 0.98);
+          /* Fully opaque. At 0.98 the screen behind composited through the
+             help panel itself at 2% — invisible while it was blurred, a sharp
+             ghost once it isn't. */
+          background: rgb(30, 30, 50);
           border: 1px solid #3a3a5e;
           border-radius: 16px;
           padding: 0;
@@ -419,6 +458,10 @@
           max-height: 90vh;
           overflow-x: hidden;
           overflow-y: auto;
+/* Chaining only. The elastic rubber-band at the ends is wanted UX;
+   it used to be a flash trigger, but with no backdrop-filter left
+   on the live path there is nothing for its frames to break. */
+overscroll-behavior-y: contain;
           color: #bbc;
           box-shadow: 0 8px 48px rgba(0, 0, 0, 0.6);
           position: relative;

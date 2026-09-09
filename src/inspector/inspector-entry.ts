@@ -472,13 +472,11 @@ initShareButton({ getState });
 initHelpPopover({
     generalHelpUrl: 'help.html?embed=1&app=inspector',
     app: 'inspector',
-    // Park the loop while help is up so the overlay's backdrop-filter has a
-    // static backdrop to blur (see helpOverlayOpen), then re-evaluate the
-    // catalog at live time on close.
+    // Park the loop while help is up (see helpOverlayOpen — CPU only), then
+    // re-evaluate the catalog at live time on close.
     onOpen: () => {
         helpOverlayOpen = true;
-        // Drop the frame already armed — it would otherwise repaint in the very
-        // frame the overlay first paints, under a brand-new backdrop snapshot.
+        // Drop the frame already armed so the park takes effect immediately.
         if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
     },
     onClose: () => {
@@ -879,12 +877,14 @@ let frameRequestedDuringTick = false;
 
 /**
  * True while the ℹ help overlay is up; the loop parks for the duration (see
- * `continuous` in tickBody). The overlay is a full-screen backdrop-filter, and
- * every catalog repaint underneath it forces Chrome to re-blur the whole
- * viewport — a re-composite that intermittently lands with the filter dropped,
- * flashing the live page through the help page. A backdrop that never changes
- * has nothing to re-blur. Observatory hit this first; the catalog churns far
- * less than a canvas, but the defect surface is the same and parking is free.
+ * `continuous` in tickBody). A pure CPU/battery optimisation — nothing under a
+ * full-screen modal is legible. It was originally added as a compositing-flash
+ * fix; that diagnosis was wrong (the flash came from the overlay's own
+ * full-screen backdrop-filter on ANY frame, not from repaints underneath it),
+ * and the real fix was to drop backdrop-filter entirely, blurring the page
+ * content behind with a plain `filter` instead — see the comment on
+ * #info-overlay in inspector.html. The park is load-bearing for that: a
+ * forward filter over a STATIC layer rasterizes once.
  */
 let helpOverlayOpen = false;
 

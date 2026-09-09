@@ -22,12 +22,10 @@ export interface HelpPopoverOptions {
      */
     onFirstOpen?: (helpContent: HTMLElement) => void;
     /**
-     * Called on every open/close of the overlay (not just the first). Observatory
-     * uses this to park its render loop while help is up: the overlay carries a
-     * full-screen backdrop-filter, and re-blurring a canvas that repaints every
-     * frame intermittently composites one frame with the filter dropped —
-     * a flash of the live screen through the help page (seen in Chrome). A
-     * backdrop that never changes has nothing to re-blur, so it can't flash.
+     * Called on every open/close of the overlay (not just the first). All three
+     * animated apps use this to park their render loop while help is up —
+     * nothing under a full-screen modal is legible, so rendering it is wasted
+     * CPU — and to catch the display back up to live time on close.
      */
     onOpen?: () => void;
     /** Counterpart to onOpen — the resume/catch-up hook. */
@@ -65,6 +63,11 @@ export function initHelpPopover(options: HelpPopoverOptions = {}): void {
         const setOverlayVisible = (visible: boolean): void => {
             if (infoOverlay.classList.contains('visible') === visible) return;
             infoOverlay.classList.toggle('visible', visible);
+            // Drives the frosted backdrop: the page content behind is blurred
+            // with a plain `filter` while help is up, rather than filtering it
+            // through the overlay with backdrop-filter (which flashed — see the
+            // comment on #info-overlay in any of the four page stylesheets).
+            document.body.classList.toggle('help-open', visible);
             (visible ? options.onOpen : options.onClose)?.();
         };
         activeSetOverlayVisible = setOverlayVisible;

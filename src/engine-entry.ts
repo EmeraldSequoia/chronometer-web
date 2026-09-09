@@ -1098,12 +1098,19 @@ async function main() {
 
     /**
      * True while the ℹ help overlay is up. The scheduler parks outright for the
-     * duration — no rAF loop AND no idle wakeup (see frame()'s tail). The
-     * overlay is a full-screen backdrop-filter, and re-blurring a grid that
-     * repaints underneath it intermittently composites one frame with the
-     * filter dropped: a flash of the live faces through the help page (Chrome).
-     * A backdrop that never changes has nothing to re-blur. Closing the overlay
-     * runs the same catch-up as a sleep/wake gap (resyncAfterGap).
+     * duration — no rAF loop AND no idle wakeup (see frame()'s tail); closing
+     * the overlay runs the same catch-up as a sleep/wake gap (resyncAfterGap).
+     *
+     * This is a pure CPU/battery optimisation — nothing under a full-screen
+     * modal is legible. It was originally added as a compositing-flash fix on
+     * the theory that repaints underneath the overlay's backdrop-filter dropped
+     * the filter for a frame; that was wrong (the flash came from the
+     * full-screen pixel-moving filter itself, on ANY frame). The real fix was
+     * to drop backdrop-filter entirely and blur the page content behind with a
+     * plain `filter` instead (the same trick #watch-grid.blurred already used
+     * for the city dialog) — see the comment on #info-overlay in
+     * face-template.html. The park is load-bearing for that: a forward filter
+     * over a STATIC layer rasterizes once.
      */
     let helpOverlayOpen = false;
 
@@ -2431,9 +2438,16 @@ async function main() {
     // Capture the browser button's label from the HTML (single source of truth)
     const browserBtnLabel = (lpUseBrowser as HTMLButtonElement).textContent || 'Use device location via browser';
 
-    function showLocationPrompt(blur: boolean) {
+    /**
+     * Show the location dialog. The grid behind is always blurred — the dialog
+     * used to blur only when it opened itself at startup and stay sharp when
+     * opened from the button, which read as a glitch (the Terra/Gaia city
+     * dialog, right next to it, always blurs). Cleared unconditionally by
+     * dismissLocationPrompt(), which every close path goes through.
+     */
+    function showLocationPrompt() {
         locationPrompt.style.display = '';
-        if (blur) grid.classList.add('blurred');
+        grid.classList.add('blurred');
         // Pre-fill with current values (always, for manual invocation)
         lpLatInput.value = (lat !== 0 || lon !== 0) ? lat.toFixed(3) : '';
         lpLonInput.value = (lat !== 0 || lon !== 0) ? lon.toFixed(3) : '';
@@ -2733,7 +2747,7 @@ async function main() {
 
     // "Set location" button on the location bar
     setLocationBtn.addEventListener('click', () => {
-        showLocationPrompt(false);  // no blur when opened manually
+        showLocationPrompt();
     });
 
     // Close prompt when clicking backdrop
@@ -3097,9 +3111,9 @@ async function main() {
     // --- Info button & popup (shared wiring + face-specific fixups) ---
     initHelpPopover({
         app: 'chronometer',
-        // Park the scheduler while help is up so the overlay's backdrop-filter
-        // has a static backdrop to blur (see helpOverlayOpen), then catch the
-        // faces back up to live time on close exactly as a wake would.
+        // Park the scheduler while help is up (see helpOverlayOpen — CPU only
+        // now, not the flash fix), then catch the faces back up to live time on
+        // close exactly as a wake would.
         onOpen: () => {
             helpOverlayOpen = true;
             stopScheduler();
@@ -4107,7 +4121,7 @@ async function main() {
 
     // Show location prompt if no location was available
     if (!isEmbedMode && needsPrompt) {
-        showLocationPrompt(true);  // with blur
+        showLocationPrompt();
     }
 
     // Quiet bloc refresh: the display already shows the stored last-known

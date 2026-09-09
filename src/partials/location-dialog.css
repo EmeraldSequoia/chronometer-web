@@ -25,10 +25,17 @@
         }
 
         #location-prompt .lp-dialog {
+            /* No backdrop-filter on this panel — deliberate. A pixel-moving
+               filter with content inside it intermittently drops its quad for
+               one composited frame, flashing the live screen (see the long
+               comment on #info-overlay in observatory.html). This panel is
+               98% opaque, so the blur only ever contributed ~1% of its
+               pixels — it was invisible in an A/B, and not worth the defect.
+               If it is ever wanted back, blur the content behind instead
+               (see body.help-open in the page stylesheets), never with a
+               backdrop-filter on this element. */
             position: relative;
             background: rgba(26, 26, 46, 0.98);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
             border: 1px solid #3a3a5e;
             border-radius: 14px;
             padding: 28px 32px;

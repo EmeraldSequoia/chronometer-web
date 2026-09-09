@@ -80,13 +80,23 @@ let inTick = false;
 let frameRequestedDuringTick = false;
 
 /**
- * True while the ℹ help overlay is up. The loop parks for the duration (see
- * `continuous` in tickBody): the overlay is a full-screen backdrop-filter, and
- * a canvas repainting under it every frame intermittently composites one frame
- * with the filter dropped — a flash of the live screen through the help page
- * (Chrome; the same defect the Keep/Revert dialog dodges by holding display
- * time). Nothing under the overlay is legible anyway, and closing it runs the
- * same catch-up as a sleep/wake gap.
+ * True while the ℹ help overlay is up; the loop parks for the duration (see
+ * `continuous` in tickBody). This is now a pure CPU/battery optimisation —
+ * nothing under a full-screen modal is legible, so rendering it is wasted work
+ * — and closing the overlay runs the same catch-up as a sleep/wake gap.
+ *
+ * It was originally added to stop a compositing flash, on the theory that the
+ * canvas repainting under the overlay's backdrop-filter was what dropped the
+ * filter for a frame. That theory was wrong in an instructive way: the blur's
+ * INPUT never changes on a repaint inside the filtered element, and the flash
+ * kept happening on scroll with the loop fully parked. The actual fix was to
+ * drop backdrop-filter entirely and blur the page content behind with a plain
+ * `filter` instead — see the comment on #info-overlay in observatory.html.
+ * The park is now load-bearing for that: a forward filter over a STATIC layer
+ * rasterizes once, whereas a repainting canvas would re-blur every frame. Also,
+ * and it is load-bearing for .map-drag-confirm, whose blur is NOT split out
+ * (you have to see the map to answer it) and which therefore still relies on
+ * simply not producing frames.
  */
 let helpOverlayOpen = false;
 
@@ -596,11 +606,14 @@ function tickBody(): void {
     // Throughout drag-to-explore ('dragging' and 'confirming'), display time
     // is held, so once animations settle nothing can change and the loop
     // parks even though the clock is running. That's load-bearing for the
-    // dialog: per-frame repaints under its backdrop-filter intermittently
-    // composite one frame unblurred (WebKit); a static backdrop can't flash.
+    // dialog, which DOES still carry a full-screen backdrop-filter with its
+    // content inside it: any frame produced while it is up risks compositing
+    // one frame with the filter dropped, and a parked loop produces none.
+    // (The help overlay had the same exposure; it was fixed by dropping
+    // backdrop-filter altogether — see #info-overlay in observatory.html. The
+    // park has been enough here: verified on a real 4K Chrome that this dialog
+    // holds fps at 0 and does not flash. Same treatment if it ever does.)
     // Map moves, dismissal, resume, and resize all wake via scheduleFrame().
-    // The help overlay carries the same backdrop-filter and gets the same
-    // treatment — see helpOverlayOpen.
     const continuous = (!timeController.isStopped || animating)
         && (dragState === 'idle' || animating)
         && !helpOverlayOpen;
@@ -1470,9 +1483,9 @@ function init(): void {
     initHelpPopover({
         generalHelpUrl: 'help.html?embed=1&app=observatory',
         app: 'observatory',
-        // Park the render loop while help is up so the overlay's backdrop-filter
-        // has a static backdrop to blur (see helpOverlayOpen), then catch the
-        // display back up to live time on close exactly as a wake would.
+        // Park the render loop while help is up (see helpOverlayOpen — CPU only
+        // now, not the flash fix), then catch the display back up to live time
+        // on close exactly as a wake would.
         onOpen: () => {
             helpOverlayOpen = true;
             // Drop the frame already armed for this tick — it would otherwise

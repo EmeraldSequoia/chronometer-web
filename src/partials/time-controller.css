@@ -178,11 +178,18 @@
 
       /* Upper section: narrow, right-aligned */
       #tp-upper {
+          /* No backdrop-filter on this panel — deliberate. A pixel-moving
+             filter with content inside it intermittently drops its quad for
+             one composited frame, flashing the live screen (see the long
+             comment on #info-overlay in observatory.html). This panel is
+             96% opaque, so the blur only ever contributed ~4% of its
+             pixels — it was invisible in an A/B, and not worth the defect.
+             If it is ever wanted back, blur the content behind instead
+             (see body.help-open in the page stylesheets), never with a
+             backdrop-filter on this element. */
           width: 120px;
           padding: 10px 10px 6px;
           background: rgba(26, 26, 46, 0.96);
-          backdrop-filter: blur(16px);
-          -webkit-backdrop-filter: blur(16px);
           border: 1px solid #3a3a5e;
           border-radius: 14px 0 0 0;
           border-bottom: none;
@@ -192,12 +199,19 @@
 
       /* Lower section: full width */
       #tp-lower {
+          /* No backdrop-filter on this panel — deliberate. A pixel-moving
+             filter with content inside it intermittently drops its quad for
+             one composited frame, flashing the live screen (see the long
+             comment on #info-overlay in observatory.html). This panel is
+             96% opaque, so the blur only ever contributed ~4% of its
+             pixels — it was invisible in an A/B, and not worth the defect.
+             If it is ever wanted back, blur the content behind instead
+             (see body.help-open in the page stylesheets), never with a
+             backdrop-filter on this element. */
           width: 100%;
           min-width: 200px;
           padding: 8px 14px 12px;
           background: rgba(26, 26, 46, 0.96);
-          backdrop-filter: blur(16px);
-          -webkit-backdrop-filter: blur(16px);
           border: 1px solid #3a3a5e;
           border-radius: 14px 0 0 0;
           border-top: 1px solid #3a3a5e;
