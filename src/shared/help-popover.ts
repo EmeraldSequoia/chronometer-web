@@ -133,6 +133,20 @@ export function initHelpPopover(options: HelpPopoverOptions = {}): void {
             popup.style.height = targetHeight + 'px';
         }
 
+        /**
+         * Put the user at the top of the view sliding in. #info-popup is the
+         * element that actually scrolls — overflow-y: auto with max-height: 90vh,
+         * declared in all four page stylesheets. #help-content has no overflow
+         * rule anywhere and computes `visible`, so the reset this replaces
+         * (helpContent.scrollTop) had never scrolled anything on any page.
+         *
+         * Safe to call right after updatePopupHeight: the assignment is instant
+         * and leaves that height transition's keyframes untouched.
+         */
+        function scrollPopupToTop() {
+            if (popup) popup.scrollTop = 0;
+        }
+
         document.querySelectorAll('.help-subpage-link').forEach(link => {
             const el = link as HTMLElement;
             el.addEventListener('click', (e) => {
@@ -143,7 +157,7 @@ export function initHelpPopover(options: HelpPopoverOptions = {}): void {
                     subContent.innerHTML = template.innerHTML;
                     slider.style.transform = 'translateX(-50%)';
                     updatePopupHeight(subView);
-                    if (helpContent) helpContent.scrollTop = 0;
+                    scrollPopupToTop();
                 }
             });
         });
@@ -153,7 +167,7 @@ export function initHelpPopover(options: HelpPopoverOptions = {}): void {
                 if (mainView && subView && slider) {
                     slider.style.transform = 'translateX(0)';
                     updatePopupHeight(mainView);
-                    if (helpContent) helpContent.scrollTop = 0;
+                    scrollPopupToTop();
                 }
             });
         }

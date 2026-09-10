@@ -685,6 +685,17 @@ overscroll-behavior-y: contain;
           popup.style.height = targetHeight + "px";
         }
 
+        // Put the user at the top of the view sliding in. #info-popup is the
+        // element that actually scrolls (overflow-y: auto, max-height: 90vh);
+        // #help-content computes overflow: visible and never scrolls. Safe
+        // after updatePopupHeight — an instant scrollTop assignment leaves that
+        // height transition's keyframes untouched. This page keeps its own
+        // inline copy of the wiring in src/shared/help-popover.ts; keep the two
+        // in step.
+        function scrollPopupToTop() {
+          if (popup) popup.scrollTop = 0;
+        }
+
         document.querySelectorAll(".help-subpage-link").forEach((link) => {
           link.addEventListener("click", (e) => {
             e.preventDefault();
@@ -694,6 +705,7 @@ overscroll-behavior-y: contain;
               subContent.innerHTML = template.innerHTML;
               slider.style.transform = "translateX(-50%)";
               updatePopupHeight(subView);
+              scrollPopupToTop();
             }
           });
         });
@@ -703,6 +715,7 @@ overscroll-behavior-y: contain;
             if (mainView && subView && slider) {
               slider.style.transform = "translateX(0)";
               updatePopupHeight(mainView);
+              scrollPopupToTop();
             }
           });
         }
