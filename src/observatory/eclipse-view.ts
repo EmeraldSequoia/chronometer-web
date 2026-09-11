@@ -15,10 +15,10 @@
  * body — and a "Below horizon" caption appears exactly when the wash has fully
  * closed over that body; see horizonOverlayState.
  *
- * Around the disc, five image markers ride an annular ring showing the
- * right-ascensions of the Sun, Moon, Earth-shadow (anti-solar), and the
- * ascending/descending lunar nodes; when the Sun and Moon markers coincide near
- * a node, an eclipse is imminent.
+ * Around the disc, five markers (sprites drawn in code, eclipse-ring-sprites.ts)
+ * ride an annular ring showing the right-ascensions of the Sun, Moon,
+ * Earth-shadow (anti-solar), and the ascending/descending lunar nodes; when the
+ * Sun and Moon markers coincide near a node, an eclipse is imminent.
  *
  * All geometry is driven by obs-values that share ONE update sentinel
  * (EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION) so the disc stays mutually
@@ -37,16 +37,6 @@ import sunEclipsePng from '../shared/assets/sunEclipse.png';
 import totalEclipsePng from '../shared/assets/totalEclipse.png';
 // @ts-ignore
 import earthShadowPng from '../shared/assets/earthShadow.png';
-// @ts-ignore
-import ringSunPng from '../shared/assets/eclipseRingSun.png';
-// @ts-ignore
-import ringMoonPng from '../shared/assets/eclipseRingMoon.png';
-// @ts-ignore
-import ringEarthShadowPng from '../shared/assets/eclipseRingEarthShadow.png';
-// @ts-ignore
-import ringAscNodePng from '../shared/assets/eclipseRingAscNode.png';
-// @ts-ignore
-import ringDesNodePng from '../shared/assets/eclipseRingDesNode.png';
 
 import type { LayoutParams } from './layout.js';
 import type { ObsValueName } from './obs-values.js';
@@ -55,6 +45,7 @@ import { EclipseKind, eclipseKindIsMoreSolarThanLunar } from '../astronomy/es-as
 import { kECRefractionAtHorizonX } from '../astronomy/astro-constants.js';
 import { drawText } from './draw-utils.js';
 import { OUTER_DIAL_TITLE_RATIO } from './layout.js';
+import { RING_BOX, getRingSprites } from './eclipse-ring-sprites.js';
 
 /**
  * "Eclipse Simulator" caption, on two lines so it fits the small disc, at the
@@ -96,15 +87,6 @@ const EARTH_SHADOW_RADIUS_FRACTION = 118.0 / 120.0; // earthShadow.png: umbra wi
 
 const ECLIPSE_THRESHOLD = Math.PI / 18;          // 10°
 
-// Natural (iOS @1x point) sizes of the ring marker images.
-const RING_SIZE = {
-    sun: 27,
-    moon: 20,
-    earthShadow: 20,
-    ascNode: 15,
-    desNode: 15,
-};
-
 // ============================================================================
 // Module state
 // ============================================================================
@@ -120,21 +102,18 @@ function loadImg(src: string, name: string): Img {
 }
 
 let moonImg: Img, sunImg: Img, totalImg: Img, shadowImg: Img;
-let ringSun: Img, ringMoon: Img, ringEarthShadow: Img, ringAscNode: Img, ringDesNode: Img;
 let initialized = false;
 
-/** Load the eight eclipse images (the Moon disc reuses moon300.png). */
+/**
+ * Load the four disc images. moon300.png also textures the Moon ring marker;
+ * the ring markers are otherwise drawn in code (eclipse-ring-sprites.ts).
+ */
 export function initEclipseView(): void {
     if (initialized) return;
     moonImg = loadImg(moonPng as string, 'moon300.png');
     sunImg = loadImg(sunEclipsePng as string, 'sunEclipse.png');
     totalImg = loadImg(totalEclipsePng as string, 'totalEclipse.png');
     shadowImg = loadImg(earthShadowPng as string, 'earthShadow.png');
-    ringSun = loadImg(ringSunPng as string, 'eclipseRingSun.png');
-    ringMoon = loadImg(ringMoonPng as string, 'eclipseRingMoon.png');
-    ringEarthShadow = loadImg(ringEarthShadowPng as string, 'eclipseRingEarthShadow.png');
-    ringAscNode = loadImg(ringAscNodePng as string, 'eclipseRingAscNode.png');
-    ringDesNode = loadImg(ringDesNodePng as string, 'eclipseRingDesNode.png');
     initialized = true;
 }
 
@@ -158,7 +137,7 @@ function drawCentered(
 }
 
 /**
- * Place a ring-indicator image marker.
+ * Place a ring-indicator marker.
  *
  * iOS layer transform (EOHandView.mm:463-465): rotate(firstAngle) →
  * translate(0, radius) → rotate(glyph). UIKit layer coordinates are Y-down
@@ -167,27 +146,28 @@ function drawCentered(
  * clockwise from the bottom (firstAngle includes a +π for most markers,
  * putting RA = 0 at the top).
  *
- * The image itself is drawn with a Y flip: iOS renders the marker PNG through
+ * The sprite itself is drawn with a Y flip: iOS renders the marker PNG through
  * setupContextForZeroOffsetAndScale, whose CGContextScaleCTM(scale, −scale)
  * flips the context, so UIImage drawInRect leaves the PNG vertically mirrored
- * within the marker view. This matters radially: the star in
- * eclipseRingSun.png sits ~4 px below the image center, and only the flipped
- * orientation puts its visible center on the outer rim (R2) as on iOS,
- * rather than 4 px outside it.
+ * within the marker view. The sprites (eclipse-ring-sprites.ts) keep the old
+ * PNGs' layouts, which were authored for that flip. This matters radially: the
+ * Sun's star sits 4 pt below the box center, and only the flipped orientation
+ * puts its visible center on the outer rim (R2) as on iOS, rather than 4 pt
+ * outside it. (With the glyph rotation, the flip also points the Moon's lit
+ * half — the sprite's top — at the Sun marker.)
  */
 function drawRingMarker(
-    ctx: CanvasRenderingContext2D, marker: Img,
+    ctx: CanvasRenderingContext2D, sprite: CanvasImageSource,
     cx: number, cy: number, radius: number,
     firstAngle: number, glyphAngle: number, size: number,
 ): void {
-    if (!marker.ready) return;
     ctx.save();
     ctx.translate(cx, cy);
     ctx.rotate(firstAngle);
     ctx.translate(0, radius);
     ctx.rotate(glyphAngle);
     ctx.scale(1, -1);
-    ctx.drawImage(marker.el, -size / 2, -size / 2, size, size);
+    ctx.drawImage(sprite, -size / 2, -size / 2, size, size);
     ctx.restore();
 }
 
@@ -446,7 +426,7 @@ export function drawEclipseView(
     }
 }
 
-/** Draw the five ring-indicator image markers (port EOHandView.mm:382-450). */
+/** Draw the five ring-indicator markers (port EOHandView.mm:382-450). */
 function drawRingHands(
     ctx: CanvasRenderingContext2D,
     L: LayoutParams,
@@ -461,13 +441,21 @@ function drawRingHands(
     const moonRA = u.get('eclRingMoonRA').currentValue;
     const nodeRA = u.get('eclRingNodeRA').currentValue;
 
+    // Sprites at the resolution the markers land at: marker scale s times the
+    // context's device scale (the DPR, in the app).
+    const m = ctx.getTransform();
+    const sprites = getRingSprites(s * Math.hypot(m.a, m.b), moonImg.ready ? moonImg.el : null);
+
     // Sun marker — outside the ring.
-    drawRingMarker(ctx, ringSun, cx, cy, R2 + 4 * s, Math.PI + sunRA, 0, RING_SIZE.sun * s);
-    // Moon marker — inside the ring; glyph spun by RA(Sun)−RA(Moon) (iOS).
-    drawRingMarker(ctx, ringMoon, cx, cy, R1 - 1 * s, Math.PI + moonRA, sunRA - moonRA, RING_SIZE.moon * s);
+    drawRingMarker(ctx, sprites.sun, cx, cy, R2 + 4 * s, Math.PI + sunRA, 0, RING_BOX.sun * s);
+    // Moon marker — inside the ring; glyph spun by RA(Sun)−RA(Moon) (iOS), which
+    // keeps its lit half facing the Sun marker. Waits for moon300.png.
+    if (sprites.moon) {
+        drawRingMarker(ctx, sprites.moon, cx, cy, R1 - 1 * s, Math.PI + moonRA, sunRA - moonRA, RING_BOX.moon * s);
+    }
     // Earth shadow — anti-solar (no +π), inside the ring.
-    drawRingMarker(ctx, ringEarthShadow, cx, cy, R1 - 1 * s, sunRA, 0, RING_SIZE.earthShadow * s);
+    drawRingMarker(ctx, sprites.earthShadow, cx, cy, R1 - 1 * s, sunRA, 0, RING_BOX.earthShadow * s);
     // Ascending node (+π) and descending node, mid-ring.
-    drawRingMarker(ctx, ringAscNode, cx, cy, mid, Math.PI + nodeRA, 0, RING_SIZE.ascNode * s);
-    drawRingMarker(ctx, ringDesNode, cx, cy, mid, nodeRA, 0, RING_SIZE.desNode * s);
+    drawRingMarker(ctx, sprites.ascNode, cx, cy, mid, Math.PI + nodeRA, 0, RING_BOX.ascNode * s);
+    drawRingMarker(ctx, sprites.desNode, cx, cy, mid, nodeRA, 0, RING_BOX.desNode * s);
 }

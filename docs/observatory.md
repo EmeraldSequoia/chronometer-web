@@ -21,6 +21,7 @@ src/observatory/
 ├── peripheral-dials.ts    Alt/Az/EOT/Eclipse dial backgrounds (drawn into static-cache)
 ├── peripheral-hands.ts    Alt/Az/EOT hands + selected-body labels
 ├── eclipse-view.ts        Eclipse simulator disc + status labels + ring hands
+├── eclipse-ring-sprites.ts Eclipse ring markers (Sun/Moon/shadow/nodes), drawn in code
 ├── date-view.ts           Header date display (weekday/date/year/leap/tz)
 ├── layout.ts              Base layout templates (radii, positions) + base builder
 ├── anchor-layout.ts       Adaptive layout: 9 aspect anchors + selector (iteration 3)
@@ -727,10 +728,10 @@ Simulator" caption:
 
 A translucent green overlay (`rgba(0,76,0,0.5)`) marks any below-horizon portion
 (see below); once the eclipsed body has fully set a "Below horizon" label
-replaces the caption. Around the disc, five image markers ride the ring at
+replaces the caption. Around the disc, five markers ride the ring at
 RA-derived clock angles: Sun, Moon, Earth-shadow (anti-solar), and the
-ascending/descending lunar nodes. When the Sun and Moon markers coincide near a
-node, an eclipse is imminent.
+ascending/descending lunar nodes (see [Ring markers](#ring-markers)). When the
+Sun and Moon markers coincide near a node, an eclipse is imminent.
 
 ### Below-horizon overlay: body-anchored apparent horizon + closure-gated caption (deliberate iOS divergence)
 
@@ -877,15 +878,55 @@ same correction `calculateEclipse` makes to classify the eclipse, so drawing and
 label agree by construction (see [astronomy.md](astronomy.md)). Both still
 interpolate `linear`: the ratio varies on the diurnal timescale.
 
+### Ring markers
+
+The five markers are drawn in code by `eclipse-ring-sprites.ts`
+([plan](../planning/2026-09-11-eclipse-ring-icons.md)). They replace the iOS
+@1x PNGs (27/20/20/15/15 px), which every device was upsampling 1.3–5.3×.
+
+- **Same boxes, same layouts.** Geometry is in iOS points, fitted to the old
+  PNGs. Each sprite keeps its PNG's box (`RING_BOX`, which `drawRingMarker`
+  scales by `s`) and its "PNG-up" layout:
+  - the Sun's star sits 4 pt below the box centre;
+  - the Moon's lit half is on top;
+  - the node arrowheads sit ½ pt low.
+
+  `drawRingMarker` draws every marker through the Y flip iOS applied, so
+  keeping the layouts keeps placement and orientation unchanged.
+- **Resolution.** Each sprite is `ceil(box · pxPerPt)` px square, where
+  `pxPerPt = s ×` the context's device scale. The device scale is read from
+  `ctx.getTransform()`; in the app it's the DPR. The set is cached until
+  `pxPerPt` changes or the Moon texture arrives, so per-frame work is still
+  five `drawImage` calls.
+- **Sun.** An 8-ray star, all rays equal, valleys at half the ray length, drawn
+  in Firenze's `sunColor` with a `sunStrokeColor` outline.
+- **Moon.** An opaque black disc whose top half shows `moon300.png`, which is
+  already loaded for the disc.
+  - The photo is pre-mirrored, so the flip leaves it unmirrored on screen.
+  - It's turned so the photo's north-northeast half is the lit one: about as
+    much maria as highlands.
+  - It's brightened 1.5× (`MOON_STYLE`).
+  - Together with the glyph rotation (`RA(Sun) − RA(Moon)`), the lit half
+    always faces the Sun marker.
+- **Dark parts** — all of the Earth shadow and the Moon's dark half — get a
+  mid-gray border, inset so each disc stays 16 pt across. The Moon's lit half
+  has no border. The iOS art's faint white rim and halo are gone.
+- **Nodes.** A 1-pt `#b60000` line across the ring, with a small arrowhead. It
+  points left in the sprite for the ascending node and right for the descending
+  node. The two markers are always 180° apart, so both arrowheads point the
+  same way on screen.
+
 ### Coordinate note (Y-up → Y-down)
 
 `EOEclipseView` is a plain (Y-down) `UIView`, so the iOS pixel formulas — which
 already carry their "change in sign from view coordinate system" adjustments —
 port literally into the Y-down canvas (unlike the main dial, which uses a flipped
-Y-up CTM). The ring markers replicate the iOS layer transform
-(`rotate(firstAngle) → translate(0, radius) → rotate(glyph)`) as
-`rotate(−firstAngle) → translate(0, −radius) → rotate(−glyph)`, placing each
-marker at `firstAngle` CCW from the top — the same screen position as iOS.
+Y-up CTM). The ring markers port the iOS layer transform
+(`rotate(firstAngle) → translate(0, radius) → rotate(glyph)`) verbatim.
+UIKit layers, like the canvas, are Y-down with clockwise-positive rotation, so
+each marker sits `firstAngle` clockwise from the bottom. The `+π` in most
+`firstAngle`s puts RA = 0 at the top. The sprite is then drawn through a Y flip;
+see `drawRingMarker`.
 
 ## Drag-to-Explore (Earth Map)
 
