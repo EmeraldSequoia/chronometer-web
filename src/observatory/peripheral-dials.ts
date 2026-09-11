@@ -189,6 +189,9 @@ function drawEOTDial(ctx: Ctx2D, L: LayoutParams): void {
     const s = R / 60;
     const lw = 0.5 * s;
     const innerR = R - 15 * s;       // iOS EOEOTDialShuffleView: EOTR-15
+    const numFont = `${f}px Arial, sans-serif`;
+    const numR = R - 5 * s;          // numeric-label radius (see labels below)
+    const gapPad = 2 * s;            // clearance around the "0" glyph, as on the altitude dial
 
     // Faded alpha for the unused negative sliver (−14.2 … −15). White strokes →
     // use the light-stroke alpha (cf. renderer.ts:3844).
@@ -213,17 +216,33 @@ function drawEOTDial(ctx: Ctx2D, L: LayoutParams): void {
     strokeArc(ctx, cx, cy, R, cFadedStart, cSolidStart, WHITE, lw, FADED);
     strokeArc(ctx, cx, cy, innerR, cFadedStart, cSolidStart, WHITE, lw, FADED);
 
-    drawHub(ctx, cx, cy, f + 1, lw);
+    // Vertical baseline (0-minute radial, straight up), gapped around the "0"
+    // glyph and dimmed — the same treatment as the altitude dial's horizon
+    // baseline. Drawn before the hub so the hub covers its inner end.
+    {
+        // Geometry of the upright "0" that drawDialNumbersUpright places at
+        // 12 o'clock below: center at radius numR − diagonal/2, glyph drawn
+        // with its font box centered there (textVisualCenterY).
+        ctx.save();
+        ctx.font = numFont;
+        const zeroW = ctx.measureText('0').width;
+        const zeroCY = cy - (numR - Math.hypot(zeroW, f) / 2);
+        const zeroBase = zeroCY + textVisualCenterY(ctx, '0');
+        const zm = ctx.measureText('0');
+        const gapTop = zeroBase - zm.actualBoundingBoxAscent - gapPad;
+        const gapBot = zeroBase + zm.actualBoundingBoxDescent + gapPad;
+        ctx.strokeStyle = WHITE_35;
+        ctx.lineWidth = lw;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx, gapBot);
+        ctx.moveTo(cx, gapTop);
+        ctx.lineTo(cx, cy - R);
+        ctx.stroke();
+        ctx.restore();
+    }
 
-    // Vertical baseline (0-minute radial, straight up).
-    ctx.save();
-    ctx.strokeStyle = WHITE;
-    ctx.lineWidth = lw;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(cx, cy - R);
-    ctx.stroke();
-    ctx.restore();
+    drawHub(ctx, cx, cy, f + 1, lw);
 
     // ── Ticks: minor every minute, major at 0, ±5, ±10, ±15. ──
     // iOS lengths: major (5-min) = EOTR-5, minor (1-min) = EOTR-3.
@@ -257,8 +276,6 @@ function drawEOTDial(ctx: Ctx2D, L: LayoutParams): void {
     // The left "15 –" is drawn separately below so the "15" can be dimmed
     // (we never reach −15) while the "−" stays full white (it labels the whole
     // negative side). All other labels are full white.
-    const numFont = `${f}px Arial, sans-serif`;
-    const numR = R - 5 * s;
     const eotLabels = ['0', '5', '10', '+ 15', '', '', '', '', '', '', '10', '5'];
     drawDialNumbersUpright(ctx, cx, cy, eotLabels, numFont, WHITE, numR);
 
