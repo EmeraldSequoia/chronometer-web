@@ -3,7 +3,7 @@
  *
  * See planning/2026-06-15-observatory-layout-iter3.md. This module is the
  * production home of the per-anchor geometry that was tuned in
- * `harness/layout-harness.html`; per §9.6 the harness imports the SAME functions
+ * `scripts/historical/harness/layout-harness.html`; per §9.6 the harness imports the SAME functions
  * (passing its live slider values where production passes the baked §9.4 ship
  * constants) so the reference and the app can never silently diverge.
  *

@@ -12,10 +12,11 @@
 # After any change to src/observatory/{anchor-layout,layout,date-view}.ts,
 # rerun this and bump the ?v=N query on the imports in layout-harness.html.
 #
-# Usage: ./harness/build-harness.sh   (then serve harness/ and open layout-harness.html)
+# Usage: ./scripts/historical/harness/build-harness.sh
+#   (then serve scripts/historical/harness/ and open layout-harness.html)
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$DIR/.." && pwd)"
+ROOT="$(cd "$DIR/../../.." && pwd)"
 
 npx --yes esbuild "$ROOT/src/observatory/anchor-layout.ts" \
   --bundle --format=esm --target=es2020 \
@@ -25,4 +26,4 @@ npx --yes esbuild "$ROOT/src/observatory/date-view.ts" \
   --bundle --format=esm --target=es2020 \
   --outfile="$DIR/date-view.mjs"
 
-echo "  ✓ harness/anchor-layout.mjs + date-view.mjs built from src/observatory/"
+echo "  ✓ scripts/historical/harness/anchor-layout.mjs + date-view.mjs built from src/observatory/"

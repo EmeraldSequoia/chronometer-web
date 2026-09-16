@@ -53,7 +53,7 @@
       "paths": [
         "dist/",
         "dist.zip",
-        "harness/*.mjs",
+        "scripts/historical/harness/*.mjs",
         "src/faces/generated/",
         "scripts/geonames-data/cities1000.txt",
         "scripts/geonames-data/alternateNamesV2.txt",

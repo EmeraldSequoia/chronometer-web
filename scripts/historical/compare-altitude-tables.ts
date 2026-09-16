@@ -1,7 +1,7 @@
 /**
  * Compare our Int16 altitude table with the iOS-generated Float32 table.
  *
- * Usage: npx tsx scripts/compare-altitude-tables.ts
+ * Usage: npx tsx scripts/historical/compare-altitude-tables.ts
  *
  * Reads:
  *   - src/observatory/data/altitude-table.bin  (our Int16 table, 696,900 bytes)

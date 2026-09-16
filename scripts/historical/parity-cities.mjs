@@ -3,7 +3,7 @@
  * One-shot parity check: old (v1 array-of-arrays, from git HEAD) vs new
  * (v2 columnar, on disk) city search. Run before committing the v2 cities DB.
  *
- *   node scripts/parity-cities.mjs
+ *   node scripts/historical/parity-cities.mjs
  *
  * Compares searchCities() result SETS (must be identical; uses a large limit to
  * remove top-N cutoff sensitivity) and reports ordering deltas separately (the

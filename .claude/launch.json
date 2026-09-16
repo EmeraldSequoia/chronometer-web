@@ -438,7 +438,7 @@
         "http.server",
         "8742",
         "--directory",
-        "harness"
+        "scripts/historical/harness"
       ],
       "port": 8742
     }

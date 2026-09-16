@@ -33,7 +33,8 @@ apps and then to TypeScript here (see [Astronomy](astronomy.md)):
 Each book prints an accuracy table on its **back cover**: the maximum
 error in **the body's longitude, in degrees**, per epoch band. Those
 tables are transcribed in `Sheet 1-Moon.csv` and
-`Sheet 1-Sun & Planets.csv` at the repository root and reproduced below.
+`Sheet 1-Sun & Planets.csv` under `scripts/historical/accuracy-verification/`
+and reproduced below.
 Blank cells are blank in print — the authors quote nothing there, and say
 nothing about what happens if you use that precision tier for that span.
 
@@ -297,11 +298,13 @@ loaded, no further data is ever fetched — the tables *are* the ephemeris.
 
 Both harnesses are manual and evidence-generating — never part of the
 build or CI, because JPL asks that Horizons be queried sequentially and
-sparingly. Every response is cached (condensed) under
-`scripts/horizons-cache/`, so re-runs are offline and byte-stable.
+sparingly. They live with their inputs and the transcribed cover tables
+under `scripts/historical/accuracy-verification/`. Every response is cached
+(condensed) in the `horizons-cache/` directory beside them, so re-runs are
+offline and byte-stable.
 
 ```bash
-node scripts/verify-wb-envelopes.mjs
+node scripts/historical/accuracy-verification/verify-wb-envelopes.mjs
 ```
 
 Samples each body's apparent longitude against Horizons inside every
@@ -311,14 +314,14 @@ conventions cancel and the difference is the series error. `--only moon`
 restricts to one body.
 
 ```bash
-node scripts/verify-eclipse-intervals.mjs
+node scripts/historical/accuracy-verification/verify-eclipse-intervals.mjs
 ```
 
 Measures §2. Add `--decompose` for the per-contact attribution table,
 `--only YYYY-MM-DD` or `--kind total-solar` to narrow it.
 
 ```bash
-node --expose-gc scripts/measure-astro-tables.mjs
+node --expose-gc scripts/historical/accuracy-verification/measure-astro-tables.mjs
 ```
 
 Measures §3 — bundle sizes under each compression scheme, the tables'

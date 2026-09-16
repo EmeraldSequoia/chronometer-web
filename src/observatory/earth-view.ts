@@ -49,7 +49,7 @@ import type { Updater } from '../shared/updater.js';
 import { citiesInWindow } from '../shared/city-search.js';
 
 // ============================================================================
-// Table constants — must match generate-altitude-table.ts
+// Table constants — must match scripts/historical/generate-altitude-table.ts
 // ============================================================================
 
 const SS_STEPS = 100;

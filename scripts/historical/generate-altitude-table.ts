@@ -11,7 +11,7 @@
  * Row-major order: [sslatIndex][latIndex][altIndex]
  *
  * Usage:
- *   npx tsx scripts/generate-altitude-table.ts
+ *   npx tsx scripts/historical/generate-altitude-table.ts
  *
  * Output:
  *   src/observatory/data/altitude-table.bin
@@ -248,7 +248,7 @@ function encodeToInt16(table: Float32Array): Int16Array {
 // Main
 // ============================================================================
 
-const outputPath = new URL('../src/observatory/data/altitude-table.bin', import.meta.url).pathname;
+const outputPath = new URL('../../src/observatory/data/altitude-table.bin', import.meta.url).pathname;
 
 console.log('Generating sun altitude table...');
 console.log(`  Dimensions: ${SS_SLOTS} subsolar × ${LAT_SLOTS} latitude × ${ALT_SLOTS} altitude`);

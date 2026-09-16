@@ -278,7 +278,7 @@ async function main() {
     
     console.log('Converting lunar table...');
     const lunarTs = convertLunarTable(lunarSource);
-    const lunarPath = new URL('../src/astronomy/lunar-tables.ts', import.meta.url).pathname;
+    const lunarPath = new URL('../../src/astronomy/lunar-tables.ts', import.meta.url).pathname;
     writeFileSync(lunarPath, lunarTs);
     console.log(`  Wrote ${lunarTs.length} bytes to ${lunarPath}`);
 
@@ -288,7 +288,7 @@ async function main() {
     
     console.log('Converting planets table...');
     const planetsTs = convertPlanetsTable(planetsSource);
-    const planetsPath = new URL('../src/astronomy/planet-tables.ts', import.meta.url).pathname;
+    const planetsPath = new URL('../../src/astronomy/planet-tables.ts', import.meta.url).pathname;
     writeFileSync(planetsPath, planetsTs);
     console.log(`  Wrote ${planetsTs.length} bytes to ${planetsPath}`);
 

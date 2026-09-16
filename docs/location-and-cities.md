@@ -137,7 +137,7 @@ prefix matching, and a single `indexOf` scan over the concatenated `alts` blob
 GeoNames sources in `scripts/geonames-data/`.
 
 **Validation:** `src/__tests__/city-search.test.ts` covers the decode + search
-paths against a synthetic dataset. `scripts/parity-cities.mjs` is the one-shot
+paths against a synthetic dataset. `scripts/historical/parity-cities.mjs` is the one-shot
 v1→v2 migration validator — it compares the columnar search against the previous
 array-of-arrays form in git HEAD (no-op once HEAD is already v2).
 

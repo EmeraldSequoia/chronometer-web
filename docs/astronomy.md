@@ -145,13 +145,14 @@ and [planning/2026-08-17-eclipse-precision-and-verification.md](../planning/2026
 > section below is the earlier, narrower measurement of solar-eclipse
 > geometry that came first.
 
-**2026-08-18.** `scripts/verify-eclipse-horizons.mjs` (manual, never in
+**2026-08-18.** `scripts/historical/accuracy-verification/verify-eclipse-horizons.mjs` (manual, never in
 build/CI — JPL asks for strictly sequential requests) measures the engine's
 topocentric Sun/Moon geometry against JPL Horizons at all 70 solar
 greatest-eclipse rows of `src/help/eclipse-data.json`: apparent-of-date,
 airless, at each row's site and derived-UT instant — the same frame
-`calculateEclipse` computes. Responses are cached in `scripts/horizons-cache/`
-(committed), so re-runs are offline and the report is byte-stable. Horizons is
+`calculateEclipse` computes. Responses are cached in the `horizons-cache/`
+directory beside the script (committed), so re-runs are offline and the report
+is byte-stable. Horizons is
 an authority independent of the Espenak/NASA canon the dataset is scraped
 from; the optional `--opale` flag adds IMCCE's INPOP19A as a third,
 independent-of-both computation.

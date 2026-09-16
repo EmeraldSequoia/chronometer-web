@@ -26,7 +26,7 @@
  * JavaScriptCore and SpiderMonkey lay these structures out differently.
  * Run with --expose-gc so the heap can be settled before each reading:
  *
- *   node --expose-gc scripts/measure-astro-tables.mjs
+ *   node --expose-gc scripts/historical/accuracy-verification/measure-astro-tables.mjs
  *
  * Findings are quoted in docs/accuracy.md ("What the tables cost").
  */
@@ -38,7 +38,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../..');
 const MODULES = ['lunar-tables', 'planet-tables'];
 
 const KB = (n) => (n / 1024).toFixed(1).padStart(8) + ' KB';

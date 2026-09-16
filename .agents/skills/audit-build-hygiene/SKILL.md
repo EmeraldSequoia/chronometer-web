@@ -47,11 +47,14 @@ script whose output feeds into the build.
 
 ### Known Exceptions
 
-- `scripts/compare-altitude-tables.ts` reads from `.esastro-ref/` for diagnostic comparison.
-  This is acceptable because it is not part of the build pipeline.
+- Everything under `scripts/historical/` is retired tooling that the build never invokes
+  (see `docs/build-system.md`). Hits there are acceptable; the two below are the known ones.
+- `scripts/historical/compare-altitude-tables.ts` reads from `.esastro-ref/` for diagnostic
+  comparison. This is acceptable because it is not part of the build pipeline.
 - `scripts/clone-refs.sh` clones reference repos. This is a setup script, not a build script.
-- `scripts/convert-tables.mjs` downloads from GitHub URLs (not from local ref dirs). The URLs
-  happen to point to the same repos, but no local ref directory is used. This is acceptable.
+- `scripts/historical/convert-tables.mjs` downloads from GitHub URLs (not from local ref dirs).
+  The URLs happen to point to the same repos, but no local ref directory is used. This is
+  acceptable.
 
 ## Violation 2: Conditional-on-Existence Logic
 

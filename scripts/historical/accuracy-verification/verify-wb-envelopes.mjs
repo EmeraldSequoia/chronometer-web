@@ -3,7 +3,7 @@
  * verify-wb-envelopes.mjs — sample the engine's geocentric apparent
  * longitudes against JPL Horizons (DE44x) inside each epoch band of the
  * Willmann-Bell books' back-cover accuracy tables, transcribed in
- * "Sheet 1-Moon.csv" and "Sheet 1-Sun & Planets.csv" at the repo root.
+ * "Sheet 1-Moon.csv" and "Sheet 1-Sun & Planets.csv" beside this script.
  * Those tables promise a maximum error of "the longitude in degrees" per
  * body per period — this script measures what the engine actually does,
  * 3 sample epochs per band (15% / 50% / 85%), a sanity check rather than
@@ -39,13 +39,13 @@
  *     error can be judged separately.
  *
  * Manual and evidence-generating only — never part of build or CI.
- * Responses are cached in scripts/horizons-cache/ (committed), so re-runs
+ * Responses are cached in horizons-cache/ beside this script (committed), so re-runs
  * are offline and byte-stable. Live runs are sequential and paced per
  * JPL's fair-use policy (~45 calls on a cold cache).
  *
- *   node scripts/verify-wb-envelopes.mjs             # everything
- *   node scripts/verify-wb-envelopes.mjs --only moon
- *   node scripts/verify-wb-envelopes.mjs --cache /tmp/h
+ *   node scripts/historical/accuracy-verification/verify-wb-envelopes.mjs             # everything
+ *   node scripts/historical/accuracy-verification/verify-wb-envelopes.mjs --only moon
+ *   node scripts/historical/accuracy-verification/verify-wb-envelopes.mjs --cache /tmp/h
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
@@ -53,7 +53,8 @@ import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const HERE = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(HERE, '../../..');
 const HORIZONS = 'https://ssd.jpl.nasa.gov/api/horizons.api';
 const AU_KM = 149597870.691;
 const RAD = Math.PI / 180;
@@ -83,7 +84,7 @@ const BODIES = {
 // ---------------------------------------------------------------- arguments
 
 function parseArgs(argv) {
-    const opts = { cache: join(ROOT, 'scripts/horizons-cache'), only: null };
+    const opts = { cache: join(HERE, 'horizons-cache'), only: null };
     for (let i = 0; i < argv.length; i++) {
         const arg = argv[i];
         if (arg === '--cache') {
@@ -295,8 +296,8 @@ async function main() {
     const opts = parseArgs(process.argv.slice(2));
     const { WB_planetApparentPosition } = await loadEngine();
 
-    const moonCsv = parseEnvelopeCsv(join(ROOT, 'Sheet 1-Moon.csv'));
-    const planetsCsv = parseEnvelopeCsv(join(ROOT, 'Sheet 1-Sun & Planets.csv'));
+    const moonCsv = parseEnvelopeCsv(join(HERE, 'Sheet 1-Moon.csv'));
+    const planetsCsv = parseEnvelopeCsv(join(HERE, 'Sheet 1-Sun & Planets.csv'));
 
     /** One measurement plan entry per body: bands + per-band tier list. */
     const plans = [];

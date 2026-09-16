@@ -29,14 +29,14 @@
  * Manual and evidence-generating only — never part of build or CI: Horizons
  * is a best-effort service with a strict sequential-requests fair-use policy
  * (~0.3 s/call; 140 calls ≈ 2 minutes live). Responses are cached in
- * scripts/horizons-cache/ (committed), so re-runs are offline and the report
+ * horizons-cache/ beside this script (committed), so re-runs are offline and the report
  * is byte-stable; a format change upstream announces itself in the
  * `API VERSION` line, which this script checks.
  *
- *   node scripts/verify-eclipse-horizons.mjs                # all 70 solar rows
- *   node scripts/verify-eclipse-horizons.mjs --opale        # + IMCCE cross-check
- *   node scripts/verify-eclipse-horizons.mjs --only 2024-04-08
- *   node scripts/verify-eclipse-horizons.mjs --cache /tmp/h # elsewhere
+ *   node scripts/historical/accuracy-verification/verify-eclipse-horizons.mjs                # all 70 solar rows
+ *   node scripts/historical/accuracy-verification/verify-eclipse-horizons.mjs --opale        # + IMCCE cross-check
+ *   node scripts/historical/accuracy-verification/verify-eclipse-horizons.mjs --only 2024-04-08
+ *   node scripts/historical/accuracy-verification/verify-eclipse-horizons.mjs --cache /tmp/h # elsewhere
  *
  * Findings live in docs/astronomy.md ("Measured accuracy") and
  * planning/2026-08-17-eclipse-precision-and-verification.md.
@@ -46,7 +46,8 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const HERE = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(HERE, '../../..');
 const HORIZONS = 'https://ssd.jpl.nasa.gov/api/horizons.api';
 const OPALE = 'https://opale.imcce.fr/api/v1/phenomena/eclipses/10';
 const AU_KM = 149597870.7;
@@ -58,7 +59,7 @@ const MOON_RADIUS_KM = 1737.4;
 
 function parseArgs(argv) {
     const opts = {
-        cache: join(ROOT, 'scripts/horizons-cache'),
+        cache: join(HERE, 'horizons-cache'),
         opale: false,
         only: null,
     };

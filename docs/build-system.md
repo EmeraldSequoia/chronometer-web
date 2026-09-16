@@ -171,6 +171,7 @@ npx vitest
 | `package.json` | Dependencies (esbuild) |
 | `file-categories.json` | Canonical file categorization registry |
 | `scripts/file-manager.sh` | File categorization, archival, and restoration CLI tool |
+| `scripts/historical/` | Retired tooling kept for reference: one-shot generators, migration checks, accuracy-verification harnesses and their cached inputs, and the layout harness. Nothing here is invoked by the build or expected to run again |
 
 ## File Categories and Archival
 

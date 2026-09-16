@@ -7,7 +7,7 @@
 // match, label building (admin2/admin1/country), and findClosestCity.
 //
 // Full-database behavior parity (old array-of-arrays vs new columnar) was
-// validated separately by scripts/parity-cities.mjs during the v2 migration.
+// validated separately by scripts/historical/parity-cities.mjs during the v2 migration.
 import { describe, it, expect, beforeAll } from 'vitest';
 import { loadCityData, searchCities, findClosestCity, citiesInWindow, isCityDataLoaded } from '../shared/city-search.js';
 

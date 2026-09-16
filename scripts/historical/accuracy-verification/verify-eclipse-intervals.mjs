@@ -47,10 +47,10 @@
  * sequential paced calls per eclipse per iteration, typically 2
  * iterations (~500 total).
  *
- *   node scripts/verify-eclipse-intervals.mjs                 # all rows
- *   node scripts/verify-eclipse-intervals.mjs --only 2024-04-08
- *   node scripts/verify-eclipse-intervals.mjs --kind total-solar
- *   node scripts/verify-eclipse-intervals.mjs --cache /tmp/h
+ *   node scripts/historical/accuracy-verification/verify-eclipse-intervals.mjs                 # all rows
+ *   node scripts/historical/accuracy-verification/verify-eclipse-intervals.mjs --only 2024-04-08
+ *   node scripts/historical/accuracy-verification/verify-eclipse-intervals.mjs --kind total-solar
+ *   node scripts/historical/accuracy-verification/verify-eclipse-intervals.mjs --cache /tmp/h
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
@@ -58,7 +58,8 @@ import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const HERE = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(HERE, '../../..');
 const HORIZONS = 'https://ssd.jpl.nasa.gov/api/horizons.api';
 const RAD = Math.PI / 180;
 const ARCSEC = 3600;
@@ -67,7 +68,7 @@ const APPLE_EPOCH_UNIX = 978307200;
 // ---------------------------------------------------------------- arguments
 
 function parseArgs(argv) {
-    const opts = { cache: join(ROOT, 'scripts/horizons-cache'), only: null, kind: null, decompose: false };
+    const opts = { cache: join(HERE, 'horizons-cache'), only: null, kind: null, decompose: false };
     for (let i = 0; i < argv.length; i++) {
         const arg = argv[i];
         if (arg === '--cache') {
