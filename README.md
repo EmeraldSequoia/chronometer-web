@@ -2,9 +2,12 @@
 
 Web ports of [Emerald Chronometer](https://github.com/EmeraldSequoia/Chronometer) and [Emerald Observatory](https://github.com/EmeraldSequoia/Observatory), the astronomical watch-face and astronomical clock apps originally built for iPhone and iPad in Objective-C, C++, and C. This project re-implements both apps entirely in TypeScript, rendering animated watch faces and an astronomical clock to HTML Canvas. Like the original iOS apps, it requires **no backend server** — everything runs completely in the browser using only the device's clock and location (while the location is being set a map will be displayed using OpenStreetMap if the internet is available, but it is not required for any functionality).
 
-The original iOS apps were developed by Steve Pucci and Bill Arnett of [Emerald Sequoia LLC](https://emeraldsequoia.com). Emerald Chronometer was one of the first 500 apps in the App Store in 2008, and Observatory was one of the first apps for the iPad. The iOS apps have **new owners** and the owner for Emerald Chronometer can be found [here](https://www.scapaflowllc.com/new-page-1).
+The original iOS apps were developed by Steve Pucci and Bill Arnett of [Emerald Sequoia LLC](https://emeraldsequoia.com). Emerald Chronometer was one of the first 500 apps in the App Store in 2008, and Observatory was one of the first apps for the iPad. The iOS apps have **new owners**:
 
-This project (the web version here) is under very active development as of August 2026.
+*   [**Emerald Chronometer for iOS's new owner**](https://www.scapaflowllc.com/new-page-1)
+*   [**Emerald Observatory for the iPad's new owner**](https://bjornfreemanbenson.com/emerald-observatory)
+
+This project (the web version here) is under active development as of August 2026.
 
 **How accurate is it?** The astronomical positions come from two Willmann-Bell series published in 1986 and 1991, and their authors printed accuracy tables on the back covers. [Accuracy of the Astronomical Algorithms](docs/accuracy.md) sets those promises beside measurements taken against NASA/JPL's DE441 ephemeris today, and reports what the engine achieves on the hardest thing it computes: eclipse timing. Short version — for every eclipse in the app's table, the length of totality is right to hundredths of a second and its start time to about a second. All of that precision ships with the app rather than arriving from a server: the coefficient tables are about 295 KB compressed, which is why placing a planet never needs the network.
 
