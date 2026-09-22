@@ -17,6 +17,8 @@ import { locationSourceOf } from './shared/url-state.js';
 import type { LocationSource } from './shared/url-state.js';
 import { registerHotkey } from './shared/hotkeys.js';
 import { initAppNavLinks, markChronometerPage, registerAppNavHotkeys, navSearch } from './shared/app-nav.js';
+import { initOverflowMenu, closeOverflowMenu } from './shared/overflow-menu.js';
+import { isPhoneSizedViewport } from './shared/chrome-layout.js';
 import { openGeneralHelpTopic } from './shared/help-popover.js';
 import { requestBrowserLocation, watchBrowserLocation } from './shared/geolocation.js';
 
@@ -448,6 +450,20 @@ document.querySelectorAll('#other-apps-section .other-app[data-app="chronometer"
 markChronometerPage();
 initAppNavLinks();
 registerAppNavHotkeys();
+
+// Corner chrome: on a phone-sized viewport the three corner buttons fold into
+// the ⋮ menu (docs/chrome.md). This page has no content-avoidance engine — the
+// buttons float over the page margin — so the phone rule is the only one.
+initOverflowMenu({ app: 'chronometer' });
+function updateChromeCollapse(): void {
+    const collapsed = isPhoneSizedViewport(window.innerWidth, window.innerHeight);
+    if (document.body.classList.contains('chrome-collapsed') !== collapsed) {
+        document.body.classList.toggle('chrome-collapsed', collapsed);
+        if (!collapsed) closeOverflowMenu();
+    }
+}
+updateChromeCollapse();
+window.addEventListener('resize', updateChromeCollapse);
 registerHotkey('h', () => document.getElementById('info-btn')?.click());
 registerHotkey('?', () => openGeneralHelpTopic('#hotkeys'));
 registerHotkey('l', () => showPrompt(false));

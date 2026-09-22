@@ -52,7 +52,7 @@
          which the entry sets on :root at startup). ─────────────────────── */
       :root {
           --obs-footer-h: 32px;
-          --obs-header-h: 32px;
+          --obs-header-h: 48px;
       }
 
       /* ── Top chrome: the iteration-3 header band — "Observatory" (left) and
@@ -93,19 +93,59 @@
       #obs-header-actions {
           display: flex;
           align-items: center;
-          gap: 10px;
+          gap: 8px;
       }
 
       /* CC2: the time controller can't fit (safe rect < 200×368), so the layout
-         dropped the chrome — hide the DOM header/footer to match, giving the
-         dial the full surface (A1/A6/short-Awide). */
-      body.obs-chrome-dropped #obs-header,
+         dropped the chrome bands — hide the DOM footer to match, giving the
+         dial the full surface (A1/A6/short-Awide). The header stays, reduced
+         to a floating [⋮] [fullscreen] over the dial's empty corner (the
+         layout reserves no band for it): presses fall through the transparent
+         strip except on those two buttons — the same pattern fullscreen uses
+         below. The ⋮ menu carries Location and the time controller, so the
+         dropped footer's functions stay reachable (docs/chrome.md). */
       body.obs-chrome-dropped #obs-footer-row,
       body.obs-chrome-dropped #time-bar,
       body.obs-chrome-dropped #observatory-controls,
       body.obs-chrome-dropped #noon-icon,
       body.obs-chrome-dropped #noon-toggle {
           display: none !important;
+      }
+      body.obs-chrome-dropped #obs-header {
+          justify-content: flex-end;
+          pointer-events: none;
+      }
+      body.obs-chrome-dropped #obs-title {
+          display: none;
+      }
+      body.obs-chrome-dropped #obs-header-actions #more-btn,
+      body.obs-chrome-dropped #fullscreen-btn {
+          pointer-events: auto;
+      }
+      /* (#more-menu, also inside the header, opts back in via the shared
+         overflow-menu.css rule.) */
+
+      /* Collapsed header (body.obs-chrome-collapsed — set by
+         updateHeaderCollapse when title + buttons don't fit the width, and
+         whenever the chrome is dropped): the app links, ℹ and share fold into
+         the ⋮ menu. They are flex items, so `visibility` alone would keep
+         their slot: `position: absolute` takes them out of the row while
+         keeping them measurable and, for the menu builder, "present" (it
+         treats `display: none` as "this page doesn't have the control"). The
+         full-set width is measured once, un-collapsed (observatory-entry.ts). */
+      #obs-header-actions #more-btn {
+          display: none;
+      }
+      body.obs-chrome-collapsed #obs-header-actions #more-btn {
+          display: flex;
+      }
+      body.obs-chrome-collapsed #chronometer-link,
+      body.obs-chrome-collapsed #inspector-link,
+      body.obs-chrome-collapsed #obs-header-actions #info-btn,
+      body.obs-chrome-collapsed #obs-header-actions #share-btn {
+          visibility: hidden;
+          position: absolute;
+          pointer-events: none;
       }
 
       /* Fullscreen (real or faux): only the dial and the exit button remain —
@@ -293,8 +333,8 @@
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 26px;
-          height: 26px;
+          width: 44px;
+          height: 44px;
           border-radius: 50%;
           background: rgba(255, 255, 255, 0.08);
           color: #889;
@@ -306,7 +346,7 @@
       }
 
       #info-btn {
-          font-size: 14px;
+          font-size: 18px;
           font-family: serif;
           font-style: italic;
           font-weight: 700;
@@ -326,8 +366,8 @@
          index page. */
       #chronometer-link {
           display: block;
-          width: 26px;
-          height: 26px;
+          width: 44px;
+          height: 44px;
           transition: filter 0.2s;
       }
 
@@ -347,8 +387,8 @@
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 26px;
-          height: 26px;
+          width: 44px;
+          height: 44px;
           border-radius: 50%;
           background: linear-gradient(145deg, #2a2a48 0%, #1e1e36 100%);
           color: #5ca0d3;
@@ -361,14 +401,14 @@
       }
 
       #inspector-link svg {
-          width: 15px;
-          height: 15px;
+          width: 18px;
+          height: 18px;
           fill: currentColor;
       }
 
       #share-btn svg {
-          width: 14px;
-          height: 14px;
+          width: 17px;
+          height: 17px;
           fill: currentColor;
       }
 
@@ -378,8 +418,8 @@
       }
 
       #fullscreen-btn svg {
-          width: 15px;
-          height: 15px;
+          width: 18px;
+          height: 18px;
           fill: currentColor;
       }
 
@@ -709,6 +749,8 @@ overscroll-behavior-y: contain;
       /* ── Time controller injection ──────────────────── */
       {{TIME_CSS}}
 
+      {{OVERFLOW_CSS}}
+
       /* ── Bottom chrome row: the time-controller (left) and location controls
          (right) as flex children. wrap-reverse keeps the time line pinned at the
          bottom (its usual spot) and lets the location line float ABOVE it when
@@ -798,6 +840,7 @@ overscroll-behavior-y: contain;
         <button id="share-btn" title="Share this view">
           <svg viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>
         </button>
+        {{OVERFLOW_MENU}}
         <button id="fullscreen-btn" title="Toggle fullscreen">
           <svg class="fs-expand" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
           <svg class="fs-compress" viewBox="0 0 24 24"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>

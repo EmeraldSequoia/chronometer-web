@@ -5,8 +5,9 @@ import {
     type AvoidTargets,
 } from '../shared/chrome-layout.js';
 import {
-    optimizeGrid, computeFaceRects, layoutGridWithChrome, GAP_PX, PADDING_PX,
+    optimizeGrid, computeFaceRects, layoutGridWithChrome, chromeShouldCollapse, GAP_PX, PADDING_PX,
 } from '../watch/grid-layout.js';
+import { CHROME_COLLAPSE_DY_PX, PHONE_SHORT_SIDE_PX, isPhoneSizedViewport } from '../shared/chrome-layout.js';
 
 const EPS = 1e-6;
 const BTN = 36;
@@ -389,5 +390,90 @@ describe('layoutGridWithChrome cascade', () => {
             }
         }
         expect(table).toMatchSnapshot();
+    });
+});
+
+describe('collapse decision (docs/chrome.md)', () => {
+    const BTN44 = 44;
+    const b = (id: string): ChromeItem => ({ id, w: BTN44, h: BTN44 });
+    const fullGroups = (nameW: number | null): CornerGroup[] => {
+        const right = [b('fullscreen-btn'), b('info-btn')];
+        if (nameW != null) right.push({ id: 'face-name', w: nameW, h: BTN44 });
+        right.push(b('share-btn'), b('observatory-link'), b('inspector-link'));
+        return [
+            { corner: 'tl', items: ['back-link', 'all-faces-link', 'selected-faces-link'].map(b), defaultSplit: 3 },
+            { corner: 'tr', items: right, defaultSplit: nameW != null ? 3 : 2, rowOrder: RIGHT_ROW_ORDER },
+        ];
+    };
+    /** Collapsed corner: fullscreen, ⋮, and on single-face pages the name. */
+    const collapsedGroups = (nameW: number | null = null): CornerGroup[] => {
+        const items = [b('fullscreen-btn'), b('more-btn')];
+        if (nameW != null) items.push({ id: 'face-name', w: nameW, h: BTN44 });
+        return [{ corner: 'tr', items, defaultSplit: items.length, rowOrder: ['fullscreen-btn', 'more-btn', 'face-name'] }];
+    };
+    const BOTTOM_CHROME = 95;
+
+    test('tolerance semantics: small nudge ok, larger nudge or shrink collapses', () => {
+        const base = { size: 300, cols: 1, rows: 1, cells: [], chrome: { placed: [], dy: 0, feasible: true, comboKey: 'x' } };
+        expect(chromeShouldCollapse({ ...base, dy: 0, shrunk: false, feasible: true })).toBe(false);
+        expect(chromeShouldCollapse({ ...base, dy: CHROME_COLLAPSE_DY_PX, shrunk: false, feasible: true })).toBe(false);
+        expect(chromeShouldCollapse({ ...base, dy: CHROME_COLLAPSE_DY_PX + 1, shrunk: false, feasible: true })).toBe(true);
+        expect(chromeShouldCollapse({ ...base, dy: 0, shrunk: true, feasible: true })).toBe(true);
+        expect(chromeShouldCollapse({ ...base, dy: 0, shrunk: false, feasible: false })).toBe(true);
+    });
+
+    test('phone: a single face keeps the full set — the L shape clears the circle in place', () => {
+        // The circle leaves the corners free and the three-item column arm
+        // ends above the circle's widest point, so nothing moves: no collapse.
+        const [vw, vh] = [375, 812];
+        const full = layoutGridWithChrome(1, vw, vh - BOTTOM_CHROME, { x: 0, y: 0 }, fullGroups(130), vw)!;
+        expect(full.dy).toBeLessThanOrEqual(CHROME_COLLAPSE_DY_PX);
+        expect(full.shrunk).toBe(false);
+        expect(chromeShouldCollapse(full)).toBe(false);
+    });
+
+    test('small phone (320×568): a single face collapses rather than shrinking', () => {
+        // Width-bound face, r≈148 centred at x=160: no arm shape clears it and
+        // the grid can slide only ~86 px, so the full set would shrink the face.
+        const [vw, vh] = [320, 568];
+        const full = layoutGridWithChrome(1, vw, vh - BOTTOM_CHROME, { x: 0, y: 0 }, fullGroups(130), vw)!;
+        expect(chromeShouldCollapse(full)).toBe(true);
+        const folded = layoutGridWithChrome(1, vw, vh - BOTTOM_CHROME, { x: 0, y: 0 }, collapsedGroups(130), vw)!;
+        expect(folded.size).toBeGreaterThanOrEqual(full.size);
+        expect(folded.dy).toBe(0);   // [⛶] [⋮] [name] row clears the circle in place
+    });
+
+    test('phone: the all-faces grid collapses and keeps its face size when folded', () => {
+        const [vw, vh] = [375, 812];
+        const full = layoutGridWithChrome(16, vw, vh - BOTTOM_CHROME, { x: 0, y: 0 }, fullGroups(null), vw)!;
+        expect(chromeShouldCollapse(full)).toBe(true);
+        const folded = layoutGridWithChrome(16, vw, vh - BOTTOM_CHROME, { x: 0, y: 0 }, collapsedGroups(), vw)!;
+        expect(folded.shrunk).toBe(false);
+    });
+
+    test('roomy desktop: a single face keeps the full set in place', () => {
+        const [vw, vh] = [1920, 1080];
+        const full = layoutGridWithChrome(1, vw, vh - BOTTOM_CHROME, { x: 0, y: 0 }, fullGroups(130), vw)!;
+        expect(full.dy).toBe(0);
+        expect(chromeShouldCollapse(full)).toBe(false);
+    });
+});
+
+describe('phone-sized viewport rule (docs/chrome.md)', () => {
+    test('phones collapse in portrait and landscape; tablets and desktops do not', () => {
+        expect(isPhoneSizedViewport(440, 956)).toBe(true);   // iPhone Pro Max portrait
+        expect(isPhoneSizedViewport(956, 440)).toBe(true);   // ... landscape
+        expect(isPhoneSizedViewport(375, 812)).toBe(true);
+        expect(isPhoneSizedViewport(320, 568)).toBe(true);
+        expect(isPhoneSizedViewport(744, 1133)).toBe(false); // iPad mini portrait
+        expect(isPhoneSizedViewport(1133, 744)).toBe(false);
+        expect(isPhoneSizedViewport(1024, 768)).toBe(false);
+        expect(isPhoneSizedViewport(1920, 1080)).toBe(false);
+    });
+
+    test('the threshold is inclusive on the short side only', () => {
+        expect(isPhoneSizedViewport(PHONE_SHORT_SIDE_PX, 2000)).toBe(true);
+        expect(isPhoneSizedViewport(PHONE_SHORT_SIDE_PX + 1, 2000)).toBe(false);
+        expect(isPhoneSizedViewport(2000, PHONE_SHORT_SIDE_PX)).toBe(true);
     });
 });

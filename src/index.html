@@ -111,8 +111,8 @@
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 36px;
-          height: 36px;
+          width: 44px;
+          height: 44px;
           border-radius: 50%;
           background: rgba(255,255,255,0.08);
           color: #889;
@@ -141,12 +141,12 @@
       #inspector-link {
           position: fixed;
           top: 16px;
-          right: 60px;
+          right: 68px;
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 36px;
-          height: 36px;
+          width: 44px;
+          height: 44px;
           border-radius: 50%;
           background: linear-gradient(145deg, #2a2a48 0%, #1e1e36 100%);
           color: #5ca0d3;
@@ -168,10 +168,10 @@
       #observatory-link {
           position: fixed;
           top: 16px;
-          right: 104px;
+          right: 120px;
           display: block;
-          width: 36px;
-          height: 36px;
+          width: 44px;
+          height: 44px;
           z-index: 10;
           transition: filter 0.2s;
       }
@@ -366,6 +366,23 @@ overscroll-behavior-y: contain;
 
       {{LOCATION_CSS}}
 
+      {{OVERFLOW_CSS}}
+
+      /* ⋮ overflow button: on a phone-sized viewport the three corner buttons
+         fold into its menu (index-page.ts updateChromeCollapse, docs/chrome.md).
+         visibility, not display, so the menu builder still sees them. */
+      #more-btn {
+          position: fixed;
+          top: 16px;
+          right: 16px;
+      }
+
+      body.chrome-collapsed #observatory-link,
+      body.chrome-collapsed #inspector-link,
+      body.chrome-collapsed #info-btn {
+          visibility: hidden;
+      }
+
       /* General help iframe section */
       #general-help-section {
           margin: 12px 0 4px;
@@ -421,6 +438,7 @@ overscroll-behavior-y: contain;
       <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.51 6.51 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
     </a>
     <button id="info-btn" title="About Chronometer">ℹ&#xFE0E;</button>
+    {{OVERFLOW_MENU}}
     <div id="info-overlay">
       <div id="info-popup">
         <button id="info-close">&times;</button>

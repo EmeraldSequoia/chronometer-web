@@ -151,7 +151,8 @@ echo "=== Generating HTML files ==="
 # Helper: inject partial files into a template.
 # Reads from stdin, writes to stdout.
 # Replaces lines containing {{LOCATION_CSS}}, {{LOCATION_DIALOG}},
-# {{TIME_CSS}}, {{TIME_CONTROLLER}}, {{OTHER_APPS}}, and terra city dialog
+# {{TIME_CSS}}, {{TIME_CONTROLLER}}, {{OVERFLOW_CSS}}, {{OVERFLOW_MENU}},
+# {{OTHER_APPS}}, and terra city dialog
 # placeholders.
 inject_partials() {
     local HELP_FILE="${1:-}"
@@ -191,6 +192,16 @@ inject_partials() {
         s=$0; sub(/\{\{ *TIME_CONTROLLER *\}\}.*/, "", s); printf "%s", s;
         while ((getline line < (P"/time-controller.html")) > 0) print line; close(P"/time-controller.html");
         s=$0; sub(/.*\{\{ *TIME_CONTROLLER *\}\}/, "", s); print s; next
+    }
+    /\{\{ *OVERFLOW_CSS *\}\}/ {
+        s=$0; sub(/\{\{ *OVERFLOW_CSS *\}\}.*/, "", s); printf "%s", s;
+        while ((getline line < (P"/overflow-menu.css")) > 0) print line; close(P"/overflow-menu.css");
+        s=$0; sub(/.*\{\{ *OVERFLOW_CSS *\}\}/, "", s); print s; next
+    }
+    /\{\{ *OVERFLOW_MENU *\}\}/ {
+        s=$0; sub(/\{\{ *OVERFLOW_MENU *\}\}.*/, "", s); printf "%s", s;
+        while ((getline line < (P"/overflow-menu.html")) > 0) print line; close(P"/overflow-menu.html");
+        s=$0; sub(/.*\{\{ *OVERFLOW_MENU *\}\}/, "", s); print s; next
     }
     /\{\{ *TERRA_CITY_CSS *\}\}/ { next }
     /\{\{ *TERRA_CITY_DIALOG *\}\}/ { next }
@@ -260,6 +271,16 @@ inject_partials_terra() {
         s=$0; sub(/\{\{ *TIME_CONTROLLER *\}\}.*/, "", s); printf "%s", s;
         while ((getline line < (P"/time-controller.html")) > 0) print line; close(P"/time-controller.html");
         s=$0; sub(/.*\{\{ *TIME_CONTROLLER *\}\}/, "", s); print s; next
+    }
+    /\{\{ *OVERFLOW_CSS *\}\}/ {
+        s=$0; sub(/\{\{ *OVERFLOW_CSS *\}\}.*/, "", s); printf "%s", s;
+        while ((getline line < (P"/overflow-menu.css")) > 0) print line; close(P"/overflow-menu.css");
+        s=$0; sub(/.*\{\{ *OVERFLOW_CSS *\}\}/, "", s); print s; next
+    }
+    /\{\{ *OVERFLOW_MENU *\}\}/ {
+        s=$0; sub(/\{\{ *OVERFLOW_MENU *\}\}.*/, "", s); printf "%s", s;
+        while ((getline line < (P"/overflow-menu.html")) > 0) print line; close(P"/overflow-menu.html");
+        s=$0; sub(/.*\{\{ *OVERFLOW_MENU *\}\}/, "", s); print s; next
     }
     /\{\{ *TERRA_CITY_CSS *\}\}/ { 
         s=$0; sub(/\{\{ *TERRA_CITY_CSS *\}\}.*/, "", s); printf "%s", s;

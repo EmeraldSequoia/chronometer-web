@@ -1,0 +1,149 @@
+      /* ============= ⋮ overflow menu (shared; see docs/chrome.md) ============= */
+
+      /* The button: same circle as the ℹ / share buttons. Hidden (but still
+         measurable — the corner engines probe it) until the page collapses
+         its corner chrome; the page's own CSS positions it. */
+      #more-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 44px;
+          height: 44px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.08);
+          color: #889;
+          border: none;
+          padding: 0;
+          cursor: pointer;
+          z-index: 10;
+          visibility: hidden;
+          transition: background 0.2s, color 0.2s;
+      }
+
+      #more-btn svg {
+          width: 20px;
+          height: 20px;
+          fill: currentColor;
+      }
+
+      #more-btn:hover,
+      #more-btn[aria-expanded="true"] {
+          background: rgba(255, 255, 255, 0.15);
+          color: #bbd;
+      }
+
+      body.chrome-collapsed #more-btn,
+      body.obs-chrome-collapsed #more-btn {
+          visibility: visible;
+      }
+
+      /* Fullscreen keeps only the exit button (decision 1a). */
+      body.is-fullscreen #more-btn {
+          display: none !important;
+      }
+
+      /* The dropdown. Positioned by overflow-menu.ts under the button, flush
+         with the right edge. No backdrop-filter — deliberate: a pixel-moving
+         filter over live canvas flashes (see the #info-overlay comment). */
+      #more-menu {
+          position: fixed;
+          z-index: 60;
+          /* Always hit-testable, whatever its ancestors do: Observatory's
+             dropped header is `pointer-events: none` so presses fall through
+             to the dial, and the menu sits inside that header — without this
+             a tap on a row reached the map underneath (Keep/Revert popup on
+             iPhone landscape, 2026-09-22). */
+          pointer-events: auto;
+          min-width: 220px;
+          padding: 6px 0;
+          box-sizing: border-box;
+          /* max-height is set per open (overflow-menu.ts position): the
+             visible area below the button. Beyond that the menu scrolls. */
+          overflow-y: auto;
+          overscroll-behavior: contain;
+          border-radius: 10px;
+          background: rgba(26, 26, 46, 0.96);
+          border: 1px solid #3a3a5e;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+          -webkit-user-select: none;
+          user-select: none;
+      }
+
+      #more-menu[hidden] {
+          display: none;
+      }
+
+      /* Rows: 44 px targets, one convention for buttons and links. */
+      .more-row {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          width: 100%;
+          min-height: 44px;
+          padding: 0 18px;
+          box-sizing: border-box;
+          background: none;
+          border: none;
+          color: #ccd;
+          font-family: inherit;
+          font-size: 15px;
+          text-align: left;
+          text-decoration: none;
+          cursor: pointer;
+      }
+
+      .more-row:hover,
+      .more-row:focus-visible {
+          background: rgba(255, 255, 255, 0.08);
+          color: #fff;
+          outline: none;
+      }
+
+      /* Icon column: the corner button's own icon, cloned (overflow-menu.ts
+         iconFor). Sized here rather than by the page's per-button rules, which
+         are scoped to the button ids. Empty for text-only controls, so labels
+         align. */
+      .more-icon {
+          flex: 0 0 auto;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 24px;
+          height: 24px;
+      }
+
+      .more-icon svg {
+          width: 18px;
+          height: 18px;
+          fill: currentColor;
+      }
+
+      .more-icon .accent-dot {
+          fill: #5ca0d3;
+      }
+
+      .more-icon img {
+          width: 22px;
+          height: 22px;
+          border-radius: 50%;
+          object-fit: cover;
+          display: block;
+      }
+
+      .more-icon-glyph {
+          font-family: serif;
+          font-style: italic;
+          font-weight: 700;
+          font-size: 17px;
+          line-height: 1;
+      }
+
+      .more-label {
+          flex: 1 1 auto;
+      }
+
+      .more-sep {
+          height: 1px;
+          margin: 6px 0;
+          background: #3a3a5e;
+      }

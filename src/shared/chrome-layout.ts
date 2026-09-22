@@ -23,10 +23,31 @@
 
 /** Minimum clearance between chrome and content, in CSS px (the tunable N). */
 export const CHROME_GAP_PX = 2;
-/** Gap between adjacent chrome items (36px buttons at the historical 44px pitch). */
+/** Gap between adjacent chrome items (44 px buttons at a 52 px pitch; was 36 px at 44). */
 export const BTN_GAP = 8;
 /** Inset of a corner cluster from the viewport edges. */
 export const EDGE_MARGIN = 16;
+/**
+ * Collapse tolerance (docs/chrome.md): content may be pushed down this far to
+ * make room for the full chrome set; needing more — or any shrink — collapses
+ * the corner to [⋮] [fullscreen]. About half a button: invisible when eaten
+ * from symmetric padding, and well short of "the face sits in the lower half".
+ */
+export const CHROME_COLLAPSE_DY_PX = 24;
+/**
+ * Phone-sized viewports always collapse the corner to the ⋮ menu, whether or
+ * not the buttons could be fitted (Steve, 2026-09-17: on a phone the icons
+ * are noise even when they fit — even on the largest iPhone). "Phone-sized"
+ * is a short side of at most this many CSS px, so it holds in portrait and
+ * landscape alike: the largest phones are ~440–480, the smallest tablets
+ * ~600–744, and nothing real sits in between.
+ */
+export const PHONE_SHORT_SIDE_PX = 500;
+
+/** True when the viewport is phone-sized (see PHONE_SHORT_SIDE_PX). */
+export function isPhoneSizedViewport(viewportW: number, viewportH: number): boolean {
+    return Math.min(viewportW, viewportH) <= PHONE_SHORT_SIDE_PX;
+}
 
 export interface Rect { left: number; top: number; right: number; bottom: number }
 export interface Circle { cx: number; cy: number; r: number }

@@ -35,6 +35,7 @@ Permanent reference documentation for the Chronometer Web codebase, organized by
 - [**Eclipse Table**](eclipse-table.md) — Standalone eclipse list: NASA dataset, TT storage, deep links into both apps
 - [**Face Picker**](face-picker.md) — Face selection/reordering, the `picks` setting, selected faces page
 - [**Embedding**](embedding.md) — Embedding Terra in other websites via iframe
+- [**Corner Chrome**](chrome.md) — Corner buttons: 44 px targets, the row/column/L layout engine, per-page collapse into the ⋮ overflow menu, Observatory chrome-drop
 
 ### Development
 - [**Adding a New App**](adding-a-new-app.md) — How to add a new app to the monorepo (e.g., Observatory)

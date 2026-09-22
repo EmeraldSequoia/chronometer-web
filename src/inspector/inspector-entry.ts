@@ -23,6 +23,7 @@ import { createFpsIndicator } from '../shared/fps-indicator.js';
 import { getState, setState, initAppState, onSharedChange, onAdoptedAsDefault, isPersistentMode } from '../shared/app-state.js';
 import { locationSourceOf } from '../shared/url-state.js';
 import { initShareButton } from '../shared/share-button.js';
+import { initOverflowMenu, closeOverflowMenu } from '../shared/overflow-menu.js';
 import { initHelpPopover, openGeneralHelpTopic } from '../shared/help-popover.js';
 import { resolveTimezoneProvisional, persistableTz } from '../shared/tz-resolve.js';
 import { createTzResolver } from '../shared/tz-ensure.js';
@@ -30,7 +31,7 @@ import { findClosestCity, prefetchCityData, loadCityData, releaseCityData, isCit
 import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
 import { showStorageWarning } from '../shared/incoming-settings-dialog.js';
 import { CATALOG, tagIsAngular, tagIsDiscrete, type CatalogCell, type Tag } from './catalog.js';
-import { layoutChrome, type ChromeItem, type Rect } from '../shared/chrome-layout.js';
+import { layoutChrome, isPhoneSizedViewport, CHROME_COLLAPSE_DY_PX, type ChromeItem, type Rect } from '../shared/chrome-layout.js';
 
 // ============================================================================
 // Initialization
@@ -463,6 +464,9 @@ function formatDateIntervalTime(value: number): string {
 // ============================================================================
 // Share button + cross-tab sync
 // ============================================================================
+
+// ⋮ overflow menu (the corner's collapsed form — see layoutTopChrome below).
+initOverflowMenu({ app: 'inspector' });
 
 // Share button — copy a link encoding the current time/location/config.
 initShareButton({ getState });
@@ -1007,6 +1011,8 @@ registerHotkey('l', () => document.getElementById('set-location-btn')?.click());
 // centered text doesn't.
 
 const CHROME_IDS = ['share-btn', 'info-btn', 'observatory-link', 'chronometer-link'];
+/** The collapsed corner: the ⋮ menu button alone (no fullscreen button here). */
+const COLLAPSED_CHROME_IDS = ['more-btn'];
 const CHROME_EDGE_MARGIN = 12; // matches the page's authored top/right insets
 let appliedChromeDy = 0;
 
@@ -1025,16 +1031,19 @@ function chromeAvoidRect(el: Element | null, whole: boolean): Rect | null {
     return { left: r.left, top: r.top - appliedChromeDy, right: r.right, bottom: r.bottom - appliedChromeDy };
 }
 
-function layoutTopChrome(): void {
+function measureChromeItems(ids: string[]): ChromeItem[] {
     const items: ChromeItem[] = [];
-    for (const id of CHROME_IDS) {
+    for (const id of ids) {
         const el = document.getElementById(id);
         if (!el) continue;
         const r = el.getBoundingClientRect();
         if (r.width <= 0 || r.height <= 0) continue;
         items.push({ id, w: r.width, h: r.height });
     }
+    return items;
+}
 
+function layoutTopChrome(): void {
     const rects: Rect[] = [];
     for (const el of [
         document.querySelector('.app-title'),
@@ -1048,15 +1057,33 @@ function layoutTopChrome(): void {
     const cat = chromeAvoidRect(document.getElementById('catalog'), true);
     if (cat) rects.push(cat);
 
-    const result = layoutChrome(
-        [{ corner: 'tr', items, defaultSplit: items.length }],
-        { circles: [], rects },
-        {
-            viewportW: document.documentElement.clientWidth,
-            maxDy: Number.POSITIVE_INFINITY,
-            edgeMargin: CHROME_EDGE_MARGIN,
-        },
-    );
+    const solve = (ids: string[]) => {
+        const items = measureChromeItems(ids);
+        return layoutChrome(
+            [{ corner: 'tr', items, defaultSplit: items.length }],
+            { circles: [], rects },
+            {
+                viewportW: document.documentElement.clientWidth,
+                maxDy: Number.POSITIVE_INFINITY,
+                edgeMargin: CHROME_EDGE_MARGIN,
+            },
+        );
+    };
+
+    // Collapse rules (docs/chrome.md): a phone-sized viewport always
+    // collapses to the ⋮ menu button; otherwise the corner collapses when the
+    // full set would push the header text down by more than the shared
+    // tolerance. Both read only the viewport and the full set's result, so
+    // the decision cannot oscillate; folded buttons stay measurable (hidden
+    // with visibility, not display).
+    const phone = isPhoneSizedViewport(window.innerWidth, window.innerHeight);
+    let result = solve(phone ? COLLAPSED_CHROME_IDS : CHROME_IDS);
+    const collapsed = phone || result.dy > CHROME_COLLAPSE_DY_PX;
+    if (collapsed && !phone) result = solve(COLLAPSED_CHROME_IDS);
+    if (document.body.classList.contains('chrome-collapsed') !== collapsed) {
+        document.body.classList.toggle('chrome-collapsed', collapsed);
+        if (!collapsed) closeOverflowMenu();
+    }
 
     for (const p of result.placed) {
         const el = document.getElementById(p.id);

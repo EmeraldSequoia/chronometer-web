@@ -134,8 +134,8 @@
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 36px;
-          height: 36px;
+          width: 44px;
+          height: 44px;
           border-radius: 50%;
           background: rgba(255, 255, 255, 0.08);
           color: #889;
@@ -149,11 +149,11 @@
       }
 
       #all-faces-link {
-          left: 60px;
+          left: 68px;
       }
 
       #selected-faces-link {
-          left: 104px;
+          left: 120px;
       }
 
       #selected-faces-link svg {
@@ -172,7 +172,7 @@
          fullscreen + info + face name along the top edge, then share and the
          app links in a column under fullscreen. */
       #info-btn {
-          right: 60px;
+          right: 68px;
           cursor: pointer;
           border: none;
           font-size: 18px;
@@ -184,7 +184,7 @@
 
       #share-btn {
           right: 16px;
-          top: 60px;
+          top: 68px;
           cursor: pointer;
           border: none;
           padding: 0;
@@ -217,10 +217,10 @@
       #observatory-link {
           position: absolute;
           right: 16px;
-          top: 104px;
+          top: 120px;
           display: block;
-          width: 36px;
-          height: 36px;
+          width: 44px;
+          height: 44px;
           z-index: 10;
           transition: filter 0.2s;
       }
@@ -240,12 +240,12 @@
       #inspector-link {
           position: absolute;
           right: 16px;
-          top: 148px;
+          top: 172px;
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 36px;
-          height: 36px;
+          width: 44px;
+          height: 44px;
           border-radius: 50%;
           background: linear-gradient(145deg, #2a2a48 0%, #1e1e36 100%);
           color: #5ca0d3;
@@ -303,11 +303,35 @@
           right: 16px !important;
       }
 
+      /* ⋮ overflow button (partials/overflow-menu.{html,css}): the corner's
+         collapsed form, beside the fullscreen button. The runtime layout
+         positions it like the other chrome; this is the pre-layout default. */
+      #more-btn {
+          position: absolute;
+          top: 16px;
+          right: 68px;
+      }
+
+      /* Collapsed corner (engine-entry onGridResize, docs/chrome.md): every
+         corner control but fullscreen + ⋮ (+ the face name on single-face
+         pages) folds into the menu. visibility, not display, so the folded
+         buttons stay measurable for the next full-set probe. */
+      body.chrome-collapsed #back-link,
+      body.chrome-collapsed #all-faces-link,
+      body.chrome-collapsed #selected-faces-link,
+      body.chrome-collapsed #edit-picks-link,
+      body.chrome-collapsed #info-btn,
+      body.chrome-collapsed #share-btn,
+      body.chrome-collapsed #observatory-link,
+      body.chrome-collapsed #inspector-link {
+          visibility: hidden;
+      }
+
       #face-name {
           position: absolute;
           top: 16px;
-          right: 104px;
-          height: 36px;
+          right: 120px;
+          height: 44px;
           display: flex;
           align-items: center;
           z-index: 10;
@@ -343,7 +367,7 @@
       }
 
       body.is-all-faces #selected-faces-link {
-          left: 60px;
+          left: 68px;
       }
 
       /* Hide nav elements on the selected-faces page */
@@ -358,9 +382,9 @@
           display: none;
           position: absolute;
           top: 16px;
-          left: 104px;
-          width: 36px;
-          height: 36px;
+          left: 120px;
+          width: 44px;
+          height: 44px;
           border-radius: 50%;
           background: rgba(255, 255, 255, 0.08);
           align-items: center;
@@ -615,6 +639,8 @@ overscroll-behavior-y: contain;
 
       {{TIME_CSS}}
 
+      {{OVERFLOW_CSS}}
+
       /* ============= Vienna Noon Toggle ============= */
 
       #vienna-noon-toggle {
@@ -861,6 +887,7 @@ overscroll-behavior-y: contain;
         <svg class="fs-expand" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
         <svg class="fs-compress" viewBox="0 0 24 24"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>
       </button>
+      {{OVERFLOW_MENU}}
       <a id="observatory-link" class="app-nav-link" data-page="observatory.html" href="observatory.html" title="Observatory">
         <img src="thumb-observatory.png" alt="Observatory" />
       </a>

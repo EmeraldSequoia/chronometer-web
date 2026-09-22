@@ -53,8 +53,9 @@ import type { AnalemmaState } from './watch/analemma.js';
 import { expandAnalemma } from './watch/analemma.js';
 import { evalAttr } from './watch/watch-env.js';
 import { TimeController, TICK_INTERVAL_MS, displaySecondsPerTick } from './shared/time-controller.js';
-import { layoutGridWithChrome } from './watch/grid-layout.js';
+import { layoutGridWithChrome, chromeShouldCollapse } from './watch/grid-layout.js';
 import type { ChromeItem, ChromeLayoutResult, CornerGroup } from './shared/chrome-layout.js';
+import { isPhoneSizedViewport } from './shared/chrome-layout.js';
 
 import { initNavigationLinks, updateNavigationLinks, locationSourceOf } from './shared/url-state.js';
 import type { LocationSource } from './shared/url-state.js';
@@ -64,6 +65,7 @@ import { closeHelpPopover, initHelpPopover, openGeneralHelpTopic } from './share
 import { registerHotkey } from './shared/hotkeys.js';
 import { initAppNavLinks, markChronometerPage, registerAppNavHotkeys } from './shared/app-nav.js';
 import { initFullscreenToggle } from './shared/fullscreen.js';
+import { initOverflowMenu, closeOverflowMenu } from './shared/overflow-menu.js';
 import { initShareButton } from './shared/share-button.js';
 import { loadCityData, prefetchCityData, releaseCityData, searchCities, findClosestCity, isCityDataLoaded, loadError } from './shared/city-search.js';
 import { showStorageWarning } from './shared/incoming-settings-dialog.js';
@@ -2148,6 +2150,11 @@ async function main() {
     const LEFT_CHROME_IDS = ['back-link', 'all-faces-link', 'selected-faces-link', 'edit-picks-link'];
     const RIGHT_CHROME_IDS = ['fullscreen-btn', 'info-btn', 'face-name', 'share-btn', 'observatory-link', 'inspector-link'];
     const RIGHT_ROW_ARM_IDS = new Set(['fullscreen-btn', 'info-btn', 'face-name']);
+    // The collapsed corner, one row from the corner inward: fullscreen, the
+    // ⋮ menu button, and on single-face pages the face name (Steve,
+    // 2026-09-22: keep the name beside the ⋮ rather than in the menu). The
+    // name is display:none on all.html / selected.html and drops out.
+    const COLLAPSED_CHROME_IDS = ['fullscreen-btn', 'more-btn', 'face-name'];
 
     function visibleChromeItems(ids: string[]): ChromeItem[] {
         const items: ChromeItem[] = [];
@@ -2179,6 +2186,11 @@ async function main() {
         ];
     }
 
+    function collapsedChromeGroups(): CornerGroup[] {
+        const items = visibleChromeItems(COLLAPSED_CHROME_IDS);
+        return [{ corner: 'tr', items, defaultSplit: items.length, rowOrder: COLLAPSED_CHROME_IDS }];
+    }
+
     function applyChromePositions(chrome: ChromeLayoutResult): void {
         for (const p of chrome.placed) {
             const el = document.getElementById(p.id);
@@ -2192,7 +2204,7 @@ async function main() {
     /** Drop inline chrome positions so stylesheet rules win again (the
      *  fullscreen rules position #fullscreen-btn without !important). */
     function clearChromePositions(): void {
-        for (const id of [...LEFT_CHROME_IDS, ...RIGHT_CHROME_IDS]) {
+        for (const id of [...LEFT_CHROME_IDS, ...RIGHT_CHROME_IDS, ...COLLAPSED_CHROME_IDS]) {
             const el = document.getElementById(id);
             if (!el) continue;
             el.style.removeProperty('top');
@@ -2213,16 +2225,34 @@ async function main() {
         // scrubbing — and never reshapes the grid.)
         const chromeActive = !isEmbedMode && !document.body.classList.contains('is-fullscreen');
         if (!chromeActive) clearChromePositions();
-        const groups = chromeActive ? measureChromeGroups() : [];
 
         const gridRect = grid.getBoundingClientRect();
-        const layout = layoutGridWithChrome(
-            faces.length, W, H,
-            { x: gridRect.left, y: gridRect.top },
-            groups,
-            document.documentElement.clientWidth,
-        );
+        const viewportW = document.documentElement.clientWidth;
+        const place = (g: CornerGroup[]) => layoutGridWithChrome(
+            faces.length, W, H, { x: gridRect.left, y: gridRect.top }, g, viewportW);
+
+        // Collapse rules (docs/chrome.md). (1) A phone-sized viewport always
+        // collapses to [⋮] [fullscreen] — on a phone the icons are noise even
+        // when they fit. (2) Otherwise (chromeShouldCollapse) the corner
+        // chrome may nudge the grid down a little but never shrink the faces
+        // or push them far; when the full set would, it collapses and the
+        // grid is re-solved for the collapsed pair. Both read only the
+        // viewport and the full set's result, never the current state, so
+        // the decision cannot oscillate; folded buttons stay measurable
+        // (hidden with visibility, not display) for the next probe.
+        const phone = chromeActive && isPhoneSizedViewport(window.innerWidth, window.innerHeight);
+        let groups = !chromeActive ? [] : phone ? collapsedChromeGroups() : measureChromeGroups();
+        let layout = place(groups);
         if (!layout) return;
+        const collapsed = phone || (chromeActive && chromeShouldCollapse(layout));
+        if (collapsed && !phone) {
+            groups = collapsedChromeGroups();
+            layout = place(groups) ?? layout;
+        }
+        if (document.body.classList.contains('chrome-collapsed') !== collapsed) {
+            document.body.classList.toggle('chrome-collapsed', collapsed);
+            if (!collapsed) closeOverflowMenu();
+        }
 
         const size = layout.size;
         const dpr = effectiveDpr();
@@ -2233,7 +2263,7 @@ async function main() {
         // width-only resize must still re-center the cells even though the
         // face size is unchanged (the old size-only guard missed that).
         const layoutKey = [
-            newPhys, W, H, layout.chrome.comboKey, layout.dy.toFixed(1),
+            newPhys, W, H, collapsed ? 'c' : 'f', layout.chrome.comboKey, layout.dy.toFixed(1),
             groups.map(g => g.items.map(i => `${i.id}:${Math.round(i.w)}`).join(',')).join(';'),
         ].join('|');
         if (layoutKey === lastLayoutKey) return;
@@ -3165,6 +3195,7 @@ async function main() {
     // navigate the host page's iframe. Key table: help.html#hotkeys.
     if (!isEmbedMode) {
         markChronometerPage();
+        initOverflowMenu({ app: 'chronometer' });
         initAppNavLinks(writeTimeState);
         registerAppNavHotkeys(writeTimeState);
         registerHotkey('h', () => document.getElementById('info-btn')?.click());

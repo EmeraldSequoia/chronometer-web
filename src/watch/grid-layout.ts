@@ -12,7 +12,7 @@
 
 import {
     layoutChrome, type ChromeLayoutResult, type Circle, type CornerGroup,
-    CHROME_GAP_PX, BTN_GAP, EDGE_MARGIN,
+    CHROME_GAP_PX, BTN_GAP, EDGE_MARGIN, CHROME_COLLAPSE_DY_PX,
 } from '../shared/chrome-layout.js';
 
 export const GAP_PX = 12;
@@ -134,6 +134,16 @@ export interface GridChromeOpts {
     chromeGap?: number;
     btnGap?: number;
     edgeMargin?: number;
+}
+
+/**
+ * Collapse decision for the face pages (docs/chrome.md): the full chrome set
+ * may translate the grid a little, but never shrink the faces or push them
+ * far down. Reads only the full set's result, so the decision cannot depend
+ * on — or oscillate with — the current collapsed state.
+ */
+export function chromeShouldCollapse(res: GridChromeResult): boolean {
+    return res.shrunk || !res.feasible || res.dy > CHROME_COLLAPSE_DY_PX;
 }
 
 /**

@@ -28,6 +28,8 @@ import { registerHotkey } from '../shared/hotkeys.js';
 import { initAppNavLinks, registerAppNavHotkeys } from '../shared/app-nav.js';
 import { initFullscreenToggle } from '../shared/fullscreen.js';
 import { initShareButton } from '../shared/share-button.js';
+import { initOverflowMenu, closeOverflowMenu } from '../shared/overflow-menu.js';
+import { isPhoneSizedViewport } from '../shared/chrome-layout.js';
 import type { TimeControlsAPI } from '../shared/time-controls-ui.js';
 import { updateDynamicCompositeIcon } from '../shared/composite-icon.js';
 import { type LayoutParams } from './layout.js';
@@ -319,7 +321,7 @@ let lastFooterH = FOOTER_H;
  * layout reserve the same strip. The layout designs in the safe rect *below*
  * this band (anchor-layout.ts §1).
  */
-const HEADER_H = 32;
+const HEADER_H = 48;   // 44 px buttons + 4 px
 
 /**
  * Read the device safe-area insets (notch / home indicator) via a hidden probe
@@ -344,6 +346,40 @@ function readSafeInsets(): { insetTop: number; insetRight: number; insetBottom: 
         insetBottom: parseFloat(cs.paddingBottom) || 0,
         insetLeft: parseFloat(cs.paddingLeft) || 0,
     };
+}
+
+/**
+ * Header collapse rules (docs/chrome.md): a phone-sized viewport always
+ * collapses; so does a dropped chrome (CC2); otherwise the header collapses
+ * when the title plus the full set of header buttons does not fit the
+ * viewport width. Collapsed = [⋮] [fullscreen], the folded controls living in
+ * the ⋮ menu (`body.obs-chrome-collapsed`; CSS in observatory.html). The
+ * full-set width is measured once with both classes off, so the decision
+ * never depends on the current state.
+ */
+let headerFullW = 0;
+function updateHeaderCollapse(dropped: boolean): void {
+    const header = document.getElementById('obs-header');
+    const title = document.getElementById('obs-title');
+    const actions = document.getElementById('obs-header-actions');
+    if (!header || !title || !actions) return;
+    if (headerFullW === 0) {
+        const cl = document.body.classList;
+        const hadDropped = cl.contains('obs-chrome-dropped');
+        const hadCollapsed = cl.contains('obs-chrome-collapsed');
+        cl.remove('obs-chrome-dropped', 'obs-chrome-collapsed');
+        headerFullW = title.getBoundingClientRect().width + 12 + actions.getBoundingClientRect().width;
+        if (hadDropped) cl.add('obs-chrome-dropped');
+        if (hadCollapsed) cl.add('obs-chrome-collapsed');
+    }
+    const cs = getComputedStyle(header);
+    const avail = header.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+    const collapsed = dropped || isPhoneSizedViewport(window.innerWidth, window.innerHeight)
+        || headerFullW > avail;
+    if (document.body.classList.contains('obs-chrome-collapsed') !== collapsed) {
+        document.body.classList.toggle('obs-chrome-collapsed', collapsed);
+        if (!collapsed) closeOverflowMenu();
+    }
 }
 
 /** Chrome bands + safe-area insets for the layout (iteration 3). */
@@ -379,6 +415,7 @@ function resizeCanvas(): void {
     // CC2: when the chrome is dropped (the time controller can't fit), hide the
     // DOM header/footer too so they don't overlap the full-surface layout.
     document.body.classList.toggle('obs-chrome-dropped', !!layout.chromeDropped);
+    updateHeaderCollapse(!!layout.chromeDropped);
     positionNoonIcon();
 
     // Log the window size + mainR whenever either changes (startup + each resize
@@ -1498,6 +1535,7 @@ function init(): void {
             resyncAfterGap();
         },
     });
+    initOverflowMenu({ app: 'observatory' });
     initShareButton({ getState });
 
     // --- Cross-app navigation (header icons + i/o/c/a) and page hotkeys ---

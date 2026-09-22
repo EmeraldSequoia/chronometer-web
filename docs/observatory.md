@@ -45,7 +45,11 @@ for the full per-anchor rules.
    safe rect.
 2. **Chrome-drop (CC2)** — if the safe rect can't fit the time-controller's
    default popover (200×368), the header + footer bands are dropped so the
-   degenerate slivers (A1/A6) use the whole surface.
+   degenerate slivers (A1/A6) use the whole surface. The DOM footer is hidden;
+   the DOM header stays as a floating `[⋮] [fullscreen]` over the dial (no band
+   reserved), and the ⋮ menu carries Set location and the time controller —
+   see [chrome.md](chrome.md). The header also collapses to that pair, band
+   kept, whenever title + buttons don't fit the width.
 3. **Anchor selection** — one of **nine** aspect anchors is chosen by a hard
    snap at the §7 thresholds (no interpolation in v1): A1 extreme-portrait,
    A2 iPhone-portrait, A3m iPad-mini, A3 iPad-portrait, Asq square, A4

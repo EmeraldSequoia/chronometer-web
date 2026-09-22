@@ -63,7 +63,10 @@ or opening a shared deep link — lands at the same instant and location.
 ### Cross-App Navigation
 
 The fixed top-right row holds Chronometer and Observatory icon links (plus ℹ
-help and Share). Their hrefs and the pre-navigation time-state flush are wired
+help and Share), 44 px each, laid out by the shared corner-chrome engine; when
+the row cannot clear the centered header text in place, it collapses to a
+single ⋮ button whose menu holds the same items (see [chrome.md](chrome.md)).
+Their hrefs and the pre-navigation time-state flush are wired
 by `initAppNavLinks()` (`src/shared/app-nav.ts`) — clean URLs in storage mode,
 so mid-scrub time survives the hop via storage rather than query params. The
 `i`/`o`/`c`/`a` hotkeys navigate the same way; `h`/`?` open the help popover,

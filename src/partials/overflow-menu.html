@@ -1,0 +1,22 @@
+<!-- ⋮ overflow menu — the corner chrome's collapsed form. Injected via
+     {{OVERFLOW_MENU}} (build.sh) into the face pages, Observatory and the
+     Inspector. The button is shown only while the corner is collapsed
+     (body.chrome-collapsed on the face pages / Inspector,
+     body.obs-chrome-collapsed on Observatory — see docs/chrome.md); the rows
+     are built at runtime by src/shared/overflow-menu.ts from the controls the
+     page actually has. Appearance: partials/overflow-menu.css ({{OVERFLOW_CSS}});
+     each page positions #more-btn itself. -->
+<button
+  id="more-btn"
+  title="More"
+  aria-label="More"
+  aria-haspopup="menu"
+  aria-expanded="false"
+>
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <circle cx="12" cy="5" r="2.2" />
+    <circle cx="12" cy="12" r="2.2" />
+    <circle cx="12" cy="19" r="2.2" />
+  </svg>
+</button>
+<div id="more-menu" role="menu" hidden></div>
