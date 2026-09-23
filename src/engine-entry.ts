@@ -66,6 +66,7 @@ import { registerHotkey } from './shared/hotkeys.js';
 import { initAppNavLinks, markChronometerPage, registerAppNavHotkeys } from './shared/app-nav.js';
 import { initFullscreenToggle } from './shared/fullscreen.js';
 import { initOverflowMenu, closeOverflowMenu } from './shared/overflow-menu.js';
+import { createFramePacer } from './shared/frame-pacer.js';
 import { initShareButton } from './shared/share-button.js';
 import { loadCityData, prefetchCityData, releaseCityData, searchCities, findClosestCity, isCityDataLoaded, loadError } from './shared/city-search.js';
 import { showStorageWarning } from './shared/incoming-settings-dialog.js';
@@ -1096,7 +1097,16 @@ async function main() {
     // =========================================================================
 
     let idleTimerId: ReturnType<typeof setTimeout> | null = null;
-    let rafId: number | null = null;
+    /**
+     * Frame scheduler (src/shared/frame-pacer.ts). Scrubbing (the only
+     * continuous-render mode) is raw rAF; every other awake frame — the
+     * hands' per-beat snaps at 1× — is paced at STEADY_STATE_FPS, except for
+     * two seconds after an explicit kick (startScheduler /
+     * ensureSchedulerRunning), so a step's or a location change's sweep
+     * renders at the display's rate. `pacer.pending` says whether a frame is
+     * armed (the old rAF-id null check).
+     */
+    const pacer = createFramePacer();
 
     /**
      * True while the ℹ help overlay is up. The scheduler parks outright for the
@@ -1126,7 +1136,7 @@ async function main() {
 
     function stopScheduler() {
         if (idleTimerId !== null) { clearTimeout(idleTimerId); idleTimerId = null; }
-        if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+        pacer.cancel();
     }
 
 
@@ -1306,7 +1316,6 @@ async function main() {
     }
 
     function frameBody() {
-        rafId = null;
         _frameCounter++;
         const now = performance.now();
         const frameStart = now;
@@ -1641,7 +1650,7 @@ async function main() {
             // Per-face error boundary. The whole rAF loop is a single chain
             // (setTimeout → onIdleWakeup → rAF → frame → armIdle → …) with no
             // watchdog: if this frame throws before the re-arm at the bottom, the
-            // loop is left with rafId === null and idleTimerId === null and stays
+            // loop is left with no frame armed and idleTimerId === null and stays
             // frozen until some unrelated event calls ensureSchedulerRunning(). In
             // the all-faces grid that means one face's transient failure freezes
             // *every* face. Contain a face's tick/render here so the loop always
@@ -1844,9 +1853,10 @@ async function main() {
         // too, since an idle wakeup is still a repaint under the blur.
         const willContinue = (timeController.needsContinuousRender || stillAnimating)
             && !helpOverlayOpen;
-        _fps?.recordFrame(willContinue, performance.now() - frameStart);
+        _fps?.recordFrame(willContinue, performance.now() - frameStart, { paced: pacer.lastMode === 'paced', vsyncMs: pacer.vsyncMs });
         if (willContinue) {
-            rafId = requestAnimationFrame(frame);
+            // Only scrubbing needs the display's full rate; snaps are paced.
+            pacer.request(frame, !timeController.needsContinuousRender);
         } else if (!helpOverlayOpen) {
             armIdle();
         }
@@ -1873,8 +1883,12 @@ async function main() {
 
     function onIdleWakeup() {
         idleTimerId = null;
-        if (rafId !== null) return;
-        rafId = requestAnimationFrame(frame);
+        if (pacer.pending) return;
+        // Paced: a wake for a boundary long after the last frame is immediate
+        // anyway, but armIdle's 50 ms lookahead makes the loop free-run frames
+        // until the boundary passes (docs/performance.md), and those must not
+        // run at the display's rate.
+        pacer.request(frame, true);
     }
 
     function startScheduler() {
@@ -1883,7 +1897,8 @@ async function main() {
         // cross-tab sync, Now) historically relied on "the next frame redraws
         // everything anyway" — preserve that contract under the render gate.
         for (const face of faces) face.renderDirty = true;
-        rafId = requestAnimationFrame(frame);
+        pacer.burst();
+        pacer.request(frame, false);
     }
 
     /**
@@ -2993,10 +3008,13 @@ async function main() {
     }
 
     function ensureSchedulerRunning() {
+        // A time-UI transition (step, astro jump, Now, transport): keep the
+        // resulting sweep at the display's rate even if the loop is awake.
+        pacer.burst();
         // Kick the scheduler if it's idle
-        if (rafId === null && idleTimerId === null) {
+        if (!pacer.pending && idleTimerId === null) {
             startScheduler();
-        } else if (rafId === null && timeController.needsContinuousRender) {
+        } else if (!pacer.pending && timeController.needsContinuousRender) {
             // Idle timer is set but we need continuous render now
             stopScheduler();
             startScheduler();

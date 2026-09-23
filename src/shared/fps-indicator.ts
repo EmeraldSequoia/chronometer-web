@@ -35,6 +35,11 @@
  * The 1s watchdog (not the caller) owns the on-screen text, so the readout refreshes on
  * its own cadence even when the render loop has gone idle.
  *
+ * Loops that pace their frames (src/shared/frame-pacer.ts) append a tail,
+ * `p<share> <Hz>`: the share of the last second's frames drawn under the
+ * steady-state cap, and the display rate the pacer measured — e.g.
+ * `60fps 4% 4% 60avg p100 120Hz`; `p0` while scrubbing or bursting.
+ *
  * Enable via the `fps` URL parameter (see url-state.ts).
  */
 
@@ -64,8 +69,11 @@ export interface FpsIndicator {
      * @param workMs CPU time spent producing this frame (measure
      *   `performance.now()` around the frame body). Drives the CPU-% metrics. Pass
      *   0 if not measured.
+     * @param pacing optional: how the frame pacer armed this frame (`paced`
+     *   = steady-state cap in force) and the display period it measured, for
+     *   the `p<share> <Hz>` tail of the readout (src/shared/frame-pacer.ts).
      */
-    recordFrame(continuous: boolean, workMs: number): void;
+    recordFrame(continuous: boolean, workMs: number, pacing?: { paced: boolean; vsyncMs: number | null }): void;
 }
 
 /**
@@ -87,6 +95,9 @@ export function createFpsIndicator(enabled: boolean): FpsIndicator | null {
     let fpsHeld = 0;
     let cpuFrameHeld = 0;  // % of the actual frame
     let cpu60Held = 0;     // % of a nominal 60 fps frame
+    let pacedFrames = 0;   // frames this window that the pacer armed under the cap
+    let pacingFrames = 0;  // frames this window that reported pacing at all
+    let pacingText = '';   // held tail: "p<share> <Hz>", or '' when the loop doesn't pace
 
     const el = document.createElement('div');
     el.id = 'fps-indicator';
@@ -94,7 +105,8 @@ export function createFpsIndicator(enabled: boolean): FpsIndicator | null {
         'fps: wallclock rate while animating (vsync-bound) · ' +
         '1st %: CPU share of that actual frame (~100% = CPU-paced) · ' +
         '2nd %: CPU share of a 60 fps (16.7ms) frame, can exceed 100% (×4 for 240 fps) · ' +
-        'avg: frames/sec over the last second, incl. idle';
+        'avg: frames/sec over the last second, incl. idle · ' +
+        'p: share of frames drawn under the steady-state cap · Hz: measured display rate';
     el.style.cssText =
         'position:fixed;bottom:8px;left:8px;z-index:9999;pointer-events:none;' +
         'font:11px "JetBrains Mono",monospace;color:rgba(255,255,255,0.5);' +
@@ -149,22 +161,34 @@ export function createFpsIndicator(enabled: boolean): FpsIndicator | null {
         // rate is — a heavy multi-face scrub is clearly active.
         const isActive = continuousFrames > 0;
 
+        if (pacingFrames > 0) {
+            const share = Math.round(100 * pacedFrames / pacingFrames);
+            pacingText = ` p${share}` + (lastVsyncMs ? ` ${(1000 / lastVsyncMs).toFixed(0)}Hz` : '');
+        }
         frameCount = 0;
         windowStart = nowW;
         continuousFrames = 0;
         workSamples.length = 0;
         deltaSamples.length = 0;
+        pacedFrames = 0;
+        pacingFrames = 0;
 
         animEl.style.opacity = isActive ? '1' : '0.4';
         animEl.textContent =
             `${fpsHeld.toFixed(0)}fps ${cpuFrameHeld.toFixed(0)}% ${cpu60Held.toFixed(0)}%`;
-        thruEl.textContent = `${throughput.toFixed(0)}avg`;
+        thruEl.textContent = `${throughput.toFixed(0)}avg${pacingText}`;
     }, FPS_WATCHDOG_MS);
 
+    let lastVsyncMs: number | null = null;
     return {
-        recordFrame(continuous: boolean, workMs: number): void {
+        recordFrame(continuous: boolean, workMs: number, pacing?: { paced: boolean; vsyncMs: number | null }): void {
             const now = performance.now();
             frameCount++;
+            if (pacing) {
+                pacingFrames++;
+                if (pacing.paced) pacedFrames++;
+                lastVsyncMs = pacing.vsyncMs;
+            }
             if (workMs > 0) workSamples.push(workMs);
             // Count the inter-frame delta toward fps/cpuFrame only between consecutive
             // continuous frames, so an idle gap is never mis-measured as one slow frame.

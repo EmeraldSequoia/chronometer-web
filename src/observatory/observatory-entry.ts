@@ -30,6 +30,7 @@ import { initFullscreenToggle } from '../shared/fullscreen.js';
 import { initShareButton } from '../shared/share-button.js';
 import { initOverflowMenu, closeOverflowMenu } from '../shared/overflow-menu.js';
 import { isPhoneSizedViewport } from '../shared/chrome-layout.js';
+import { createFramePacer } from '../shared/frame-pacer.js';
 import type { TimeControlsAPI } from '../shared/time-controls-ui.js';
 import { updateDynamicCompositeIcon } from '../shared/composite-icon.js';
 import { type LayoutParams } from './layout.js';
@@ -67,8 +68,13 @@ declare const __BUILD_VERSION__: string | undefined;
  */
 let noonOnTop = false;
 
-/** RAF id for the render loop; null means the loop is idle (stopped + settled). */
-let rafId: number | null = null;
+/**
+ * The render loop's frame scheduler (src/shared/frame-pacer.ts): raw rAF while
+ * scrubbing, dragging, or for two seconds after an explicit wake; otherwise
+ * steady-state frames are capped at STEADY_STATE_FPS. `pacer.pending` is
+ * false when the loop is idle (stopped + settled).
+ */
+const pacer = createFramePacer();
 
 /**
  * True while tick() is executing. scheduleFrame() must not queue a frame during
@@ -561,7 +567,11 @@ function scheduleFrame(): void {
         frameRequestedDuringTick = true;
         return;
     }
-    if (rafId === null) rafId = requestAnimationFrame(tick);
+    // An explicit wake is a change to show: draw at the next vsync, and keep
+    // the loop uncapped for a moment so any resulting sweep renders at the
+    // display's rate (docs/performance.md § Idle (1×) and battery).
+    pacer.burst();
+    pacer.request(tick, false);
 }
 
 /** One-shot: fires the load-progress bar's __appReady handoff on first paint. */
@@ -584,7 +594,6 @@ function tick(): void {
 }
 
 function tickBody(): void {
-    rafId = null;
     inTick = true;
     frameRequestedDuringTick = false;
     const perfNow = performance.now();
@@ -654,10 +663,14 @@ function tickBody(): void {
     const continuous = (!timeController.isStopped || animating)
         && (dragState === 'idle' || animating)
         && !helpOverlayOpen;
-    fpsIndicator?.recordFrame(continuous, performance.now() - perfNow);
+    fpsIndicator?.recordFrame(continuous, performance.now() - perfNow, { paced: pacer.lastMode === 'paced', vsyncMs: pacer.vsyncMs });
     inTick = false;
     if (continuous || frameRequestedDuringTick) {
-        rafId = requestAnimationFrame(tick);
+        // Steady state — running at 1× / −1× / offset with no scrub and no
+        // map drag — is paced (60 fps cap); a frame requested during the tick
+        // is a wake for a change and stays immediate.
+        const steady = timeController.currentRate === null && dragState === 'idle';
+        pacer.request(tick, steady && !frameRequestedDuringTick);
     }
 }
 
@@ -1528,7 +1541,7 @@ function init(): void {
             // Drop the frame already armed for this tick — it would otherwise
             // repaint the canvas in the very frame the overlay first paints,
             // which is one repaint under a brand-new backdrop snapshot.
-            if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+            pacer.cancel();
         },
         onClose: () => {
             helpOverlayOpen = false;

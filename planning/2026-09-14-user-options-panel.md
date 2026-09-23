@@ -1,9 +1,11 @@
 # Plan: a user options panel — or as little of one as we can get away with
 
-**Status**: revision 5 (2026-09-17) — implementation under way: Part 1 done
+**Status**: revision 6 (2026-09-22) — implementation under way: Part 1 done
 ([2026-09-17-chrome-targets-and-overflow-menu.md](2026-09-17-chrome-targets-and-overflow-menu.md)),
 including the outcome of Steve's in-app review (desktop fine at 44 px; phones
-always collapse to the ⋮ menu). Every question in §7 is decided. What remains is in-app tuning, noted in
+always collapse to the ⋮ menu); Part 2 done
+([2026-09-22-steady-state-frame-pacer.md](2026-09-22-steady-state-frame-pacer.md)).
+Every question in §7 is decided. What remains is in-app tuning, noted in
 each section: final button size (§3.1 A), chevron alpha (§3.3.1), the
 magnifier heuristic (§3.6), the low-power cap value (§3.4). Each part in §6
 gets its own plan document when it is implemented.
@@ -574,7 +576,7 @@ and the share-link equality logic untouched.
 | Part | Scope | Depends on | Size |
 |------|-------|------------|------|
 | 1 | 44 px targets everywhere first (judge in situ; pointer-type sizing as fallback; glyphs unchanged); shared ⋮ menu component and the collapse rule (latched engine signal); Observatory chrome-drop → collapse instead of none | — | M — **done 2026-09-17**, [plan](2026-09-17-chrome-targets-and-overflow-menu.md) |
-| 2 | Steady-state 60 fps pacer in all three loops; honour `prefers-reduced-motion` | — | S–M |
+| 2 | Steady-state 60 fps pacer in all three loops; honour `prefers-reduced-motion` | — | S–M — **done 2026-09-22**, [plan](2026-09-22-steady-state-frame-pacer.md) |
 | 3 | `prefs.ts`; Settings dialog + ⚙ button (and its ⋮ row); Got-it toast; Keep screen awake; Forget settings; noon-on-top moved | 1 (menu, collapse rule) | M |
 | 4 | Time-controller redesign: unit-first, any-body astro, 44 px targets; CC2 threshold re-derived | 1 (sizing conventions) | L |
 | 5 | Observatory ‹ Body › chevrons (treatment c), 44 px half-dial targets, directional label slide on change, help line; (`?cycle=N` only if a kiosk use ever exists) | — | S |

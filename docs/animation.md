@@ -362,3 +362,15 @@ The **`ObsValue.discrete`** flag tells the updater to evaluate a value at the **
 - [Rendering](rendering.md) — How animated parts are drawn each frame
 - [Timezone & DST](timezone-and-dst.md) — DST transition detection and environment rebuild triggers
 - [Development Rules](development-rules.md) — Schedule reset rules (§6), never rebuild parts (§3)
+
+## Reduced motion
+
+When the OS asks for reduced motion (`prefers-reduced-motion: reduce`, read
+live via `matchMedia` in `src/shared/updater.ts`; `setReducedMotion()`
+overrides it), *transitions* jump to their target instead of animating: the
+catch-up phase of a natural-speed hand, settling to the frozen time when
+stopped, the legacy 1× snap-to-target, drag-to-explore's fixed-duration
+updates, and the on-beat settles (`transitionMultiplier()` returns 0, which
+`startAnimationRaw` treats as an immediate jump). Motion that *is* the content
+is untouched: the second hands' natural-speed sweep, the eval-ahead sweep
+between boundaries, the on-beat sweep to the next beat, and scrub compression.

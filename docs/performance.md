@@ -137,6 +137,46 @@ The duty cycle itself is unchanged (non-goal — no scheduler surgery); awake
 frames just draw the 0–3 faces mid-snap instead of all 16. Energy readings
 (Activity Monitor / `powermetrics`, Safari + Chrome) are native-only.
 
+**Steady-state frame cap (2026-09-22,
+[plan](../planning/2026-09-22-steady-state-frame-pacer.md)).** All three
+loops arm their frames through `src/shared/frame-pacer.ts`. In *steady state*
+— the clock running at 1× / −1× / offset, no scrub, no map drag — a frame is
+drawn on every k-th vsync, k = ⌊display rate ÷ `STEADY_STATE_FPS`⌋: the
+highest rate at or above 60 that divides the display's evenly, so intervals
+are uniform — 60 fps on 120 and 240 Hz, 72 on 144, 82.5 on 165, and the
+display's own rate on 60, 75 and 90 Hz (Steve's rule: never below 60, never
+uneven). Between frames the loop sleeps: a `setTimeout` wakes it half a
+display period before the slot, a `requestAnimationFrame` lands on the vsync,
+and a frame whose timestamp is still ahead of the slot is skipped and
+re-armed. The skip is what makes the rate exact — browsers may run a
+timer-requested rAF inside the frame already in progress, whose timestamp is
+older, and pacing from that alone gave ~90 fps on a 120 Hz laptop (Chrome and
+Safari alike). The display rate comes from a shared 12-frame rAF probe at
+page load, re-run when the tab becomes visible and once a minute (a window
+can move to another monitor, and macOS Low Power Mode caps ProMotion at
+60 Hz, without any event), snapped to the nearest plausible rate within 6 %:
+the common rates sit exactly on the integer boundaries of the k rule (120 Hz
+is 2.000 × the 60 fps interval), so an estimate a few percent long would
+otherwise floor k to 1 and switch the cap off. Until measured, paced requests
+are plain rAF. Nothing in steady state moves visibly faster than the cap (a
+6°/s second hand covers a tenth of a degree per 60 Hz frame), so a fast
+display no longer does 2–4× the work.
+Scrubbing and dragging pass `paced = false`, and every explicit wake
+(Observatory / Inspector `scheduleFrame`, Chronometer `startScheduler` /
+`ensureSchedulerRunning`) starts a two-second `burst()` so the hands' sweep to
+new targets after a step, Now, or a location / body / noon change renders at
+the display's rate. Chronometer's 1× loop was already boundary-scheduled; the
+cap applies to its awake windows — the per-beat snaps and the lookahead
+free-run before each boundary (idle wakes request paced frames too). The `?fps` readout shows
+the effect natively — ~60 in steady state, the display's rate while scrubbing —
+and its tail `p<share> <Hz>` says what share of the last second's frames were
+drawn under the cap and the display rate the pacer measured.
+`setTargetFps` is the hook for the Low-power preference (options-panel Part 7).
+
+**Reduced motion.** When the OS asks for it (`prefers-reduced-motion:
+reduce`), the shared updater snaps transitions instead of animating them —
+see [animation.md](animation.md#reduced-motion).
+
 ## Measuring
 
 - **Authoritative numbers are native**, from a 240 Hz Mac Studio; the dev VM

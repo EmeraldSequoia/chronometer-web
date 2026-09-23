@@ -147,7 +147,12 @@ rendering on a frozen dial). In-flight animations are *not* snapped on stop — 
 finish naturally (e.g. a sweep hand eases the remaining distance), then the loop
 idles.
 
-The loop is restarted via `scheduleFrame()` (a no-op if already running):
+Frames are armed through the shared frame pacer (`src/shared/frame-pacer.ts`,
+see [performance.md](performance.md#idle-1-and-battery)): capped at 60 fps in
+steady state (no scrub, no drag), raw rAF otherwise and for two seconds after
+any `scheduleFrame()` wake.
+
+The loop is restarted via `scheduleFrame()` (a frame is armed at once):
 - The shared time-controls UI calls `ensureSchedulerRunning()` after every transport
   action (play / step / scrub / now).
 - `rebuildEnv()` and the canvas resize handler call it directly, so location /

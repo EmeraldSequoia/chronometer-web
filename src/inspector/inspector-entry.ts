@@ -24,6 +24,7 @@ import { getState, setState, initAppState, onSharedChange, onAdoptedAsDefault, i
 import { locationSourceOf } from '../shared/url-state.js';
 import { initShareButton } from '../shared/share-button.js';
 import { initOverflowMenu, closeOverflowMenu } from '../shared/overflow-menu.js';
+import { createFramePacer } from '../shared/frame-pacer.js';
 import { initHelpPopover, openGeneralHelpTopic } from '../shared/help-popover.js';
 import { resolveTimezoneProvisional, persistableTz } from '../shared/tz-resolve.js';
 import { createTzResolver } from '../shared/tz-ensure.js';
@@ -481,7 +482,7 @@ initHelpPopover({
     onOpen: () => {
         helpOverlayOpen = true;
         // Drop the frame already armed so the park takes effect immediately.
-        if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+        pacer.cancel();
     },
     onClose: () => {
         helpOverlayOpen = false;
@@ -875,7 +876,12 @@ const fpsIndicator = createFpsIndicator(urlState.fps);
 // --- Idle scheduler (mirrors Observatory) ---
 // The loop runs while time is moving or an animation is settling, then goes idle.
 // Transport actions and edits restart it via scheduleFrame().
-let rafId: number | null = null;
+/**
+ * Frame scheduler (src/shared/frame-pacer.ts): raw rAF while scrubbing or for
+ * two seconds after an explicit wake; otherwise steady-state frames are
+ * capped at STEADY_STATE_FPS. `pacer.pending` is false when the loop is idle.
+ */
+const pacer = createFramePacer();
 let inTick = false;
 let frameRequestedDuringTick = false;
 
@@ -908,7 +914,10 @@ function resyncAfterGap(): void {
 
 function scheduleFrame(): void {
     if (inTick) { frameRequestedDuringTick = true; return; }
-    if (rafId === null) rafId = requestAnimationFrame(tick);
+    // An explicit wake: draw at the next vsync, uncapped for a moment so any
+    // resulting animation renders at the display's rate.
+    pacer.burst();
+    pacer.request(tick, false);
 }
 
 /** One-shot: fires the load-progress bar's __appReady handoff on first paint. */
@@ -931,7 +940,6 @@ function tick(): void {
 }
 
 function tickBody(): void {
-    rafId = null;
     inTick = true;
     frameRequestedDuringTick = false;
     const perfNow = performance.now();
@@ -960,11 +968,14 @@ function tickBody(): void {
 
     const continuous = (!timeController.isStopped || updater.anyAnimating())
         && !helpOverlayOpen;
-    fpsIndicator?.recordFrame(continuous, performance.now() - perfNow);
+    fpsIndicator?.recordFrame(continuous, performance.now() - perfNow, { paced: pacer.lastMode === 'paced', vsyncMs: pacer.vsyncMs });
 
     inTick = false;
     if (continuous || frameRequestedDuringTick) {
-        rafId = requestAnimationFrame(tick);
+        // Steady state (no scrub) is paced; a frame requested during the tick
+        // is a wake for a change and stays immediate.
+        const steady = timeController.currentRate === null;
+        pacer.request(tick, steady && !frameRequestedDuringTick);
     }
 }
 

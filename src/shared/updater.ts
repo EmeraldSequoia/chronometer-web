@@ -30,6 +30,39 @@ import { TICK_INTERVAL_MS, displaySecondsPerTick } from './time-controller.js';
 // startAnimationRaw expects.
 const K_ANGLE_ANIM_SPEED = 2.0;
 
+// ============================================================================
+// Reduced motion
+// ============================================================================
+
+/**
+ * When the OS asks for reduced motion (`prefers-reduced-motion: reduce`),
+ * *transitions* jump instead of sweeping: the catch-up phase of a
+ * natural-speed hand, settling to the frozen time when stopped, the legacy
+ * 1× snap-to-target, drag-to-explore's fixed-duration updates, and the
+ * on-beat settles. Motion that *is* the content — the second hands' natural-
+ * speed sweep, the eval-ahead sweep between boundaries, the on-beat sweep to
+ * the next beat, scrub compression — is untouched. Tracked live from the
+ * media query where one exists (not under jsdom / node).
+ */
+let reducedMotion = false;
+
+/** Override the OS preference (tests; a future preference could too). */
+export function setReducedMotion(on: boolean): void { reducedMotion = on; }
+export function isReducedMotion(): boolean { return reducedMotion; }
+
+if (typeof matchMedia === 'function') {
+    try {
+        const mq = matchMedia('(prefers-reduced-motion: reduce)');
+        reducedMotion = mq.matches;
+        mq.addEventListener?.('change', (e) => { reducedMotion = e.matches; });
+    } catch { /* not a browser */ }
+}
+
+/** animSpeed multiplier for a transition: 0 — an immediate jump — under reduced motion. */
+function transitionMultiplier(v: ObsValue): number {
+    return reducedMotion ? 0 : v.animSpeed / K_ANGLE_ANIM_SPEED;
+}
+
 // Error threshold (radians) below which a natural-speed value is considered
 // "on track" and skips the catch-up phase.
 const NATURAL_ERROR_THRESHOLD = 0.002;
@@ -258,7 +291,7 @@ function updateNaturalSpeedValue(
     if (dtToNextUpdateSec <= 0 || !isFinite(dtToNextUpdateSec)) {
         // Edge case: next update is now or in the past — snap
         startAnimationRaw(v.anim, currentCorrectAngle, perfNow,
-            v.animSpeed / K_ANGLE_ANIM_SPEED, undefined, v.period);
+            transitionMultiplier(v), undefined, v.period);
         v.pendingSweep = null;
         return;
     }
@@ -319,7 +352,7 @@ function updateNaturalSpeedValue(
     // Phase 1 target: where the correct position will be when catch-up ends
     const catchUpTarget = currentCorrectAngle + effNaturalSpeed * catchUpSec;
     startAnimationRaw(v.anim, catchUpTarget, perfNow,
-        v.animSpeed / K_ANGLE_ANIM_SPEED, catchUpMs, v.period);
+        transitionMultiplier(v), catchUpMs, v.period);
 
     // Store Phase 2 for the animate pass to pick up
     const remainingMs = dtToNextUpdateMs - catchUpMs;
@@ -411,7 +444,7 @@ function settleAtNow(v: ObsValue, env: Environment, perfNow: number): void {
     v.nextUpdateTime = perfNow + 100;
     v.pendingSweep = null;
     startAnimationRaw(v.anim, newTarget, perfNow,
-        v.animSpeed / K_ANGLE_ANIM_SPEED, undefined, v.period);
+        transitionMultiplier(v), undefined, v.period);
 }
 
 /**
@@ -440,8 +473,7 @@ function updateObsValueFixedDuration(
         return;
     }
 
-    const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
-    startAnimationRaw(v.anim, newTarget, perfNow, multiplier, durationMs, v.period);
+    startAnimationRaw(v.anim, newTarget, perfNow, transitionMultiplier(v), durationMs, v.period);
 }
 
 /**
@@ -459,7 +491,7 @@ function snapToTargetAtBoundary(
     v.nextUpdateTime = displayTimeToPerfNow(nextDisplayMs, getNow);
     v.pendingSweep = null;
     startAnimationRaw(v.anim, newTarget, perfNow,
-        v.animSpeed / K_ANGLE_ANIM_SPEED, undefined, v.period);
+        transitionMultiplier(v), undefined, v.period);
 }
 
 // ============================================================================
@@ -634,7 +666,7 @@ function onBeatStep(
     if (timeDirection === 0) {
         if (!v.anim.animating) {
             const target = v.evalFn(env);
-            startAnimationRaw(v.anim, target, perfNow, multiplier, undefined, v.period);
+            startAnimationRaw(v.anim, target, perfNow, transitionMultiplier(v), undefined, v.period);
             v.pendingTarget = null;
             v.nextUpdateDisplayTime = Infinity;
             v.nextUpdateTime = Infinity;
@@ -672,7 +704,7 @@ function onBeatStep(
     if (v.nextUpdateTime === 0 && !v.anim.animating
         && (tickIntervalMs === null || tickIntervalMs <= 0 || envChangeOnly)) {
         const target = v.evalFn(env);
-        startAnimationRaw(v.anim, target, perfNow, multiplier, undefined, v.period);
+        startAnimationRaw(v.anim, target, perfNow, transitionMultiplier(v), undefined, v.period);
         v.pendingTarget = null;
         // No display-time boundary is scheduled yet — the settle's *arrival* re-arms
         // the beat (onArrivalOnBeat below, on a later frame). Clear the reset
