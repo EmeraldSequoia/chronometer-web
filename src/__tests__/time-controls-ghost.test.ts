@@ -22,7 +22,7 @@ let pop: HTMLElement;
 
 const ghost = () => pop.classList.contains('tp-ghost');
 const hidden = () => pop.classList.contains('tp-hidden');
-const stepBtn = () => document.querySelector('[data-step="+day"]') as HTMLElement;
+const stepBtn = () => document.getElementById('tp-step-fwd') as HTMLElement;
 const down = (el: HTMLElement) => el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
 const up = (el: HTMLElement) => el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
 const tap = (el: HTMLElement) => { down(el); up(el); };
@@ -102,15 +102,22 @@ describe('tap ghost', () => {
         const pause = [...document.querySelectorAll('#tp-transport .tp-btn')]
             .find(b => b.textContent?.trim() === '‖') as HTMLElement;
         expect(pause).toBeTruthy();
-        pause.click();
+        // Transport buttons act on press, not on the click that follows.
+        pause.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+        expect(tc.isStopped).toBe(true);
         expect(ghost()).toBe(true);
+        pause.click();
+        expect(tc.isStopped).toBe(true);   // the click is not a second action
         vi.advanceTimersByTime(1000);
         expect(ghost()).toBe(false);     // no settle wait on transport taps
     });
 
-    test('tab switches and date-input changes do not ghost', () => {
-        (document.querySelector('.tp-tab[data-tab="astro"]') as HTMLElement).click();
+    test('unit chips, the body stepper and date-input changes do not ghost', () => {
+        (document.querySelector('.tp-chip[data-unit="rise"]') as HTMLElement).click();
         expect(ghost()).toBe(false);
+        (document.getElementById('tp-body-next') as HTMLElement).click();
+        expect(ghost()).toBe(false);
+        (document.querySelector('.tp-chip[data-unit="day"]') as HTMLElement).click();
         const hour = document.getElementById('tp-hour') as HTMLInputElement;
         hour.value = '6';
         hour.dispatchEvent(new Event('change', { bubbles: true }));

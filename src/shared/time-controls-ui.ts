@@ -8,7 +8,18 @@
  *   - Calls callbacks for app-specific actions
  *   - Returns an API for the consumer to update each frame
  *
- * Used by both Chronometer (engine-entry.ts) and Observatory (observatory-entry.ts).
+ * Used by Chronometer (engine-entry.ts), Observatory (observatory-entry.ts)
+ * and the Inspector (inspector-entry.ts).
+ *
+ * The panel (docs/time-controller.md; partials/time-controller.html): unit
+ * first, then one pair. A row of chips chooses what a step means — a calendar
+ * unit (yr … sec) or an astronomical event (rise / set / transit of a chosen
+ * body, or the Moon's quarter phase) — and one big ◀ ▶ pair steps (tap) or
+ * scrubs (hold) by it. The pair's label always names the unit, so the mode
+ * is never hidden. The controller's body is decoupled from the page's
+ * (parent plan §7.3): it defaults to the page's body where the page has one
+ * (`getSelectedBody`), else the Moon, until the user steps it. The unit
+ * (`tu`) and body (`tb`) persist per app through app-state.
  */
 
 import { TimeController, TimeUnit, RATE_OPTIONS } from './time-controller.js';
@@ -22,7 +33,69 @@ import {
     dateToDateInterval, dateIntervalToDate,
     MIN_DISPLAY_DATE_MS, MAX_DISPLAY_DATE_MS,
 } from '../astronomy/es-time.js';
-import { setState } from './app-state.js';
+import { getState, setState } from './app-state.js';
+import type { TimeStepUnit, ControllerBody } from './url-state.js';
+
+// ---------------------------------------------------------------------------
+// Units and bodies
+// ---------------------------------------------------------------------------
+
+/** An astronomical-event step kind (the astro chips). */
+export type AstroStepKind = 'rise' | 'set' | 'transit' | 'phase';
+
+export interface UnitSpec {
+    key: TimeStepUnit;
+    /** The pair's label for calendar units ("1 day"); astro labels are built from the body. */
+    label: string;
+    /** Calendar units: the TimeController unit and the RATE_OPTIONS index hold-to-scrub uses. */
+    time?: TimeUnit;
+    rateIndex?: number;
+    /** Astro units: the event kind (tap only — each jump is a search). */
+    astro?: AstroStepKind;
+}
+
+/** The chips, in display order (two rows of five; docs/time-controller.md). */
+export const UNITS: readonly UnitSpec[] = [
+    { key: 'yr',  label: '1 year',   time: 'year',   rateIndex: 5 },
+    { key: 'mo',  label: '1 month',  time: 'month',  rateIndex: 4 },
+    { key: 'day', label: '1 day',    time: 'day',    rateIndex: 3 },
+    { key: 'hr',  label: '1 hour',   time: 'hour',   rateIndex: 2 },
+    { key: 'min', label: '1 minute', time: 'minute', rateIndex: 1 },
+    { key: 'sec', label: '1 second', time: 'second', rateIndex: 0 },
+    { key: 'rise',    label: 'rise',       astro: 'rise' },
+    { key: 'set',     label: 'set',        astro: 'set' },
+    { key: 'transit', label: 'transit',    astro: 'transit' },
+    { key: 'phase',   label: 'Moon phase', astro: 'phase' },
+];
+
+export interface BodySpec {
+    key: ControllerBody;
+    name: string;
+    /** ECPlanetNumber. */
+    planet: number;
+}
+
+/** The bodies the stepper cycles, in Venezia's order. */
+export const CONTROLLER_BODIES: readonly BodySpec[] = [
+    { key: 'sun',     name: 'Sun',     planet: 0 },
+    { key: 'moon',    name: 'Moon',    planet: 1 },
+    { key: 'mercury', name: 'Mercury', planet: 2 },
+    { key: 'venus',   name: 'Venus',   planet: 3 },
+    { key: 'mars',    name: 'Mars',    planet: 5 },
+    { key: 'jupiter', name: 'Jupiter', planet: 6 },
+    { key: 'saturn',  name: 'Saturn',  planet: 7 },
+    { key: 'uranus',  name: 'Uranus',  planet: 8 },
+    { key: 'neptune', name: 'Neptune', planet: 9 },
+];
+const MOON = CONTROLLER_BODIES[1];
+
+/** The pair's label for an astro unit: "Sunrise", "Moon transit", "Jupiter set", "Moon phase". */
+export function astroStepLabel(kind: AstroStepKind, body: BodySpec): string {
+    if (kind === 'phase') return 'Moon phase';
+    if (kind === 'transit') return `${body.name} transit`;
+    if (body.key === 'sun' || body.key === 'moon') return body.name + kind;   // Sunrise, Moonset
+    return `${body.name} ${kind}`;
+}
 
 // ---------------------------------------------------------------------------
 // Config & API interfaces
@@ -38,7 +111,11 @@ export interface TimeControlsConfig {
     getLat: () => number;
     /** Observer longitude in degrees. */
     getLon: () => number;
-    /** Currently selected body planet number (for body-* astro events). */
+    /**
+     * The *page's* body as an ECPlanetNumber (Venezia's face body, the
+     * Observatory's dial body) — the controller body's default until the
+     * user steps the ‹ › body row; omit where the page has none (the Moon).
+     */
     getSelectedBody?: () => number | undefined;
 
     /**
@@ -103,34 +180,15 @@ export interface TimeControlsAPI {
     isPopoverOpen: () => boolean;
     /** Update timezone display (call after location change). */
     updateTimezoneDisplay: () => void;
+    /** The selected step unit (the chip). */
+    getUnit: () => TimeStepUnit;
+    /** The controller's body for rise / set / transit (stored, or the page's, or the Moon). */
+    getBody: () => BodySpec;
 }
 
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
-
-/** Map step unit names to RATE_OPTIONS indices for hold-to-scrub. */
-const unitToRateIndex: Record<string, number> = {
-    'minute': 1,   // 10 min/s
-    'hour':   2,   // 10 hr/s
-    'day':    3,   // 10 day/s
-    'month':  4,   // 10 mo/s
-    'year':   5,   // 10 yr/s
-};
-
-/** Map data-step attributes to [unit, direction]. */
-const stepMap: Record<string, [TimeUnit, 1 | -1]> = {
-    '-year':   ['year',   -1],
-    '-month':  ['month',  -1],
-    '-day':    ['day',    -1],
-    '-hour':   ['hour',   -1],
-    '-minute': ['minute', -1],
-    '+minute': ['minute',  1],
-    '+hour':   ['hour',    1],
-    '+day':    ['day',     1],
-    '+month':  ['month',   1],
-    '+year':   ['year',    1],
-};
 
 /**
  * Initialize the shared time controller UI.
@@ -192,10 +250,14 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
     const _tpRateLabel = document.getElementById('tp-rate-label');
     const _tpTransport = document.getElementById('tp-transport');
     const _tpClose = document.getElementById('tp-close');
+    const _tpUnits = document.getElementById('tp-units');
+    const _tpBodyRow = document.getElementById('tp-body-row');
+    const _tpBodyName = document.getElementById('tp-body-name');
+    const _tpStepLabel = document.getElementById('tp-step-label');
 
     if (!_timeBar || !_timeBarLabel || !_timeBarDate || !_timeBarOffset ||
         !_timeBarRate || !_timeBarNow || !_timePopover || !_tpRateLabel ||
-        !_tpTransport || !_tpClose) {
+        !_tpTransport || !_tpClose || !_tpUnits || !_tpBodyRow || !_tpBodyName || !_tpStepLabel) {
         console.warn('[TimeControlsUI] Required DOM elements not found');
         return null;
     }
@@ -211,6 +273,10 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
     const tpRateLabel = _tpRateLabel;
     const tpTransport = _tpTransport;
     const tpClose = _tpClose;
+    const tpUnits = _tpUnits;
+    const tpBodyRow = _tpBodyRow;
+    const tpBodyName = _tpBodyName;
+    const tpStepLabel = _tpStepLabel;
 
     // ---- Optional DOM elements for timezone display ----
     const locationTzLabel = document.getElementById('location-tz');
@@ -218,6 +284,55 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
 
     // ---- State ----
     let popoverOpen = false;
+
+    /** The selected chip; from the per-app `tu` setting (default day). */
+    let unit: UnitSpec = UNITS.find((u) => u.key === getState().tu) ?? UNITS[2];
+    /** The user's body choice (`tb`), or null = follow the page's body, else the Moon. */
+    let bodyKey: ControllerBody | null = getState().tb;
+
+    function bodyByKey(key: ControllerBody | null): BodySpec | undefined {
+        return key ? CONTROLLER_BODIES.find((b) => b.key === key) : undefined;
+    }
+
+    /** The controller's body: stored, else the page's (getSelectedBody), else the Moon. */
+    function currentBody(): BodySpec {
+        const stored = bodyByKey(bodyKey);
+        if (stored) return stored;
+        const page = getSelectedBody?.();
+        return CONTROLLER_BODIES.find((b) => b.planet === page) ?? MOON;
+    }
+
+    /** The pair's label and the body row follow the unit (and the body, which the page can change). */
+    function refreshStepLabels(): void {
+        const body = currentBody();
+        const label = unit.astro ? astroStepLabel(unit.astro, body) : unit.label;
+        if (tpStepLabel.textContent !== label) tpStepLabel.textContent = label;
+        if (tpBodyName.textContent !== body.name) tpBodyName.textContent = body.name;
+    }
+
+    /** Choose a unit: chips, the body row (rise / set / transit only), the pair's label, persistence. */
+    function selectUnit(key: TimeStepUnit, persist = true): void {
+        const next = UNITS.find((u) => u.key === key);
+        if (!next) return;
+        unit = next;
+        tpUnits.querySelectorAll<HTMLElement>('.tp-chip').forEach((chip) => {
+            const on = chip.dataset.unit === unit.key;
+            chip.classList.toggle('active', on);
+            chip.setAttribute('aria-pressed', String(on));
+        });
+        tpBodyRow.hidden = !(unit.astro === 'rise' || unit.astro === 'set' || unit.astro === 'transit');
+        refreshStepLabels();
+        if (persist) setState({ tu: unit.key });
+    }
+
+    /** Step the body row: ‹ / ›, cycling CONTROLLER_BODIES; from then on the body is the user's. */
+    function stepBody(dir: 1 | -1): void {
+        const n = CONTROLLER_BODIES.length;
+        const idx = CONTROLLER_BODIES.indexOf(currentBody());
+        bodyKey = CONTROLLER_BODIES[(idx + dir + n) % n].key;
+        refreshStepLabels();
+        setState({ tb: bodyKey });
+    }
 
     // ===================================================================
     // Formatting helpers
@@ -406,80 +521,53 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
 
         tpTransport.innerHTML = '';
 
-        // Top row: Now▶ (when overridden) and/or ‖ (when running)
-        const topRow = document.createElement('div');
-        topRow.className = 'tp-transport-row';
+        // One row: Now ▶ (when overridden), then ‖ while running or ◀ ▶ when
+        // stopped. The buttons act on PRESS (pointerdown), like the step pair:
+        // a stop lands the instant the finger touches rather than on release
+        // (Steve, 2026-09-23). preventDefault keeps the press from focusing
+        // or selecting; nothing listens for the click that follows.
+        const onPress = (b: HTMLButtonElement, action: () => void): void => {
+            b.addEventListener('pointerdown', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                action();
+            });
+        };
+        const transportBtn = (html: string, className: string, action: () => void): HTMLButtonElement => {
+            const b = document.createElement('button');
+            b.className = className;
+            b.innerHTML = html;
+            onPress(b, () => {
+                ghostTap();
+                action();
+                updater?.reset();
+                onTransportChange();
+                updateTimeUI();
+                ensureSchedulerRunning();
+                writeTimeState();
+            });
+            return b;
+        };
 
-        if (!timeController.isRealTime) {
+        if (!isReal) {
             const nowBtn = document.createElement('button');
             nowBtn.className = 'tp-btn';
             nowBtn.innerHTML = 'Now\u2009<span style="position:relative;top:1px">▶</span>';
-            nowBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                nowClicked();
-            });
-            topRow.appendChild(nowBtn);
+            onPress(nowBtn, nowClicked);
+            tpTransport.appendChild(nowBtn);
         }
 
         if (!isStopped) {
-            const pauseBtn = document.createElement('button');
-            pauseBtn.className = 'tp-btn active';
-            pauseBtn.textContent = '‖';
-            pauseBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                ghostTap();
-                timeController.stop();
-                updater?.reset();
-                onTransportChange();
-                updateTimeUI();
-                ensureSchedulerRunning();
-                writeTimeState();
-            });
-            topRow.appendChild(pauseBtn);
-        }
-
-        if (topRow.childNodes.length > 0) {
-            tpTransport.appendChild(topRow);
-        }
-
-        // Bottom row: ◀ ▶ direction buttons (only when stopped)
-        if (isStopped) {
-            const bottomRow = document.createElement('div');
-            bottomRow.className = 'tp-transport-row';
-
-            const revBtn = document.createElement('button');
-            revBtn.className = 'tp-btn';
-            revBtn.textContent = '◀';
-            revBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                ghostTap();
+            tpTransport.appendChild(transportBtn('‖', 'tp-btn active', () => timeController.stop()));
+        } else {
+            tpTransport.appendChild(transportBtn('◀', 'tp-btn', () => {
                 timeController.setDirection(-1);
                 timeController.setRate(null);
-                updater?.reset();
-                onTransportChange();
-                updateTimeUI();
-                ensureSchedulerRunning();
-                writeTimeState();
-            });
-
-            const fwdBtn = document.createElement('button');
-            fwdBtn.className = 'tp-btn';
-            fwdBtn.textContent = '▶';
-            fwdBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                ghostTap();
+            }));
+            tpTransport.appendChild(transportBtn('▶', 'tp-btn', () => {
                 timeController.setDirection(1);
                 timeController.setRate(null);
-                updater?.reset();
-                onTransportChange();
-                updateTimeUI();
-                ensureSchedulerRunning();
-                writeTimeState();
-            });
-
-            bottomRow.appendChild(revBtn);
-            bottomRow.appendChild(fwdBtn);
-            tpTransport.appendChild(bottomRow);
+            }));
         }
     }
 
@@ -514,6 +602,9 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
 
         // Rebuild transport bar
         renderTransport();
+
+        // The pair's label / body name follow the page's body while no body is stored.
+        refreshStepLabels();
 
         // Update timezone display in case DST state changed
         updateTimezoneDisplay();
@@ -604,19 +695,16 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
     let holdTimer: ReturnType<typeof setTimeout> | null = null;
     let holdingBtn: HTMLElement | null = null;
 
-    function startHold(btn: HTMLElement, unit: string, dir: 1 | -1) {
+    function startHold(btn: HTMLElement, rateIndex: number, dir: 1 | -1) {
         holdingBtn = btn;
         btn.classList.add('holding');
         // Ghost the popover so the app is visible while scrubbing. Opacity-only
         // (see .tp-hidden in the CSS): the held button must keep hit-testing.
         timePopover.classList.add('tp-hidden');
 
-        // Set direction and start the corresponding rate
+        // Set direction and start the unit's rate (10 units per second).
         timeController.setDirection(dir);
-        const rateIdx = unitToRateIndex[unit];
-        if (rateIdx !== undefined) {
-            timeController.setRate(RATE_OPTIONS[rateIdx]);
-        }
+        timeController.setRate(RATE_OPTIONS[rateIndex]);
         updater?.reset();
         onScrubStart();
         updateTimeUI();
@@ -687,120 +775,88 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
     }
 
     // ===================================================================
-    // Step button wiring
+    // The ◀ ▶ pair: tap = one step of the selected unit (astro units: one
+    // jump); hold (calendar units only) = scrub at the unit's rate.
     // ===================================================================
 
-    timePopover.querySelectorAll('[data-step]').forEach(btn => {
-        const el = btn as HTMLElement;
-        const stepKey = el.dataset.step!;
-        const entry = stepMap[stepKey];
-        if (!entry) return;
-        const [unit, dir] = entry;
-        const unitName = el.dataset.unit || unit;
-
-        function doStep(e: Event) {
-            e.preventDefault();
-            e.stopPropagation();
-            ghostTap(true);
-            // Stop time and snap in-flight animations before stepping
-            timeController.stop();
-            timeController.step(unit, dir);
-            updater?.reset();
-            onTimeStep();
-            updateTimeUI();
-            ensureSchedulerRunning();
-            // Start hold timer
-            holdTimer = setTimeout(() => {
-                holdTimer = null;
-                startHold(el, unitName, dir);
-            }, HOLD_DELAY_MS);
+    function stepPress(e: Event, dir: 1 | -1, el: HTMLElement) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (unit.astro) {
+            handleAstroStep(unit.astro, dir, el);
+            return;
         }
+        ghostTap(true);
+        // Stop time and snap in-flight animations before stepping
+        timeController.stop();
+        timeController.step(unit.time!, dir);
+        updater?.reset();
+        onTimeStep();
+        updateTimeUI();
+        ensureSchedulerRunning();
+        // Start hold timer
+        const rateIndex = unit.rateIndex!;
+        holdTimer = setTimeout(() => {
+            holdTimer = null;
+            startHold(el, rateIndex, dir);
+        }, HOLD_DELAY_MS);
+    }
 
-        function doRelease(e: Event) {
-            e.stopPropagation();
-            endHold();
-            writeTimeState();
-        }
+    function stepRelease(e: Event) {
+        e.stopPropagation();
+        endHold();
+        writeTimeState();
+    }
 
+    timePopover.querySelectorAll<HTMLElement>('.tp-step-btn').forEach((el) => {
+        const dir = parseInt(el.dataset.dir || '1', 10) as 1 | -1;
         // Mouse events
-        el.addEventListener('mousedown', doStep);
-        el.addEventListener('mouseup', doRelease);
+        el.addEventListener('mousedown', (e) => stepPress(e, dir, el));
+        el.addEventListener('mouseup', stepRelease);
         el.addEventListener('mouseleave', () => endHold());
-
         // Touch events
-        el.addEventListener('touchstart', doStep);
-        el.addEventListener('touchend', doRelease);
+        el.addEventListener('touchstart', (e) => stepPress(e, dir, el));
+        el.addEventListener('touchend', stepRelease);
         el.addEventListener('touchcancel', () => endHold());
     });
 
     // ===================================================================
-    // Tab switching: Date / Astro
+    // Unit chips and the body stepper
     // ===================================================================
 
-    const tpTabDate = document.getElementById('tp-tab-date');
-    const tpTabAstro = document.getElementById('tp-tab-astro');
-    const tpTabs = timePopover.querySelectorAll('.tp-tab');
-
-    function switchTab(tabName: 'd' | 'a') {
-        if (tpTabDate && tpTabAstro) {
-            const hiding = tabName === 'a' ? tpTabDate : tpTabAstro;
-            const showing = tabName === 'a' ? tpTabAstro : tpTabDate;
-
-            // Collapse the outgoing pane instantly (no transition)
-            hiding.style.transition = 'none';
-            hiding.classList.add('tp-pane-hidden');
-            // Force reflow so the instant collapse takes effect
-            void hiding.offsetHeight;
-            hiding.style.transition = '';
-
-            // Animate the incoming pane open
-            showing.classList.remove('tp-pane-hidden');
-        }
-        tpTabs.forEach(btn => {
-            const el = btn as HTMLElement;
-            el.classList.toggle('active', el.dataset.tab === (tabName === 'a' ? 'astro' : 'date'));
-        });
-        setState({ tp: tabName });
-    }
-
-    // Initialize tab from URL state
-    const urlTp = new URLSearchParams(window.location.search).get('tp');
-    if (urlTp === 'a') {
-        switchTab('a');
-    }
-
-    tpTabs.forEach(btn => {
-        btn.addEventListener('click', (e) => {
+    tpUnits.querySelectorAll<HTMLElement>('.tp-chip').forEach((chip) => {
+        chip.addEventListener('click', (e) => {
             e.stopPropagation();
-            const el = btn as HTMLElement;
-            switchTab(el.dataset.tab === 'astro' ? 'a' : 'd');
+            selectUnit(chip.dataset.unit as TimeStepUnit);
         });
     });
+    document.getElementById('tp-body-prev')?.addEventListener('click', (e) => { e.stopPropagation(); stepBody(-1); });
+    document.getElementById('tp-body-next')?.addEventListener('click', (e) => { e.stopPropagation(); stepBody(1); });
+
+    // The initial unit (from the per-app setting) — no write-back.
+    selectUnit(unit.key, false);
 
     // ===================================================================
     // Astronomical event stepper
     // ===================================================================
 
-    function handleAstroStep(eventType: AstroEventType, dir: 1 | -1, btnEl: HTMLElement) {
-        // Determine the body planet number for body-* events
-        let bodyPlanetNumber: number | undefined;
-        if (eventType === 'body-transit' || eventType === 'body-rise' || eventType === 'body-set') {
-            bodyPlanetNumber = getSelectedBody?.();
-            // Fall back to label data attribute if no callback
-            if (bodyPlanetNumber === undefined) {
-                const bodyLabel = document.getElementById('tp-body-transit-label');
-                bodyPlanetNumber = bodyLabel ? parseInt(bodyLabel.dataset.planet || '1', 10) : undefined;
-            }
-        }
+    function handleAstroStep(kind: AstroStepKind, dir: 1 | -1, btnEl: HTMLElement) {
+        const body = currentBody();
+        const eventType: AstroEventType =
+            kind === 'phase' ? 'moonphase'
+            : kind === 'rise' ? 'body-rise'
+            : kind === 'set' ? 'body-set'
+            : 'body-transit';
 
         const targetDate = computeAstroTarget(
             eventType, dir, timeController.getDisplayTime(),
-            getLat() * Math.PI / 180, getLon() * Math.PI / 180, bodyPlanetNumber,
+            getLat() * Math.PI / 180, getLon() * Math.PI / 180, body.planet,
         );
 
         if (!targetDate || isNaN(targetDate.getTime())) {
-            // No event found — flash the button. Deliberately no ghostTap():
-            // the flash is on the popover and must stay readable.
+            // No event found (a polar day / night, a body that never rises or
+            // sets here) — flash the button. Deliberately no ghostTap(): the
+            // flash is on the popover and must stay readable.
             btnEl.classList.add('flash-fail');
             setTimeout(() => btnEl.classList.remove('flash-fail'), 300);
             return;
@@ -816,26 +872,6 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
         ensureSchedulerRunning();
         writeTimeState();
     }
-
-    timePopover.querySelectorAll('[data-astro]').forEach(btn => {
-        const el = btn as HTMLElement;
-        const eventType = el.dataset.astro as AstroEventType;
-        const dir = parseInt(el.dataset.dir || '1', 10) as 1 | -1;
-
-        // Mouse events (no hold timer — tap only)
-        el.addEventListener('mousedown', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            handleAstroStep(eventType, dir, el);
-        });
-
-        // Touch events
-        el.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            handleAstroStep(eventType, dir, el);
-        });
-    });
 
     // ===================================================================
     // Date inputs + BCE toggle
@@ -942,5 +978,7 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
         hidePopover,
         isPopoverOpen: () => popoverOpen,
         updateTimezoneDisplay,
+        getUnit: () => unit.key,
+        getBody: currentBody,
     };
 }

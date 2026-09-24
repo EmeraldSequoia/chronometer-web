@@ -54,8 +54,9 @@ offset / stopped state (not just `new Date()`).
 
 The Inspector uses the shared `TimeController` + `initTimeControls` transport bar
 (`{{TIME_CONTROLLER}}` / `{{TIME_CSS}}` partials, pinned under the time display),
-exactly like Chronometer and Observatory: play / pause, reverse, hold-to-scrub at
-various rates, single-step, offset, and "Now". Time state (`t` / `off` / `dir`)
+exactly like Chronometer and Observatory ([time-controller.md](time-controller.md)):
+play / pause, reverse, a unit chip row with one ◀ ▶ pair (tap to step, hold to
+scrub), rise / set / transit for any body, offset, and "Now". Time state (`t` / `off` / `dir`)
 persists through the shared app-state layer (the `ec:shared` localStorage
 namespace in storage mode, the URL in the fallbacks), so hopping between apps —
 or opening a shared deep link — lands at the same instant and location.

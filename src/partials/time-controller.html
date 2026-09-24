@@ -8,302 +8,51 @@
         <button class="time-bar-btn" id="time-bar-now">Now</button>
       </div>
 
-      <!-- Time controller popover (L-shaped) -->
+      <!-- Time controller popover (docs/time-controller.md): one panel. The
+           unit chips choose what a step means; the one ◀ ▶ pair steps (tap)
+           or scrubs (hold) by it; the ‹ › body stepper appears for rise / set /
+           transit. Wired by src/shared/time-controls-ui.ts; each page positions
+           #time-popover itself. -->
       <div id="time-popover" style="display: none">
-        <button id="tp-close">&times;</button>
-        <div id="tp-upper">
-          <div class="tp-transport" id="tp-transport"></div>
+        <div id="tp-panel">
+          <div class="tp-top-row">
+            <div class="tp-transport" id="tp-transport"></div>
+            <button id="tp-close" title="Close" aria-label="Close">&times;</button>
+          </div>
           <div id="tp-rate-label">1× (real time)</div>
-          <div class="tp-label">Hold to scrub</div>
-          <div class="tp-step-row">
-            <button class="tp-btn" data-step="-year" data-unit="year">
-              ◀1y
-            </button>
-            <button class="tp-btn" data-step="+year" data-unit="year">
-              1y ▶
-            </button>
+          <div class="tp-label">Step by</div>
+          <div id="tp-units" role="group" aria-label="Step unit">
+            <button class="tp-chip" data-unit="yr" title="Years">yr</button>
+            <button class="tp-chip" data-unit="mo" title="Months">mo</button>
+            <button class="tp-chip" data-unit="day" title="Days">day</button>
+            <button class="tp-chip" data-unit="hr" title="Hours">hr</button>
+            <button class="tp-chip" data-unit="min" title="Minutes">min</button>
+            <button class="tp-chip" data-unit="sec" title="Seconds">sec</button>
+            <button class="tp-chip tp-chip-astro" data-unit="rise" title="Rise of the chosen body">rise</button>
+            <button class="tp-chip tp-chip-astro" data-unit="set" title="Set of the chosen body">set</button>
+            <button class="tp-chip tp-chip-astro" data-unit="transit" title="Transit (meridian crossing) of the chosen body">transit</button>
+            <button class="tp-chip tp-chip-astro" data-unit="phase" title="Quarter phase of the Moon">phase</button>
           </div>
-          <div class="tp-step-row">
-            <button class="tp-btn" data-step="-month" data-unit="month">
-              ◀1mo
-            </button>
-            <button class="tp-btn" data-step="+month" data-unit="month">
-              1mo ▶
-            </button>
+          <div id="tp-body-row" hidden>
+            <button class="tp-btn tp-body-btn" id="tp-body-prev" title="Previous body" aria-label="Previous body">‹</button>
+            <span id="tp-body-name">Moon</span>
+            <button class="tp-btn tp-body-btn" id="tp-body-next" title="Next body" aria-label="Next body">›</button>
           </div>
-          <div class="tp-step-row">
-            <button class="tp-btn" data-step="-day" data-unit="day">◀1d</button>
-            <button class="tp-btn" data-step="+day" data-unit="day">
-              1d ▶
-            </button>
+          <div class="tp-step-pair">
+            <button class="tp-btn tp-step-btn" id="tp-step-back" data-dir="-1" title="Step back (hold to scrub)" aria-label="Step back">◀</button>
+            <span id="tp-step-label">1 day</span>
+            <button class="tp-btn tp-step-btn" id="tp-step-fwd" data-dir="1" title="Step forward (hold to scrub)" aria-label="Step forward">▶</button>
           </div>
-          <div class="tp-step-row">
-            <button class="tp-btn" data-step="-hour" data-unit="hour">
-              ◀1h
-            </button>
-            <button class="tp-btn" data-step="+hour" data-unit="hour">
-              1h ▶
-            </button>
+          <div class="tp-label">Set date &amp; time</div>
+          <div class="tp-date-inputs">
+            <input id="tp-year" type="number" min="1" max="4000" placeholder="YYYY" aria-label="Year" />
+            <input id="tp-month" type="number" min="1" max="12" placeholder="MM" aria-label="Month" />
+            <input id="tp-day" type="number" min="1" max="31" placeholder="DD" aria-label="Day" />
           </div>
-          <div class="tp-step-row">
-            <button class="tp-btn" data-step="-minute" data-unit="minute">
-              ◀1mi
-            </button>
-            <button class="tp-btn" data-step="+minute" data-unit="minute">
-              1mi ▶
-            </button>
-          </div>
-        </div>
-        <div id="tp-lower">
-          <div id="tp-tabs">
-            <button class="tp-tab active" data-tab="date">Date</button>
-            <button class="tp-tab" data-tab="astro">Astro</button>
-          </div>
-          <div id="tp-tab-date" class="tp-tab-pane">
-            <div>
-              <div class="tp-label">Set Date &amp; Time</div>
-              <div class="tp-date-inputs">
-                <input
-                  id="tp-year"
-                  type="number"
-                  min="1"
-                  max="4000"
-                  placeholder="YYYY"
-                />
-                <input
-                  id="tp-month"
-                  type="number"
-                  min="1"
-                  max="12"
-                  placeholder="MM"
-                />
-                <input
-                  id="tp-day"
-                  type="number"
-                  min="1"
-                  max="31"
-                  placeholder="DD"
-                />
-              </div>
-              <div class="tp-date-inputs">
-                <button id="tp-bce" title="Toggle BCE (Before Common Era)">
-                  CE
-                </button>
-                <input
-                  id="tp-hour"
-                  type="number"
-                  min="0"
-                  max="23"
-                  placeholder="HH"
-                />
-                <input
-                  id="tp-minute"
-                  type="number"
-                  min="0"
-                  max="59"
-                  placeholder="mm"
-                />
-              </div>
-            </div>
-          </div>
-          <div id="tp-tab-astro" class="tp-tab-pane tp-pane-hidden">
-            <div>
-              <div class="tp-label">Astronomical Events</div>
-              <div class="tp-astro-row">
-                <button
-                  class="tp-btn tp-astro-btn"
-                  data-astro="sunrise"
-                  data-dir="-1"
-                >
-                  ◀
-                </button>
-                <span class="tp-astro-label">Sunrise</span>
-                <button
-                  class="tp-btn tp-astro-btn"
-                  data-astro="sunrise"
-                  data-dir="1"
-                >
-                  ▶
-                </button>
-              </div>
-              <div class="tp-astro-row">
-                <button
-                  class="tp-btn tp-astro-btn"
-                  data-astro="sunset"
-                  data-dir="-1"
-                >
-                  ◀
-                </button>
-                <span class="tp-astro-label">Sunset</span>
-                <button
-                  class="tp-btn tp-astro-btn"
-                  data-astro="sunset"
-                  data-dir="1"
-                >
-                  ▶
-                </button>
-              </div>
-              <div class="tp-astro-row" id="tp-astro-moonrise">
-                <button
-                  class="tp-btn tp-astro-btn"
-                  data-astro="moonrise"
-                  data-dir="-1"
-                >
-                  ◀
-                </button>
-                <span class="tp-astro-label">Moonrise</span>
-                <button
-                  class="tp-btn tp-astro-btn"
-                  data-astro="moonrise"
-                  data-dir="1"
-                >
-                  ▶
-                </button>
-              </div>
-              <div
-                class="tp-astro-row"
-                id="tp-astro-body-rise"
-                style="display: none"
-              >
-                <button
-                  class="tp-btn tp-astro-btn"
-                  data-astro="body-rise"
-                  data-dir="-1"
-                >
-                  ◀
-                </button>
-                <span
-                  class="tp-astro-label tp-body-label"
-                  id="tp-body-rise-label"
-                  >Moon Rise</span
-                >
-                <button
-                  class="tp-btn tp-astro-btn"
-                  data-astro="body-rise"
-                  data-dir="1"
-                >
-                  ▶
-                </button>
-              </div>
-              <div class="tp-astro-row" id="tp-astro-moonset">
-                <button
-                  class="tp-btn tp-astro-btn"
-                  data-astro="moonset"
-                  data-dir="-1"
-                >
-                  ◀
-                </button>
-                <span class="tp-astro-label">Moonset</span>
-                <button
-                  class="tp-btn tp-astro-btn"
-                  data-astro="moonset"
-                  data-dir="1"
-                >
-                  ▶
-                </button>
-              </div>
-              <div
-                class="tp-astro-row"
-                id="tp-astro-body-set"
-                style="display: none"
-              >
-                <button
-                  class="tp-btn tp-astro-btn"
-                  data-astro="body-set"
-                  data-dir="-1"
-                >
-                  ◀
-                </button>
-                <span
-                  class="tp-astro-label tp-body-label"
-                  id="tp-body-set-label"
-                  >Moon Set</span
-                >
-                <button
-                  class="tp-btn tp-astro-btn"
-                  data-astro="body-set"
-                  data-dir="1"
-                >
-                  ▶
-                </button>
-              </div>
-              <div class="tp-astro-row">
-                <button
-                  class="tp-btn tp-astro-btn"
-                  data-astro="moonphase"
-                  data-dir="-1"
-                >
-                  ◀
-                </button>
-                <span class="tp-astro-label">Moon Phase</span>
-                <button
-                  class="tp-btn tp-astro-btn"
-                  data-astro="moonphase"
-                  data-dir="1"
-                >
-                  ▶
-                </button>
-              </div>
-              <div class="tp-astro-row">
-                <button
-                  class="tp-btn tp-astro-btn"
-                  data-astro="sun-transit"
-                  data-dir="-1"
-                >
-                  ◀
-                </button>
-                <span class="tp-astro-label">Sun Transit</span>
-                <button
-                  class="tp-btn tp-astro-btn"
-                  data-astro="sun-transit"
-                  data-dir="1"
-                >
-                  ▶
-                </button>
-              </div>
-              <div class="tp-astro-row" id="tp-astro-moon-transit">
-                <button
-                  class="tp-btn tp-astro-btn"
-                  data-astro="moon-transit"
-                  data-dir="-1"
-                >
-                  ◀
-                </button>
-                <span class="tp-astro-label">Moon Transit</span>
-                <button
-                  class="tp-btn tp-astro-btn"
-                  data-astro="moon-transit"
-                  data-dir="1"
-                >
-                  ▶
-                </button>
-              </div>
-              <div
-                class="tp-astro-row"
-                id="tp-astro-body-transit"
-                style="display: none"
-              >
-                <button
-                  class="tp-btn tp-astro-btn"
-                  data-astro="body-transit"
-                  data-dir="-1"
-                >
-                  ◀
-                </button>
-                <span
-                  class="tp-astro-label tp-body-label"
-                  id="tp-body-transit-label"
-                  >Moon Trans</span
-                >
-                <button
-                  class="tp-btn tp-astro-btn"
-                  data-astro="body-transit"
-                  data-dir="1"
-                >
-                  ▶
-                </button>
-              </div>
-            </div>
+          <div class="tp-date-inputs">
+            <button id="tp-bce" title="Toggle BCE (Before Common Era)">CE</button>
+            <input id="tp-hour" type="number" min="0" max="23" placeholder="HH" aria-label="Hour" />
+            <input id="tp-minute" type="number" min="0" max="59" placeholder="mm" aria-label="Minute" />
           </div>
         </div>
       </div>

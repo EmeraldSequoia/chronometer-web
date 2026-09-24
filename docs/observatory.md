@@ -44,7 +44,7 @@ for the full per-anchor rules.
    `viewport-fit=cover`; zero on desktop windows). All layout math is in the
    safe rect.
 2. **Chrome-drop (CC2)** — if the safe rect can't fit the time-controller's
-   default popover (200×368), the header + footer bands are dropped so the
+   default panel above the footer band (264×389 + 6 + the footer — `TC_POPOVER_W / H / GAP`, [time-controller.md](time-controller.md)), the header + footer bands are dropped so the
    degenerate slivers (A1/A6) use the whole surface. The DOM footer is hidden;
    the DOM header stays as a floating `[⋮] [fullscreen]` over the dial (no band
    reserved), and the ⋮ menu carries Set location and the time controller —

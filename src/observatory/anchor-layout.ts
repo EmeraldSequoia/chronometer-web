@@ -72,13 +72,19 @@ export function pickAnchor(aspect: number, thresholds: readonly number[] = SHIP_
 }
 
 /**
- * CC2 chrome-drop footprint: the time-controller's default-config popover (Date
- * tab, astro tab collapsed) measures 200×368 (tp-lower min-width drives W;
- * tp-upper+tp-lower stacked drive H). If the safe rect is narrower OR shorter
- * than this, the controller is unusable, so we drop both chrome bands.
+ * CC2 chrome-drop footprint: the time controller's default-config panel (a
+ * calendar unit selected, body row hidden) measures 264×389 (five 44 px
+ * chips plus gaps and padding drive W; transport, chips, the 56 px pair and
+ * the date inputs stacked drive H — docs/time-controller.md; measured on
+ * build 2.0.150). The panel sits TC_POPOVER_GAP above the footer band
+ * (observatory.html #time-popover), so with the bands kept the safe rect
+ * must hold panel + gap + footer; if it cannot, we drop both bands and the
+ * panel moves down into the freed band (a viewport shorter than the panel
+ * itself scrolls it inside — partials/time-controller.css).
  */
-export const TC_POPOVER_W = 200;
-export const TC_POPOVER_H = 368;
+export const TC_POPOVER_W = 264;
+export const TC_POPOVER_H = 389;
+export const TC_POPOVER_GAP = 6;
 
 // ---------------------------------------------------------------------------
 // Per-anchor tunables — defaults are the §9.4 ship constants. The harness
@@ -971,8 +977,9 @@ export function computeLayout(
     const safeW = Math.max(1, viewW - insetLeft - insetRight);
     const safeH = Math.max(1, viewH - insetTop - insetBottom);
 
-    // 2. CC2 chrome-drop: drop both bands if the controller popover can't fit.
-    const dropChrome = safeW < TC_POPOVER_W || safeH < TC_POPOVER_H;
+    // 2. CC2 chrome-drop: drop both bands if the controller panel, sitting
+    //    above the footer band, can't fit.
+    const dropChrome = safeW < TC_POPOVER_W || safeH < TC_POPOVER_H + TC_POPOVER_GAP + chrome.footerH;
     let headerH = chrome.headerH;
     let footerH = chrome.footerH;
     if (dropChrome) { headerH = 0; footerH = 0; }

@@ -3041,17 +3041,20 @@ async function main() {
         flushTimeState(timeController);
     }
 
+    /**
+     * The page's body for the time controller's rise / set / transit default
+     * (docs/time-controller.md): Venezia's selected planet on single-face
+     * Venezia (kept current by the planet selector below), else none.
+     */
+    let selectedBodyPlanet: number | undefined;
+
     const timeUI = initTimeControls({
         timeController,
         getTimezone: () => locationTimezone,
         getTzDeltaMs: () => tzDeltaMs,
         getLat: () => lat,
         getLon: () => lon,
-        getSelectedBody: () => {
-            // Read from Venezia's currentPlanetNumber env variable
-            const bodyLabel = document.getElementById('tp-body-transit-label');
-            return bodyLabel ? parseInt(bodyLabel.dataset.planet || '1', 10) : undefined;
-        },
+        getSelectedBody: () => selectedBodyPlanet,
         onTimeStep: () => {
             finishAllAnimations();
             resetAllSchedules();
@@ -3332,33 +3335,9 @@ async function main() {
             // Sun=0, Moon=1, Mercury=2, Venus=3, Mars=5, Jupiter=6, Saturn=7, Uranus=8, Neptune=9
             const planetNumberForIdx = [0, 1, 2, 3, 5, 6, 7, 8, 9];
 
-            // --- Body-transit row in astro panel ---
-            // On single-face Venezia, replace Moon rows with body-aware rows
-            const moonRiseRow = document.getElementById('tp-astro-moonrise');
-            const bodyRiseRow = document.getElementById('tp-astro-body-rise');
-            const bodyRiseLabel = document.getElementById('tp-body-rise-label');
-            const moonSetRow = document.getElementById('tp-astro-moonset');
-            const bodySetRow = document.getElementById('tp-astro-body-set');
-            const bodySetLabel = document.getElementById('tp-body-set-label');
-            const moonTransitRow = document.getElementById('tp-astro-moon-transit');
-            const bodyTransitRow = document.getElementById('tp-astro-body-transit');
-            const bodyTransitLabel = document.getElementById('tp-body-transit-label');
-
-            // Swap moon rows for body rows
-            if (moonRiseRow && bodyRiseRow) { moonRiseRow.style.display = 'none'; bodyRiseRow.style.display = ''; }
-            if (moonSetRow && bodySetRow) { moonSetRow.style.display = 'none'; bodySetRow.style.display = ''; }
-            if (moonTransitRow && bodyTransitRow) { moonTransitRow.style.display = 'none'; bodyTransitRow.style.display = ''; }
-
-            // Helper to update all body labels
-            function updateBodyLabels(name: string, planetNum: number) {
-                const numStr = String(planetNum);
-                if (bodyRiseLabel) { bodyRiseLabel.textContent = `${name} Rise`; bodyRiseLabel.dataset.planet = numStr; }
-                if (bodySetLabel) { bodySetLabel.textContent = `${name} Set`; bodySetLabel.dataset.planet = numStr; }
-                if (bodyTransitLabel) { bodyTransitLabel.textContent = `${name} Trans`; bodyTransitLabel.dataset.planet = numStr; }
-            }
-
-            // Set initial body labels
-            updateBodyLabels(planetOrder[selectedIdx].name, planetNumberForIdx[selectedIdx]);
+            // The time controller's rise / set / transit default follows this
+            // body until the user picks one there (getSelectedBody above).
+            selectedBodyPlanet = planetNumberForIdx[selectedIdx];
 
             function selectPlanet(idx: number) {
                 selectedIdx = idx;
@@ -3368,8 +3347,7 @@ async function main() {
                 iconBtns.forEach((b, i) => b.classList.toggle('selected', i === idx));
                 nameLabel!.textContent = p.name;
 
-                // Update body labels in astro panel
-                updateBodyLabels(p.name, planetNumberForIdx[idx]);
+                selectedBodyPlanet = planetNumberForIdx[idx];
 
                 // Persist the body selection (storage in storage mode, URL otherwise).
                 setState({ body: p.param });

@@ -111,8 +111,7 @@
           font-weight: 700;
       }
 
-      /* Popover */
-      /* ---- L-shaped time popover ---- */
+      /* ---- Time controller popover: one panel (docs/time-controller.md) ---- */
       #time-popover {
           position: absolute;
           bottom: 0;
@@ -122,9 +121,8 @@
           flex-direction: column;
           align-items: flex-end;
           background: none;
-          /* sections carry their own bg */
+          /* the panel carries its own bg */
           overflow: visible;
-          /* close btn floats above */
           padding: 0;
           pointer-events: none;
           transition: opacity 0.15s;
@@ -148,18 +146,25 @@
           opacity: 0.25;
       }
 
-      /* Close button: floats above popover top edge */
+      /* The top row: the transport buttons and, at the panel's top-right
+         where a close belongs, the 44 px × (Steve, 2026-09-23 — it was a
+         24 px disc floating above the panel; inside the row it costs no
+         height, so the CC2 footprint is unchanged). */
+      .tp-top-row {
+          display: flex;
+          gap: 4px;
+          align-items: stretch;
+      }
+
       #tp-close {
-          position: absolute;
-          top: -26px;
-          right: 4px;
-          background: rgba(26, 26, 46, 0.85);
-          border: 1px solid #3a3a5e;
-          border-radius: 50%;
+          flex: 0 0 44px;
+          width: 44px;
+          min-height: 44px;
+          background: none;
+          border: 1px solid transparent;
+          border-radius: 8px;
           color: #667;
-          font-size: 14px;
-          width: 24px;
-          height: 24px;
+          font-size: 24px;
           cursor: pointer;
           padding: 0;
           line-height: 1;
@@ -167,56 +172,42 @@
           align-items: center;
           justify-content: center;
           transition: color 0.15s, background 0.15s;
-          z-index: 31;
-          pointer-events: auto;
+          touch-action: manipulation;
       }
 
       #tp-close:hover {
           color: #ccf;
-          background: rgba(50, 50, 80, 0.95);
+          background: #2a2a3e;
+          border-color: #3a3a5e;
       }
 
-      /* Upper section: narrow, right-aligned */
-      #tp-upper {
+      /* The panel. 264 px wide: five 44 px chips plus gaps and padding. */
+      #tp-panel {
           /* No backdrop-filter on this panel — deliberate. A pixel-moving
              filter with content inside it intermittently drops its quad for
              one composited frame, flashing the live screen (see the long
              comment on #info-overlay in observatory.html). This panel is
-             96% opaque, so the blur only ever contributed ~4% of its
-             pixels — it was invisible in an A/B, and not worth the defect.
-             If it is ever wanted back, blur the content behind instead
-             (see body.help-open in the page stylesheets), never with a
-             backdrop-filter on this element. */
-          width: 120px;
-          padding: 10px 10px 6px;
+             96% opaque, so a blur would contribute ~4% of its pixels — it
+             was invisible in an A/B, and not worth the defect. If it is ever
+             wanted back, blur the content behind instead (see body.help-open
+             in the page stylesheets), never with a backdrop-filter here. */
+          width: 264px;
+          box-sizing: border-box;
+          padding: 10px 12px 12px;
           background: rgba(26, 26, 46, 0.96);
           border: 1px solid #3a3a5e;
           border-radius: 14px 0 0 0;
-          border-bottom: none;
           box-shadow: 0 -4px 32px rgba(0, 0, 0, 0.5);
           pointer-events: auto;
-      }
-
-      /* Lower section: full width */
-      #tp-lower {
-          /* No backdrop-filter on this panel — deliberate. A pixel-moving
-             filter with content inside it intermittently drops its quad for
-             one composited frame, flashing the live screen (see the long
-             comment on #info-overlay in observatory.html). This panel is
-             96% opaque, so the blur only ever contributed ~4% of its
-             pixels — it was invisible in an A/B, and not worth the defect.
-             If it is ever wanted back, blur the content behind instead
-             (see body.help-open in the page stylesheets), never with a
-             backdrop-filter on this element. */
-          width: 100%;
-          min-width: 200px;
-          padding: 8px 14px 12px;
-          background: rgba(26, 26, 46, 0.96);
-          border: 1px solid #3a3a5e;
-          border-radius: 14px 0 0 0;
-          border-top: 1px solid #3a3a5e;
-          box-shadow: 0 -4px 32px rgba(0, 0, 0, 0.5);
-          pointer-events: auto;
+          /* Never taller than the viewport (a phone on its side): the panel
+             scrolls inside itself instead, like the ⋮ menu, so the chips at
+             the top stay reachable. 100dvh tracks Safari's toolbar; 100vh
+             is the fallback where dvh is unknown. Pages that place the
+             popover above other chrome subtract that in their own rule. */
+          max-height: calc(100vh - 12px);
+          max-height: calc(100dvh - 12px);
+          overflow-y: auto;
+          overscroll-behavior: contain;
       }
 
       .tp-label {
@@ -224,28 +215,25 @@
           text-transform: uppercase;
           color: #667;
           letter-spacing: 0.5px;
-          margin-bottom: 5px;
+          margin: 8px 0 5px;
           text-align: center;
-      }
-
-      #tp-upper .tp-label {
-          margin-top: 8px;
       }
 
       .tp-btn {
           background: #2a2a3e;
           border: 1px solid #3a3a5e;
-          border-radius: 6px;
+          border-radius: 8px;
           color: #99b;
-          font-size: 12px;
-          padding: 5px 8px;
+          font-size: 13px;
+          min-height: 44px;
+          padding: 4px 8px;
           cursor: pointer;
           transition: background 0.15s, color 0.15s, border-color 0.15s;
           white-space: nowrap;
-          min-width: 32px;
           text-align: center;
           user-select: none;
           -webkit-user-select: none;
+          touch-action: manipulation;
       }
 
       .tp-btn:hover {
@@ -259,52 +247,144 @@
           color: #8af;
       }
 
-      /* Step buttons: 2 per row, fill equally */
-      .tp-step-row {
-          display: flex;
-          gap: 3px;
-          margin-bottom: 3px;
-      }
-
-      .tp-step-row .tp-btn {
-          flex: 1;
-          font-size: 11px;
-          padding: 4px 2px;
-      }
-
       .tp-btn.holding {
           background: #556;
           border-color: #8af;
           color: #ccf;
       }
 
-      /* Transport: flex column with sub-rows */
+      /* Transport: Now (when overridden), ‖ while running, ◀ ▶ when stopped;
+         fills the top row left of the ×. */
       .tp-transport {
+          flex: 1 1 auto;
           display: flex;
-          flex-direction: column;
-          gap: 3px;
-      }
-
-      .tp-transport-row {
-          display: flex;
-          gap: 3px;
-          justify-content: center;
+          gap: 4px;
       }
 
       .tp-transport .tp-btn {
-          font-size: 13px;
-          padding: 4px 10px;
           flex: 1;
+          font-size: 15px;
       }
 
       #tp-rate-label {
           font-size: 11px;
           color: #8af;
           text-align: center;
-          margin-top: 4px;
-          margin-bottom: 2px;
+          margin-top: 6px;
       }
 
+      /* Unit chips: five per row, 44 px targets. The selected chip is the
+         unit the ◀ ▶ pair steps by; astro chips are tinted so the group reads
+         even where the rows split it (sec sits with them). */
+      #tp-units {
+          display: grid;
+          grid-template-columns: repeat(5, 1fr);
+          gap: 4px;
+          margin-bottom: 8px;
+      }
+
+      .tp-chip {
+          background: #222238;
+          border: 1px solid #3a3a5e;
+          border-radius: 8px;
+          color: #778;
+          font-size: 12px;
+          min-height: 44px;
+          padding: 0 2px;
+          cursor: pointer;
+          transition: background 0.15s, color 0.15s, border-color 0.15s;
+          white-space: nowrap;
+          overflow: hidden;
+          text-align: center;
+          user-select: none;
+          -webkit-user-select: none;
+          touch-action: manipulation;
+      }
+
+      .tp-chip:hover {
+          color: #99b;
+          background: #2a2a44;
+      }
+
+      .tp-chip-astro {
+          background: #1e2536;
+          border-color: #34405c;
+          color: #7a8aa8;
+      }
+
+      .tp-chip-astro:hover {
+          background: #263049;
+          color: #aabbdd;
+      }
+
+      .tp-chip.active,
+      .tp-chip-astro.active {
+          background: #2a2a3e;
+          border-color: #8af;
+          color: #8af;
+      }
+
+      /* Body stepper (rise / set / transit only): ‹ Name › */
+      #tp-body-row {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          margin-bottom: 8px;
+      }
+
+      #tp-body-row[hidden] {
+          display: none;
+      }
+
+      .tp-body-btn {
+          flex: 0 0 44px;
+          font-size: 22px;
+          line-height: 1;
+          padding: 0;
+      }
+
+      #tp-body-name {
+          flex: 1;
+          text-align: center;
+          font-size: 15px;
+          color: #8af;
+          user-select: none;
+          -webkit-user-select: none;
+      }
+
+      /* The pair: two 56 px buttons around the selected unit's name. */
+      .tp-step-pair {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          margin-bottom: 4px;
+      }
+
+      .tp-step-btn {
+          flex: 0 0 56px;
+          min-height: 56px;
+          font-size: 20px;
+          padding: 0;
+      }
+
+      #tp-step-label {
+          flex: 1;
+          text-align: center;
+          font-size: 15px;
+          font-weight: 600;
+          color: #ccd;
+          user-select: none;
+          -webkit-user-select: none;
+      }
+
+      .tp-btn.flash-fail {
+          background: #432;
+          border-color: #754;
+          color: #a86;
+          transition: none;
+      }
+
+      /* Date & time inputs */
       .tp-date-inputs {
           display: flex;
           gap: 4px;
@@ -312,13 +392,16 @@
       }
 
       .tp-date-inputs input {
-          width: 52px;
+          flex: 1 1 0;
+          min-width: 0;
+          width: 0;
+          min-height: 44px;
           padding: 4px 5px;
           border: 1px solid #444;
-          border-radius: 4px;
+          border-radius: 6px;
           background: #2a2a3e;
           color: #ddd;
-          font-size: 13px;
+          font-size: 14px;
           font-family: monospace;
           text-align: center;
           -moz-appearance: textfield;
@@ -330,24 +413,20 @@
           margin: 0;
       }
 
-      .tp-date-inputs input:first-child {
-          width: 58px;
-      }
-
       /* BCE toggle */
       #tp-bce {
           background: #2a2a3e;
           border: 1px solid #3a3a5e;
-          border-radius: 4px;
+          border-radius: 6px;
           color: #99b;
-          font-size: 10px;
+          font-size: 11px;
+          min-height: 44px;
           padding: 4px 5px;
           cursor: pointer;
           transition: background 0.15s, color 0.15s, border-color 0.15s;
           white-space: nowrap;
           line-height: 1;
-          flex-shrink: 0;
-          width: 58px;
+          flex: 0 0 64px;
       }
 
       #tp-bce:hover {
@@ -359,103 +438,3 @@
           border-color: #a44;
           color: #f44;
       }
-
-      /* YYYY */
-
-      /* ============= Tab strip for lower panel ============= */
-
-      #tp-tabs {
-          display: flex;
-          gap: 0;
-          margin-bottom: 8px;
-      }
-
-      .tp-tab {
-          flex: 1;
-          background: #222238;
-          border: 1px solid #3a3a5e;
-          color: #667;
-          font-size: 11px;
-          padding: 5px 8px;
-          cursor: pointer;
-          transition: background 0.15s, color 0.15s, border-color 0.15s;
-          text-align: center;
-          user-select: none;
-          -webkit-user-select: none;
-      }
-
-      .tp-tab:first-child {
-          border-radius: 6px 0 0 6px;
-          border-right: none;
-      }
-
-      .tp-tab:last-child {
-          border-radius: 0 6px 6px 0;
-      }
-
-      .tp-tab.active {
-          background: #2a2a3e;
-          border-color: #8af;
-          color: #8af;
-      }
-
-      .tp-tab:hover:not(.active) {
-          color: #99b;
-          background: #2a2a44;
-      }
-
-      .tp-tab-pane {
-          display: grid;
-          grid-template-rows: 1fr;
-          transition: grid-template-rows 0.3s ease, opacity 0.25s ease;
-          opacity: 1;
-      }
-
-      .tp-tab-pane>* {
-          overflow: hidden;
-          /* children clip during collapse */
-      }
-
-      .tp-tab-pane.tp-pane-hidden {
-          grid-template-rows: 0fr;
-          opacity: 0;
-          pointer-events: none;
-      }
-
-      /* ============= Astro stepper rows ============= */
-
-      .tp-astro-row {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          margin-bottom: 3px;
-      }
-
-      .tp-astro-btn {
-          flex: 0 0 auto;
-          font-size: 11px;
-          padding: 4px 8px;
-          min-width: 28px;
-      }
-
-      .tp-astro-label {
-          flex: 1;
-          font-size: 12px;
-          color: #99b;
-          text-align: center;
-          user-select: none;
-          -webkit-user-select: none;
-      }
-
-      /* Highlighted body name on Venezia */
-      .tp-body-label {
-          color: #8af;
-      }
-
-      .tp-astro-btn.flash-fail {
-          background: #432;
-          border-color: #754;
-          color: #a86;
-          transition: none;
-      }
-

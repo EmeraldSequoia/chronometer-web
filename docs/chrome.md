@@ -69,13 +69,16 @@ the next full-set probe. The Observatory's buttons are flex items, so it hides
 them with `display` and measures the full-set width once with both classes off.
 
 **Observatory chrome-drop (CC2).** When the safe rect cannot fit the
-time-controller popover (200 × 368) the layout drops the header and footer
+time-controller panel (264 × 389, [time-controller.md](time-controller.md)) the layout drops the header and footer
 bands. The footer is hidden, but the header now stays as a floating
 `[⋮] [fullscreen]` over the dial's empty corner (the layout reserves no band for
 it; presses fall through the transparent strip except on the two buttons, the
 same pattern fullscreen uses). The ⋮ menu carries Set location and the time
-controller, so the dropped footer's functions stay reachable. Before this, a
-phone in landscape with a home-indicator inset could lose every control.
+controller, so the dropped footer's functions stay reachable — the footer
+*row* itself stays displayed (a transparent strip) because the controller's
+popover lives inside it; hiding the row had hidden the popover with it until
+2026-09-23. Before this, a phone in landscape with a home-indicator inset
+could lose every control.
 
 **The menu** (`src/shared/overflow-menu.ts`; markup and appearance in
 `src/partials/overflow-menu.{html,css}`, injected by build.sh as

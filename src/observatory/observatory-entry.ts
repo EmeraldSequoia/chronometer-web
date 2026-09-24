@@ -1608,6 +1608,9 @@ function init(): void {
         getTzDeltaMs: () => tzDeltaMs,
         getLat: () => lat,
         getLon: () => lon,
+        // The dial's body is the controller's rise / set / transit default
+        // until the user picks one there (docs/time-controller.md).
+        getSelectedBody: () => selectedPlanet,
         ensureSchedulerRunning: () => {
             // The loop idles when stopped + settled; restart it on transport changes.
             scheduleFrame();

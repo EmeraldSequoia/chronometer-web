@@ -1011,56 +1011,63 @@
 
       <!-- ================================================================ -->
       <details class="help-section" id="astro-stepping">
-        <summary>Astronomical Event Stepping</summary>
+        <summary>The Time Controller</summary>
         <div class="section-body">
           <!-- ================================================================ -->
 
           <h3>Overview</h3>
           <p>
-            The time controller popover has two tabs at the bottom:
-            <b>Date</b> and <b>Astro</b>. The Date tab allows you to set a
-            specific date and time. The Astro tab allows you to jump forward or
-            backward to the next occurrence of specific astronomical events.
+            The <b>⏱ Show time controller</b> button (or the <kbd>t</kbd> key)
+            opens a panel for moving the displayed time. Choose <b>what a step
+            means</b> with the row of unit chips — a calendar unit (years,
+            months, days, hours, minutes, seconds) or an astronomical event
+            (rise, set, transit, or the Moon's phase) — then use the one big
+            <b>◀ ▶</b> pair beneath them. The label between the two buttons
+            always names the chosen unit ("1 day", "Sunrise", "Jupiter
+            transit"), so you can always see what the next tap will do.
+          </p>
+          <p>
+            <b>Tap</b> ◀ or ▶ to step once. <b>Hold</b> either button to scrub:
+            after a moment the clock runs at ten units per second in that
+            direction until you let go, and the panel fades so you can watch
+            the display underneath. Scrubbing works for the calendar units;
+            the astronomical events are tap-only, since each jump is a search.
+          </p>
+          <p>
+            The transport row at the top stops (‖) or restarts (◀ ▶) the
+            clock, and <b>Now</b> returns to the present. Below the pair you
+            can also type a date and time directly (with a CE / BCE toggle).
           </p>
 
-          <h3>Available events</h3>
+          <h3>Astronomical events</h3>
           <p>
-            The Astro tab provides forward (▶) and backward (◀) buttons for the
-            following events:
+            The four tinted chips jump to the next (▶) or previous (◀)
+            occurrence of an event at your location:
           </p>
           <ul>
             <li>
-              <b>Sunrise</b> — Jump to the next or previous sunrise at your
-              location
-            </li>
-            <li><b>Sunset</b> — Jump to the next or previous sunset</li>
-            <li><b>Moonrise</b> — Jump to the next or previous moonrise</li>
-            <li><b>Moonset</b> — Jump to the next or previous moonset</li>
-            <li>
-              <b>Moon Phase</b> — Jump to the next or previous lunar quarter
-              phase (new moon, first quarter, full moon, or third quarter)
+              <b>rise</b> and <b>set</b> — the chosen body rising or setting
             </li>
             <li>
-              <b>Sun Transit</b> — Jump to the next or previous solar noon (when
-              the Sun crosses the local meridian)
+              <b>transit</b> — the chosen body crossing the local meridian
+              (for the Sun, solar noon)
             </li>
             <li>
-              <b>Moon Transit</b> — Jump to the next or previous lunar transit
-            </li>
-            <li class="chrono-only">
-              <b>Planetary events</b> — (only on Venezia) see below
+              <b>phase</b> — the Moon's next quarter (new moon, first quarter,
+              full moon, or third quarter)
             </li>
           </ul>
-
-          <h3 class="chrono-only">Venezia body selection</h3>
-          <p class="chrono-only">
-            When viewing the Venezia watch face in single-face mode, the
-            Moonrise, Moonset, and Moon Transit rows are replaced with
-            body-specific versions that follow the currently selected planet in
-            Venezia's planet selector. For example, if Jupiter is selected,
-            these rows become "Jupiter Rise", "Jupiter Set", and "Jupiter Xit".
-            The Moon Phase row always remains lunar, since other planets do not
-            have the same quarter-phase cycle as the Moon.
+          <p>
+            For rise, set and transit a <b>‹ Body ›</b> row appears above the
+            pair: step it through the Sun, Moon, Mercury, Venus, Mars, Jupiter,
+            Saturn, Uranus and Neptune. The body starts as whatever the page
+            is showing<span class="chrono-only"> — the planet selected on the
+            Venezia watch face</span
+            ><span class="obs-only"> — the body on the altitude and azimuth
+            dials</span
+            > — or the Moon, and follows it until you pick one here; from then
+            on it is your own choice and does not change what the page shows.
+            Phase is always the Moon's.
           </p>
 
           <h3>How it works</h3>
@@ -1070,19 +1077,19 @@
             <span class="chrono-only">The watch hands</span
             ><span class="obs-only">The hands and dials</span> animate smoothly
             to their new positions. You can tap repeatedly to step through
-            successive events — for example, tapping ▶ on Sunrise multiple times
-            will step through successive sunrises.
+            successive events — for example, tapping ▶ with <b>rise</b> chosen
+            steps through successive sunrises.
           </p>
           <p>
-            If no event can be found (for example, trying to find a sunrise at
-            an extreme polar latitude during polar night), the button will flash
-            briefly to indicate that no result was found.
+            If no event can be found (for example, a sunrise at an extreme
+            polar latitude during polar night, or a body that never rises at
+            your location), the button flashes briefly to say so.
           </p>
           <p>
-            The Astro tab selection is saved on this device<span
-              class="chrono-only"
-              >, so it persists when navigating between watch face pages</span
-            >.
+            The chosen unit and body are saved on this device, separately for
+            each app<span class="chrono-only">, so they persist when navigating
+            between watch face pages</span
+            >, and they are included in shared links.
           </p>
         </div>
       </details>

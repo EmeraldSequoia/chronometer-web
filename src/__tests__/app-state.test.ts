@@ -35,11 +35,13 @@ describe('namespaceOf', () => {
         expect(namespaceOf('onoon', 'inspector')).toBe('observatory');
     });
 
-    test('tp is per-app', () => {
-        expect(namespaceOf('tp', 'chronometer')).toBe('chronometer');
-        expect(namespaceOf('tp', 'observatory')).toBe('observatory');
-        expect(namespaceOf('tp', 'inspector')).toBe('inspector');
-        expect(namespaceOf('tp', 'index')).toBeNull();
+    test('the time controller\'s unit and body are per-app', () => {
+        for (const f of ['tu', 'tb'] as const) {
+            expect(namespaceOf(f, 'chronometer')).toBe('chronometer');
+            expect(namespaceOf(f, 'observatory')).toBe('observatory');
+            expect(namespaceOf(f, 'inspector')).toBe('inspector');
+            expect(namespaceOf(f, 'index')).toBeNull();
+        }
     });
 
     test('URL-only fields are never persisted', () => {
@@ -57,8 +59,10 @@ describe('isDefaultValue', () => {
     test('field-specific defaults', () => {
         expect(isDefaultValue('dir', 1)).toBe(true);
         expect(isDefaultValue('dir', -1)).toBe(false);
-        expect(isDefaultValue('tp', 'd')).toBe(true);
-        expect(isDefaultValue('tp', 'a')).toBe(false);
+        expect(isDefaultValue('tu', 'day')).toBe(true);
+        expect(isDefaultValue('tu', 'hr')).toBe(false);
+        expect(isDefaultValue('tb', null)).toBe(true);
+        expect(isDefaultValue('tb', 'mars')).toBe(false);
         expect(isDefaultValue('bloc', false)).toBe(true);
         expect(isDefaultValue('bloc', true)).toBe(false);
         expect(isDefaultValue('lsrc', null)).toBe(true);
@@ -84,7 +88,7 @@ describe('smoke test', () => {
 describe('LocalStorageBackend', () => {
     test('write routes fields to the correct namespaces', () => {
         const be = new LocalStorageBackend('chronometer');
-        be.write({ lat: 37.7, lon: -122.4, city: 'San Francisco', kyhand: '1', tp: 'a' });
+        be.write({ lat: 37.7, lon: -122.4, city: 'San Francisco', kyhand: '1', tu: 'hr', tb: 'mars' });
 
         const shared = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + 'shared')!);
         expect(shared.lat).toBe(37.7);
@@ -94,7 +98,8 @@ describe('LocalStorageBackend', () => {
 
         const chrono = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX + 'chronometer')!);
         expect(chrono.kyhand).toBe('1');
-        expect(chrono.tp).toBe('a');
+        expect(chrono.tu).toBe('hr');
+        expect(chrono.tb).toBe('mars');
     });
 
     test('picks persists to the chronometer namespace', () => {
@@ -117,7 +122,8 @@ describe('LocalStorageBackend', () => {
         expect(state.onoon).toBe(true);
         // Untouched fields keep their defaults.
         expect(state.dir).toBe(1);
-        expect(state.tp).toBe('d');
+        expect(state.tu).toBe('day');
+        expect(state.tb).toBeNull();
         expect(state.city).toBeNull();
     });
 
@@ -223,14 +229,15 @@ describe('buildShareUrl', () => {
 
     test('includes bloc and app config, excludes fps/embed/tc', () => {
         const u = new URL(buildShareUrl({
-            ...defaults, bloc: true, op: 3, onoon: true, tp: 'a', picks: 'bbmk',
+            ...defaults, bloc: true, op: 3, onoon: true, tu: 'rise', tb: 'saturn', picks: 'bbmk',
             kyhand: '1', body: 'jupiter', vnoon: true, fps: true, embed: true, tc: true,
         }, { baseUrl: base }));
         expect(u.searchParams.get('bloc')).toBe('1');
         expect(u.searchParams.has('lsrc')).toBe(false);
         expect(u.searchParams.get('op')).toBe('3');
         expect(u.searchParams.get('onoon')).toBe('1');
-        expect(u.searchParams.get('tp')).toBe('a');
+        expect(u.searchParams.get('tu')).toBe('rise');
+        expect(u.searchParams.get('tb')).toBe('saturn');
         expect(u.searchParams.get('picks')).toBe('bbmk');
         expect(u.searchParams.get('kyhand')).toBe('1');
         expect(u.searchParams.get('body')).toBe('jupiter');

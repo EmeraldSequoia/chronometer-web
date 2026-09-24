@@ -325,7 +325,7 @@ The `Updater<K extends string = string>` is **name-keyed**: `add(v)` registers a
 |-------|-----------|---------|
 | `timeController` | yes | the shared `TimeController` the UI drives |
 | `getTimezone` / `getTzDeltaMs` / `getLat` / `getLon` | yes | read-only accessors for the UI's display + astro stepping |
-| `getSelectedBody` | optional | body selector for astro-step (rise/set/transit) |
+| `getSelectedBody` | optional | the *page's* body (an `ECPlanetNumber`): the default for the controller's rise / set / transit body until the user picks one — see [time-controller.md](time-controller.md#the-body) |
 | `updater` | optional | anything with `reset()`; the UI calls it on **every** transition. Pass the client's `Updater` to get automatic schedule re-arming. |
 | `ensureSchedulerRunning` | yes | restart the client's (app-owned) render loop after a transition; the rAF loop differs per app, so there is no generic default |
 | `onTimeStep` / `onScrubStart` / `onScrubEnd` / `onNowClicked` / `onTransportChange` | optional | **notifications for custom logic only** — omit when the client has none |

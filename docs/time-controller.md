@@ -1,0 +1,131 @@
+# Time Controller
+
+The time controller is the shared transport for all three apps: the
+`#time-bar` under the display (date, offset, rate, Now) and the `#time-popover`
+panel it opens (`⏱ Show time controller`, hotkey `t`). This doc covers the
+panel's design and wiring; the time model it drives is `TimeController` in
+`src/shared/time-controller.ts` ([animation.md](animation.md#time-controls-contract)
+has the `initTimeControls` contract). It is the implementation record of
+Part 4 of
+[planning/2026-09-14-user-options-panel.md](../planning/2026-09-14-user-options-panel.md)
+(plan: [planning/2026-09-23-time-controller-redesign.md](../planning/2026-09-23-time-controller-redesign.md)).
+
+## The panel: unit first, then one pair
+
+```
+ [ Now ▶ ] [ ‖ ]            [×]  transport — Now when time is overridden; ‖ running, ◀ ▶ stopped; close
+ 10 day/s ▶                       the rate / status label
+ STEP BY
+ [yr ] [mo ] [day] [hr ] [min]    unit chips (44 px); one is selected
+ [sec] [rise][set][transit][phase]   astro chips are tinted
+ [‹]        Jupiter          [›]  body stepper — rise / set / transit only
+ [ ◀ ]    Jupiter rise      [ ▶ ] the pair (56 px): tap = one step, hold = scrub
+ SET DATE & TIME
+ [YYYY] [MM] [DD]  /  [CE] [HH] [mm]
+```
+
+Markup: `src/partials/time-controller.html` (injected as `{{TIME_CONTROLLER}}`
+by build.sh into the face pages, Observatory and the Inspector); appearance:
+`src/partials/time-controller.css` (`{{TIME_CSS}}`); wiring:
+`src/shared/time-controls-ui.ts`.
+
+**Why unit-first.** The previous panel had five ◀ 1y ▶ … ◀ 1mi ▶ rows of
+22 px buttons and a Date / Astro tab pair with seven event rows; nothing met
+a touch-target guideline, there was no seconds unit, and rise / set /
+transit applied to the Sun and Moon only. Choosing the unit once and then
+using one big pair gives 44 px targets everywhere in the same footprint,
+and it makes the unit *visible*: the pair's centre label always names it
+("1 day", "Sunrise", "Jupiter transit"), so the mode is never hidden, and the
+time bar keeps showing the offset after every step.
+
+### Units
+
+| Chip | `tu` | Pair label | Tap | Hold |
+|------|------|------------|-----|------|
+| yr, mo, day, hr, min, sec | `yr mo day hr min sec` | 1 year … 1 second | `TimeController.step(unit)` (stops the clock first) | scrub at 10 units / s (`RATE_OPTIONS`) |
+| rise, set, transit | `rise set transit` | *Body* rise / set / transit (Sunrise, Moonset, Sun transit …) | `computeAstroTarget('body-rise' …)` for the chosen body, then `setTime` | tap only — each jump is a rise / set / transit search |
+| phase | `phase` | Moon phase | `computeAstroTarget('moonphase')` | tap only |
+
+Row 1 is the five largest calendar units; row 2 is seconds and the four
+astro chips, tinted so the group boundary reads even though the rows split
+it. `UNITS` in time-controls-ui.ts is the table. The default is a day.
+
+Hold-to-scrub is unchanged in mechanism: a press steps once, and after
+`HOLD_DELAY_MS` (300 ms) the clock runs at the unit's rate in the pressed
+direction until release, which stops it; the popover ghosts to 25 % while
+held (`.tp-hidden`) and every actuating tap ghosts it briefly (`.tp-ghost`,
+[planning/2026-07-17-time-controller-scrub-invisibility.md](../planning/2026-07-17-time-controller-scrub-invisibility.md)).
+Chip and body taps do not ghost.
+
+### The body
+
+Rise / set / transit apply to any of nine bodies (Sun, Moon, Mercury, Venus,
+Mars, Jupiter, Saturn, Uranus, Neptune — `CONTROLLER_BODIES`, Venezia's
+order and spelling). The ‹ › row appears for those three units only; *phase*
+is Moon-only and hides it.
+
+The controller's body is **decoupled from the page's** (parent plan §7.3):
+picking Mars here leaves Venezia showing Jupiter, and vice versa. It
+*defaults* to the page's body — `getSelectedBody` in the `initTimeControls`
+config: Venezia's selected planet on single-face Venezia, the Observatory's
+dial planet; the Inspector passes nothing — and follows it while the user
+has not chosen; the first ‹ › tap stores `tb` and the two are independent
+from then on. Without a page body and without `tb` the body is the Moon.
+The search itself is `computeAstroTarget` with the `body-*` event types and
+the body's `ECPlanetNumber`; a body that never rises or sets at the
+location (a polar day, a circumpolar planet) returns null and the pressed
+button flashes (`.flash-fail`).
+
+### Persistence
+
+`tu` (the chip) and `tb` (the body, or null = follow the page) live in
+`UrlState` and are routed **per app** by app-state (`namespaceOf`: the
+running app's namespace; nothing on the index / pick pages), like the
+retired Date / Astro tab `tp` was. Defaults are omitted from storage and
+URLs; both are shareable (`buildShareUrl` writes `tu=rise&tb=saturn`), so a
+shared link opens the controller the way the sender had it. Legacy `?tp=a`
+links are cleaned from the URL on adoption and otherwise ignored.
+
+### Transport and date
+
+The transport is one row: `Now ▶` whenever time is overridden, then `‖`
+while running or `◀` `▶` when stopped (`renderTransport`, rebuilt only when
+that state changes so the buttons keep their listeners), with the 44 px
+close × as the row's last cell. The transport buttons act on **press**
+(`pointerdown`), like the step pair: a stop lands the instant the finger
+touches rather than on release. (The time bar's Now and the × still act on
+click.) The date inputs are
+always present under the pair (no tab): year / month / day and CE-BCE /
+hour / minute, applied on change through the hybrid calendar
+([calendar.md](calendar.md#time-bar-display)).
+
+## Footprint and placement
+
+The panel is one 264 px column (five 44 px chips plus gaps and padding),
+389 px tall in the default configuration (a calendar unit, body row hidden;
+433 with the body row). That default is the Observatory's CC2 chrome-drop
+footprint, `TC_POPOVER_W / H` in `src/observatory/anchor-layout.ts`
+([observatory.md](observatory.md)): the panel sits `TC_POPOVER_GAP` (6 px)
+above the footer band, so the bands are kept only while the safe rect holds
+panel + gap + footer; otherwise both bands drop, the ⋮ menu carries the
+controls, and the panel moves down into the freed band
+(`body.obs-chrome-dropped #time-popover`). A viewport shorter than the panel
+itself (a phone on its side) does not cut it off: `#tp-panel` is capped at
+the visible height (`100dvh` less its offsets, `100vh` where dvh is
+unknown) and scrolls inside itself, like the ⋮ menu, so the chips at the top
+stay reachable. Each page positions `#time-popover` itself (bottom-right of
+the viewport on the face pages, above the footer row on the Observatory,
+8 px in on the Inspector) and sets the cap's offsets in its own rule; it is a
+pure overlay everywhere — no layout participates
+([planning/2026-07-17-time-controller-cleanup.md](../planning/2026-07-17-time-controller-cleanup.md)).
+
+## Files
+
+| File | Role |
+|------|------|
+| `src/partials/time-controller.html`, `.css` | markup and appearance |
+| `src/shared/time-controls-ui.ts` | `initTimeControls`: units, the pair, hold-to-scrub, ghosting, the body, transport, date inputs; `UNITS`, `CONTROLLER_BODIES`, `astroStepLabel` |
+| `src/shared/time-controller.ts` | the time model: 1× / offset / stopped / quantized rates |
+| `src/shared/astro-stepper.ts` | rise / set / transit / phase searches (`computeAstroTarget`) |
+| `src/shared/url-state.ts`, `app-state.ts` | `tu` / `tb` |
+| tests | `src/__tests__/time-controls-units.test.ts`, `time-controls-ghost.test.ts`, `scrub-direction-snap.test.ts`, `astro-boundary.test.ts` |

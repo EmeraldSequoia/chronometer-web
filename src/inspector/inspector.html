@@ -723,6 +723,11 @@ overscroll-behavior-y: contain;
           transform: none;
           z-index: 10000;
       }
+      /* 8 px above the viewport bottom: the panel's own scroll cap allows for it. */
+      #tp-panel {
+          max-height: calc(100vh - 20px);
+          max-height: calc(100dvh - 20px);
+      }
 
       /* ── Location dialog injection ─────────────────── */
       {{LOCATION_CSS}}

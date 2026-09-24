@@ -1,8 +1,11 @@
 # Plan: a user options panel — or as little of one as we can get away with
 
-**Status**: revision 8 (2026-09-22) — Parts 1, 2, 3 and 7 done; **next:
-Part 4 (time controller), 5 (Observatory body chevrons) or 6 (magnifier
-gating)**, all independent. Part 1
+**Status**: revision 9 (2026-09-23) — Parts 1, 2, 3, 4 and 7 done; **next:
+Part 5 (Observatory body chevrons) or 6 (magnifier gating)**, independent.
+Part 4 (the time controller: unit chips, one ◀ ▶ pair, any body) is
+[2026-09-23-time-controller-redesign.md](2026-09-23-time-controller-redesign.md)
+(build 2.0.150, awaiting Steve's native review; living description
+[docs/time-controller.md](../docs/time-controller.md)). Part 1
 ([2026-09-17-chrome-targets-and-overflow-menu.md](2026-09-17-chrome-targets-and-overflow-menu.md)),
 including the outcome of Steve's in-app review (desktop fine at 44 px; phones
 always collapse to the ⋮ menu); Part 2
@@ -589,7 +592,7 @@ and the share-link equality logic untouched.
 | 1 | 44 px targets everywhere first (judge in situ; pointer-type sizing as fallback; glyphs unchanged); shared ⋮ menu component and the collapse rule (latched engine signal); Observatory chrome-drop → collapse instead of none | — | M — **done 2026-09-17**, [plan](2026-09-17-chrome-targets-and-overflow-menu.md) |
 | 2 | Steady-state 60 fps pacer in all three loops; honour `prefers-reduced-motion` | — | S–M — **done 2026-09-22**, [plan](2026-09-22-steady-state-frame-pacer.md) |
 | 3 | `prefs.ts`; Settings dialog + ⚙ button (and its ⋮ row); Got-it toast; Keep screen awake; Forget settings; noon-on-top moved | 1 (menu, collapse rule) | M — **done 2026-09-22** (with 7), [plan](2026-09-22-settings-dialog-and-prefs.md) |
-| 4 | Time-controller redesign: unit-first, any-body astro, 44 px targets; CC2 threshold re-derived | 1 (sizing conventions) | L |
+| 4 | Time-controller redesign: unit-first, any-body astro, 44 px targets; CC2 threshold re-derived | 1 (sizing conventions) | L — **done 2026-09-23**, [plan](2026-09-23-time-controller-redesign.md) |
 | 5 | Observatory ‹ Body › chevrons (treatment c), 44 px half-dial targets, directional label slide on change, help line; (`?cycle=N` only if a kiosk use ever exists) | — | S |
 | 6 | Magnifier speed gating | — | S |
 | 7 | Low-power toggle (decided); cap value tuned by measurement | 2, 3 | S — **done 2026-09-22** inside Part 3 (`LOW_POWER_FPS` = 10, to tune) |

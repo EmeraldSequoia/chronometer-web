@@ -104,7 +104,11 @@
          strip except on those two buttons — the same pattern fullscreen uses
          below. The ⋮ menu carries Location and the time controller, so the
          dropped footer's functions stay reachable (docs/chrome.md). */
-      body.obs-chrome-dropped #obs-footer-row,
+      /* The footer row itself stays displayed (it is a transparent,
+         pointer-events: none strip): the time-controller popover lives
+         inside it, and hiding the row hid the popover too — the ⋮ menu's
+         "Show time controller" and the `t` key opened nothing in the
+         dropped state (found 2026-09-23 re-deriving the CC2 footprint). */
       body.obs-chrome-dropped #time-bar,
       body.obs-chrome-dropped #observatory-controls {
           display: none !important;
@@ -174,11 +178,13 @@
       body.is-fullscreen #obs-header-actions #info-btn,
       body.is-fullscreen #obs-header-actions #settings-btn,
       body.is-fullscreen #obs-header-actions #share-btn,
-      body.is-fullscreen #obs-footer-row,
       body.is-fullscreen #time-bar,
       body.is-fullscreen #observatory-controls {
           display: none !important;
       }
+      /* (#obs-footer-row stays displayed for the same reason as in the
+         dropped state above: the time-controller popover is inside it and
+         must stay reachable by hotkey in fullscreen.) */
 
       /* Location controls — right part of the bottom chrome row. Positioning
          and z-index come from the #obs-footer-row flex parent. */
@@ -723,6 +729,25 @@ overscroll-behavior-y: contain;
           bottom: calc(var(--obs-footer-h) + 6px + env(safe-area-inset-bottom));
           right: calc(12px + env(safe-area-inset-right));
           z-index: 20;
+      }
+      /* The panel above the footer band must fit the viewport; beyond that it
+         scrolls inside itself (see #tp-panel in the shared time-controller
+         CSS). The 6 px is TC_POPOVER_GAP in anchor-layout.ts, which sizes
+         the CC2 chrome-drop rule the same way. */
+      #tp-panel {
+          max-height: calc(100vh - var(--obs-footer-h) - 12px - env(safe-area-inset-bottom));
+          max-height: calc(100dvh - var(--obs-footer-h) - 12px - env(safe-area-inset-bottom));
+      }
+      /* CC2 dropped the bands, or fullscreen hid them: the panel takes the
+         freed footer band. */
+      body.obs-chrome-dropped #time-popover,
+      body.is-fullscreen #time-popover {
+          bottom: calc(6px + env(safe-area-inset-bottom));
+      }
+      body.obs-chrome-dropped #tp-panel,
+      body.is-fullscreen #tp-panel {
+          max-height: calc(100vh - 12px - env(safe-area-inset-bottom));
+          max-height: calc(100dvh - 12px - env(safe-area-inset-bottom));
       }
     </style>
   </head>

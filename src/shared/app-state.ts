@@ -68,8 +68,8 @@ const URL_ONLY_FIELDS: ReadonlySet<keyof UrlState> = new Set([
 
 /**
  * Resolve the storage namespace for a field. App-specific fields route to a
- * fixed app namespace except `tp` (the time-panel tab), which is per-app and
- * therefore routes to whichever app is currently running.
+ * fixed app namespace except the time controller's `tu` / `tb` (step unit and
+ * body), which are per-app and therefore route to whichever app is running.
  *
  * Returns null for URL-only fields (which are never persisted).
  */
@@ -86,8 +86,9 @@ function namespaceOf(field: keyof UrlState, app: AppName): Namespace | null {
         case 'op':
         case 'onoon':
             return 'observatory';
-        case 'tp':
-            // Per-app: chronometer/observatory/inspector each keep their own tab.
+        case 'tu':
+        case 'tb':
+            // Per-app: chronometer/observatory/inspector each keep their own unit and body.
             return (app === 'index' || app === 'pick') ? null : app;
         default:
             return null;
@@ -101,7 +102,7 @@ function namespaceOf(field: keyof UrlState, app: AppName): Namespace | null {
 function defaultState(): UrlState {
     return {
         lat: null, lon: null, city: null, bloc: false, lsrc: null, tc: false,
-        t: null, off: null, dir: 1, tz: null, picks: null, tp: 'd',
+        t: null, off: null, dir: 1, tz: null, picks: null, tu: 'day', tb: null,
         embed: false, fps: false, kyhand: null, kmode: null, op: null, onoon: false,
         body: null, vnoon: false,
     };
@@ -116,7 +117,7 @@ function isDefaultValue(field: keyof UrlState, value: unknown): boolean {
     if (value === null || value === undefined) return true;
     switch (field) {
         case 'dir': return value === 1;
-        case 'tp': return value === 'd';
+        case 'tu': return value === 'day';
         case 'bloc':
         case 'tc':
         case 'embed':
@@ -306,7 +307,7 @@ const TIME_FIELDS: ReadonlySet<keyof UrlState> = new Set(['t', 'off', 'dir']);
  */
 const SHAREABLE_FIELDS: readonly (keyof UrlState)[] = [
     'lat', 'lon', 'city', 'tz', 'bloc', 'lsrc', 't', 'off', 'dir',
-    'picks', 'kyhand', 'kmode', 'op', 'onoon', 'body', 'vnoon', 'tp',
+    'picks', 'kyhand', 'kmode', 'op', 'onoon', 'body', 'vnoon', 'tu', 'tb',
 ];
 
 /**
@@ -317,11 +318,15 @@ const SHAREABLE_FIELDS: readonly (keyof UrlState)[] = [
  */
 const SHAREABLE_URL_KEYS: readonly string[] = [
     'lat', 'lon', 'long', 'city', 'loc', 'tz', 'bloc', 'lsrc',
-    't', 'off', 'dir', 'picks', 'kyhand', 'kmode', 'op', 'onoon', 'body', 'vnoon', 'tp',
+    't', 'off', 'dir', 'picks', 'kyhand', 'kmode', 'op', 'onoon', 'body', 'vnoon', 'tu', 'tb',
 ];
 
-/** Query keys cleared from the URL when settings are adopted into storage. */
-const CLEARED_URL_KEYS: readonly string[] = [...SHAREABLE_URL_KEYS, 'tc'];
+/**
+ * Query keys cleared from the URL when settings are adopted into storage.
+ * `tp` (the retired Date / Astro tab, replaced by `tu` on 2026-09-23) is
+ * cleaned from legacy links too.
+ */
+const CLEARED_URL_KEYS: readonly string[] = [...SHAREABLE_URL_KEYS, 'tc', 'tp'];
 
 /**
  * Terra/Gaia per-slot city overrides are a *variable* set of keys, not scalar
@@ -425,7 +430,8 @@ function urlScalarOverrides(): Partial<UrlState> {
     if (has('onoon')) out.onoon = url.onoon;
     if (has('body')) out.body = url.body;
     if (has('vnoon')) out.vnoon = url.vnoon;
-    if (has('tp')) out.tp = url.tp;
+    if (has('tu')) out.tu = url.tu;
+    if (has('tb')) out.tb = url.tb;
     return out;
 }
 

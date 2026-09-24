@@ -19,7 +19,10 @@
  *   dir   - Time direction: 1=forward, -1=reverse, 0=stopped (absent = 1)
  *   tz    - IANA timezone for the location (e.g. "America/Los_Angeles")
  *   picks - Compact face selection: concatenated 2-letter abbreviations (e.g. "bbmktr")
- *   tp    - Time panel lower tab: 'd' = date (default), 'a' = astro events
+ *   tu    - Time controller step unit: yr mo day hr min sec (calendar units) or
+ *           rise set transit phase (astronomical events); 'day' is the default
+ *   tb    - Time controller body for rise/set/transit: sun moon mercury venus mars
+ *           jupiter saturn uranus neptune (absent = the page's body, else the Moon)
  *   embed - Embed mode: 1 = Terra-only minimal embed (no chrome, transparent bg)
  *   fps   - FPS indicator: present (any/no value) = show the fps readout (Chronometer + Observatory + Inspector)
  *   op    - Observatory selected planet for the alt/az dials (0=Sun..7=Saturn, skips 4=Earth)
@@ -28,6 +31,20 @@
 
 /** Provenance of a stored lat/lon fix — where the coordinates came from. */
 export type LocationSource = 'browser' | 'city' | 'map' | 'manual';
+
+/** The time controller's step unit (the chip): a calendar unit or an astronomical event. */
+export type TimeStepUnit = 'yr' | 'mo' | 'day' | 'hr' | 'min' | 'sec' | 'rise' | 'set' | 'transit' | 'phase';
+export const TIME_STEP_UNITS: readonly TimeStepUnit[] = ['yr', 'mo', 'day', 'hr', 'min', 'sec', 'rise', 'set', 'transit', 'phase'];
+/** The time controller's body for rise / set / transit (Venezia's `body` spelling). */
+export type ControllerBody = 'sun' | 'moon' | 'mercury' | 'venus' | 'mars' | 'jupiter' | 'saturn' | 'uranus' | 'neptune';
+export const CONTROLLER_BODY_KEYS: readonly ControllerBody[] = ['sun', 'moon', 'mercury', 'venus', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune'];
+
+export function parseTimeStepUnit(v: string | null | undefined): TimeStepUnit {
+    return (TIME_STEP_UNITS as readonly string[]).includes(v ?? '') ? (v as TimeStepUnit) : 'day';
+}
+export function parseControllerBody(v: string | null | undefined): ControllerBody | null {
+    return (CONTROLLER_BODY_KEYS as readonly string[]).includes(v ?? '') ? (v as ControllerBody) : null;
+}
 
 export interface UrlState {
     lat: number | null;
@@ -44,8 +61,10 @@ export interface UrlState {
     tz: string | null;
     /** Compact face selection string — concatenated 2-letter abbreviations. */
     picks: string | null;
-    /** Time panel lower tab: 'd' = date (default), 'a' = astro events. */
-    tp: 'd' | 'a';
+    /** Time controller step unit (default 'day'). */
+    tu: TimeStepUnit;
+    /** Time controller body for rise / set / transit; null = follow the page's body, else the Moon. */
+    tb: ControllerBody | null;
     /** Embed mode: minimal UI, transparent background (Terra only). */
     embed: boolean;
     /** FPS indicator: true when the `fps` param is present (Chronometer + Observatory + Inspector). */
@@ -114,7 +133,8 @@ export function readUrlState(): UrlState {
         dir,
         tz: params.get('tz') || null,
         picks: params.get('picks') || null,
-        tp: params.get('tp') === 'a' ? 'a' : 'd',
+        tu: parseTimeStepUnit(params.get('tu')),
+        tb: parseControllerBody(params.get('tb')),
         embed: params.get('embed') === '1',
         fps: params.has('fps'),
         kyhand: params.get('kyhand'),
@@ -221,12 +241,13 @@ export function writeUrlState(changes: Partial<UrlState>): void {
         }
     }
 
-    if ('tp' in changes) {
-        if (changes.tp === 'a') {
-            params.set('tp', 'a');
-        } else {
-            params.delete('tp');  // 'd' is default, omit from URL
-        }
+    if ('tu' in changes) {
+        if (changes.tu && changes.tu !== 'day') params.set('tu', changes.tu);
+        else params.delete('tu');  // 'day' is the default, omitted from the URL
+    }
+    if ('tb' in changes) {
+        if (changes.tb) params.set('tb', changes.tb);
+        else params.delete('tb');
     }
 
     if ('op' in changes) {
@@ -319,7 +340,8 @@ export function buildShareUrl(
     if (state.onoon) p.set('onoon', '1');
     if (state.body) p.set('body', state.body);
     if (state.vnoon) p.set('vnoon', '1');
-    if (state.tp === 'a') p.set('tp', 'a');
+    if (state.tu && state.tu !== 'day') p.set('tu', state.tu);
+    if (state.tb) p.set('tb', state.tb);
 
     // --- Terra/Gaia per-slot city overrides ---
     if (options.slots) {
