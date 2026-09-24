@@ -47,7 +47,8 @@ import { drawClockHands, drawSubdialHands } from './hand-views.js';
 import { initEarthView, drawEarthView, isInsideEarthMap, earthPixelToLatLon, drawDragCrosshair, drawDragMagnifier, resetDragMagnifier, endDragMagnifier, drawObserverDot, earthMaskSizeBytes } from './earth-view.js';
 import { initMoonView, drawMoonView } from './moon-view.js';
 import { miniMapTextureSizeBytes } from '../shared/mini-map.js';
-import { drawPeripheralHands, cycleSelectablePlanet } from './peripheral-hands.js';
+import { drawPeripheralHands, cycleSelectablePlanet, beginBodyLabelSlide, bodyLabelSliding, type BodySelectorHover } from './peripheral-hands.js';
+import { dialHalfAt } from './body-selector.js';
 import { drawDateView } from './date-view.js';
 import { initEclipseView, drawEclipseView } from './eclipse-view.js';
 
@@ -274,29 +275,44 @@ function initCanvas(): void {
     resizeCanvas();
 }
 
-/** Cycle the alt/az body when the user clicks within either dial. */
+/**
+ * The body-selector target under a canvas point: the left half of either
+ * alt/az dial is "back", the right half "forward", each at least 44 px
+ * (body-selector.ts; docs/observatory.md § Planet selection). The altitude
+ * dial is tested first; the two never overlap at any anchor.
+ */
+function bodyTargetAt(x: number, y: number): BodySelectorHover | null {
+    if (!layout) return null;
+    const L = layout;
+    const alt = dialHalfAt(x, y, L.altCX, L.altCY, L.altR);
+    if (alt) return { dial: 'alt', half: alt };
+    const az = dialHalfAt(x, y, L.azCX, L.azCY, L.azR);
+    if (az) return { dial: 'az', half: az };
+    return null;
+}
+
+/** The chevron target under the mouse, for its hover brightening (mouse only). */
+let bodyHover: BodySelectorHover | null = null;
+
+/** Step the alt/az body when the user taps a chevron target on either dial. */
 function onCanvasClick(ev: MouseEvent): void {
     // Suppress the synthetic click that fires after a drag-to-explore pointerup.
     if (suppressNextClick) { suppressNextClick = false; return; }
     if (!layout) return;
     const rect = canvas.getBoundingClientRect();
-    const x = ev.clientX - rect.left;
-    const y = ev.clientY - rect.top;
-    const L = layout;
-    const hit = (cx: number, cy: number, r: number) => Math.hypot(x - cx, y - cy) <= r;
-    // iOS: the altitude dial cycles forward, the azimuth dial backward, so you
-    // can "go back" by clicking the other dial (EOClock.mm:739-762).
-    const onAlt = hit(L.altCX, L.altCY, L.altR);
-    const onAz = hit(L.azCX, L.azCY, L.azR);
-    if (onAlt || onAz) {
-        selectedPlanet = cycleSelectablePlanet(selectedPlanet, onAlt ? 1 : -1);
-        // Move the dial target, then reset so dialAlt/dialAz re-evaluate and
-        // animate to the new body (same sweep as a location change).
-        env.variables.set('dialPlanet', selectedPlanet);
-        setState({ op: selectedPlanet });
-        updater?.reset();
-        scheduleFrame();
-    }
+    const target = bodyTargetAt(ev.clientX - rect.left, ev.clientY - rect.top);
+    if (!target) return;
+    const dir: 1 | -1 = target.half === 'forward' ? 1 : -1;
+    const prev = selectedPlanet;
+    selectedPlanet = cycleSelectablePlanet(prev, dir);
+    // The name slides out in the tapped direction (the hands sweep concurrently).
+    beginBodyLabelSlide(prev, selectedPlanet, dir, performance.now());
+    // Move the dial target, then reset so dialAlt/dialAz re-evaluate and
+    // animate to the new body (same sweep as a location change).
+    env.variables.set('dialPlanet', selectedPlanet);
+    setState({ op: selectedPlanet });
+    updater?.reset();
+    scheduleFrame();
 }
 
 /**
@@ -521,7 +537,7 @@ function drawFrame(): void {
     // 4. Peripheral dial hands + labels (backgrounds are in the static cache)
     // ================================================================
     if (updater) {
-        drawPeripheralHands(ctx, L, updater, selectedPlanet);
+        drawPeripheralHands(ctx, L, updater, selectedPlanet, { hover: bodyHover, nowMs: performance.now() });
         // Eclipse simulator: disc geometry + status labels + ring hands (7B).
         drawEclipseView(ctx, L, updater);
     }
@@ -631,7 +647,9 @@ function tickBody(): void {
             updater.tick(env, perfNow, getNow, withDisplayTime,
                 timingContextForFrame(timeController));
         }
-        animating = updater.anyAnimating();
+        // The body-name slide (a tap on the ‹ › selector) needs frames too,
+        // even on a stopped clock.
+        animating = updater.anyAnimating() || bodyLabelSliding(perfNow);
     }
 
     drawFrame();
@@ -1203,9 +1221,23 @@ function setupMapDrag(): void {
             return;
         }
 
-        // Cursor feedback: show crosshair when hovering over the earth map.
+        // Cursor feedback: a crosshair over the earth map, a pointer over the
+        // alt/az body-selector targets — whose hovered chevron brightens (mouse
+        // only; a change redraws through the idle loop's wake).
         if (dragState === 'idle' && layout) {
-            canvas.style.cursor = isInsideEarthMap(x, y, layout) ? 'crosshair' : '';
+            const target = ev.pointerType === 'mouse' ? bodyTargetAt(x, y) : null;
+            if (target?.dial !== bodyHover?.dial || target?.half !== bodyHover?.half) {
+                bodyHover = target;
+                scheduleFrame();
+            }
+            canvas.style.cursor = isInsideEarthMap(x, y, layout) ? 'crosshair' : target ? 'pointer' : '';
+        }
+    });
+
+    canvas.addEventListener('pointerleave', () => {
+        if (bodyHover) {
+            bodyHover = null;
+            scheduleFrame();
         }
     });
 

@@ -208,6 +208,25 @@ export function drawDialNumbersUpright(
  * @param radius   Outer radius (for top-half numbers)
  * @param radius2  Inner radius reference (for bottom-half numbers)
  */
+/**
+ * Centre of the i-th of n demi-radial labels, as drawDialNumbersDemiRadial
+ * places them: the radial (top) half at `radius − halfH`, the flipped bottom
+ * half at `radius2 − halfH`, at the canvas angle of slot i (clockwise from
+ * 12 o'clock). Exported so the Observatory's body selector can keep its ‹
+ * chevron clear of the altitude dial's "30" with the drawing code's own math.
+ */
+export function demiRadialTextCenter(
+    cx: number, cy: number,
+    i: number, n: number,
+    radius: number, radius2: number,
+    halfH: number,
+): { x: number; y: number; angle: number; bottom: boolean } {
+    const th = (i / n) * TWO_PI - HALF_PI;
+    const bottom = i > n / 4 && i < 3 * n / 4;
+    const textR = (bottom ? radius2 : radius) - halfH;
+    return { x: cx + textR * Math.cos(th), y: cy + textR * Math.sin(th), angle: th, bottom };
+}
+
 export function drawDialNumbersDemiRadial(
     ctx: Ctx2D,
     cx: number, cy: number,
@@ -236,37 +255,15 @@ export function drawDialNumbersDemiRadial(
         const label = labels[i];
         if (!label || label === ' ') continue;
 
-        // Angle in canvas coordinates: clockwise from 12 o'clock
-        // canvas: th = (i/n)*2π - π/2
-        const th = (i / n) * TWO_PI - HALF_PI;
-
-        // Is this label in the bottom half? (between 3 o'clock and 9 o'clock positions)
-        // iOS: i > n/4 && i < 3*n/4
-        const isBottom = i > n / 4 && i < 3 * n / 4;
-
+        // Slot centre and orientation (shared with demiRadialTextCenter): the
+        // bottom half (between 3 and 9 o'clock; iOS i > n/4 && i < 3n/4) is
+        // flipped 180° so its outer edge sits at radius2; the top half reads
+        // upright along the radius with its outer edge at radius.
+        const c = demiRadialTextCenter(cx, cy, i, n, radius, radius2, halfH);
         ctx.save();
-
-        if (isBottom) {
-            // Anti-radial half: text flipped 180°
-            // After the flip, the text's outer edge sits at textR + halfH.
-            // To align with radius2, we need textR = radius2 - halfH.
-            const textR = radius2 - halfH;
-            const tx = textR * Math.cos(th);
-            const ty = textR * Math.sin(th);
-            ctx.translate(cx + tx, cy + ty);
-            ctx.rotate(th + HALF_PI + Math.PI);  // radial + 180° flip
-            ctx.fillText(label, 0, textVisualCenterY(ctx, label));
-        } else {
-            // Radial half: text upright along radius
-            // Text center at textR, outer edge at textR + halfH = radius
-            const textR = radius - halfH;
-            const tx = textR * Math.cos(th);
-            const ty = textR * Math.sin(th);
-            ctx.translate(cx + tx, cy + ty);
-            ctx.rotate(th + HALF_PI);  // point outward
-            ctx.fillText(label, 0, textVisualCenterY(ctx, label));
-        }
-
+        ctx.translate(c.x, c.y);
+        ctx.rotate(c.angle + HALF_PI + (c.bottom ? Math.PI : 0));  // point outward (+ flip)
+        ctx.fillText(label, 0, textVisualCenterY(ctx, label));
         ctx.restore();
     }
 

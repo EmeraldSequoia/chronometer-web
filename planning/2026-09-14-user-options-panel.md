@@ -1,7 +1,8 @@
 # Plan: a user options panel — or as little of one as we can get away with
 
-**Status**: revision 9 (2026-09-23) — Parts 1, 2, 3, 4 and 7 done; **next:
-Part 5 (Observatory body chevrons) or 6 (magnifier gating)**, independent.
+**Status**: revision 10 (2026-09-23) — Parts 1, 2, 3, 4, 5 and 7 done; **next:
+Part 6 (magnifier gating)**. Part 5 (the ‹ › body chevrons) is
+[2026-09-23-observatory-body-chevrons.md](2026-09-23-observatory-body-chevrons.md).
 Part 4 (the time controller: unit chips, one ◀ ▶ pair, any body) is
 [2026-09-23-time-controller-redesign.md](2026-09-23-time-controller-redesign.md)
 (build 2.0.150, awaiting Steve's native review; living description
@@ -593,7 +594,7 @@ and the share-link equality logic untouched.
 | 2 | Steady-state 60 fps pacer in all three loops; honour `prefers-reduced-motion` | — | S–M — **done 2026-09-22**, [plan](2026-09-22-steady-state-frame-pacer.md) |
 | 3 | `prefs.ts`; Settings dialog + ⚙ button (and its ⋮ row); Got-it toast; Keep screen awake; Forget settings; noon-on-top moved | 1 (menu, collapse rule) | M — **done 2026-09-22** (with 7), [plan](2026-09-22-settings-dialog-and-prefs.md) |
 | 4 | Time-controller redesign: unit-first, any-body astro, 44 px targets; CC2 threshold re-derived | 1 (sizing conventions) | L — **done 2026-09-23**, [plan](2026-09-23-time-controller-redesign.md) |
-| 5 | Observatory ‹ Body › chevrons (treatment c), 44 px half-dial targets, directional label slide on change, help line; (`?cycle=N` only if a kiosk use ever exists) | — | S |
+| 5 | Observatory ‹ Body › chevrons (treatment c), 44 px half-dial targets, directional label slide on change, help line; (`?cycle=N` only if a kiosk use ever exists) | — | S — **done 2026-09-23**, [plan](2026-09-23-observatory-body-chevrons.md) |
 | 6 | Magnifier speed gating | — | S |
 | 7 | Low-power toggle (decided); cap value tuned by measurement | 2, 3 | S — **done 2026-09-22** inside Part 3 (`LOW_POWER_FPS` = 10, to tune) |
 

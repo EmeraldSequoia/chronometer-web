@@ -605,10 +605,12 @@ drawPeripheralDials(ctx, L)   — drawn into the merged static cache (static-cac
  ├── drawEOTDial        (asymmetric real-range design, see below)
  └── drawEclipseDial    (static ring annulus, port EOEclipseDialShuffleView)
 
-drawPeripheralHands(ctx, L, u, selectedPlanet)  [per frame]
- ├── altitude triangle hand  ({body}Alt)  + body name label
- ├── azimuth triangle hand   ({body}Az)   + body name label
+drawPeripheralHands(ctx, L, u, selectedPlanet, ui)  [per frame]
+ ├── altitude triangle hand  ({body}Alt)  + ‹ body name › (nudged clear of "30")
+ ├── azimuth triangle hand   ({body}Az)   + ‹ body name ›
  └── EOT triangle hand       (eotAngle)
+body-selector.ts — pure geometry: the 44 px tap halves, the label layout
+and nudge, the slide's timing
 ```
 
 ### Hand angles (port of EOHandView.mm)
@@ -621,13 +623,32 @@ drawPeripheralHands(ctx, L, u, selectedPlanet)  [per frame]
 
 ### Planet selection (and its animation)
 
-The alt/az dials share one selected body (`ECPlanetNumber`), skipping Earth.
-Matching iOS (`EOClock.mm:739-762`), the two dials cycle in **opposite
-directions** (via `cycleSelectablePlanet(current, dir)`): clicking the
-**altitude** dial advances (Sun→Moon→…→Saturn→Sun) and clicking the **azimuth**
-dial reverses (Sun→Saturn→…→Moon→Sun) — so you "go back" by clicking the other
-dial. The choice persists as the `op` setting via `app-state` (observatory
-namespace; 0 = Sun is the default and is omitted).
+The alt/az dials share one selected body (`ECPlanetNumber`), skipping Earth,
+shown as a name at the top of each dial between dim **‹ ›** chevrons — the
+visible selector (Part 5 of the options-panel project, treatment c of
+[planning/2026-09-14-user-options-panel.md](../planning/2026-09-14-user-options-panel.md)
+§3.3.1; plan
+[planning/2026-09-23-observatory-body-chevrons.md](../planning/2026-09-23-observatory-body-chevrons.md)).
+The chevrons are 0.8 × the label font at 65 % alpha (`CHEVRON_ALPHA`; the
+mock's 45 % got lost in the starfield), 0.3 em from the name, brightening
+to full white under the mouse (`CHEVRON_HOVER_ALPHA`); on the altitude half-dial, where the
+"30" numeral sits at the label's height, the whole group shifts right by the
+minimum that keeps the ‹ 0.35 em clear of it (Mercury today; short names
+never move). **Touch targets are the dial halves, not the glyphs**: the left
+half of either dial is *back*, the right half *forward*, each at least 44 px
+in both dimensions (`dialHalfAt` in `body-selector.ts`) — the chevrons are
+~7 px on a phone dial. This replaced the iOS rule (altitude dial forward,
+azimuth dial back; `EOClock.mm:739-762`) on 2026-09-23. `cycleSelectablePlanet(current, ±1)`
+steps Sun→Moon→…→Saturn and wraps. The choice persists as the `op` setting
+via `app-state` (observatory namespace; 0 = Sun is the default and is omitted).
+
+On a tap the outgoing name **slides out in the tapped direction** while
+fading and the new one slides in from the other side (250 ms, eased, clipped
+to the label zone so nothing crosses the numerals or the hub —
+`beginBodyLabelSlide` / `bodyLabelSliding` in `peripheral-hands.ts`; the loop's
+`animating` includes it), the same whichever target was hit, so the motion
+teaches the chevrons. Cross-tab and share-link changes snap, and so does
+reduced motion.
 
 The hands track **one** value per axis — `dialAlt` / `dialAz` — whose expression
 reads the selected body from the `dialPlanet` **env variable** (set alongside
