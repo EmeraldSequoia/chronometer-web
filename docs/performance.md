@@ -171,7 +171,12 @@ free-run before each boundary (idle wakes request paced frames too). The `?fps` 
 the effect natively — ~60 in steady state, the display's rate while scrubbing —
 and its tail `p<share> <Hz>` says what share of the last second's frames were
 drawn under the cap and the display rate the pacer measured.
-`setTargetFps` is the hook for the Low-power preference (options-panel Part 7).
+The **Low power** preference (Settings — [preferences.md](preferences.md))
+sets the cap to `LOW_POWER_FPS` = 10 through `setTargetFps`, same rule —
+every 12th vsync on 120 Hz, every 6th on 60 — and the same exemptions, so
+scrubs, drags and bursts are untouched and only the 1× second hands change:
+they step instead of sweeping. The value is the plan's lower bound (§3.4:
+10–12 fps) and is meant to be settled by measurement on the native machines.
 
 **Reduced motion.** When the OS asks for it (`prefers-reduced-motion:
 reduce`), the shared updater snaps transitions instead of animating them —

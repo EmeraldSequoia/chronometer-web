@@ -1,14 +1,25 @@
 # Plan: a user options panel — or as little of one as we can get away with
 
-**Status**: revision 6 (2026-09-22) — implementation under way: Part 1 done
+**Status**: revision 8 (2026-09-22) — Parts 1, 2, 3 and 7 done; **next:
+Part 4 (time controller), 5 (Observatory body chevrons) or 6 (magnifier
+gating)**, all independent. Part 1
 ([2026-09-17-chrome-targets-and-overflow-menu.md](2026-09-17-chrome-targets-and-overflow-menu.md)),
 including the outcome of Steve's in-app review (desktop fine at 44 px; phones
-always collapse to the ⋮ menu); Part 2 done
-([2026-09-22-steady-state-frame-pacer.md](2026-09-22-steady-state-frame-pacer.md)).
+always collapse to the ⋮ menu); Part 2
+([2026-09-22-steady-state-frame-pacer.md](2026-09-22-steady-state-frame-pacer.md));
+Part 3 with Part 7 folded in
+([2026-09-22-settings-dialog-and-prefs.md](2026-09-22-settings-dialog-and-prefs.md);
+living description in [docs/preferences.md](../docs/preferences.md)); Steve's
+review round 1 applied 2026-09-23 (build 2.0.146), and its follow-up —
+per-app sections, the Forget scope, the notice's text and icons, retiring
+the storage-paradigm notice — implemented the same day (build 2.0.148):
+[2026-09-23-settings-sections-and-forget-scope.md](2026-09-23-settings-sections-and-forget-scope.md).
+Part 3 and that follow-up land as one commit. The handoff that started Part 3 is
+[2026-09-22-options-panel-handoff.md](2026-09-22-options-panel-handoff.md).
 Every question in §7 is decided. What remains is in-app tuning, noted in
 each section: final button size (§3.1 A), chevron alpha (§3.3.1), the
-magnifier heuristic (§3.6), the low-power cap value (§3.4). Each part in §6
-gets its own plan document when it is implemented.
+magnifier heuristic (§3.6), the low-power cap value (§3.4 — shipped at 10).
+Each part in §6 gets its own plan document when it is implemented.
 **Created**: 2026-09-14
 **Baseline**: cb731ca (`[Observatory] Update the sprites on the eclipse simulator ring`)
 **Related**:
@@ -577,11 +588,11 @@ and the share-link equality logic untouched.
 |------|-------|------------|------|
 | 1 | 44 px targets everywhere first (judge in situ; pointer-type sizing as fallback; glyphs unchanged); shared ⋮ menu component and the collapse rule (latched engine signal); Observatory chrome-drop → collapse instead of none | — | M — **done 2026-09-17**, [plan](2026-09-17-chrome-targets-and-overflow-menu.md) |
 | 2 | Steady-state 60 fps pacer in all three loops; honour `prefers-reduced-motion` | — | S–M — **done 2026-09-22**, [plan](2026-09-22-steady-state-frame-pacer.md) |
-| 3 | `prefs.ts`; Settings dialog + ⚙ button (and its ⋮ row); Got-it toast; Keep screen awake; Forget settings; noon-on-top moved | 1 (menu, collapse rule) | M |
+| 3 | `prefs.ts`; Settings dialog + ⚙ button (and its ⋮ row); Got-it toast; Keep screen awake; Forget settings; noon-on-top moved | 1 (menu, collapse rule) | M — **done 2026-09-22** (with 7), [plan](2026-09-22-settings-dialog-and-prefs.md) |
 | 4 | Time-controller redesign: unit-first, any-body astro, 44 px targets; CC2 threshold re-derived | 1 (sizing conventions) | L |
 | 5 | Observatory ‹ Body › chevrons (treatment c), 44 px half-dial targets, directional label slide on change, help line; (`?cycle=N` only if a kiosk use ever exists) | — | S |
 | 6 | Magnifier speed gating | — | S |
-| 7 | Low-power toggle (decided); cap value tuned by measurement | 2, 3 | S |
+| 7 | Low-power toggle (decided); cap value tuned by measurement | 2, 3 | S — **done 2026-09-22** inside Part 3 (`LOW_POWER_FPS` = 10, to tune) |
 
 Order rationale: 1 and 2 are the largest user-visible wins and unblock 3; 4 is
 the biggest and independent; 5–7 are small and independent. 7 could fold into

@@ -20,6 +20,8 @@ import { initAppNavLinks, markChronometerPage, registerAppNavHotkeys, navSearch 
 import { initOverflowMenu, closeOverflowMenu } from './shared/overflow-menu.js';
 import { isPhoneSizedViewport } from './shared/chrome-layout.js';
 import { openGeneralHelpTopic } from './shared/help-popover.js';
+import { initSettingsDialog } from './shared/settings-dialog.js';
+import { initKeepAwake } from './shared/wake-lock.js';
 import { requestBrowserLocation, watchBrowserLocation } from './shared/geolocation.js';
 
 // Select the state backend before any getState()/setState() call.
@@ -467,6 +469,10 @@ window.addEventListener('resize', updateChromeCollapse);
 registerHotkey('h', () => document.getElementById('info-btn')?.click());
 registerHotkey('?', () => openGeneralHelpTopic('#hotkeys'));
 registerHotkey('l', () => showPrompt(false));
+registerHotkey(',', () => document.getElementById('settings-btn')?.click());
+// ⚙ Settings dialog (docs/preferences.md). No render loop here to park.
+initSettingsDialog({ app: 'index' });
+initKeepAwake();
 
 // Adopting a shared link mid-session clears the query string from under links
 // that were built with it; rebuild them (and re-derive the persistent-mode

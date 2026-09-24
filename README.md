@@ -92,9 +92,11 @@ On a physical keyboard, these single-key shortcuts work on every page (they're i
 | `t` | Show or hide the time controller |
 | `n` | Reset the clock to now |
 | `l` | Open the location dialog |
-| `f` | Toggle the frame-rate (fps) indicator |
+| `f` | Toggle fullscreen |
+| `p` | Toggle the frame-rate (fps) indicator |
+| `,` | Open the Settings dialog |
 
-The `h`, `?`, `t`, `n`, `l`, and `f` keys apply on pages that have the corresponding control.
+The `h`, `?`, `t`, `n`, `l`, `f`, `p`, and `,` keys apply on pages that have the corresponding control.
 
 ## Development
 

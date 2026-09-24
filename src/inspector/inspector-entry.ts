@@ -24,7 +24,10 @@ import { getState, setState, initAppState, onSharedChange, onAdoptedAsDefault, i
 import { locationSourceOf } from '../shared/url-state.js';
 import { initShareButton } from '../shared/share-button.js';
 import { initOverflowMenu, closeOverflowMenu } from '../shared/overflow-menu.js';
-import { createFramePacer } from '../shared/frame-pacer.js';
+import { createFramePacer, LOW_POWER_FPS, STEADY_STATE_FPS } from '../shared/frame-pacer.js';
+import { getPrefs, onPrefsChange } from '../shared/prefs.js';
+import { initKeepAwake } from '../shared/wake-lock.js';
+import { initSettingsDialog } from '../shared/settings-dialog.js';
 import { initHelpPopover, openGeneralHelpTopic } from '../shared/help-popover.js';
 import { resolveTimezoneProvisional, persistableTz } from '../shared/tz-resolve.js';
 import { createTzResolver } from '../shared/tz-ensure.js';
@@ -490,6 +493,12 @@ initHelpPopover({
     },
 });
 
+// ⚙ Settings dialog (docs/preferences.md): shows the Got-it notice while it
+// is still due. The loop keeps running under it — unlike help, the dialog is
+// up for seconds, and Low power's cadence is meant to be seen at once.
+initSettingsDialog({ app: 'inspector' });
+initKeepAwake();
+
 // Live cross-tab sync: when another tab (or app) changes the shared location
 // or time, apply it here without a reload.
 function applyTimeFromState(s: ReturnType<typeof getState>): boolean {
@@ -882,6 +891,9 @@ const fpsIndicator = createFpsIndicator(urlState.fps);
  * capped at STEADY_STATE_FPS. `pacer.pending` is false when the loop is idle.
  */
 const pacer = createFramePacer();
+// The Low power preference lowers the steady-state cap (docs/preferences.md).
+pacer.setTargetFps(getPrefs().lowPower ? LOW_POWER_FPS : STEADY_STATE_FPS);
+onPrefsChange((p) => pacer.setTargetFps(p.lowPower ? LOW_POWER_FPS : STEADY_STATE_FPS));
 let inTick = false;
 let frameRequestedDuringTick = false;
 
@@ -1010,6 +1022,7 @@ registerHotkey('?', () => openGeneralHelpTopic('#hotkeys'));
 registerHotkey('t', () => document.getElementById('time-bar-label')?.click());
 registerHotkey('n', () => document.getElementById('time-bar-now')?.click());
 registerHotkey('l', () => document.getElementById('set-location-btn')?.click());
+registerHotkey(',', () => document.getElementById('settings-btn')?.click());
 
 // --- Corner-chrome layout: keep the fixed top-right buttons off the header ---
 // Same engine as the Chronometer face pages (shared/chrome-layout.ts): try
@@ -1021,7 +1034,7 @@ registerHotkey('l', () => document.getElementById('set-location-btn')?.click());
 // full-width <p> blocks would register as colliding even where their
 // centered text doesn't.
 
-const CHROME_IDS = ['share-btn', 'info-btn', 'observatory-link', 'chronometer-link'];
+const CHROME_IDS = ['share-btn', 'info-btn', 'settings-btn', 'observatory-link', 'chronometer-link'];
 /** The collapsed corner: the ⋮ menu button alone (no fullscreen button here). */
 const COLLAPSED_CHROME_IDS = ['more-btn'];
 const CHROME_EDGE_MARGIN = 12; // matches the page's authored top/right insets

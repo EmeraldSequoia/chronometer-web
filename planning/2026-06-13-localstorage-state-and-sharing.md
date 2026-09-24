@@ -1,6 +1,12 @@
 # LocalStorage-backed state with URL sharing
 
-Status: **implemented** — 2026-06-13 (plan); 2026-06-14 (built across phases 1–8)
+Status: **implemented** — 2026-06-13 (plan); 2026-06-14 (built across phases 1–8).
+**Update 2026-09-23**: the paradigm-change notice ("Your settings now save in
+this browser instead of the URL…", `maybeShowParadigmNotice`) was retired —
+months after deployment nobody arrives from the URL era, and a new user was
+getting two popups; the Settings notice is now the only first-load toast
+([2026-09-23-settings-sections-and-forget-scope.md](2026-09-23-settings-sections-and-forget-scope.md),
+decision 5). `ec:meta.noticeSeen` values already on devices are inert.
 
 Implementation notes (2026-06-14):
 - New `src/shared/app-state.ts` (three backends, smoke test, protocol-aware

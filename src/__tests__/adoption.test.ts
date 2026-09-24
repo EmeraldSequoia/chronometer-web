@@ -57,8 +57,6 @@ beforeEach(() => {
     localStorage.clear();
     document.body.innerHTML = '';
     window.history.replaceState(null, '', '/');
-    // The paradigm notice is a one-shot on the clean-URL path; keep it quiet.
-    localStorage.setItem('ec:meta', JSON.stringify({ noticeSeen: true, v: 1 }));
 });
 
 // ============================================================================

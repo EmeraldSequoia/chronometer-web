@@ -36,6 +36,7 @@ Permanent reference documentation for the Chronometer Web codebase, organized by
 - [**Face Picker**](face-picker.md) — Face selection/reordering, the `picks` setting, selected faces page
 - [**Embedding**](embedding.md) — Embedding Terra in other websites via iframe
 - [**Corner Chrome**](chrome.md) — Corner buttons: 44 px targets, the row/column/L layout engine, per-page collapse into the ⋮ overflow menu, Observatory chrome-drop
+- [**Preferences & Settings**](preferences.md) — The ⚙ Settings dialog and its rows (keep awake, low power, Observatory noon-on-top, forget settings), the `ec:prefs` device-preference store and its file:// fallback, the Got-it notice
 
 ### Development
 - [**Adding a New App**](adding-a-new-app.md) — How to add a new app to the monorepo (e.g., Observatory)

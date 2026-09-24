@@ -121,8 +121,40 @@
           color: #aab;
       }
 
+      /* ⚙ Settings (partials/settings-button.html) — next in the fixed row,
+         outboard of ℹ (docs/preferences.md). */
+      #settings-btn {
+          position: fixed;
+          top: 12px;
+          right: 116px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 44px;
+          height: 44px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.06);
+          color: #6b7280;
+          border: none;
+          cursor: pointer;
+          padding: 0;
+          z-index: 20;
+          transition: background 0.2s, color 0.2s;
+      }
+
+      #settings-btn svg {
+          width: 18px;
+          height: 18px;
+          fill: currentColor;
+      }
+
+      #settings-btn:hover {
+          background: rgba(255, 255, 255, 0.12);
+          color: #aab;
+      }
+
       /* Cross-app links (Chronometer / Observatory) — continue the fixed
-         top-right row left of info + share; hrefs wired by shared/app-nav.ts.
+         top-right row left of info, settings + share; hrefs wired by shared/app-nav.ts.
          Both show their colored app icons — deliberately breaking the
          monochrome style, since these switch apps (discoverability). */
       #chronometer-link,
@@ -137,11 +169,11 @@
       }
 
       #observatory-link {
-          right: 116px;
+          right: 168px;
       }
 
       #chronometer-link {
-          right: 168px;
+          right: 220px;
       }
 
       /* ⋮ overflow button (partials/overflow-menu.{html,css}): the corner's
@@ -159,6 +191,7 @@
          measurable for the next full-set probe. */
       body.chrome-collapsed #share-btn,
       body.chrome-collapsed #info-btn,
+      body.chrome-collapsed #settings-btn,
       body.chrome-collapsed #chronometer-link,
       body.chrome-collapsed #observatory-link {
           visibility: hidden;
@@ -517,6 +550,23 @@
           filter: blur(6px);
       }
 
+      /* …but not #app itself, for help or the Settings dialog (whose shared
+         rule, in incoming-settings-dialog.ts, has the same body > * shape):
+         #app is the centred 600 px column, and a filter on it would make it
+         the containing block of the fixed corner buttons inside .pinned-top,
+         which then sit 340 px left of the corner while blurred. Filtering
+         the wrapper's contents element by element re-anchors nothing. */
+      body.help-open > #app,
+      body.ec-settings-open > #app {
+          filter: none;
+      }
+      body.help-open > #app > .catalog,
+      body.ec-settings-open > #app > .catalog,
+      body.help-open > #app > .pinned-top > *,
+      body.ec-settings-open > #app > .pinned-top > * {
+          filter: blur(6px);
+      }
+
       #info-popup {
           /* Fully opaque. At 0.98 the screen behind composited through the
              help panel itself at 2% — invisible while it was blurred, a sharp
@@ -694,6 +744,7 @@ overscroll-behavior-y: contain;
         <img src="thumb-observatory.png" alt="Observatory" />
       </a>
       <button id="info-btn" title="About Inspector">ℹ&#xFE0E;</button>
+      {{SETTINGS_BUTTON}}
       <button id="share-btn" title="Share this view">
         <svg viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>
       </button>

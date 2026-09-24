@@ -30,7 +30,10 @@ import { initFullscreenToggle } from '../shared/fullscreen.js';
 import { initShareButton } from '../shared/share-button.js';
 import { initOverflowMenu, closeOverflowMenu } from '../shared/overflow-menu.js';
 import { isPhoneSizedViewport } from '../shared/chrome-layout.js';
-import { createFramePacer } from '../shared/frame-pacer.js';
+import { createFramePacer, LOW_POWER_FPS, STEADY_STATE_FPS } from '../shared/frame-pacer.js';
+import { getPrefs, onPrefsChange } from '../shared/prefs.js';
+import { initKeepAwake } from '../shared/wake-lock.js';
+import { initSettingsDialog } from '../shared/settings-dialog.js';
 import type { TimeControlsAPI } from '../shared/time-controls-ui.js';
 import { updateDynamicCompositeIcon } from '../shared/composite-icon.js';
 import { type LayoutParams } from './layout.js';
@@ -62,9 +65,10 @@ declare const __BUILD_VERSION__: string | undefined;
 // ============================================================================
 
 /**
- * Noon-on-top toggle: when true, 12 is at top; when false, 24 is at top.
- * Initialized from the URL `onoon` param once urlState is read (below);
- * toggled at runtime by the footer pill control (setupNoonToggle).
+ * Noon-on-top: when true, 12 is at top; when false, 24 is at top.
+ * Initialized from the stored `onoon` setting once urlState is read (below);
+ * changed at runtime by the Settings dialog's row (setNoonOnTop) or by
+ * another tab (onSharedChange).
  */
 let noonOnTop = false;
 
@@ -89,7 +93,8 @@ let frameRequestedDuringTick = false;
 
 /**
  * True while the ℹ help overlay is up; the loop parks for the duration (see
- * `continuous` in tickBody). This is now a pure CPU/battery optimisation —
+ * `continuous` in tickBody). (The Settings dialog deliberately does not park
+ * — see initSettingsDialog.) This is now a pure CPU/battery optimisation —
  * nothing under a full-screen modal is legible, so rendering it is wasted work
  * — and closing the overlay runs the same catch-up as a sleep/wake gap.
  *
@@ -422,7 +427,6 @@ function resizeCanvas(): void {
     // DOM header/footer too so they don't overlap the full-surface layout.
     document.body.classList.toggle('obs-chrome-dropped', !!layout.chromeDropped);
     updateHeaderCollapse(!!layout.chromeDropped);
-    positionNoonIcon();
 
     // Log the window size + mainR whenever either changes (startup + each resize
     // / anchor switch). Replaces the old on-canvas debug overlay.
@@ -1050,12 +1054,17 @@ function setupLocationDialog(): void {
 }
 
 // ============================================================================
-// Noon-on-top toggle
+// Noon-on-top
 // ============================================================================
 
 /**
- * Wire the footer noon-on-top pill control (Vienna-style, see
- * face-template.html / engine-entry.ts for the Chronometer original).
+ * The single setter for the noon-on-top choice — the Settings dialog's
+ * "Noon at the top of the 24-hour dial" row (its Observatory section, shown
+ * on this page only) calls it through initSettingsDialog's `noonOnTop`
+ * (docs/preferences.md; the footer disc + pill it replaced went with Part 3
+ * of the options-panel project, 2026-09-22). Persists as the shareable
+ * `onoon` setting (observatory namespace); another tab's change arrives
+ * through onSharedChange below.
  *
  * Toggling moves the `noonOnTop` env variable and resets the updater: every
  * expression with a `+ pi * noonOnTop` term (24h hand, sun-event hands, planet
@@ -1064,83 +1073,14 @@ function setupLocationDialog(): void {
  * location change. The main-dial static cache keys on noonOnTop and rebuilds
  * on the next frame.
  */
-/**
- * Position the footer's noon-toggle icon. It normally flows inside the footer
- * flex row (#obs-footer-row) — centred between the time controls and location,
- * and wrapping with them on narrow phones, so it never overlaps the red offset /
- * Now button (whose width changes as the offset grows). Only when the main dial
- * reaches into the footer (e.g. A5) do we pull it OUT of the row (.pinned) and
- * pin it to the right of the time-controller contents, so it isn't lost under
- * the dial.
- */
-function positionNoonIcon(): void {
-    const icon = document.getElementById('noon-icon');
-    if (!icon || !layout) return;
-    const footerTop = window.innerHeight - readSafeInsets().insetBottom - lastFooterH;
-    const dialInFooter = layout.mainCY + layout.mainR > footerTop;
-    if (dialInFooter) {
-        // Rightmost edge of the time-bar's left-aligned contents (hidden
-        // elements — e.g. the Now button at 1× real time — report zero width).
-        let rightEdge = 0;
-        for (const id of ['time-bar-label', 'time-bar-info', 'time-bar-now']) {
-            const r = document.getElementById(id)?.getBoundingClientRect();
-            if (r && r.width > 0) rightEdge = Math.max(rightEdge, r.right);
-        }
-        icon.classList.add('pinned');
-        icon.style.left = `${rightEdge + 12}px`;
-    } else {
-        icon.classList.remove('pinned');
-        icon.style.left = '';
-    }
-}
-
-/**
- * Noon-on-top control (iteration 3, §6 C2): a small footer-centre icon that, on
- * tap, raises the Midnight/Noon pill as an on-demand overlay (which may overlap
- * the dial — rare — so it costs the static layout nothing). Replaces the
- * always-present wrapping pill row.
- */
-function setupNoonToggle(): void {
-    const toggle = document.getElementById('noon-toggle');
-    const icon = document.getElementById('noon-icon');
-    if (!toggle || !icon) return;
-    const midnightPill = toggle.querySelector('[data-mode="midnight"]') as HTMLButtonElement;
-    const noonPill = toggle.querySelector('[data-mode="noon"]') as HTMLButtonElement;
-
-    const updateHighlight = () => {
-        midnightPill.classList.toggle('active', !noonOnTop);
-        noonPill.classList.toggle('active', noonOnTop);
-        // Rotate the disc icon: dark half on top for midnight, light half on
-        // top for noon (the .noon class flips it the extra 180°).
-        icon.classList.toggle('noon', noonOnTop);
-    };
-    const closeOverlay = () => toggle.classList.remove('open');
-
-    const setNoonOnTop = (value: boolean) => {
-        closeOverlay();
-        if (value === noonOnTop) return;
-        noonOnTop = value;
-        env.variables.set('noonOnTop', noonOnTop ? 1 : 0);
-        setState({ onoon: noonOnTop });
-        updater?.reset();
-        updateHighlight();
-        // The loop may be idle (stopped); the toggle must trigger a redraw.
-        scheduleFrame();
-    };
-
-    icon.addEventListener('click', (e) => { e.stopPropagation(); toggle.classList.toggle('open'); });
-    midnightPill.addEventListener('click', () => setNoonOnTop(false));
-    noonPill.addEventListener('click', () => setNoonOnTop(true));
-    // Dismiss the overlay on any click outside it (and outside the icon).
-    document.addEventListener('click', (e) => {
-        if (!toggle.classList.contains('open')) return;
-        const t = e.target as Node;
-        if (!toggle.contains(t) && !icon.contains(t)) closeOverlay();
-    });
-    updateHighlight();
-    positionNoonIcon();
-    // (Re-placement on time-bar content changes is driven by timeController.onTick
-    // and the initial deferred call in init(), not a ResizeObserver here.)
+function setNoonOnTop(value: boolean): void {
+    if (value === noonOnTop) return;
+    noonOnTop = value;
+    env.variables.set('noonOnTop', noonOnTop ? 1 : 0);
+    setState({ onoon: noonOnTop });
+    updater?.reset();
+    // The loop may be idle (stopped); the change must trigger a redraw.
+    scheduleFrame();
 }
 
 // ============================================================================
@@ -1524,7 +1464,6 @@ function init(): void {
         updateDynamicCompositeIcon(['thumb-observatory.png'], '#000000');
     }
     setupLocationDialog();
-    setupNoonToggle();
     setupMapDrag();
     updateLocationDisplay();
 
@@ -1551,6 +1490,22 @@ function init(): void {
     initOverflowMenu({ app: 'observatory' });
     initShareButton({ getState });
 
+    // ⚙ Settings dialog (docs/preferences.md): hosts the noon-on-top choice
+    // (the footer disc it replaces is gone) and shows the Got-it notice while
+    // it is still due. The loop keeps running under it — unlike help, the
+    // dialog is up for seconds, and its toggles are meant to be seen taking
+    // effect: the noon-on-top sweep plays behind the blur (Steve, 2026-09-23;
+    // parking had turned it into a snap on close), and Low power's cadence
+    // shows at once.
+    initSettingsDialog({
+        app: 'observatory',
+        noonOnTop: { get: () => noonOnTop, set: setNoonOnTop },
+    });
+    initKeepAwake();
+    // The Low power preference lowers the steady-state cap.
+    pacer.setTargetFps(getPrefs().lowPower ? LOW_POWER_FPS : STEADY_STATE_FPS);
+    onPrefsChange((p) => pacer.setTargetFps(p.lowPower ? LOW_POWER_FPS : STEADY_STATE_FPS));
+
     // --- Cross-app navigation (header icons + i/o/c/a) and page hotkeys ---
     // Key table: help.html#hotkeys.
     const flushTime = () => flushTimeState(timeController);
@@ -1562,6 +1517,7 @@ function init(): void {
     registerHotkey('n', () => document.getElementById('time-bar-now')?.click());
     registerHotkey('l', () => document.getElementById('set-location-btn')?.click());
     registerHotkey('f', () => document.getElementById('fullscreen-btn')?.click());
+    registerHotkey(',', () => document.getElementById('settings-btn')?.click());
 
     // --- Fullscreen toggle button ---
     // The canvas layout must recompute when is-fullscreen flips: chromeParams()
@@ -1596,10 +1552,6 @@ function init(): void {
 
         if (s.onoon !== noonOnTop) {
             noonOnTop = s.onoon;
-            const toggle = document.getElementById('noon-toggle');
-            toggle?.querySelector('[data-mode="midnight"]')?.classList.toggle('active', !noonOnTop);
-            toggle?.querySelector('[data-mode="noon"]')?.classList.toggle('active', noonOnTop);
-            document.getElementById('noon-icon')?.classList.toggle('noon', noonOnTop);
             changed = true;
         }
 
@@ -1619,22 +1571,13 @@ function init(): void {
     // every transition (reset/stop/setTime/setOffset/setRate/setDirection) as well
     // as on each quantized tick, so this keeps env (timezone offset, DST) fresh
     // across both continuous advance and discrete jumps — which is why the time
-    // controls need no transition callbacks of their own (see below).
-    // Also re-place the footer noon icon: a transport change shows/hides the red
-    // offset label + Now button, changing where the icon must sit (to the right
-    // of those contents, or when the dial reaches into the footer in A5). onTick
-    // fires on every transition + tick. Defer to a microtask: the transport
-    // handlers reveal the offset/Now via updateTimeUI() *after* firing onTick, so
-    // positioning synchronously here would measure the stale, pre-offset row.
+    // controls need no transition callbacks of their own (see below). A footer
+    // wrap/unwrap a transport change causes (the offset label + Now button
+    // appearing; 1↔2 lines at boundary widths) re-reserves the dial band via
+    // the ResizeObserver on #obs-footer-row — no per-tick relayout here (keeps
+    // scrubbing cheap).
     timeController.onTick = () => {
         rebuildEnv();
-        // The transport handlers reveal the offset/Now via updateTimeUI() *after*
-        // firing onTick, so defer re-placing the noon disc against the settled row.
-        // A footer wrap/unwrap that this causes (1↔2 lines, possible at boundary
-        // widths when the offset appears) re-reserves the dial band via the
-        // ResizeObserver on #obs-footer-row — no per-tick relayout here (keeps
-        // scrubbing cheap).
-        queueMicrotask(positionNoonIcon);
     };
 
     // Initialize Observatory value system
@@ -1700,12 +1643,10 @@ function init(): void {
         timeUI?.showPopover();
     }
 
-    // Place the noon icon once the time bar has laid out its contents (the
-    // offset label / Now button appear when ?t/?off seed an overridden time),
-    // and re-reserve the footer band in case the row wrapped to two lines once
-    // its final width/content settled.
+    // Once the time bar has laid out its contents (the offset label / Now
+    // button appear when ?t/?off seed an overridden time), re-reserve the
+    // footer band in case the row wrapped to two lines.
     requestAnimationFrame(() => {
-        positionNoonIcon();
         if (measuredFooterH() !== lastFooterH) resizeCanvas();
     });
 

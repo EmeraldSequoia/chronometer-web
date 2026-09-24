@@ -133,15 +133,47 @@
           color: #bbd;
       }
 
+      /* ⚙ Settings (partials/settings-button.html) — next in the fixed row,
+         outboard of ℹ (docs/preferences.md). */
+      #settings-btn {
+          position: fixed;
+          top: 16px;
+          right: 68px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 44px;
+          height: 44px;
+          border-radius: 50%;
+          background: rgba(255,255,255,0.08);
+          color: #889;
+          z-index: 10;
+          transition: background 0.2s, color 0.2s;
+          cursor: pointer;
+          border: none;
+          padding: 0;
+      }
+
+      #settings-btn svg {
+          width: 18px;
+          height: 18px;
+          fill: currentColor;
+      }
+
+      #settings-btn:hover {
+          background: rgba(255,255,255,0.15);
+          color: #bbd;
+      }
+
       /* Cross-app links (Observatory / Inspector) — fixed top-right row left
-         of the ℹ button; hrefs wired by shared/app-nav.ts. Both show their
+         of the ℹ and ⚙ buttons; hrefs wired by shared/app-nav.ts. Both show their
          colored app-icon look — deliberately breaking the monochrome style,
          since these switch apps (discoverability). Inspector's colors match
          its card in the "Other apps" grid below. */
       #inspector-link {
           position: fixed;
           top: 16px;
-          right: 68px;
+          right: 120px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -168,7 +200,7 @@
       #observatory-link {
           position: fixed;
           top: 16px;
-          right: 120px;
+          right: 172px;
           display: block;
           width: 44px;
           height: 44px;
@@ -379,7 +411,8 @@ overscroll-behavior-y: contain;
 
       body.chrome-collapsed #observatory-link,
       body.chrome-collapsed #inspector-link,
-      body.chrome-collapsed #info-btn {
+      body.chrome-collapsed #info-btn,
+      body.chrome-collapsed #settings-btn {
           visibility: hidden;
       }
 
@@ -438,6 +471,7 @@ overscroll-behavior-y: contain;
       <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.51 6.51 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
     </a>
     <button id="info-btn" title="About Chronometer">ℹ&#xFE0E;</button>
+    {{SETTINGS_BUTTON}}
     {{OVERFLOW_MENU}}
     <div id="info-overlay">
       <div id="info-popup">

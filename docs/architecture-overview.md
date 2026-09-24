@@ -27,7 +27,7 @@ src/
 │   ├── location-dialog.ts   # Self-contained location picker (DOM, search, mini-map)
 │   ├── mini-map.ts          # Blue Marble globe renderer
 │   ├── app-state.ts         # State front door: LocalStorage by default, URL for sharing/fallback (getState/setState)
-│   ├── incoming-settings-dialog.ts # Shared-link prompt, storage warning, paradigm notice, (URL) badge
+│   ├── incoming-settings-dialog.ts # Shared-link prompt, storage warning, Settings notice, (URL) badge
 │   ├── share-button.ts      # "Share this view" button → buildShareUrl + copy
 │   ├── url-state.ts         # URL serializer (UrlState, readUrlState/writeUrlState, buildShareUrl) used by sharing + the URL fallback
 │   ├── dst-detect.ts        # DST transition detection

@@ -66,7 +66,10 @@ import { registerHotkey } from './shared/hotkeys.js';
 import { initAppNavLinks, markChronometerPage, registerAppNavHotkeys } from './shared/app-nav.js';
 import { initFullscreenToggle } from './shared/fullscreen.js';
 import { initOverflowMenu, closeOverflowMenu } from './shared/overflow-menu.js';
-import { createFramePacer } from './shared/frame-pacer.js';
+import { createFramePacer, LOW_POWER_FPS, STEADY_STATE_FPS } from './shared/frame-pacer.js';
+import { getPrefs, onPrefsChange } from './shared/prefs.js';
+import { initKeepAwake } from './shared/wake-lock.js';
+import { initSettingsDialog } from './shared/settings-dialog.js';
 import { initShareButton } from './shared/share-button.js';
 import { loadCityData, prefetchCityData, releaseCityData, searchCities, findClosestCity, isCityDataLoaded, loadError } from './shared/city-search.js';
 import { showStorageWarning } from './shared/incoming-settings-dialog.js';
@@ -1107,11 +1110,16 @@ async function main() {
      * armed (the old rAF-id null check).
      */
     const pacer = createFramePacer();
+    // The Low power preference lowers the steady-state cap (docs/preferences.md);
+    // it can change from the Settings dialog or another tab.
+    pacer.setTargetFps(getPrefs().lowPower ? LOW_POWER_FPS : STEADY_STATE_FPS);
+    onPrefsChange((p) => pacer.setTargetFps(p.lowPower ? LOW_POWER_FPS : STEADY_STATE_FPS));
 
     /**
      * True while the ℹ help overlay is up. The scheduler parks outright for the
      * duration — no rAF loop AND no idle wakeup (see frame()'s tail); closing
      * the overlay runs the same catch-up as a sleep/wake gap (resyncAfterGap).
+     * (The Settings dialog deliberately does not park — see initSettingsDialog.)
      *
      * This is a pure CPU/battery optimisation — nothing under a full-screen
      * modal is legible. It was originally added as a compositing-flash fix on
@@ -2161,10 +2169,13 @@ async function main() {
 
     // Corner chrome that participates in grid layout, in canonical order.
     // The right group's preferred shape is an L: fullscreen + info (+ face
-    // name) along the top edge, the rest in a column below fullscreen.
+    // name) + settings along the top edge, the rest in a column below
+    // fullscreen. Settings is canonically after the name so the name keeps the
+    // top row when the row must shorten; rowOrder puts the gear beside ℹ
+    // whenever both are rowed (outboard of it — ℹ keeps its usual place).
     const LEFT_CHROME_IDS = ['back-link', 'all-faces-link', 'selected-faces-link', 'edit-picks-link'];
-    const RIGHT_CHROME_IDS = ['fullscreen-btn', 'info-btn', 'face-name', 'share-btn', 'observatory-link', 'inspector-link'];
-    const RIGHT_ROW_ARM_IDS = new Set(['fullscreen-btn', 'info-btn', 'face-name']);
+    const RIGHT_CHROME_IDS = ['fullscreen-btn', 'info-btn', 'face-name', 'settings-btn', 'share-btn', 'observatory-link', 'inspector-link'];
+    const RIGHT_ROW_ARM_IDS = new Set(['fullscreen-btn', 'info-btn', 'face-name', 'settings-btn']);
     // The collapsed corner, one row from the corner inward: fullscreen, the
     // ⋮ menu button, and on single-face pages the face name (Steve,
     // 2026-09-22: keep the name beside the ⋮ rather than in the menu). The
@@ -2196,7 +2207,7 @@ async function main() {
                 // When share (or an app link) is pressed into the row, it
                 // slots in beside the corner rather than outboard of the
                 // face name, so it stays on the side users expect.
-                rowOrder: ['fullscreen-btn', 'share-btn', 'info-btn', 'face-name', 'observatory-link', 'inspector-link'],
+                rowOrder: ['fullscreen-btn', 'share-btn', 'info-btn', 'settings-btn', 'face-name', 'observatory-link', 'inspector-link'],
             },
         ];
     }
@@ -3222,6 +3233,14 @@ async function main() {
         registerHotkey('n', () => document.getElementById('time-bar-now')?.click());
         registerHotkey('l', () => document.getElementById('set-location-btn')?.click());
         registerHotkey('f', () => document.getElementById('fullscreen-btn')?.click());
+        registerHotkey(',', () => document.getElementById('settings-btn')?.click());
+        // ⚙ Settings dialog (docs/preferences.md). The scheduler keeps running
+        // under it — unlike help, it is up for seconds, and its toggles are
+        // meant to be seen taking effect (Low power's cadence here; on the
+        // Observatory, the noon-on-top sweep). Shows the Got-it notice while
+        // it is still due. Keep-awake follows its preference from here on.
+        initSettingsDialog({ app: 'chronometer' });
+        initKeepAwake();
     }
 
     // --- Fullscreen toggle button ---
@@ -4147,7 +4166,7 @@ async function main() {
     if (isEmbedMode) {
         const removeIds = [
             'location-panel', 'time-bar', 'back-link', 'all-faces-link',
-            'selected-faces-link', 'info-btn', 'share-btn', 'fullscreen-btn', 'face-name', 'time-popover',
+            'selected-faces-link', 'info-btn', 'settings-btn', 'share-btn', 'fullscreen-btn', 'face-name', 'time-popover',
             'location-prompt', 'planet-selector', 'vienna-noon-toggle',
             'kyoto-hand-toggle', 'kyoto-mode-toggle',
             'change-cities-btn', 'edit-picks-link', 'info-overlay',

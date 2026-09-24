@@ -655,40 +655,35 @@ rendered in the Observatory subdial style:
 - Ticks every minute (major at 0/±5/±10/±15), numbers `0/5/10/15`, bold `+`/`−`
   symbols, "Equation of Time" title, center hub + vertical baseline.
 
-## Noon-on-Top Toggle
+## Noon-on-Top
 
-A small **half-disc icon** (`#noon-icon`) sits centered in the bottom chrome
-row, sharing it with the time-bar button (left) and the location controls
-(right). Tapping it raises the Vienna-style pill control ("Midnight on top" /
-"Noon on top") as an **on-demand overlay** above the footer — which may overlap
-the dial (rare), so the pill costs the static layout nothing (iteration 3, §6
-C2). In A5 (iPhone landscape) the big dial overlaps the footer centre, so the
-icon shifts left toward the time-controller button (`positionNoonIcon()`). The
-pill markup/CSS mirrors Chronometer's Vienna toggle (`face-template.html`); the
-wiring lives in `setupNoonToggle()` in `observatory-entry.ts`. The choice
-persists as the `onoon` setting via `app-state` (observatory namespace;
-midnight-on-top is the default and is omitted).
-
-> The earlier always-visible pill that *wrapped* onto a second row when it
-> didn't fit (reserving a two-row footer band) was retired by iteration 3 — the
-> footer is now a single row at every anchor.
-
-Toggling sets the `noonOnTop` env variable (0/1) and calls `updater.reset()`:
-every expression carrying a `+ pi * noonOnTop` term (24h hand, sun-event hands,
-planet rings, sun-ring gradient stops) re-evaluates against its moved target, so
-all moving parts **animate** half a turn to the flipped positions — the same
-sweep as a location change. The merged static cache keys on `noonOnTop`
+Whether noon (12) or midnight (0/24) sits at the top of the 24-hour dial is
+the **"Noon at the top of the 24-hour dial"** row of the Settings dialog (⚙
+in the header, the ⋮ menu's first row on phones, or `,`), under its
+*Observatory* section — shown on this page only, see
+[preferences.md](preferences.md). The row calls `setNoonOnTop()` in
+`observatory-entry.ts` (the `noonOnTop` option of `initSettingsDialog`),
+the single setter: it moves the `noonOnTop` env
+variable (0/1), persists the choice as the shareable `onoon` setting via
+`app-state` (observatory namespace; midnight-on-top is the default and is
+omitted), resets the updater and wakes the loop. Every expression carrying a
+`+ pi * noonOnTop` term (24h hand, sun-event hands, planet rings, sun-ring
+gradient stops) re-evaluates against its moved target, so all moving parts
+**animate** half a turn to the flipped positions — the same sweep as a
+location change. The merged static cache keys on `noonOnTop`
 (`getStaticCache(L, noonOnTop)` in `static-cache.ts`), so the dial numerals
 rebuild (snap) on the next frame — no explicit invalidate call is needed.
+Another tab's change arrives through `onSharedChange` and takes the same
+path. The Chronometer and Inspector pages have no noon row (sections are
+per app since 2026-09-23); `onoon` still travels in Observatory share links.
 
-**Footer wrap:** when the centered toggle would collide with the time-bar
-contents or the location controls (narrow windows, or when the red offset label
-+ Now button appear), `updateNoonToggleWrap()` adds the `wrapped` CSS class —
-lifting the toggle onto a second row above the footer — and `chromeParams()`
-reserves `2 × FOOTER_H` so the canvas layout keeps the dial clear of it. The
-check runs on every canvas resize, and a `ResizeObserver` on the footer
-neighbors (offset label, Now button, location controls) re-solves the layout
-when their sizes change at runtime.
+> History: the choice used to be a half-disc icon (`#noon-icon`) centred in
+> the footer row that raised a Midnight / Noon pill overlay, with
+> `positionNoonIcon()` dodging the dial when it reached into the footer (A5);
+> before that, an always-visible pill that wrapped onto a second footer row.
+> Both were retired on 2026-09-22 (options-panel Part 3): the disc was
+> cryptic, and removing it frees the footer centre. The footer is now the
+> time controller (left) and the location controls (right) only.
 
 ## Help Popover
 

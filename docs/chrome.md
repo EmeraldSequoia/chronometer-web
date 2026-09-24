@@ -1,6 +1,7 @@
 # Corner Chrome
 
-The top corners of every app page carry the page's buttons: ℹ help, share,
+The top corners of every app page carry the page's buttons: ℹ help, ⚙ settings
+([preferences.md](preferences.md)), share,
 fullscreen, the cross-app links, and on the face pages the navigation links
 (home, all faces, selected faces, edit selection) and the face name. This doc
 covers how they are sized, laid out, and folded away when they would cost
@@ -79,7 +80,9 @@ phone in landscape with a home-indicator inset could lose every control.
 **The menu** (`src/shared/overflow-menu.ts`; markup and appearance in
 `src/partials/overflow-menu.{html,css}`, injected by build.sh as
 `{{OVERFLOW_MENU}}` / `{{OVERFLOW_CSS}}`) builds its rows from the controls the
-page has, in a fixed order: this app's pages (face pages only, and only the
+page has, in a fixed order: Settings… (the ⚙ dialog — on phones, where the
+corner is always collapsed, this row is the way in), this app's pages (face
+pages only, and only the
 links the page's body class shows), the other apps, then the actions — Share
 this view, Set location, Show / Hide time controller (label mirrored from the
 time bar) — and last About & help. Each row carries the icon its corner button shows, cloned from that
@@ -102,12 +105,13 @@ the menu has to fit on its own. The ⋮ button is
 collapse-only: it never appears on a wide layout, and `body.is-fullscreen`
 hides it like the rest of the chrome — fullscreen keeps only the exit button.
 
-Part 3 of the options-panel project adds the Settings row (and the ⚙ button
-for wide layouts) at the top of this menu.
+The ⚙ Settings button sits outboard of ℹ on every page and folds with the
+rest of the corner — see [preferences.md](preferences.md) for its placement
+per page and the dialog it opens.
 
 ## Fullscreen
 
 `body.is-fullscreen` (`src/shared/fullscreen.ts`; real API where available,
 faux mode on iPhone) hides every corner control except the fullscreen button,
 which holds the top-right corner. Overlays stay reachable by hotkey
-(`h`, `t`, `l`).
+(`h`, `t`, `l`, `,`).

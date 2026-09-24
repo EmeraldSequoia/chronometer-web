@@ -69,6 +69,92 @@ const CSS = `
 }
 .ec-toast-close:hover { color: #ccd; }
 
+/* The Settings notice (showSettingsNotice): no auto-dismiss, no ×, a Got it
+   button; below the Settings dialog's backdrop so an open dialog covers it.
+   The line height makes room for the 26 px button miniatures in the prose.
+   Sized to its text: a fixed box at left: 50% otherwise shrinks to fit the
+   right half of the viewport, which on a phone made it 220 px wide and a
+   dozen lines tall. */
+.ec-toast.ec-notice {
+    z-index: 999; line-height: 1.6;
+    width: max-content; max-width: min(380px, calc(100vw - 32px));
+}
+/* A miniature of a corner button (miniButton): the real svg in a circle of
+   the button's own colours, read from the live button. */
+.ec-mini-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 50%; vertical-align: middle; margin: 0 2px;
+}
+.ec-mini-btn svg { width: 15px; height: 15px; fill: currentColor; }
+.ec-toast-btn {
+    flex: 0 0 auto; min-height: 44px; padding: 0 16px;
+    border-radius: 8px; font-size: 13px; cursor: pointer;
+    background: #34507a; border: 1px solid #4a6fa5; color: #dde9ff;
+    transition: background 0.15s, color 0.15s;
+}
+.ec-toast-btn:hover { background: #3f5f92; color: #fff; }
+
+/* Settings dialog (settings-dialog.ts): the modal above, with left-aligned
+   44 px rows and switch controls. */
+.ec-modal.ec-settings { max-width: 440px; padding: 22px 22px 18px; }
+/* The dialog takes focus on open (so Esc and Tab start inside it); the
+   container itself needs no ring — the rows and buttons keep theirs. */
+.ec-modal.ec-settings:focus { outline: none; }
+.ec-settings-rows {
+    display: flex; flex-direction: column; margin: 0 0 14px; text-align: left;
+}
+.ec-settings-row {
+    display: flex; align-items: center; gap: 14px;
+    min-height: 44px; padding: 6px 4px; margin: 0;
+    border-top: 1px solid #2e2e4a; cursor: pointer;
+    font: inherit; color: inherit; background: none; width: 100%; box-sizing: border-box;
+}
+.ec-settings-row:first-child { border-top: none; }
+/* Section titles (planning/2026-09-23-settings-sections-and-forget-scope.md
+   §2): small caps over an hrule, rendered only above at least one row; the
+   row under a title needs no rule of its own. */
+.ec-settings-section {
+    display: flex; align-items: center; gap: 10px; margin: 14px 0 2px;
+    font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: #889;
+}
+.ec-settings-section:first-child { margin-top: 0; }
+.ec-settings-section::after { content: ''; flex: 1 1 auto; height: 1px; background: #3a3a5e; }
+.ec-settings-section + .ec-settings-row { border-top: none; }
+.ec-settings-row:hover .ec-settings-label { color: #fff; }
+.ec-settings-text { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; }
+.ec-settings-label { font-size: 14px; color: #dcd8cc; }
+.ec-settings-hint { font-size: 12px; color: #889; line-height: 1.35; }
+.ec-switch {
+    appearance: none; -webkit-appearance: none;
+    flex: 0 0 auto; width: 44px; height: 26px; margin: 0;
+    border-radius: 13px; background: #2a2a4e; border: 1px solid #3a3a5e;
+    position: relative; cursor: pointer; transition: background 0.15s, border-color 0.15s;
+}
+.ec-switch::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 20px; height: 20px; border-radius: 50%; background: #99a;
+    transition: transform 0.15s, background 0.15s;
+}
+.ec-switch:checked { background: #34507a; border-color: #4a6fa5; }
+.ec-switch:checked::after { transform: translateX(18px); background: #dde9ff; }
+.ec-switch:focus-visible { outline: 2px solid #8af; outline-offset: 2px; }
+.ec-settings .ec-modal-btn { min-height: 44px; }
+/* The Forget row: its button centred, set off from the switches above. */
+.ec-settings-action { justify-content: center; margin-top: 10px; padding-top: 14px; cursor: default; }
+.ec-modal-btn.ec-danger { background: #5a2a2e; border-color: #8a3a42; color: #f0c8cc; }
+.ec-modal-btn.ec-danger:hover { background: #7a3238; color: #fff; }
+/* The Forget confirmation: a small modal on its own backdrop, over the
+   Settings dialog (later in the DOM, same z-index). */
+.ec-modal.ec-confirm { max-width: 360px; }
+
+/* Blur the page behind the Settings dialog — a forward filter on the parked
+   content, never backdrop-filter (see the #info-overlay comment in any page
+   stylesheet: a full-screen backdrop-filter flashes). The same shape as the
+   pages' own body.help-open rules; the face pages override it for their
+   #app wrapper (face-template.html), whose fixed descendants a filter on the
+   wrapper itself would re-anchor. */
+body.ec-settings-open > *:not(.ec-modal-backdrop) { filter: blur(6px); }
+
 .ec-modal-input {
     width: 100%; box-sizing: border-box;
     background: #1d1d30; border: 1px solid #3a3a5e; border-radius: 6px;
@@ -211,29 +297,69 @@ export function showStorageWarning(message: string): void {
 }
 
 /**
- * One-time notice explaining the move from URL parameters to local storage.
- * Shown once per device (the caller persists the "seen" flag).
+ * A small replica of a corner button — its svg cloned, its computed colours
+ * — for prose that points at it. The ⋮ menu clones icons the same way
+ * (iconFor in overflow-menu.ts); kept here so this module imports nothing.
+ * A folded button (visibility: hidden) or a display: none one still yields
+ * its colours from getComputedStyle. The fallback character stands in on a
+ * page without the button (not one of the four app pages).
  */
-export function showParadigmNotice(): void {
+function miniButton(id: string, fallback: string): HTMLElement {
+    const box = document.createElement('span');
+    box.className = 'ec-mini-btn';
+    box.setAttribute('aria-hidden', 'true');
+    const src = document.getElementById(id);
+    const svg = src?.querySelector('svg');
+    if (src && svg) {
+        const cs = getComputedStyle(src);
+        box.style.background = cs.backgroundColor;
+        box.style.color = cs.color;
+        box.appendChild(svg.cloneNode(true));
+    } else {
+        box.textContent = fallback;
+    }
+    return box;
+}
+
+/**
+ * The Settings notice — the one first-load toast: where the settings for all
+ * three apps are, with miniatures of the real ⚙ and ⋮ buttons in the prose,
+ * and on Observatory pages that the Midnight / Noon control moved there. It
+ * neither auto-dismisses nor has a × — it stays until Got it is clicked
+ * (Steve, 2026-09-16), and the caller records that click (prefs.ts) so the
+ * notice stops appearing on load. Returns the toast so the caller can remove
+ * it when another tab acknowledges first.
+ */
+export function showSettingsNotice(options: { observatory: boolean; onGotIt: () => void }): HTMLElement {
     ensureModalStyles();
     const toast = document.createElement('div');
-    toast.className = 'ec-toast';
+    toast.className = 'ec-toast ec-notice';
+    toast.setAttribute('role', 'status');
 
+    // Text nodes around the miniatures: the words carry the meaning for
+    // screen readers and copies; the miniatures are aria-hidden.
     const span = document.createElement('span');
-    span.textContent = 'Your settings now save in this browser instead of the URL. ' +
-        'Use the Share button to copy a link to a view; local storage can be cleared ' +
-        'along with your browser history.';
+    span.append(
+        'Settings for Chronometer, Observatory and the Inspector — keep the screen awake, ' +
+        'low power, and each app’s own options — are behind the ',
+        miniButton('settings-btn', '⚙'),
+        ' Settings button at the top right (on a phone, the first row of the ',
+        miniButton('more-btn', '⋮'),
+        ' menu).',
+    );
+    if (options.observatory) span.append(' The Midnight / Noon control now lives there too.');
 
-    const close = document.createElement('button');
-    close.className = 'ec-toast-close';
-    close.setAttribute('aria-label', 'Dismiss');
-    close.textContent = '×';
-    close.addEventListener('click', () => toast.remove());
+    const btn = document.createElement('button');
+    btn.className = 'ec-toast-btn';
+    btn.textContent = 'Got it';
+    btn.addEventListener('click', () => {
+        toast.remove();
+        options.onGotIt();
+    });
 
-    toast.append(span, close);
+    toast.append(span, btn);
     document.body.appendChild(toast);
-
-    setTimeout(() => toast.remove(), 16000);
+    return toast;
 }
 
 /**

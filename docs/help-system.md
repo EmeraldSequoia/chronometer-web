@@ -101,7 +101,7 @@ The eclipses section's worked-example screenshots live in `src/help/images/basel
 
 ### Keyboard Shortcuts section
 
-`help.html` also contains a **Keyboard Shortcuts** section (`#hotkeys`) documenting the single-key hotkeys (`c a o i h ? t n l f`). It is app-neutral, so all app flavors (`app=observatory`, `app=inspector`, and the Chronometer default) show it. The runtime registry lives in `src/shared/hotkeys.ts` (one keydown listener, input-focus guard); the cross-app navigation keys are registered by `registerAppNavHotkeys()` in `src/shared/app-nav.ts`, and each entry script registers its page-local keys. **Keep help.html's table, the README table, and the registrations in sync.** The `?` hotkey calls `openGeneralHelpTopic('#hotkeys')` (help-popover.ts), which opens the popup, expands the General Help section, and routes the iframe to `#hotkeys` (help.html opens/scrolls on load and on `hashchange`).
+`help.html` also contains a **Keyboard Shortcuts** section (`#hotkeys`) documenting the single-key hotkeys (`c a o i h ? t n l f p ,`). It is app-neutral, so all app flavors (`app=observatory`, `app=inspector`, and the Chronometer default) show it. The runtime registry lives in `src/shared/hotkeys.ts` (one keydown listener, input-focus guard); the cross-app navigation keys are registered by `registerAppNavHotkeys()` in `src/shared/app-nav.ts`, and each entry script registers its page-local keys. **Keep help.html's table, the README table, and the registrations in sync.** The `?` hotkey calls `openGeneralHelpTopic('#hotkeys')` (help-popover.ts), which opens the popup, expands the General Help section, and routes the iframe to `#hotkeys` (help.html opens/scrolls on load and on `hashchange`).
 
 ## Architecture
 

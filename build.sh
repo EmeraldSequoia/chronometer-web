@@ -152,7 +152,7 @@ echo "=== Generating HTML files ==="
 # Reads from stdin, writes to stdout.
 # Replaces lines containing {{LOCATION_CSS}}, {{LOCATION_DIALOG}},
 # {{TIME_CSS}}, {{TIME_CONTROLLER}}, {{OVERFLOW_CSS}}, {{OVERFLOW_MENU}},
-# {{OTHER_APPS}}, and terra city dialog
+# {{SETTINGS_BUTTON}}, {{OTHER_APPS}}, and terra city dialog
 # placeholders.
 inject_partials() {
     local HELP_FILE="${1:-}"
@@ -202,6 +202,11 @@ inject_partials() {
         s=$0; sub(/\{\{ *OVERFLOW_MENU *\}\}.*/, "", s); printf "%s", s;
         while ((getline line < (P"/overflow-menu.html")) > 0) print line; close(P"/overflow-menu.html");
         s=$0; sub(/.*\{\{ *OVERFLOW_MENU *\}\}/, "", s); print s; next
+    }
+    /\{\{ *SETTINGS_BUTTON *\}\}/ {
+        s=$0; sub(/\{\{ *SETTINGS_BUTTON *\}\}.*/, "", s); printf "%s", s;
+        while ((getline line < (P"/settings-button.html")) > 0) print line; close(P"/settings-button.html");
+        s=$0; sub(/.*\{\{ *SETTINGS_BUTTON *\}\}/, "", s); print s; next
     }
     /\{\{ *TERRA_CITY_CSS *\}\}/ { next }
     /\{\{ *TERRA_CITY_DIALOG *\}\}/ { next }
@@ -281,6 +286,11 @@ inject_partials_terra() {
         s=$0; sub(/\{\{ *OVERFLOW_MENU *\}\}.*/, "", s); printf "%s", s;
         while ((getline line < (P"/overflow-menu.html")) > 0) print line; close(P"/overflow-menu.html");
         s=$0; sub(/.*\{\{ *OVERFLOW_MENU *\}\}/, "", s); print s; next
+    }
+    /\{\{ *SETTINGS_BUTTON *\}\}/ {
+        s=$0; sub(/\{\{ *SETTINGS_BUTTON *\}\}.*/, "", s); printf "%s", s;
+        while ((getline line < (P"/settings-button.html")) > 0) print line; close(P"/settings-button.html");
+        s=$0; sub(/.*\{\{ *SETTINGS_BUTTON *\}\}/, "", s); print s; next
     }
     /\{\{ *TERRA_CITY_CSS *\}\}/ { 
         s=$0; sub(/\{\{ *TERRA_CITY_CSS *\}\}.*/, "", s); printf "%s", s;

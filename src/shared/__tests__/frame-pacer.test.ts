@@ -8,7 +8,7 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
     createFramePacer, snapDisplayPeriod, probeDisplayPeriod, getDisplayPeriodMs, setDisplayPeriodMs,
-    STEADY_STATE_FPS, BURST_MS, type FramePacer,
+    STEADY_STATE_FPS, LOW_POWER_FPS, BURST_MS, type FramePacer,
 } from '../frame-pacer';
 
 let period = 1000 / 120;
@@ -107,6 +107,27 @@ describe('frame pacer', () => {
             expect(p.lastMode).toBe('paced');
         });
     }
+
+    test('Low power (LOW_POWER_FPS): every 12th vsync on 120 Hz, every 6th on 60, uniform', () => {
+        for (const hz of [120, 60] as const) {
+            display(hz);
+            const p = createFramePacer();
+            p.setTargetFps(LOW_POWER_FPS);
+            let paced = false;
+            const frames = runLoop(p, () => paced, 300);
+            paced = true;
+            simulate(3000);
+            // Measured from this loop's own start (fake time runs on between iterations).
+            const from = frames[0] + 600;
+            expect(rate(frames, from)).toBeCloseTo(LOW_POWER_FPS, 1);
+            for (const g of gaps(frames, from)) expect(g).toBeCloseTo(1000 / LOW_POWER_FPS, 3);
+            expect(p.getTargetFps()).toBe(LOW_POWER_FPS);
+            // Back to the default cap on the fly, as a preference change does.
+            p.setTargetFps(STEADY_STATE_FPS);
+            simulate(2000);
+            expect(rate(frames, frames[frames.length - 1] - 1000)).toBeCloseTo(60, 0);
+        }
+    });
 
     test('unmeasured display: paced requests are plain rAF', () => {
         display(120);

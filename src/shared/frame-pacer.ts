@@ -37,13 +37,21 @@
  *     hands' sweep to their new targets renders at the display's rate. The
  *     loops call it from their explicit-wake entry points.
  *
- * `setTargetFps` exists for the Low-power preference (Part 7 of the
- * options-panel project): a lower cap, same rule (10 fps on 120 Hz = every
+ * `setTargetFps` serves the Low power preference (docs/preferences.md): the
+ * entries set LOW_POWER_FPS instead, same rule (10 fps on 120 Hz = every
  * 12th vsync). The `?fps` readout shows the paced share and the display rate.
  */
 
 /** Steady-state cap, frames per second. */
 export const STEADY_STATE_FPS = 60;
+/**
+ * Steady-state cap under the Low power preference. Scrubs, drags and bursts
+ * are exempt as ever; at 1× the second hands visibly step instead of
+ * sweeping, which is what the preference means. Tunable: the plan's range is
+ * 10–12 (planning/2026-09-14-user-options-panel.md §3.4), to be settled by
+ * measurement on the native machines.
+ */
+export const LOW_POWER_FPS = 10;
 /** How long a user-driven change keeps the loop uncapped. */
 export const BURST_MS = 2000;
 /** Frames in one display-rate probe (the first gap is discarded). */

@@ -23,8 +23,8 @@
  * empty icon column so the labels stay aligned (Steve, 2026-09-22).
  *
  * Markup: partials/overflow-menu.html (#more-btn, #more-menu); appearance:
- * partials/overflow-menu.css. Part 3 of the options-panel project adds a
- * Settings row at the top.
+ * partials/overflow-menu.css. The Settings row heads the menu wherever the
+ * page has the ⚙ button (docs/preferences.md).
  */
 
 export interface OverflowMenuOptions {
@@ -43,6 +43,9 @@ export interface RowSpec {
 }
 
 export const ROW_SPECS: readonly RowSpec[] = [
+    // Settings first: on a phone the corner is always collapsed, so this row
+    // is the only way to the ⚙ dialog there (parent plan decision 1).
+    { label: 'Settings…', kind: 'click', id: 'settings-btn', group: true },
     // This app's pages (face pages only; each exists only where the page's
     // body class shows the corresponding corner link).
     { label: 'Home', kind: 'nav', id: 'back-link', group: true },

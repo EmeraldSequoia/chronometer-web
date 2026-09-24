@@ -222,6 +222,9 @@ export function openGeneralHelpTopic(hash: string): void {
 export function closeHelpPopover(): boolean {
     const overlay = document.getElementById('info-overlay');
     if (!overlay?.classList.contains('visible')) return false;
-    activeSetOverlayVisible?.(false);
+    // The index page wires its popup inline (no setter here): its close
+    // button does the same job.
+    if (activeSetOverlayVisible) activeSetOverlayVisible(false);
+    else document.getElementById('info-close')?.click();
     return true;
 }
