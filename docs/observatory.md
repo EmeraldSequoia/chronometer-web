@@ -999,6 +999,14 @@ idle → dragging → confirming → idle
   appears near the map. Enter or clicking Keep persists; Escape or clicking
   Revert restores the saved location.
 
+The time controller's Escape yields to every other overlay on the page — the
+Settings dialog, this Keep dialog (any non-idle drag state), the location
+dialog, help, the share dialog, the ⋮ menu and fullscreen — through the
+`escapeYields` predicate the entry passes to `initTimeControls`, and closes
+the panel only when none is up. A `pointerdown` on the canvas closes it too,
+passing through to the map drag or body tap underneath
+([time-controller.md](time-controller.md#closing-the-panel)).
+
 ### Coordinate conversion
 
 The earth map uses equirectangular (plate carrée) projection:

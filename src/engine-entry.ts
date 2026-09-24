@@ -3094,9 +3094,7 @@ async function main() {
         },
         ensureSchedulerRunning,
         writeTimeState,
-        // Settle probe for the tap ghost (no shared `updater` here — faces
-        // drive their own): landed when no enabled face is still sweeping.
-        isSettled: () => !faces.some(f => f.enabled && f.updater.anyAnimating()),
+        // No escapeYields: this page runs its own Escape ladder (below).
         // No onPopoverToggle: the popover is a pure overlay, so open/close
         // needs no relayout (and must not trigger one — a relayout invalidates
         // every face cache).

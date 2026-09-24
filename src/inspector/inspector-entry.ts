@@ -22,12 +22,12 @@ import { initAppNavLinks, registerAppNavHotkeys } from '../shared/app-nav.js';
 import { createFpsIndicator } from '../shared/fps-indicator.js';
 import { getState, setState, initAppState, onSharedChange, onAdoptedAsDefault, isPersistentMode } from '../shared/app-state.js';
 import { locationSourceOf } from '../shared/url-state.js';
-import { initShareButton } from '../shared/share-button.js';
-import { initOverflowMenu, closeOverflowMenu } from '../shared/overflow-menu.js';
+import { initShareButton, isShareDialogOpen } from '../shared/share-button.js';
+import { initOverflowMenu, closeOverflowMenu, isOverflowMenuOpen } from '../shared/overflow-menu.js';
 import { createFramePacer, LOW_POWER_FPS, STEADY_STATE_FPS } from '../shared/frame-pacer.js';
 import { getPrefs, onPrefsChange } from '../shared/prefs.js';
 import { initKeepAwake } from '../shared/wake-lock.js';
-import { initSettingsDialog } from '../shared/settings-dialog.js';
+import { initSettingsDialog, isSettingsDialogOpen } from '../shared/settings-dialog.js';
 import { initHelpPopover, openGeneralHelpTopic } from '../shared/help-popover.js';
 import { resolveTimezoneProvisional, persistableTz } from '../shared/tz-resolve.js';
 import { createTzResolver } from '../shared/tz-ensure.js';
@@ -1009,6 +1009,14 @@ const timeUI: TimeControlsAPI | null = initTimeControls({
     getLat: () => lat,
     getLon: () => lon,
     ensureSchedulerRunning: () => { scheduleFrame(); },
+    // Escape closes the panel last: yield while any other overlay is up (each
+    // owns its own Escape) — docs/time-controller.md.
+    escapeYields: () =>
+        isSettingsDialogOpen() ||
+        (locationDialog?.isVisible() ?? false) ||
+        (document.getElementById('info-overlay')?.classList.contains('visible') ?? false) ||
+        isShareDialogOpen() ||
+        isOverflowMenuOpen(),
 });
 
 // --- Cross-app navigation (header icons + i/o/c/a) and page hotkeys ---

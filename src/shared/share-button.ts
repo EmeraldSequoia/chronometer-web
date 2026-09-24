@@ -25,6 +25,13 @@ export function initShareButton(options: ShareButtonOptions): void {
     });
 }
 
+let openShare: HTMLElement | null = null;
+
+/** True while the share dialog is up (the time controller's Escape yields to it). */
+export function isShareDialogOpen(): boolean {
+    return openShare !== null;
+}
+
 /** Show the "Share this view" dialog for a prepared URL. */
 export function showShareDialog(url: string): void {
     ensureModalStyles();
@@ -67,6 +74,7 @@ export function showShareDialog(url: string): void {
     modal.append(title, text, input, buttons);
     backdrop.append(modal);
     document.body.appendChild(backdrop);
+    openShare = backdrop;
 
     let done = false;
     const close = () => {
@@ -74,6 +82,7 @@ export function showShareDialog(url: string): void {
         done = true;
         document.removeEventListener('keydown', onKey);
         backdrop.remove();
+        if (openShare === backdrop) openShare = null;
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
 

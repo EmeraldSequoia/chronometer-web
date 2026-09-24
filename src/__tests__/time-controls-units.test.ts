@@ -10,6 +10,14 @@
  * resolved body (stored `tb`, else the page's body, else the Moon; phase is
  * always the Moon) and flashing on a miss; persistence of `tu` and `tb`
  * through app-state, and the initial unit from it.
+ *
+ * Also pinned (planning/2026-09-24-time-controller-two-stories.md): the panel
+ * fades only while a scrub runs, never on a tap; a release at the display's
+ * edge keeps the scrub running hands-free until the next press anywhere,
+ * which is swallowed, with the padlock shown while the held pointer is in
+ * that zone and kept up afterwards; Escape stops a hands-free scrub, and closes
+ * the popover last — only when the page's `escapeYields` says nothing else is
+ * up; hiding the popover mid-scrub stops the scrub.
  */
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'fs';
@@ -37,12 +45,39 @@ const bodyRow = () => document.getElementById('tp-body-row') as HTMLElement;
 const bodyName = () => document.getElementById('tp-body-name')!.textContent;
 const fwd = () => document.getElementById('tp-step-fwd') as HTMLElement;
 const back = () => document.getElementById('tp-step-back') as HTMLElement;
-const down = (el: HTMLElement) => el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-const up = (el: HTMLElement) => el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+const pop = () => document.getElementById('time-popover') as HTMLElement;
+const faded = () => pop().classList.contains('tp-hidden');
+const inZone = () => pop().classList.contains('tp-lock-zone');
+const locked = () => pop().classList.contains('tp-locked');
+
+/** The pair's buttons on jsdom's 1024×768 viewport: ▶ at the bottom-right, 12 px from the edge (the Observatory's placement). */
+function placeButtons(): void {
+    const rect = (l: number, t: number) => () =>
+        ({ left: l, top: t, right: l + 56, bottom: t + 56, width: 56, height: 56, x: l, y: t, toJSON: () => ({}) }) as DOMRect;
+    fwd().getBoundingClientRect = rect(956, 600);
+    back().getBoundingClientRect = rect(760, 600);
+}
+const centre = (el: HTMLElement) => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+};
+const ptr = (type: string, el: HTMLElement, x: number, y: number, pointerId = 1) => {
+    const e = new PointerEvent(type, { bubbles: true, cancelable: true, pointerId, clientX: x, clientY: y });
+    el.dispatchEvent(e);
+    return e;
+};
+/** Press / release at the button's centre unless a point is given. */
+const down = (el: HTMLElement, x?: number, y?: number) => { const c = centre(el); return ptr('pointerdown', el, x ?? c.x, y ?? c.y); };
+const up = (el: HTMLElement, x?: number, y?: number) => { const c = centre(el); return ptr('pointerup', el, x ?? c.x, y ?? c.y); };
 const tap = (el: HTMLElement) => { down(el); up(el); };
+const key = (k: string) => {
+    const e = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true });
+    document.body.dispatchEvent(e);
+    return e;
+};
 const stored = (ns: string) => JSON.parse(localStorage.getItem(`ec:${ns}`) ?? 'null');
 
-function setup(opts: { withPageBody?: boolean } = {}): void {
+function setup(opts: { withPageBody?: boolean; escapeYields?: () => boolean } = {}): void {
     document.body.innerHTML = PARTIAL;
     tc = new TimeController();
     const maybe = initTimeControls({
@@ -53,10 +88,12 @@ function setup(opts: { withPageBody?: boolean } = {}): void {
         getLon: () => -122.42,
         getSelectedBody: opts.withPageBody ? () => pageBody : undefined,
         ensureSchedulerRunning: () => {},
+        escapeYields: opts.escapeYields,
     });
     if (!maybe) throw new Error('initTimeControls returned null');
     api = maybe;
     api.showPopover();
+    placeButtons();
 }
 
 beforeEach(() => {
@@ -70,6 +107,11 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+    // A test may end with a hands-free scrub running, whose stop listener sits
+    // on the document: press once to release it (and let its click swallower
+    // disarm) so it cannot swallow the next test's first press.
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 9 }));
+    vi.advanceTimersByTime(1000);
     vi.useRealTimers();
     document.body.innerHTML = '';
 });
@@ -264,5 +306,252 @@ describe('astro units and the body', () => {
         expect(astroStepLabel('transit', sun)).toBe('Sun transit');
         expect(astroStepLabel('rise', mars)).toBe('Mars rise');
         expect(astroStepLabel('phase', mars)).toBe('Moon phase');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// The scrub fade and hands-free scrubbing
+// ---------------------------------------------------------------------------
+
+describe('the scrub fade: only while a scrub runs', () => {
+    test('taps never fade the panel: step, astro jump, transport, Now, chips', () => {
+        setup();
+        tap(fwd());                                    // a step
+        expect(faded()).toBe(false);
+        vi.advanceTimersByTime(300);
+        expect(faded()).toBe(false);                   // and no hold from a tap
+        chip('rise').click();
+        mockedTarget.mockReturnValue(new Date('2026-09-24T06:00:00Z'));
+        tap(fwd());                                    // an astro jump
+        expect(faded()).toBe(false);
+        chip('day').click();
+        expect(faded()).toBe(false);
+        // Transport: the clock is stopped, so ◀ ▶ render; press ▶ (1×), then Now.
+        const transport = () => [...document.querySelectorAll('#tp-transport .tp-btn')] as HTMLElement[];
+        const play = transport().find((b) => b.textContent?.trim() === '▶')!;
+        play.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+        expect(tc.isStopped).toBe(false);
+        expect(faded()).toBe(false);
+        const now = transport().find((b) => b.textContent?.startsWith('Now'))!;
+        now.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+        expect(tc.isRealTime).toBe(true);
+        expect(faded()).toBe(false);
+        expect(locked()).toBe(false);
+    });
+
+    test('a hold fades the panel when it engages, not at the press; a release on the button restores', () => {
+        setup();
+        down(fwd());
+        expect(faded()).toBe(false);
+        vi.advanceTimersByTime(299);
+        expect(faded()).toBe(false);
+        vi.advanceTimersByTime(1);
+        expect(faded()).toBe(true);
+        expect(fwd().classList.contains('holding')).toBe(true);
+        up(fwd());
+        expect(faded()).toBe(false);
+        expect(tc.isStopped).toBe(true);
+        expect(fwd().classList.contains('holding')).toBe(false);
+    });
+
+    test('a release off the button but on the display stops the scrub', () => {
+        setup();
+        down(fwd());
+        vi.advanceTimersByTime(300);
+        up(fwd(), 500, 300);
+        expect(tc.isStopped).toBe(true);
+        expect(faded()).toBe(false);
+        expect(locked()).toBe(false);
+    });
+
+    test('hiding the popover mid-hold stops the scrub and leaves nothing faded', () => {
+        setup();
+        down(fwd());
+        vi.advanceTimersByTime(300);
+        expect(tc.currentRate).toBe(RATE_OPTIONS[3]);
+        api.hidePopover();
+        expect(tc.isStopped).toBe(true);
+        expect(faded()).toBe(false);
+        up(fwd());                                     // the late release changes nothing
+        expect(tc.isStopped).toBe(true);
+        api.showPopover();
+        expect(faded()).toBe(false);
+    });
+
+    test('a second pointer while one is down is ignored', () => {
+        setup();
+        down(fwd());
+        ptr('pointerdown', back(), 788, 628, 2);
+        vi.advanceTimersByTime(300);
+        expect(tc.currentDirection).toBe(1);
+        expect(back().classList.contains('holding')).toBe(false);
+        ptr('pointerup', back(), 788, 628, 2);
+        expect(tc.isStopped).toBe(false);              // the second finger's lift is not the release
+        up(fwd());
+        expect(tc.isStopped).toBe(true);
+    });
+
+    test('a cancelled pointer after the hold engaged stops', () => {
+        setup();
+        down(fwd());
+        vi.advanceTimersByTime(300);
+        ptr('pointercancel', fwd(), 984, 628);
+        expect(tc.isStopped).toBe(true);
+        expect(faded()).toBe(false);
+    });
+});
+
+describe('hands-free scrubbing: a release at the display edge', () => {
+    /** Press ▶, let the hold engage, slide to the right edge and lift there. */
+    function lockForward(): void {
+        down(fwd());
+        vi.advanceTimersByTime(300);
+        up(fwd(), 1022, 640);
+    }
+    const pressElsewhere = () => {
+        const e = new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 3, clientX: 300, clientY: 300 });
+        document.body.dispatchEvent(e);
+        return e;
+    };
+
+    test('the lock zone shows while the held pointer is where a release would lock, and clears when it leaves', () => {
+        setup();
+        down(fwd());
+        ptr('pointermove', fwd(), 1022, 640);              // at the edge before the hold engages: nothing yet
+        expect(inZone()).toBe(false);
+        vi.advanceTimersByTime(300);
+        expect(inZone()).toBe(true);                       // the hold engaged with the pointer already there
+        ptr('pointermove', fwd(), 500, 300);               // back onto the display
+        expect(inZone()).toBe(false);
+        expect(faded()).toBe(true);
+        ptr('pointermove', fwd(), -20, 300);               // out of the window (a mouse)
+        expect(inZone()).toBe(true);
+        ptr('pointermove', fwd(), 984, 628);               // back on the button
+        expect(inZone()).toBe(false);
+        up(fwd());
+        expect(tc.isStopped).toBe(true);
+        expect(inZone()).toBe(false);
+        expect(locked()).toBe(false);
+    });
+
+    test('keeps the scrub running, keeps the padlock up at the scrub level, and drops the holding highlight', () => {
+        setup();
+        down(fwd());
+        vi.advanceTimersByTime(300);
+        ptr('pointermove', fwd(), 1022, 640);
+        expect(inZone()).toBe(true);
+        up(fwd(), 1022, 640);
+        expect(tc.isStopped).toBe(false);
+        expect(tc.currentRate).toBe(RATE_OPTIONS[3]);
+        expect(faded()).toBe(true);                        // the scrub level again …
+        expect(inZone()).toBe(false);
+        expect(locked()).toBe(true);                       // … with the padlock still showing
+        expect(fwd().classList.contains('holding')).toBe(false);
+    });
+
+    test('a release past the window edge (a mouse dragged out) locks too; a lift on the button never does', () => {
+        setup();
+        down(fwd());
+        vi.advanceTimersByTime(300);
+        up(fwd(), -40, 300);
+        expect(tc.isStopped).toBe(false);
+        expect(tc.currentRate).toBe(RATE_OPTIONS[3]);
+        expect(locked()).toBe(true);
+        pressElsewhere();
+        expect(tc.isStopped).toBe(true);
+        down(fwd());
+        vi.advanceTimersByTime(300);
+        up(fwd(), 1011, 655);                          // on the button, 13 px from the edge
+        expect(tc.isStopped).toBe(true);
+        expect(locked()).toBe(false);
+    });
+
+    test('the next press anywhere stops it and is swallowed, with the click that follows', () => {
+        setup();
+        lockForward();
+        const reached = vi.fn();
+        document.body.addEventListener('pointerdown', reached);
+        document.body.addEventListener('click', reached);
+        const press = pressElsewhere();
+        expect(tc.isStopped).toBe(true);
+        expect(press.defaultPrevented).toBe(true);
+        expect(faded()).toBe(false);
+        expect(locked()).toBe(false);
+        expect(api.isPopoverOpen()).toBe(true);
+        expect(getState().dir).toBe(0);                // state written at the stop
+        const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+        document.body.dispatchEvent(click);
+        expect(click.defaultPrevented).toBe(true);
+        expect(reached).not.toHaveBeenCalled();
+        // The swallower is one-shot: the click after that goes through.
+        const next = new MouseEvent('click', { bubbles: true, cancelable: true });
+        document.body.dispatchEvent(next);
+        expect(next.defaultPrevented).toBe(false);
+        expect(reached).toHaveBeenCalledTimes(1);
+    });
+
+    test('a swallower that sees no click disarms itself', () => {
+        setup();
+        lockForward();
+        pressElsewhere();
+        vi.advanceTimersByTime(500);
+        const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+        document.body.dispatchEvent(click);
+        expect(click.defaultPrevented).toBe(false);
+    });
+
+    test('Escape stops it and keeps the panel; a hidden tab stops it too', () => {
+        setup({ escapeYields: () => false });
+        lockForward();
+        const esc = key('Escape');
+        expect(tc.isStopped).toBe(true);
+        expect(esc.defaultPrevented).toBe(true);
+        expect(api.isPopoverOpen()).toBe(true);
+        lockForward();
+        expect(tc.isStopped).toBe(false);
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+        try {
+            document.dispatchEvent(new Event('visibilitychange'));
+            expect(tc.isStopped).toBe(true);
+        } finally {
+            Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+        }
+    });
+});
+
+describe('Escape closes the popover last', () => {
+    test('closes when nothing else is up, yields while something is, and is inert once closed', () => {
+        let busy = false;
+        setup({ escapeYields: () => busy });
+        busy = true;
+        let esc = key('Escape');
+        expect(api.isPopoverOpen()).toBe(true);
+        expect(esc.defaultPrevented).toBe(false);
+        busy = false;
+        esc = key('Escape');
+        expect(api.isPopoverOpen()).toBe(false);
+        expect(esc.defaultPrevented).toBe(true);
+        esc = key('Escape');
+        expect(api.isPopoverOpen()).toBe(false);
+        expect(esc.defaultPrevented).toBe(false);
+    });
+
+    test('a focused date input gives up focus first; the next Escape closes', () => {
+        setup({ escapeYields: () => false });
+        const hour = document.getElementById('tp-hour') as HTMLInputElement;
+        hour.focus();
+        expect(document.activeElement).toBe(hour);
+        key('Escape');
+        expect(document.activeElement).not.toBe(hour);
+        expect(api.isPopoverOpen()).toBe(true);
+        key('Escape');
+        expect(api.isPopoverOpen()).toBe(false);
+    });
+
+    test('without the hook, Escape leaves the popover alone (the page runs its own ladder)', () => {
+        setup();
+        const esc = key('Escape');
+        expect(api.isPopoverOpen()).toBe(true);
+        expect(esc.defaultPrevented).toBe(false);
     });
 });

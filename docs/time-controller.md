@@ -50,12 +50,13 @@ Row 1 is the five largest calendar units; row 2 is seconds and the four
 astro chips, tinted so the group boundary reads even though the rows split
 it. `UNITS` in time-controls-ui.ts is the table. The default is a day.
 
-Hold-to-scrub is unchanged in mechanism: a press steps once, and after
-`HOLD_DELAY_MS` (300 ms) the clock runs at the unit's rate in the pressed
-direction until release, which stops it; the popover ghosts to 25 % while
-held (`.tp-hidden`) and every actuating tap ghosts it briefly (`.tp-ghost`,
-[planning/2026-07-17-time-controller-scrub-invisibility.md](../planning/2026-07-17-time-controller-scrub-invisibility.md)).
-Chip and body taps do not ghost.
+Hold-to-scrub: a press steps once, and after `HOLD_DELAY_MS` (300 ms) the
+clock runs at the unit's rate in the pressed direction until release, which
+stops it. The pair uses Pointer Events with capture, so the release reaches
+the button wherever the pointer went by then — which is what makes
+[hands-free scrubbing](#hands-free-scrubbing) possible. While a scrub runs
+the popover fades to `--tp-scrub-opacity` (0.38, `.tp-hidden`) so the display
+underneath is visible; see [the scrub fade](#the-scrub-fade-two-stories).
 
 ### The body
 
@@ -99,6 +100,86 @@ always present under the pair (no tab): year / month / day and CE-BCE /
 hour / minute, applied on change through the hybrid calendar
 ([calendar.md](calendar.md#time-bar-display)).
 
+### The scrub fade: two stories
+
+Setting the time has two stories, like setting the location
+([planning/2026-09-24-time-controller-two-stories.md](../planning/2026-09-24-time-controller-two-stories.md)):
+
+- **Precise** — "I want to know about *this* time": type a date, or get
+  there by steps ("in a few days", "at the next full moon", "at sunset").
+  Several taps, each aimed at a target; the display is not the point until
+  the last one. The location dialog is this story for location.
+- **Exploratory** — "what changes as time passes?": hold to scrub. One
+  continuous gesture whose whole point is watching the display. Dragging the
+  map is this story for location — and nothing overlays the display while
+  you do.
+
+So the panel **fades only while a scrub runs, and never on a tap**: a panel
+that faded after every step moved the target out from under the next one
+(the 2026-07-17 tap ghost, retired; users read it as the controller "going
+away entirely"). A hold fades the popover to 0.38 when it engages (at
++300 ms, the first moment a press is known to be a scrub) and the release
+restores it; steps, astro jumps, transport presses, Now, chips and the date
+inputs leave it alone. The fade must stay opacity-only: the hold's release
+arrives on the faded button, and `visibility` / `display` would stop
+hit-testing and strand the hold.
+
+### Hands-free scrubbing
+
+The native app has a habit its users like: slide the finger off the
+display while scrubbing and the scrub keeps going, finger out of the way,
+until the next tap. The web controller does this on purpose, and narrowly:
+a release that lands **off the button and at the display's edge** (within
+`EDGE_PX` of the visual viewport's edge, or past it — a mouse dragged out of
+the browser window and released) turns the scrub from *on until release*
+into *on until the next press*. A release anywhere on the display, on the
+button or off it, stops as usual, so a wobble never locks.
+
+The outcome is visible before it happens: while the held pointer is where a
+release would lock — the captured button's `pointermove`s drive it, so a
+mouse dragged out of the window counts — the panel comes back to **full
+opacity with a large green padlock over it** (`.tp-lock-zone`,
+`#tp-lock-badge`, the badge at 0.75); move back onto the display and it
+fades again. Let go in the zone and the padlock **stays up**, dimmed to 0.4
+over the panel at the scrub level (`.tp-locked`; the badge is a child of the
+popover, so the two multiply to about 0.15 — a full-strength lock was
+distracting). The time bar shows the rate throughout.
+
+A hands-free scrub stops on:
+
+- **the next press anywhere**, which does nothing else: it is swallowed in
+  the capture phase (no map drag, no menu, no chip) along with the click the
+  browser synthesises from it;
+- **Escape** (the panel stays open; the next Escape closes it — see below);
+- **the tab going hidden** (`visibilitychange`), so a background tab cannot
+  run time away for an hour;
+- a cancelled or lost pointer at any time (unknown state: stop).
+
+The apps see nothing new: `onScrubStart` fired when the hold engaged,
+`onScrubEnd` and the time-state write fire at the stop.
+
+### Closing the panel
+
+The × in the top row, the time bar's ⏱ toggle, the `t` key and the ⋮ menu's
+item close the panel, and each stops any running scrub first (`hidePopover`
+ends the hold — `display: none` would otherwise strand a held button's
+release). Two more, for the precise story's "done now":
+
+- **Escape, last in the hierarchy.** On pages that pass `escapeYields`
+  (Observatory, Inspector), the UI installs a window capture-phase Escape
+  listener that closes the panel only while that predicate is false — no
+  dialog, menu or fullscreen is up to take the key first (each of those owns
+  its own Escape, and most close themselves on the same keydown without
+  stopping it, so the decision has to be made in the capture phase on the
+  pre-close state). A focused date input gives up focus first; the pending
+  edit applies on change. Chronometer runs its own Escape ladder with the
+  panel as its last rung and passes nothing.
+- **A press on the display** (the Observatory canvas, wired in its entry)
+  closes the panel and passes through, so a map drag with the panel open
+  both closes it and starts the drag. Presses on chrome (Settings, Set
+  location, the corners) leave it open. The face pages and the Inspector
+  are to follow after the Observatory's native pass.
+
 ## Footprint and placement
 
 The panel is one 264 px column (five 44 px chips plus gaps and padding),
@@ -124,8 +205,8 @@ pure overlay everywhere — no layout participates
 | File | Role |
 |------|------|
 | `src/partials/time-controller.html`, `.css` | markup and appearance |
-| `src/shared/time-controls-ui.ts` | `initTimeControls`: units, the pair, hold-to-scrub, ghosting, the body, transport, date inputs; `UNITS`, `CONTROLLER_BODIES`, `astroStepLabel` |
+| `src/shared/time-controls-ui.ts` | `initTimeControls`: units, the pair, hold-to-scrub, the scrub fade, hands-free scrubbing, Escape, the body, transport, date inputs; `UNITS`, `CONTROLLER_BODIES`, `astroStepLabel` |
 | `src/shared/time-controller.ts` | the time model: 1× / offset / stopped / quantized rates |
 | `src/shared/astro-stepper.ts` | rise / set / transit / phase searches (`computeAstroTarget`) |
 | `src/shared/url-state.ts`, `app-state.ts` | `tu` / `tb` |
-| tests | `src/__tests__/time-controls-units.test.ts`, `time-controls-ghost.test.ts`, `scrub-direction-snap.test.ts`, `astro-boundary.test.ts` |
+| tests | `src/__tests__/time-controls-units.test.ts` (units, the pair, the fade, hands-free, Escape), `scrub-direction-snap.test.ts`, `astro-boundary.test.ts` |

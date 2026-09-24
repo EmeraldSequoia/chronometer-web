@@ -126,24 +126,56 @@
           padding: 0;
           pointer-events: none;
           transition: opacity 0.15s;
+          /* The scrub fade's level. 0.38 (Steve, 2026-09-24, down from 0.5
+             for a look): 0.25 read as "went away entirely"; 0.05 and 0.15
+             as fully invisible on a real display. */
+          --tp-scrub-opacity: 0.38;
       }
 
-      /* Tap ghosting: any actuating tap (step / astro jump / transport / Now)
-         fades the popover briefly so the change is visible landing; a dwell
-         timer restores it. Same level as .tp-hidden today but kept separate
-         so the two can be retuned independently. */
-      #time-popover.tp-ghost {
-          opacity: 0.25;
-      }
-
-      /* Ghosting while scrubbing: fade so the app underneath is visible while
-         the controls stay findable (0.05 and 0.15 read as fully invisible on
-         a real display). MUST stay opacity-only — the hold gesture depends on
-         the faded button still receiving mouseup/mouseleave/touchend;
-         visibility/display would stop hit-testing and strand the hold.
-         Declared after .tp-ghost so the scrub state wins while both apply. */
+      /* The scrub fade: while a scrub runs — held, or hands-free — the popover
+         fades so the display underneath is visible, and ONLY then. A tap never
+         fades it: stepping to a target takes several taps and each needs the
+         panel where it was (docs/time-controller.md, the two stories). MUST
+         stay opacity-only — the hold's release arrives on the faded button;
+         visibility/display would stop hit-testing and strand the hold. */
       #time-popover.tp-hidden {
-          opacity: 0.25;
+          opacity: var(--tp-scrub-opacity);
+      }
+
+      /* Hands-free scrubbing feedback. .tp-lock-zone: a held scrub's pointer
+         is where a release would keep it running (off the button, at the
+         display's edge) — the panel comes back to full opacity and the
+         padlock shows, so the outcome of letting go is visible before it
+         happens. Declared after .tp-hidden so it wins. .tp-locked: it did —
+         the padlock stays and the panel is back at the scrub level (the
+         badge is a child of the popover, so it fades with it). */
+      #time-popover.tp-lock-zone {
+          opacity: 1;
+      }
+
+      /* The padlock's own opacity multiplies the popover's: 0.75 over the
+         full-opacity panel in the zone, 0.4 over the 0.38 panel once
+         released (≈ 0.15 effective) — a full-strength lock was distracting
+         (Steve, 2026-09-24). */
+      #tp-lock-badge {
+          display: none;
+          position: absolute;
+          inset: 0;
+          align-items: center;
+          justify-content: center;
+          pointer-events: none;
+          filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.7));
+          transition: opacity 0.15s;
+      }
+
+      #time-popover.tp-lock-zone #tp-lock-badge {
+          display: flex;
+          opacity: 0.75;
+      }
+
+      #time-popover.tp-locked #tp-lock-badge {
+          display: flex;
+          opacity: 0.4;
       }
 
       /* The top row: the transport buttons and, at the panel's top-right
@@ -365,6 +397,10 @@
           min-height: 56px;
           font-size: 20px;
           padding: 0;
+          /* A held finger may slide off the button to the screen's edge
+             (hands-free scrubbing): the browser must not turn that into a
+             panel scroll, which would cancel the pointer. */
+          touch-action: none;
       }
 
       #tp-step-label {

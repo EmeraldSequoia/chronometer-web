@@ -55,4 +55,15 @@
             <input id="tp-minute" type="number" min="0" max="59" placeholder="mm" aria-label="Minute" />
           </div>
         </div>
+        <!-- Hands-free scrubbing (docs/time-controller.md): the padlock shows
+             while a held scrub's pointer is where a release would keep it
+             running, and stays up, faded with the panel, once it does. -->
+        <div id="tp-lock-badge" aria-hidden="true">
+          <svg viewBox="0 0 64 64" width="96" height="96" focusable="false">
+            <path d="M20 29v-9a12 12 0 0 1 24 0v9" fill="none" stroke="#4cd964" stroke-width="6" stroke-linecap="round"/>
+            <rect x="11" y="29" width="42" height="30" rx="7" fill="#4cd964"/>
+            <circle cx="32" cy="41" r="4.5" fill="#1a1a2e"/>
+            <rect x="29.5" y="41" width="5" height="10" rx="2.5" fill="#1a1a2e"/>
+          </svg>
+        </div>
       </div>

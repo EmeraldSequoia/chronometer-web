@@ -330,6 +330,7 @@ The `Updater<K extends string = string>` is **name-keyed**: `add(v)` registers a
 | `ensureSchedulerRunning` | yes | restart the client's (app-owned) render loop after a transition; the rAF loop differs per app, so there is no generic default |
 | `onTimeStep` / `onScrubStart` / `onScrubEnd` / `onNowClicked` / `onTransportChange` | optional | **notifications for custom logic only** — omit when the client has none |
 | `writeTimeState` | optional | defaults to `flushTimeState(timeController)`, which persists `t`/`off`/`dir` through `app-state` (LocalStorage by default, URL for sharing/fallback); override only to change time-state persistence |
+| `escapeYields` | optional | "another overlay is up": when supplied, Escape closes the popover only while it returns false — see [time-controller.md](time-controller.md#closing-the-panel); pages with their own Escape ladder omit it |
 
 The UI performs the generic controller action itself (e.g. `nowClicked()` → `timeController.reset()`, `endHold()` → `timeController.stop()`), then `updater?.reset()`, then the optional notification, then `updateTimeUI()` / `ensureSchedulerRunning()` / `writeTimeState()`. Because every `TimeController` mutation (`reset`/`stop`/`setTime`/`setOffset`/`setRate`/`setDirection`) fires `onTick`, a client that wires `timeController.onTick` to its env rebuild (Observatory, Chronometer) gets a fresh env on every transition for free.
 

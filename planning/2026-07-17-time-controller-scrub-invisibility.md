@@ -1,5 +1,12 @@
 # Plan: make the time controller invisible while scrubbing
 
+> **Superseded 2026-09-24** by
+> [2026-09-24-time-controller-two-stories.md](2026-09-24-time-controller-two-stories.md):
+> the §4 tap ghost (`.tp-ghost`, dwell, settle-wait, `isSettled`) is retired —
+> the panel fades only while a scrub runs, at 0.5 — and a release at the
+> display's edge keeps the scrub running hands-free. The scrub fade
+> (`.tp-hidden`) and the Chronometer cleanup (§3) stand.
+>
 > **Status: phases 1–2 implemented 2026-07-17** (phase 1 in build 2.0.42;
 > scrub opacity retuned to **0.25** in 2.0.43 after Steve's native eyeball —
 > 0.05 and 0.15 both read as fully invisible on a real display, 0.25

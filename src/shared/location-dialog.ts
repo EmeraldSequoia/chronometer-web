@@ -101,6 +101,8 @@ export interface LocationDialogAPI {
     /** True while the compact locating panel is showing (caller can use this to
      *  decide whether a late geolocation result should auto-apply). */
     isLocating: () => boolean;
+    /** True while the dialog (full, or the compact locating panel) is showing. */
+    isVisible: () => boolean;
     /** Hide the dialog. */
     dismiss: () => void;
     /** Update the dialog's internal state (e.g. after location changes externally). */
@@ -639,6 +641,7 @@ export function initLocationDialog(config: LocationDialogConfig): LocationDialog
         show: showDialog,
         showLocating,
         isLocating: () => locating,
+        isVisible: () => locationPrompt.style.display !== 'none',
         dismiss: dismissDialog,
 
         updateState(lat: number, lon: number, sourceType: LocationSourceType, source: string, fullLabel: string) {

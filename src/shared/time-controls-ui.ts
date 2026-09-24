@@ -20,6 +20,11 @@
  * (parent plan §7.3): it defaults to the page's body where the page has one
  * (`getSelectedBody`), else the Moon, until the user steps it. The unit
  * (`tu`) and body (`tb`) persist per app through app-state.
+ *
+ * The panel fades only while a scrub runs — never on a tap (the two stories,
+ * docs/time-controller.md): stepping to a target takes several taps and each
+ * needs the panel where it was. A scrub whose release lands off the button at
+ * the display's edge keeps running hands-free until the next press anywhere.
  */
 
 import { TimeController, TimeUnit, RATE_OPTIONS } from './time-controller.js';
@@ -123,23 +128,21 @@ export interface TimeControlsConfig {
      * after **every** time transition (scrub / step / now / transport) so the
      * app's values re-evaluate at the new time — the generic controller→updater
      * coupling. Apps driving values by hand (Chronometer's `HandState`) omit this
-     * and do their own work in the callbacks below. When the updater also
-     * exposes `anyAnimating()` (the shared Updater does), it doubles as the
-     * default settle probe for the tap ghost — see `isSettled`.
+     * and do their own work in the callbacks below.
      */
-    updater?: { reset: () => void; anyAnimating?: () => boolean };
+    updater?: { reset: () => void };
 
     /**
-     * "Step animations have settled" probe for the tap ghost. After a step or
-     * astro jump the ghosted popover is restored at the LATER of the dwell
-     * and this returning true (bounded by a cap), so the change finishes
-     * landing on screen before the popover re-covers it. Only consulted after
-     * taps that stop the clock — a running 1× clock animates forever, so
-     * transport/Now taps always use the plain dwell. Defaults to
-     * `!updater.anyAnimating()` when `updater` provides it; omit both and the
-     * ghost restores on the fixed dwell.
+     * Escape closes the popover, last in the page's overlay hierarchy. When
+     * supplied, the UI installs a window capture-phase Escape listener that
+     * closes the popover only while this returns false — no other overlay
+     * (dialog, menu, fullscreen) is up to take the key first. Capture phase,
+     * because the other overlays close themselves on the same keydown without
+     * stopping it, so the decision must be made on the pre-close state. Pages
+     * that run their own Escape ladder (Chronometer) omit it. Independent of
+     * this, Escape always stops a hands-free scrub.
      */
-    isSettled?: () => boolean;
+    escapeYields?: () => boolean;
 
     // ---- App-specific callbacks (all optional — for *custom* work only) ----
     // The generic parts (the controller action, `updater.reset()`,
@@ -232,12 +235,8 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
         ensureSchedulerRunning,
         writeTimeState = () => flushTimeState(timeController),
         onPopoverToggle,
+        escapeYields,
     } = config;
-
-    // Settle probe for the tap ghost: explicit config wins, else derive from
-    // the updater's anyAnimating() (arrow wrapper preserves `this`).
-    const settledProbe = config.isSettled ??
-        (updater?.anyAnimating ? () => !updater.anyAnimating!() : undefined);
 
     // ---- Required DOM elements ----
     const _timeBar = document.getElementById('time-bar');
@@ -538,7 +537,6 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
             b.className = className;
             b.innerHTML = html;
             onPress(b, () => {
-                ghostTap();
                 action();
                 updater?.reset();
                 onTransportChange();
@@ -652,10 +650,9 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
     function showPopover() {
         popoverOpen = true;
         timePopover.style.display = '';
-        // Stale-ghost guard: a force-close mid-hold (e.g. Escape) can skip
-        // endHold(), leaving the scrub ghost class behind; a close within the
-        // tap-ghost dwell similarly strands .tp-ghost until its timer fires.
-        timePopover.classList.remove('tp-hidden', 'tp-ghost');
+        // Stale-fade guard: hidePopover() ends any scrub, so nothing should be
+        // left behind — belt and braces against a future close path that skips it.
+        timePopover.classList.remove('tp-hidden', 'tp-lock-zone', 'tp-locked');
         timeBarLabel.textContent = '⏱ Hide time controller';
         timeBarLabel.classList.add('active');
         updateTimeUI();
@@ -664,6 +661,10 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
     }
 
     function hidePopover() {
+        // A close mid-scrub (Escape, the ⋮ menu item, the `t` key) stops the
+        // scrub first: display:none would strand a held button's release, and
+        // a hands-free scrub would run on with the panel gone.
+        endHold();
         popoverOpen = false;
         timePopover.style.display = 'none';
         timeBarLabel.textContent = '⏱ Show time controller';
@@ -678,7 +679,6 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
     // ===================================================================
 
     function nowClicked() {
-        ghostTap();
         timeController.reset();    // generic controller action (was delegated to clients)
         updater?.reset();
         onNowClicked();
@@ -689,18 +689,38 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
 
     // ===================================================================
     // Hold-to-scrub
+    //
+    // A press steps once; after HOLD_DELAY_MS the clock runs at the unit's
+    // rate until release. Pointer Events with capture, so the release reaches
+    // the button wherever the pointer went by then, with its coordinates. A
+    // release that lands OFF the button AND at the display's edge (or outside
+    // the window — a mouse dragged out of it) is the native app's
+    // finger-off-the-screen gesture: the scrub keeps running hands-free until
+    // the next press anywhere (docs/time-controller.md). Any other release
+    // stops it, on the button or off it.
     // ===================================================================
 
     const HOLD_DELAY_MS = 300;
+    /** A release within this many px of a visual-viewport edge counts as off the display. */
+    const EDGE_PX = 8;
+    /** How long the click swallower armed by a hands-free stop press stays armed. */
+    const STOP_CLICK_SWALLOW_MS = 500;
     let holdTimer: ReturnType<typeof setTimeout> | null = null;
     let holdingBtn: HTMLElement | null = null;
+    /** The pointer that pressed the pair — one press at a time; a second finger is ignored. */
+    let holdPointerId: number | null = null;
+    /** True while a scrub runs hands-free: on until the next press. */
+    let scrubLocked = false;
+    /** The held pointer's last known position (viewport coordinates). */
+    let lastPointer: { x: number; y: number } | null = null;
 
     function startHold(btn: HTMLElement, rateIndex: number, dir: 1 | -1) {
         holdingBtn = btn;
         btn.classList.add('holding');
-        // Ghost the popover so the app is visible while scrubbing. Opacity-only
+        // Fade the popover so the app is visible while scrubbing. Opacity-only
         // (see .tp-hidden in the CSS): the held button must keep hit-testing.
         timePopover.classList.add('tp-hidden');
+        updateLockZone();
 
         // Set direction and start the unit's rate (10 units per second).
         timeController.setDirection(dir);
@@ -711,68 +731,112 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
         ensureSchedulerRunning();
     }
 
+    /** Stop a running scrub, held or hands-free; a pending hold that never engaged is just cancelled. */
     function endHold() {
         if (holdTimer !== null) {
             clearTimeout(holdTimer);
             holdTimer = null;
         }
+        const wasScrubbing = holdingBtn !== null || scrubLocked;
         if (holdingBtn) {
             holdingBtn.classList.remove('holding');
             holdingBtn = null;
-            // Release always restores immediately (hold = ghosted, release =
-            // restored): clear the initiating tap's ghost too — its settle-wait
-            // would otherwise keep short holds ghosted after release.
-            timePopover.classList.remove('tp-hidden', 'tp-ghost');
-            if (ghostTimer !== null) {
-                clearTimeout(ghostTimer);
-                ghostTimer = null;
-            }
-
-            // Stop at the current position (generic — was delegated to clients),
-            // then let the app run any custom snap/finish logic.
-            timeController.stop();
-            updater?.reset();
-            onScrubEnd();
-            updateTimeUI();
-            ensureSchedulerRunning();
-            writeTimeState();
         }
+        if (scrubLocked) unlockScrub();
+        if (!wasScrubbing) return;
+
+        // Release restores immediately: scrubbing = faded, stopped = restored.
+        timePopover.classList.remove('tp-hidden', 'tp-lock-zone', 'tp-locked');
+
+        // Stop at the current position (generic — was delegated to clients),
+        // then let the app run any custom snap/finish logic.
+        timeController.stop();
+        updater?.reset();
+        onScrubEnd();
+        updateTimeUI();
+        ensureSchedulerRunning();
+        writeTimeState();
     }
-
-    // ===================================================================
-    // Tap ghosting
-    // ===================================================================
-
-    const GHOST_DWELL_MS = 1000;
-    const GHOST_SETTLE_POLL_MS = 200;
-    const GHOST_SETTLE_CAP_MS = 4000;
-    let ghostTimer: ReturnType<typeof setTimeout> | null = null;
 
     /**
-     * Ghost the popover briefly after an actuating tap (step / astro jump /
-     * transport / Now) so the app is visible while the change lands. The
-     * dwell timer restarts on every tap, so repeated taps keep it ghosted.
-     * With `waitSettle` (step/astro taps — the clock is stopped afterwards),
-     * restore waits for the app's animations to finish landing: the later of
-     * the dwell and the settle probe, bounded by a cap so a stuck probe can't
-     * strand the ghost. Opacity-only, same constraint as the scrub ghost.
+     * Did a release leave the display? Off the button's own rect (a lift on
+     * the button is a stop wherever on it) and within EDGE_PX of a visual
+     * viewport edge, or past one. Both halves matter: excluding the button is
+     * what lets EDGE_PX be generous — the Observatory's ▶ is 12 px from the
+     * right edge — without a normal lift ever qualifying.
      */
-    function ghostTap(waitSettle = false) {
-        if (!popoverOpen) return;
-        timePopover.classList.add('tp-ghost');
-        if (ghostTimer !== null) clearTimeout(ghostTimer);
-        const deadline = Date.now() + GHOST_SETTLE_CAP_MS;
-        const expire = () => {
-            if (waitSettle && settledProbe && !settledProbe() &&
-                Date.now() < deadline) {
-                ghostTimer = setTimeout(expire, GHOST_SETTLE_POLL_MS);
-                return;
-            }
-            ghostTimer = null;
-            timePopover.classList.remove('tp-ghost');
-        };
-        ghostTimer = setTimeout(expire, GHOST_DWELL_MS);
+    function releaseLeavesDisplay(btn: HTMLElement, x: number, y: number): boolean {
+        const r = btn.getBoundingClientRect();
+        if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return false;
+        const vv = window.visualViewport;
+        const left = vv?.offsetLeft ?? 0;
+        const top = vv?.offsetTop ?? 0;
+        const w = vv?.width ?? window.innerWidth;
+        const h = vv?.height ?? window.innerHeight;
+        return x <= left + EDGE_PX || x >= left + w - EDGE_PX ||
+               y <= top + EDGE_PX || y >= top + h - EDGE_PX;
     }
+
+    /**
+     * Lock-zone feedback while a scrub is held: when the pointer is where a
+     * release would keep the scrub running, the panel comes back to full
+     * opacity with the padlock over it (.tp-lock-zone), so the outcome of
+     * letting go is visible before it happens — the only way a mouse user
+     * could predict it.
+     */
+    function updateLockZone() {
+        const inZone = holdingBtn !== null && lastPointer !== null &&
+            releaseLeavesDisplay(holdingBtn, lastPointer.x, lastPointer.y);
+        timePopover.classList.toggle('tp-lock-zone', inZone);
+    }
+
+    /** The scrub outlives the press: "on until release" becomes "on until the next press". */
+    function lockScrub() {
+        scrubLocked = true;
+        if (holdingBtn) {
+            holdingBtn.classList.remove('holding');   // no finger there; the bar shows the rate
+            holdingBtn = null;
+        }
+        // The padlock stays; the panel drops back to the scrub level with it.
+        timePopover.classList.remove('tp-lock-zone');
+        timePopover.classList.add('tp-locked');
+        document.addEventListener('pointerdown', onLockedPress, true);
+    }
+
+    function unlockScrub() {
+        scrubLocked = false;
+        document.removeEventListener('pointerdown', onLockedPress, true);
+    }
+
+    /**
+     * The next press anywhere stops a hands-free scrub and does nothing else:
+     * swallowed in the capture phase (no map drag, no menu, no chip), along
+     * with the click the browser synthesises from it — which preventDefault
+     * on pointerdown does not cancel — for as long as that click can take.
+     */
+    function onLockedPress(e: PointerEvent) {
+        e.stopPropagation();
+        e.preventDefault();
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const disarm = () => {
+            document.removeEventListener('click', swallow, true);
+            if (timer !== null) clearTimeout(timer);
+        };
+        const swallow = (ce: Event) => {
+            ce.stopPropagation();
+            ce.preventDefault();
+            disarm();
+        };
+        document.addEventListener('click', swallow, true);
+        timer = setTimeout(disarm, STOP_CLICK_SWALLOW_MS);
+        endHold();
+    }
+
+    // A hidden tab must not run time away hands-free (a web tab, unlike the
+    // native app, can sit in the background for hours).
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden && scrubLocked) endHold();
+    });
 
     // ===================================================================
     // The ◀ ▶ pair: tap = one step of the selected unit (astro units: one
@@ -786,7 +850,6 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
             handleAstroStep(unit.astro, dir, el);
             return;
         }
-        ghostTap(true);
         // Stop time and snap in-flight animations before stepping
         timeController.stop();
         timeController.step(unit.time!, dir);
@@ -802,22 +865,51 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
         }, HOLD_DELAY_MS);
     }
 
-    function stepRelease(e: Event) {
+    function stepRelease(e: Event, el: HTMLElement, x: number, y: number) {
         e.stopPropagation();
+        if (holdingBtn && releaseLeavesDisplay(el, x, y)) {
+            lockScrub();
+            return;
+        }
         endHold();
         writeTimeState();
     }
 
     timePopover.querySelectorAll<HTMLElement>('.tp-step-btn').forEach((el) => {
         const dir = parseInt(el.dataset.dir || '1', 10) as 1 | -1;
-        // Mouse events
-        el.addEventListener('mousedown', (e) => stepPress(e, dir, el));
-        el.addEventListener('mouseup', stepRelease);
-        el.addEventListener('mouseleave', () => endHold());
-        // Touch events
-        el.addEventListener('touchstart', (e) => stepPress(e, dir, el));
-        el.addEventListener('touchend', stepRelease);
-        el.addEventListener('touchcancel', () => endHold());
+        el.addEventListener('pointerdown', (e: PointerEvent) => {
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+            if (holdPointerId !== null) return;   // one press at a time
+            holdPointerId = e.pointerId;
+            lastPointer = { x: e.clientX, y: e.clientY };
+            // Capture: the release reaches this button wherever the pointer is
+            // by then (off the button, off the window), with its coordinates —
+            // and so do the moves, which drive the lock-zone feedback.
+            try { el.setPointerCapture(e.pointerId); } catch { /* unsupported (jsdom) */ }
+            stepPress(e, dir, el);
+        });
+        el.addEventListener('pointermove', (e: PointerEvent) => {
+            if (e.pointerId !== holdPointerId) return;
+            lastPointer = { x: e.clientX, y: e.clientY };
+            updateLockZone();
+        });
+        el.addEventListener('pointerup', (e: PointerEvent) => {
+            if (e.pointerId !== holdPointerId) return;
+            holdPointerId = null;
+            lastPointer = null;
+            stepRelease(e, el, e.clientX, e.clientY);
+        });
+        // A cancelled or lost pointer is an unknown state: stop. (After a
+        // normal release the id is already cleared, so the implicit capture
+        // loss that follows is a no-op.)
+        const cancel = (e: PointerEvent) => {
+            if (e.pointerId !== holdPointerId) return;
+            holdPointerId = null;
+            lastPointer = null;
+            endHold();
+        };
+        el.addEventListener('pointercancel', cancel);
+        el.addEventListener('lostpointercapture', cancel);
     });
 
     // ===================================================================
@@ -855,15 +947,13 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
 
         if (!targetDate || isNaN(targetDate.getTime())) {
             // No event found (a polar day / night, a body that never rises or
-            // sets here) — flash the button. Deliberately no ghostTap(): the
-            // flash is on the popover and must stay readable.
+            // sets here) — flash the button.
             btnEl.classList.add('flash-fail');
             setTimeout(() => btnEl.classList.remove('flash-fail'), 300);
             return;
         }
 
         // Same as single-tap time step:
-        ghostTap(true);
         timeController.stop();
         timeController.setTime(targetDate);
         updater?.reset();
@@ -960,6 +1050,31 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
         e.stopPropagation();
         hidePopover();
     });
+
+    // Escape. A hands-free scrub stops first (the panel stays open; the next
+    // Escape closes). Otherwise, on pages that supply `escapeYields`, the
+    // popover closes when no other overlay is up to take the key — decided in
+    // the capture phase on the pre-close state (see the config doc). A date
+    // input with focus gives it up first; the pending edit applies on change,
+    // as it would on clicking away.
+    window.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key !== 'Escape' || !timePopover.isConnected) return;
+        if (scrubLocked) {
+            e.preventDefault();
+            e.stopPropagation();
+            endHold();
+            return;
+        }
+        if (!escapeYields || !popoverOpen || escapeYields()) return;
+        const active = document.activeElement;
+        if (active instanceof HTMLInputElement && timePopover.contains(active)) {
+            e.preventDefault();
+            active.blur();
+            return;
+        }
+        e.preventDefault();
+        hidePopover();
+    }, true);
 
     // ===================================================================
     // Initial state

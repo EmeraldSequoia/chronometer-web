@@ -108,10 +108,16 @@ function fillRow(row: HTMLElement, src: HTMLElement, label: string): void {
 }
 
 let closeActive: (() => void) | null = null;
+let openActive: (() => boolean) | null = null;
 
 /** Close the menu if it is open (pages call this when the corner un-collapses). */
 export function closeOverflowMenu(): void {
     closeActive?.();
+}
+
+/** True while the menu is open (the time controller's Escape yields to it). */
+export function isOverflowMenuOpen(): boolean {
+    return openActive?.() ?? false;
 }
 
 export function initOverflowMenu(_opts: OverflowMenuOptions): void {
@@ -194,6 +200,7 @@ export function initOverflowMenu(_opts: OverflowMenuOptions): void {
         btn!.setAttribute('aria-expanded', String(v));
     }
     closeActive = () => setOpen(false);
+    openActive = () => open;
 
     btn.addEventListener('click', (ev) => {
         ev.stopPropagation();

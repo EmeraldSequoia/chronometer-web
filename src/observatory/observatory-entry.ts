@@ -18,7 +18,7 @@ import { locationSourceOf } from '../shared/url-state.js';
 import { resolveTimezoneProvisional, persistableTz } from '../shared/tz-resolve.js';
 import { createTzResolver } from '../shared/tz-ensure.js';
 import { findClosestCity, findLargestCityNear, prefetchCityData, loadCityData, releaseCityData, isCityDataLoaded } from '../shared/city-search.js';
-import { initLocationDialog, requestBrowserLocation } from '../shared/location-dialog.js';
+import { initLocationDialog, requestBrowserLocation, type LocationDialogAPI } from '../shared/location-dialog.js';
 import { systemTimezone, BLOC_REFRESH_STALE_MS } from '../shared/geolocation.js';
 import { showStorageWarning } from '../shared/incoming-settings-dialog.js';
 import { TimeController } from '../shared/time-controller.js';
@@ -27,13 +27,13 @@ import { initHelpPopover, openGeneralHelpTopic } from '../shared/help-popover.js
 import { registerHotkey } from '../shared/hotkeys.js';
 import { initAppNavLinks, registerAppNavHotkeys } from '../shared/app-nav.js';
 import { initFullscreenToggle } from '../shared/fullscreen.js';
-import { initShareButton } from '../shared/share-button.js';
-import { initOverflowMenu, closeOverflowMenu } from '../shared/overflow-menu.js';
+import { initShareButton, isShareDialogOpen } from '../shared/share-button.js';
+import { initOverflowMenu, closeOverflowMenu, isOverflowMenuOpen } from '../shared/overflow-menu.js';
 import { isPhoneSizedViewport } from '../shared/chrome-layout.js';
 import { createFramePacer, LOW_POWER_FPS, STEADY_STATE_FPS } from '../shared/frame-pacer.js';
 import { getPrefs, onPrefsChange } from '../shared/prefs.js';
 import { initKeepAwake } from '../shared/wake-lock.js';
-import { initSettingsDialog } from '../shared/settings-dialog.js';
+import { initSettingsDialog, isSettingsDialogOpen } from '../shared/settings-dialog.js';
 import type { TimeControlsAPI } from '../shared/time-controls-ui.js';
 import { updateDynamicCompositeIcon } from '../shared/composite-icon.js';
 import { type LayoutParams } from './layout.js';
@@ -222,6 +222,8 @@ let updater: Updater<ObsValueName> | null = null;
 
 /** Time controller UI handle (null until DOM is ready) */
 let timeUI: TimeControlsAPI | null = null;
+/** The location dialog (set up in setupLocationDialog); the time controller's Escape yields to it. */
+let activeLocationDialog: LocationDialogAPI | null = null;
 
 /**
  * Body shown on the altitude/azimuth dials (ECPlanetNumber). Click either dial
@@ -937,6 +939,7 @@ function setupLocationDialog(): void {
         },
     });
 
+    activeLocationDialog = locationDialog;
     if (locationDialog && setLocationBtn) {
         setLocationBtn.addEventListener('click', () => {
             const s = getState();
@@ -1643,6 +1646,17 @@ function init(): void {
         // The dial's body is the controller's rise / set / transit default
         // until the user picks one there (docs/time-controller.md).
         getSelectedBody: () => selectedPlanet,
+        // Escape closes the panel last: yield while any other overlay is up
+        // (each owns its own Escape; fullscreen exits first, as the real
+        // Fullscreen API forces anyway) — docs/time-controller.md.
+        escapeYields: () =>
+            isSettingsDialogOpen() ||
+            dragState !== 'idle' ||
+            (activeLocationDialog?.isVisible() ?? false) ||
+            (document.getElementById('info-overlay')?.classList.contains('visible') ?? false) ||
+            isShareDialogOpen() ||
+            isOverflowMenuOpen() ||
+            document.body.classList.contains('is-fullscreen'),
         ensureSchedulerRunning: () => {
             // The loop idles when stopped + settled; restart it on transport changes.
             scheduleFrame();
@@ -1671,6 +1685,15 @@ function init(): void {
             if (tzNeedsResolution) ensureTzResolved();
             else setState({ tz: locationTimezone });
         }
+    });
+
+    // A press on the display closes the controller (the two stories,
+    // docs/time-controller.md): the press passes through, so a map drag with
+    // the panel open both closes it and starts the drag. Chrome presses
+    // (Settings, Set location, the corners) leave it open. A hands-free stop
+    // press is swallowed before it gets here.
+    canvas.addEventListener('pointerdown', () => {
+        if (timeUI?.isPopoverOpen()) timeUI.hidePopover();
     });
 
     // Show time controller if URL says so
