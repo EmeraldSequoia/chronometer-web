@@ -17,6 +17,7 @@ import {
 } from '../shared/updater.js';
 import { TimeController } from '../shared/time-controller.js';
 import { initTimeControls, flushTimeState, type TimeControlsAPI } from '../shared/time-controls-ui.js';
+import { hybridDateFields } from '../shared/hybrid-date.js';
 import { registerHotkey } from '../shared/hotkeys.js';
 import { initAppNavLinks, registerAppNavHotkeys } from '../shared/app-nav.js';
 import { createFpsIndicator } from '../shared/fps-indicator.js';
@@ -415,14 +416,10 @@ function formatTime(date: Date): string {
 }
 
 function formatDate(date: Date): string {
-    const options: Intl.DateTimeFormatOptions = {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        timeZone: locationTimezone,
-    };
-    return date.toLocaleDateString('en-US', options);
+    // The hybrid calendar (docs/calendar.md): toLocaleDateString is proleptic
+    // Gregorian — 11 Sep for a Julian 1 Sep 1582 — and drops the era.
+    const f = hybridDateFields(date, locationTimezone);
+    return `${f.weekdayName}, ${f.monthName} ${f.day}, ${f.yearLabel}`;
 }
 
 function updateTimeDisplay(): void {

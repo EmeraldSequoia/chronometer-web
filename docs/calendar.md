@@ -35,6 +35,7 @@ JavaScript's `Date` object always uses the **proleptic Gregorian calendar** — 
 |---|---|
 | `utcComponentsFromTimeInterval()` | Decompose an `ESTimeInterval` into hybrid calendar components (UTC) |
 | `localComponentsFromTimeInterval()` | Same, but with timezone offset applied |
+| `hybridDateFields()` (`src/shared/hybrid-date.ts`) | The display fields — weekday name, month name, day, year label with era, leap flag — for an instant in a zone, from this calendar; what the Observatory's date view and the Inspector's date line render |
 | `timeIntervalFromUTCComponents()` | Convert hybrid calendar components back to `ESTimeInterval` |
 | `timeIntervalFromLocalComponents()` | Same, from local time with timezone correction |
 | `daysInMonth()` | Number of days in a month, respecting the hybrid calendar's leap year rules |
@@ -80,6 +81,12 @@ The web code uses `weekdayFromTimeInterval()` in `es-calendar.ts` — a faithful
 > [!WARNING]
 > Using `Date.getDay()` produces **incorrect weekday values** for dates before Oct 15, 1582 because JavaScript's `Date` uses the proleptic Gregorian calendar, not the hybrid Julian/Gregorian calendar. Any code computing weekday for arbitrary dates must use epoch arithmetic or `es-calendar.ts`.
 
+> The same goes for `Intl.DateTimeFormat` and `toLocaleDateString`: they are proleptic Gregorian too and report BCE years without their era, so a Julian 1 Sep 1582 formatted through them reads as 11 Sep. Displays take their calendar fields from `hybridDateFields` (the Observatory's date view and the Inspector's date line since 2026-09-24; before that both went through Intl — the "1582-9-1 snaps to 9-11" bug). Intl is still fine for what is not a calendar component: the zone's abbreviation, and the zone's offset at an instant (see [timezone-and-dst.md](timezone-and-dst.md), where the offset lookup is calendar-free by construction).
+
+### Millisecond-exact decomposition (a deliberate deviation from the port)
+
+`utcComponentsFromTimeInterval` takes the time of day from the exact remainder of the interval within its day, quantized to the millisecond, with the day index corrected when the day quotient's float noise lands an exact midnight on the wrong day (`splitDay`); `weekdayFromTimeInterval` uses the same day index. The port (`ESCalendar.cpp`) takes the time of day from the fraction of the day quotient, `xRemainder = x1F - x1`, which carries the noise of dividing a large interval by 86400 — a few 10⁻⁵ s at BCE dates — so an exact 16:55:00 came back as 16:54:59.99999 and floored to the wrong minute, and the time controller's date inputs, re-composed from that, drifted a minute per round trip. Quantizing the interval up front also keeps the calendar branch, the day and the time of day on one instant: an interval a hair below the switchover rounds onto it and takes the Gregorian branch rather than carrying into a Julian Oct 5 that the hybrid calendar does not have. Pinned by `src/__tests__/es-calendar-precision.test.ts` (Steve, 2026-09-24; planning/2026-09-24-seconds-scrub-cadence-and-bce-offset.md §5).
+
 ### Time bar display
 
 The time bar at the bottom of each face page uses hybrid calendar decomposition:
@@ -93,7 +100,7 @@ The time bar at the bottom of each face page uses hybrid calendar decomposition:
 - **BCE toggle** in the time controller popover switches between CE and BCE eras
 
 > [!IMPORTANT]
-> The timezone offset passed to `localComponentsFromTimeInterval` must be the **actual UTC offset** of the target timezone (east-positive, in seconds), not `tzDeltaMs`. The helper `targetTzOffsetSec(d)` computes this as `-d.getTimezoneOffset() * 60 + tzDeltaMs / 1000`.
+> The timezone offset passed to `localComponentsFromTimeInterval` must be the **actual UTC offset** of the target timezone (east-positive, in seconds), not `tzDeltaMs`. The helper `targetTzOffsetSec(d)` computes this as `-d.getTimezoneOffset() * 60 + tzDeltaMs / 1000`. The zone offset itself comes from `tzOffsetSecondsAt` (astro-env.ts), which uses `Intl` only to difference two proleptic-Gregorian representations of one instant — calendar-free, so it is safe on either side of the switchover and in BCE; see [timezone-and-dst.md](timezone-and-dst.md).
 
 ## Notes on Remaining JS `Date` Usage
 

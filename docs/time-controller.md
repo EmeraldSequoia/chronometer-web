@@ -98,7 +98,11 @@ touches rather than on release. (The time bar's Now and the × still act on
 click.) The date inputs are
 always present under the pair (no tab): year / month / day and CE-BCE /
 hour / minute, applied on change through the hybrid calendar
-([calendar.md](calendar.md#time-bar-display)).
+([calendar.md](calendar.md#time-bar-display)). The composition is two-pass —
+compose with the current offset, look the zone's offset up at the result,
+recompose if it differs — so the typed wall time wins across a DST edge or an
+era flip (a BCE date sits on the zone's LMT, an hour's fraction away from
+today's offset).
 
 ### The scrub fade: two stories
 

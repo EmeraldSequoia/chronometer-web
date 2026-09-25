@@ -217,8 +217,9 @@ The expression is evaluated at time T and the value animates at `animSpeed`
 planet hands, ring stops — anything that just moves to a new position.
 
 **2. Two-phase sweep** (`naturalSpeed > 0`, second hands):
-For constant-velocity values that sweep between infrequent updates (e.g.,
-second hands updating every 20s). Uses a two-phase algorithm:
+For constant-velocity values that sweep between infrequent updates at 1× (e.g.,
+second hands re-synced every 20 s; under scrub they re-evaluate every tick like
+everything else — mode 3). Uses a two-phase algorithm:
 
 - **Phase 1 (catch-up)**: If the hand is more than 0.002 rad from where it
   should be, animate at `animSpeed` (2.0 rad/s) to the point where the hand
@@ -231,13 +232,19 @@ second hands updating every 20s). Uses a two-phase algorithm:
 This handles tab-switch recovery gracefully: the hand catches up at 2 rad/s
 then resumes smooth ticking.
 
-**3. Scrub compression** (quantized mode, all values):
-During hold-to-scrub, display time jumps by large units per tick. The
-compression logic (the Updater's `updateObsValueScrub` branch, modeled on the
-legacy watch-face tick loop):
-- Compute ticks until next update boundary: `ceil(displayDelta / displayDeltaPerTick)`
-- Real-time budget: `ticksUntilUpdate × TICK_INTERVAL_MS`
-- If natural animation duration exceeds the budget, compress to fit
+**3. Scrub** (quantized mode, all values):
+During hold-to-scrub, display time jumps by one unit per tick and **every
+value re-evaluates every tick** (the Updater's `updateObsValueScrub` branch),
+sweeping to the new target over exactly one tick: a large per-tick delta (a
+day of sun motion) is compressed into the tick, a small one (6° of second
+hand) is stretched to fill it. Under scrub there is no external "right" time
+to land on — only the last tick's display time — so evaluating every part at
+that instant and arriving by the next tick is self-consistent, and it is the
+cadence the discrete and eval-ahead branches use too. Until 2026-09-24 this
+branch scheduled each value at its own display-time boundary instead, which
+at the seconds rate left the 20 s second hands sitting for twenty ticks and
+then jumping
+([planning/2026-09-24-seconds-scrub-cadence-and-bce-offset.md](../planning/2026-09-24-seconds-scrub-cadence-and-bce-offset.md)).
 
 ### Value Catalog
 
@@ -735,8 +742,8 @@ and animated popup height for the Privacy/Support/Disclaimer pages.
 
 `date-view.ts` renders the header date stack (port of the EOClock date labels,
 `EOClock.mm:525-570`): weekday, month + day, year, a "leap"/"not leap" indicator
-(Gregorian %4/%100/%400 rule), and the timezone abbreviation. All fields use
-`Intl.DateTimeFormat` in the **location's** timezone (not the browser's), so the
+(under the calendar in force for the date: every fourth year in the Julian era before 1582, the Gregorian %4/%100/%400 rule after), and the timezone abbreviation. All fields use
+the hybrid calendar (`hybridDateFields`, [calendar.md](calendar.md)) in the **location's** timezone (not the browser's; Intl only for the zone abbreviation — it is proleptic Gregorian and read a Julian 1 Sep 1582 as 11 Sep), so the
 display follows the selected location and the scrubbed time. Placement and mode
 (`stack`/`row`/`split`) are set per aspect anchor by the adaptive layout (see
 [Adaptive Layout](#adaptive-layout-aspect-anchors)); `extractDateFields` is

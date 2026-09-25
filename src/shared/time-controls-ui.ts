@@ -30,6 +30,7 @@
 import { TimeController, TimeUnit, RATE_OPTIONS } from './time-controller.js';
 import { computeAstroTarget } from './astro-stepper.js';
 import type { AstroEventType } from './astro-stepper.js';
+import { tzOffsetSecondsAt } from './astro-env.js';
 import {
     localComponentsFromTimeInterval, timeIntervalFromLocalComponents,
     kECJulianGregorianSwitchoverTimeInterval,
@@ -350,10 +351,18 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
     }
 
     /**
-     * Get the actual UTC offset (east-positive, in seconds) of the target timezone
-     * at a given instant.  This is what localComponentsFromTimeInterval expects.
+     * The target timezone's actual UTC offset (east-positive, in seconds) AT a
+     * given instant — what localComponentsFromTimeInterval expects. Exact per
+     * instant from the zone's own rules when a zone is known
+     * (tzOffsetSecondsAt: DST at that instant; LMT before the zone's first
+     * rule — the same offset the astronomy env uses), so composing a typed
+     * time and displaying the result agree to the second whatever instant the
+     * app last computed its tzDeltaMs at. Without a zone, the browser's own
+     * offset at the instant plus the app's delta.
      */
     function targetTzOffsetSec(d: Date): number {
+        const tz = getTimezone();
+        if (tz) return tzOffsetSecondsAt(tz, d.getTime());
         return -d.getTimezoneOffset() * 60 + getTzDeltaMs() / 1000;
     }
 
@@ -980,11 +989,18 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
         const isBCE = bceBtn?.classList.contains('active') ?? false;
         const era = isBCE ? 0 : 1;
 
-        // Use hybrid calendar to construct the time interval
-        const refDate = timeController.getDisplayTime();
-        const tzOff = targetTzOffsetSec(refDate);
-        const di = timeIntervalFromLocalComponents(tzOff, era, yr, mo, dy, hr, mn, 0);
-        const d = dateIntervalToDate(di);
+        // Use the hybrid calendar to construct the time interval — in two
+        // passes: the zone's offset at the target instant can differ from the
+        // current one (a DST edge; LMT once the era flips), and the typed wall
+        // time must win. Compose with the current offset, look the offset up
+        // at the result, and recompose if it moved (the same two-pass idea
+        // timeIntervalFromLocalComponents documents).
+        const compose = (tzOff: number): Date =>
+            dateIntervalToDate(timeIntervalFromLocalComponents(tzOff, era, yr, mo, dy, hr, mn, 0));
+        const tzOffNow = targetTzOffsetSec(timeController.getDisplayTime());
+        let d = compose(tzOffNow);
+        const tzOffThere = targetTzOffsetSec(d);
+        if (tzOffThere !== tzOffNow) d = compose(tzOffThere);
         // Clamp to supported astronomical range (4000 BCE – 2800 CE)
         const clampedMs = Math.max(MIN_DISPLAY_DATE_MS,
                                    Math.min(MAX_DISPLAY_DATE_MS, d.getTime()));

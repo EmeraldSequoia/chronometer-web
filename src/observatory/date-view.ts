@@ -17,11 +17,15 @@
  * "leap" is shown only in leap years; non-leap years show nothing (per review,
  * "not leap" is dropped).
  *
- * All fields use Intl.DateTimeFormat in the location's timezone so the display
- * follows the selected location and scrubbed time, not the browser's locale tz.
+ * The calendar fields come from the hybrid calendar (`hybridDateFields`,
+ * docs/calendar.md) in the location's timezone, so the display follows the
+ * selected location and scrubbed time — and reads a Julian 1 Sep 1582 as
+ * 1 Sep, where Intl (proleptic Gregorian) read 11 Sep and dropped BCE eras.
+ * Only the timezone abbreviation still comes from Intl.
  */
 
 import type { LayoutParams } from './layout.js';
+import { hybridDateFields } from '../shared/hybrid-date.js';
 
 const COLOR = 'rgba(255,255,255,0.9)';
 const COLOR_DIM = 'rgba(255,255,255,0.55)';
@@ -33,11 +37,6 @@ const REL_SMALL = 0.21;
 
 /** Absolute cap on the unit size so huge windows don't produce absurd text. */
 const UNIT_MAX = 72;
-
-/** Gregorian leap-year test (port of EOClock.mm:541-547). */
-function isLeapYear(year: number): boolean {
-    return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-}
 
 export interface DateFields {
     weekday: string;
@@ -55,19 +54,7 @@ export interface DateFields {
  */
 export function extractDateFields(date: Date, timezone: string | undefined): DateFields {
     const tz = timezone || undefined;
-    const parts = new Intl.DateTimeFormat('en-US', {
-        timeZone: tz,
-        weekday: 'long',
-        month: 'short',          // iOS bigDate uses "MMM dd"
-        day: 'numeric',
-        year: 'numeric',
-    }).formatToParts(date);
-
-    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
-    const weekday = get('weekday');
-    const month = get('month');
-    const day = get('day');
-    const year = get('year');
+    const f = hybridDateFields(date, tz);   // iOS bigDate uses "MMM dd"
 
     let tzAbbrev = '';
     try {
@@ -81,10 +68,10 @@ export function extractDateFields(date: Date, timezone: string | undefined): Dat
     }
 
     return {
-        weekday,
-        monthDay: `${month} ${day}`,
-        year,
-        leap: isLeapYear(parseInt(year, 10)),
+        weekday: f.weekdayName,
+        monthDay: `${f.monthShort} ${f.day}`,
+        year: f.yearLabel,
+        leap: f.leap,   // Julian rules before the switchover (EOClock.mm:541-547 was Gregorian-only)
         tzAbbrev,
     };
 }

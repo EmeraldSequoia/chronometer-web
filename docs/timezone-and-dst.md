@@ -12,11 +12,13 @@ The watch environment uses a millisecond delta (`tzDeltaMs`) to shift the browse
 target local time = browser local time + tzDeltaMs
 ```
 
-This is computed by `computeTzDeltaMs(olsonTimezone, referenceDate?)` in `watch-env.ts`:
+This is computed by `computeTzDeltaMs(olsonTimezone, referenceDate?)` in `src/shared/astro-env.ts` (re-exported by `watch-env.ts`):
 
 1. Get the browser's UTC offset at the reference date (`-Date.getTimezoneOffset() * 60`)
-2. Get the target timezone's UTC offset at the same date (via `Intl.DateTimeFormat` with `longOffset`)
+2. Get the target timezone's UTC offset at the same date — `tzOffsetSecondsAt(tz, utcMs)`, which formats the instant in the zone with `Intl.DateTimeFormat.formatToParts` (numeric parts plus the era), rebuilds the same instant from those parts with `setUTCFullYear`, and differences it against the UTC instant
 3. Return the difference in milliseconds
+
+The lookup is **calendar-free**: Intl's parts are proleptic Gregorian and so is `Date`, so rebuilding the instant in the same calendar makes the calendar cancel out — a zone's offset is a property of the instant, whatever calendar the app displays it in, and the hybrid Julian calendar of [calendar.md](calendar.md) never enters here. Two year traps are handled explicitly: Intl reports BCE years era-relative ("2026" for 2026 BC) and names the era only when asked, so the formatter requests `era` and maps BC years to astronomical numbering (1 BC = year 0); and `Date.UTC` maps a year of 0–99 to 1900–1999, hence `setUTCFullYear`. Before a zone's first rule Intl extrapolates its LMT (Los Angeles: −7:52:58 for every instant before 1883), which is also what the browser's own `getTimezoneOffset()` reports there. Until 2026-09-24 both traps were misread, so any BCE or 1–99 CE instant got an "offset" of thousands of years — Chronometer's BCE toggle, which recomputes `tzDeltaMs` at the display time, showed the instant on the Gregorian side of the switchover ([planning/2026-09-24-seconds-scrub-cadence-and-bce-offset.md](../planning/2026-09-24-seconds-scrub-cadence-and-bce-offset.md) §2).
 
 The reference date matters because UTC offsets change at DST boundaries. When displayed time is offset from real time (1× with offset, scrubbing), the reference date must be the **displayed** time, not the real time.
 

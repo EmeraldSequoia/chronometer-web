@@ -274,7 +274,7 @@ separate animation loop — see [Terminator](terminator.md).
 
 Built on the primitives above, **`ObsValue`** ([src/shared/obs-value.ts](../src/shared/obs-value.ts)) is a general-purpose, expression-driven animated value: a parsed AST + update interval + animation speeds + an `AnimatingValue`. The per-frame logic that drives ObsValues lives in [src/shared/updater.ts](../src/shared/updater.ts) — the embryonic "updater" subsystem — and runs two passes:
 
-1. **`updateObsValues(values, env, perfNow, getNow, …)`** — for each value whose timer expired, re-evaluate the expression and start an animation. Dispatches to one of: eval-ahead, scrub compression, two-phase `naturalSpeed` sweep, or snap-to-target.
+1. **`updateObsValues(values, env, perfNow, getNow, …)`** — for each value whose timer expired, re-evaluate the expression and start an animation. Dispatches to one of: eval-ahead, the per-tick scrub sweep, two-phase `naturalSpeed` sweep, or snap-to-target (under scrub every branch re-evaluates every tick and sweeps over the tick).
 2. **`animateObsValues(values, perfNow)`** — interpolate every value toward its target (and hand off Phase-2 sweeps).
 
 Both operate on a flat `ObsValue[]` and are normally driven through the **`Updater`** (below) rather than called directly. See [Observatory — ObsValue System](observatory.md#obsvalue-system).

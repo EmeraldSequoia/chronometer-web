@@ -77,12 +77,12 @@ const key = (k: string) => {
 };
 const stored = (ns: string) => JSON.parse(localStorage.getItem(`ec:${ns}`) ?? 'null');
 
-function setup(opts: { withPageBody?: boolean; escapeYields?: () => boolean } = {}): void {
+function setup(opts: { withPageBody?: boolean; escapeYields?: () => boolean; timezone?: string } = {}): void {
     document.body.innerHTML = PARTIAL;
     tc = new TimeController();
     const maybe = initTimeControls({
         timeController: tc,
-        getTimezone: () => undefined,
+        getTimezone: () => opts.timezone,
         getTzDeltaMs: () => 0,
         getLat: () => 37.77,
         getLon: () => -122.42,
@@ -553,5 +553,53 @@ describe('Escape closes the popover last', () => {
         const esc = key('Escape');
         expect(api.isPopoverOpen()).toBe(true);
         expect(esc.defaultPrevented).toBe(false);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// The date inputs and the CE / BCE toggle
+// ---------------------------------------------------------------------------
+
+describe('the date inputs compose the typed wall time', () => {
+    const inputs = () => ['tp-year', 'tp-month', 'tp-day', 'tp-hour', 'tp-minute']
+        .map((id) => (document.getElementById(id) as HTMLInputElement).value).join(' ');
+    const bce = () => document.getElementById('tp-bce') as HTMLElement;
+    const bar = () => document.getElementById('time-bar-date')!.textContent!;
+
+    // A zone is named, so offsets come from its own rules (exact per instant)
+    // and the machine's zone plays no part. Today Los Angeles is PDT (−7:00);
+    // the BCE twin of any 2026 instant sits on its LMT (−7:52:58) — the
+    // two-pass composition is what keeps the typed wall time, and the display
+    // nudge is what keeps the minute from drifting on the way back.
+    const LA = 'America/Los_Angeles';
+    const pdt = (h: number, m: number) => new Date(Date.UTC(2026, 8, 24, h + 7, m, 0));
+
+    test.each([
+        ['15:55', 15, 55],
+        ['15:02', 15, 2],
+        ['00:00', 0, 0],
+        ['23:59', 23, 59],
+    ])('toggling BCE at %s keeps the typed date and wall time, and toggling back restores the instant', (_label, h, m) => {
+        setup({ timezone: LA });
+        const wall = `2026 9 24 ${h} ${m}`;
+        const clock = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`;
+        tc.setTime(pdt(h, m));
+        api.updateTimeUI();
+        expect(inputs()).toBe(wall);
+        expect(bce().textContent).toBe('CE');
+
+        bce().click();
+        expect(bce().textContent).toBe('BCE');
+        expect(bce().classList.contains('active')).toBe(true);
+        expect(inputs()).toBe(wall);
+        expect(bar()).toContain('2026 BCE (Julian)');
+        expect(bar()).toContain(clock);
+
+        bce().click();
+        expect(bce().textContent).toBe('CE');
+        expect(inputs()).toBe(wall);
+        expect(bar()).not.toContain('BCE');
+        expect(bar()).toContain(clock);
+        expect(tc.getDisplayTime().getTime()).toBe(pdt(h, m).getTime());
     });
 });

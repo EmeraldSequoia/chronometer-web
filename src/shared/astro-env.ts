@@ -100,8 +100,12 @@ const _tzFmtCache = new Map<string, Intl.DateTimeFormat>();
 function tzFormatter(tz: string): Intl.DateTimeFormat {
     let fmt = _tzFmtCache.get(tz);
     if (!fmt) {
+        // `era` is requested because Intl reports BCE years era-relative —
+        // "2026" for 2026 BC — and says which era only when asked. Without it
+        // a BCE instant rebuilt as its CE twin, 4051 years off, and the
+        // "offset" was that difference (docs/timezone-and-dst.md).
         fmt = new Intl.DateTimeFormat('en-US', {
-            timeZone: tz, hourCycle: 'h23',
+            timeZone: tz, hourCycle: 'h23', era: 'short',
             year: 'numeric', month: '2-digit', day: '2-digit',
             hour: '2-digit', minute: '2-digit', second: '2-digit',
         });
@@ -110,18 +114,38 @@ function tzFormatter(tz: string): Intl.DateTimeFormat {
     return fmt;
 }
 
-/** Uncached single offset lookup (one formatToParts). */
+/**
+ * Uncached single offset lookup (one formatToParts).
+ *
+ * Calendar-free by construction: Intl's parts are proleptic Gregorian and so
+ * is `Date`, so rebuilding the instant from the parts in the same calendar
+ * and differencing against the UTC instant yields the zone's offset whatever
+ * calendar the app displays the instant in — the hybrid Julian calendar
+ * (es-calendar) never enters here, and must not (docs/calendar.md). Two
+ * year traps on the way: the year is era-relative ("1 BC" is astronomical
+ * year 0), and `Date.UTC` maps a year of 0–99 to 1900–1999, hence
+ * `setUTCFullYear`. Before a zone's first rule Intl extrapolates its LMT
+ * (Los Angeles: −7:52:58), which is what the browser's own
+ * `getTimezoneOffset()` reports for those instants too.
+ */
 function rawTzOffsetSecondsAt(tz: string, utcMs: number): number {
     const parts = tzFormatter(tz).formatToParts(new Date(utcMs));
     const p: Record<string, number> = {};
-    for (const part of parts) if (part.type !== 'literal') p[part.type] = +part.value;
+    let bce = false;
+    for (const part of parts) {
+        if (part.type === 'era') bce = part.value.startsWith('B');   // "BC" in en-US
+        else if (part.type !== 'literal') p[part.type] = +part.value;
+    }
+    const year = bce ? 1 - p.year : p.year;
+    const rebuilt = new Date(0);
+    rebuilt.setUTCFullYear(year, p.month - 1, p.day);
     // h23 yields 00..23, but guard the midnight-as-24 quirk seen on some engines.
-    const asUTC = Date.UTC(p.year, p.month - 1, p.day, p.hour % 24, p.minute, p.second);
+    rebuilt.setUTCHours(p.hour % 24, p.minute, p.second, 0);
     // formatToParts truncates to whole seconds, so compare against the equally
     // truncated input — differencing against raw utcMs made the offset come out
     // 1s low whenever the sub-second fraction exceeded 500ms (and the per-tz
     // window memo then served that poisoned value for days of queries).
-    return Math.round((asUTC - Math.floor(utcMs / 1000) * 1000) / 1000);
+    return Math.round((rebuilt.getTime() - Math.floor(utcMs / 1000) * 1000) / 1000);
 }
 
 /**

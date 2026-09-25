@@ -382,56 +382,25 @@ function updateObsValueScrub(
 ): void {
     const newTarget = v.evalFn(env);
 
-    // Compute next boundary in display time
-    const nextDisplayMs = computeNextBoundary(
-        v.updateInterval * 1000, getNow, timeDirection, env);
-    v.nextUpdateDisplayTime = nextDisplayMs;
+    // Every tick. Under scrub there is no external "right" time to land on,
+    // only the last tick's display time, so every value is evaluated at that
+    // instant and animates there by the next tick — self-consistent across
+    // the face, and the cadence the discrete and eval-ahead branches already
+    // use. Scheduling by the value's own display-time boundary (its 1×
+    // economy) made a hand whose boundary spans many ticks — the 20 s second
+    // hands at the seconds rate — sit for twenty ticks and then jump
+    // (planning/2026-09-24-seconds-scrub-cadence-and-bce-offset.md §1).
+    v.nextUpdateDisplayTime = getNow().getTime() + displayDeltaPerTickSec * 1000 * timeDirection;
+    v.nextUpdateTime = perfNow + tickIntervalMs;
 
-    // Compute real-time budget (same formula as tickAnimations)
-    const displayNowMs = getNow().getTime();
-    const displayDeltaMs = Math.abs(nextDisplayMs - displayNowMs);
-    const displayDeltaPerTickMs = displayDeltaPerTickSec * 1000;
-    const ticksUntilUpdate = displayDeltaPerTickMs > 0
-        ? Math.max(1, Math.ceil(displayDeltaMs / displayDeltaPerTickMs))
-        : 1;
-    const timeUntilNextUpdateMs = ticksUntilUpdate * tickIntervalMs;
+    // Sweep to the new target over exactly one tick: a large per-tick delta
+    // (a day of sun motion) is compressed into the tick, a small one (6° of
+    // second hand) is stretched to fill it, so nothing snaps sub-frame and
+    // nothing lags a tick behind.
+    startAnimationRaw(v.anim, newTarget, perfNow, v.animSpeed / K_ANGLE_ANIM_SPEED,
+        tickIntervalMs, v.period);
 
-    // Schedule next re-evaluation
-    v.nextUpdateTime = perfNow + timeUntilNextUpdateMs;
-
-    // Compute natural animation duration
-    const speed = v.animSpeed;  // rad/s
-    let angleDelta: number;
-    if (!isFinite(v.period)) {
-        // Linear values: straight-line delta (no cyclic wrapping)
-        angleDelta = Math.abs(newTarget - v.anim.currentValue);
-    } else {
-        const P = v.period;
-        const normalizedTarget = ((newTarget % P) + P) % P;
-        const normalizedCurrent = ((v.anim.currentValue % P) + P) % P;
-        angleDelta = Math.abs(normalizedTarget - normalizedCurrent);
-        if (angleDelta > P / 2) angleDelta = P - angleDelta;
-    }
-    const naturalDurationMs = speed > 0 ? (angleDelta / speed) * 1000 : 0;
-
-    const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
-
-    // Compress if needed, stretch if too fast, otherwise use natural speed.
-    if (naturalDurationMs > timeUntilNextUpdateMs) {
-        // Too slow — compress to finish before next re-evaluation
-        startAnimationRaw(v.anim, newTarget, perfNow, multiplier,
-            timeUntilNextUpdateMs, v.period);
-    } else if (naturalDurationMs < tickIntervalMs) {
-        // Too fast — stretch to fill one tick (prevents sub-frame snaps)
-        startAnimationRaw(v.anim, newTarget, perfNow, multiplier,
-            tickIntervalMs, v.period);
-    } else {
-        // Natural speed falls between one tick and next update — use as-is
-        startAnimationRaw(v.anim, newTarget, perfNow, multiplier,
-            undefined, v.period);
-    }
-
-    // No pending sweep during scrub — just snap-to-target with compression
+    // No pending sweep during scrub — just the per-tick sweep above
     v.pendingSweep = null;
 }
 

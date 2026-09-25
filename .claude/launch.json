@@ -2,6 +2,42 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "dist-fresh59",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8871",
+        "--directory",
+        "dist"
+      ],
+      "port": 8871
+    },
+    {
+      "name": "dist-fresh58",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8869",
+        "--directory",
+        "dist"
+      ],
+      "port": 8869
+    },
+    {
+      "name": "dist-fresh57",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8867",
+        "--directory",
+        "dist"
+      ],
+      "port": 8867
+    },
+    {
       "name": "dist-fresh56",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

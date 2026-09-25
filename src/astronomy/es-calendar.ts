@@ -69,23 +69,51 @@ export interface ESDateComponents {
  *
  * Ported from ESCalendar_UTCComponentsFromTimeInterval() in ESCalendar.cpp.
  */
+/**
+ * Day index of `t` relative to the calendar branch's `origin` (the floor of
+ * the day quotient, as the port computes it) and the seconds into that day.
+ *
+ * Deliberate deviation from ESCalendar.cpp (Steve, 2026-09-24): the port
+ * takes the time of day from the fraction of the day quotient
+ * (`xRemainder = x1F - x1`), which carries the float noise of dividing a
+ * large interval by 86400 — a few 10⁻⁵ s at BCE dates — so an exact 16:55:00
+ * came back as 16:54:59.99999 and floored to the wrong minute (and the
+ * controller's date inputs, re-composed from that, drifted a minute per
+ * round trip). Here the time of day is the exact remainder of the interval
+ * (the difference of two nearby doubles is exact), quantized to the
+ * millisecond, and the day index is corrected when the quotient's noise
+ * lands an exact midnight on the wrong day.
+ */
+function splitDay(t: number, origin: number): { dayIndex: number; secOfDay: number } {
+    let dayIndex = Math.floor(origin + t / (24 * 3600));
+    let secOfDay = Math.round((t - (dayIndex - origin) * 24 * 3600) * 1000) / 1000;
+    if (secOfDay < 0) { dayIndex -= 1; secOfDay += 24 * 3600; }
+    else if (secOfDay >= 24 * 3600) { dayIndex += 1; secOfDay -= 24 * 3600; }
+    return { dayIndex, secOfDay };
+}
+
 export function utcComponentsFromTimeInterval(timeInterval: number): ESDateComponents {
-    let xRemainder: number;
+    // Quantized to the millisecond up front, so the calendar branch, the day
+    // and the time of day agree on one instant (an interval a hair below the
+    // switchover rounds onto it and takes the Gregorian branch, rather than
+    // carrying into a Julian Oct 5 the hybrid calendar does not have).
+    const t = Math.round(timeInterval * 1000) / 1000;
+    let secOfDay: number;
     let signedYear: number;
     let x0: number;
 
-    if (timeInterval < kECJulianGregorianSwitchoverTimeInterval) {
+    if (t < kECJulianGregorianSwitchoverTimeInterval) {
         // Julian calendar
-        const x1F = 730793 + timeInterval / (24 * 3600);
-        const x1 = Math.floor(x1F);
-        xRemainder = x1F - x1;
+        const split = splitDay(t, 730793);
+        const x1 = split.dayIndex;
+        secOfDay = split.secOfDay;
         signedYear = Math.floor((4 * x1 + 3) / kECDaysInJulianCycle);
         x0 = x1 - Math.floor(kECDaysInJulianCycle * signedYear / 4.0);
     } else {
         // Gregorian calendar
-        const x2F = 730791 + timeInterval / (24 * 3600);
-        const x2 = Math.floor(x2F);
-        xRemainder = x2F - x2;
+        const split = splitDay(t, 730791);
+        const x2 = split.dayIndex;
+        secOfDay = split.secOfDay;
 
         const century = Math.floor((4 * x2 + 3) / kECDaysInGregorianCycle);
         const x1 = x2 - Math.floor(kECDaysInGregorianCycle * century / 4.0);
@@ -116,11 +144,11 @@ export function utcComponentsFromTimeInterval(timeInterval: number): ESDateCompo
     const dayF = x0 - Math.floor((153 * monthI - 457) / 5.0) + 1;
     const day = Math.round(dayF);
 
-    const hoursF = xRemainder * 24;
-    const hoursI = Math.floor(hoursF);
-    const minutesF = (hoursF - hoursI) * 60;
-    const minutesI = Math.floor(minutesF);
-    const seconds = (minutesF - minutesI) * 60;
+    // From the millisecond-exact seconds of the day (see splitDay); the last
+    // subtraction is re-quantized so 86399.999 yields 59.999, not 59.998999….
+    const hoursI = Math.floor(secOfDay / 3600);
+    const minutesI = Math.floor((secOfDay - hoursI * 3600) / 60);
+    const seconds = Math.round((secOfDay - hoursI * 3600 - minutesI * 60) * 1000) / 1000;
 
     return { era, year, month, day, hour: hoursI, minute: minutesI, seconds };
 }
@@ -370,10 +398,13 @@ export function timeIntervalFromLocalComponents(
  */
 export function weekdayFromTimeInterval(dateInterval: number, tzOffsetSeconds: number): number {
     const localNow = dateInterval + tzOffsetSeconds;
-    const localNowDays = localNow / (24 * 3600);
+    // The local day index with the same millisecond quantization and midnight
+    // correction as utcComponentsFromTimeInterval (the port's float division
+    // could put an exact local midnight on the previous day). Equivalent to
+    // the port's floor((days + 1) mod 7) otherwise.
+    const { dayIndex } = splitDay(Math.round(localNow * 1000) / 1000, 0);
     // fmod that always returns non-negative: (x % m + m) % m
-    const weekday = ((localNowDays + 1) % 7 + 7) % 7;
-    return Math.floor(weekday);
+    return ((dayIndex + 1) % 7 + 7) % 7;
 }
 
 // ============================================================================
