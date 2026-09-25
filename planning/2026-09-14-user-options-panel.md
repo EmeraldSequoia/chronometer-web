@@ -1,7 +1,13 @@
 # Plan: a user options panel — or as little of one as we can get away with
 
-**Status**: revision 10 (2026-09-23) — Parts 1, 2, 3, 4, 5 and 7 done; **next:
-Part 6 (magnifier gating)**. Part 5 (the ‹ › body chevrons) is
+**Status**: revision 11 (2026-09-24) — every part built. Part 6 (magnifier
+gating) is
+[2026-09-24-magnifier-speed-gating.md](2026-09-24-magnifier-speed-gating.md)
+(build 2.1.8; Steve's review rounds replaced the four candidates with one
+strict rule for mouse drags — 1 s at rest under 5 px/s to show, 10 px of
+drift within a second to hide, so a slow crawl keeps it — whose knobs are
+his to tune; touch drags are exempt, the bubble always up, since the
+finger covers the point). Part 5 (the ‹ › body chevrons) is
 [2026-09-23-observatory-body-chevrons.md](2026-09-23-observatory-body-chevrons.md).
 Part 4 (the time controller: unit chips, one ◀ ▶ pair, any body) is
 [2026-09-23-time-controller-redesign.md](2026-09-23-time-controller-redesign.md)
@@ -494,6 +500,16 @@ it appeared (a distance threshold, say a third of the band width); or a
 *combination* — show on pause or slow movement, hide on fast movement or large
 displacement. Compare on device before choosing.
 
+*Implemented 2026-09-24 —
+[2026-09-24-magnifier-speed-gating.md](2026-09-24-magnifier-speed-gating.md).
+Built first with all three plus `off` switchable for a comparison; Steve's
+review the same day (its §7) settled on one much stricter rule instead —
+the bubble is for very small motions only: 1 s at rest (average under
+5 px/s; round 3 halved it from 2 s) to show, 10 px of drift within the
+last second to hide (round 2: a trail anchor, so a slow crawl keeps it).
+Round 4, from the phone: touch drags are exempt — the finger covers the
+point, so there the bubble is always up.*
+
 ### 3.7 Other candidates
 
 **Proposed — both accepted 2026-09-16.**
@@ -595,7 +611,7 @@ and the share-link equality logic untouched.
 | 3 | `prefs.ts`; Settings dialog + ⚙ button (and its ⋮ row); Got-it toast; Keep screen awake; Forget settings; noon-on-top moved | 1 (menu, collapse rule) | M — **done 2026-09-22** (with 7), [plan](2026-09-22-settings-dialog-and-prefs.md) |
 | 4 | Time-controller redesign: unit-first, any-body astro, 44 px targets; CC2 threshold re-derived | 1 (sizing conventions) | L — **done 2026-09-23**, [plan](2026-09-23-time-controller-redesign.md) |
 | 5 | Observatory ‹ Body › chevrons (treatment c), 44 px half-dial targets, directional label slide on change, help line; (`?cycle=N` only if a kiosk use ever exists) | — | S — **done 2026-09-23**, [plan](2026-09-23-observatory-body-chevrons.md) |
-| 6 | Magnifier speed gating | — | S |
+| 6 | Magnifier gating, mouse drags — rest 1 s to show, 10 px within a second to hide; touch always up (Steve's rule, review rounds 1–4) | — | S — **done 2026-09-24**, [plan](2026-09-24-magnifier-speed-gating.md) |
 | 7 | Low-power toggle (decided); cap value tuned by measurement | 2, 3 | S — **done 2026-09-22** inside Part 3 (`LOW_POWER_FPS` = 10, to tune) |
 
 Order rationale: 1 and 2 are the largest user-visible wins and unblock 3; 4 is

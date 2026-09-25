@@ -47,6 +47,7 @@ import type { LayoutParams } from './layout.js';
 import type { ObsValueName } from './obs-values.js';
 import type { Updater } from '../shared/updater.js';
 import { citiesInWindow } from '../shared/city-search.js';
+import { createMagGate, resetMagGate, stepMagGate, magGateAnimating, magGateDebug } from './magnifier-gate.js';
 
 // ============================================================================
 // Table constants — must match scripts/historical/generate-altitude-table.ts
@@ -415,10 +416,18 @@ let magActive = false;
 /** True while the active drag is a touch drag (finger occlusion applies). */
 let magTouch = false;
 let magLastT = 0;
+/** Visibility gate (Part 6): rest for a while to show, drift to hide —
+ *  magnifier-gate.ts. Mouse (and pen) drags only: on a touch drag the
+ *  finger covers the very point being chosen, which is what the bubble is
+ *  for, so it stays up for the whole drag (review round 4). */
+const magGate = createMagGate();
 
 /** Reused debug object exposed for headless bounds verification (no per-frame
  *  allocation). */
-const magDebug = { x: 0, y: 0, r: 0, ex: 0, ey: 0, ew: 0, eh: 0 };
+const magDebug = {
+    x: 0, y: 0, r: 0, ex: 0, ey: 0, ew: 0, eh: 0,
+    alpha: 0, shown: false, restMs: 0, driftPx: 0, touch: false,
+};
 
 /** Reset magnifier smoothing state at drag start (fresh or resumed).
  *  `isTouch` selects the finger-clearance gap for the whole drag. */
@@ -430,6 +439,7 @@ export function resetDragMagnifier(lat: number, lon: number, isTouch: boolean = 
     magActive = true;
     magTouch = isTouch;
     magLastT = performance.now();
+    resetMagGate(magGate);
 }
 
 /**
@@ -455,9 +465,30 @@ export function drawDragMagnifier(
     if (d < 40) return;  // degenerate band — no room for a useful bubble
     const r = d / 2;
 
-    // --- Smoothing (display-only; the drag itself is unsmoothed) ---
     const t = performance.now();
     if (!magActive) resetDragMagnifier(renderLat, renderLon, magTouch);
+
+    // --- Visibility gate: rest and drift of the drag point → opacity ---
+    // (touch: always up). The drag point in CSS px, also the placement
+    // anchor below.
+    const ax = ex + (renderLon + 180) / 360 * bw;
+    const ay = ey + (90 - renderLat) / 180 * bh;
+    const alpha = magTouch ? 1 : stepMagGate(magGate, ax, ay, t);
+    const dbg = magTouch ? { restMs: 0, driftPx: 0 } : magGateDebug(magGate, ax, ay, t);
+    magDebug.alpha = alpha; magDebug.shown = magTouch || magGate.shown;
+    magDebug.restMs = dbg.restMs; magDebug.driftPx = dbg.driftPx;
+    magDebug.touch = magTouch;
+    if (alpha <= 0) {
+        // Hidden: pin the smoothing state to the pointer so the bubble fades
+        // back in where the pointer is, not lerping over from where it was.
+        magLat = renderLat; magLon = renderLon;
+        magSide = 0; magPosInit = false;
+        magLastT = t;
+        (window as unknown as { _dragMag?: typeof magDebug })._dragMag = magDebug;
+        return;
+    }
+
+    // --- Smoothing (display-only; the drag itself is unsmoothed) ---
     const k = 1 - Math.exp(-(t - magLastT) / MAG_TAU);
     magLastT = t;
 
@@ -473,8 +504,6 @@ export function drawDragMagnifier(
     const wLat = Math.max(-90 + half, Math.min(90 - half, magLat));
 
     // --- Bubble placement: sideways from the drag point, always in-band ---
-    const ax = ex + (renderLon + 180) / 360 * bw;
-    const ay = ey + (90 - renderLat) / 180 * bh;
     const minX = ex + r + MAG_EDGE, maxX = ex + bw - r - MAG_EDGE;
     const minY = ey + r + MAG_EDGE, maxY = ey + bh - r - MAG_EDGE;
 
@@ -509,6 +538,10 @@ export function drawDragMagnifier(
     const pxPerDeg = d / MAG_SPAN_DEG;
     const westLon = wLon - half;
     const northLat = wLat + half;
+
+    // The whole bubble — blit, overlays, rings — at the gate's opacity.
+    const prevAlpha = ctx.globalAlpha;
+    ctx.globalAlpha = prevAlpha * alpha;
 
     ctx.save();
     ctx.beginPath();
@@ -614,6 +647,7 @@ export function drawDragMagnifier(
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
     ctx.lineWidth = 1.5;
     ctx.stroke();
+    ctx.globalAlpha = prevAlpha;
 
     magDebug.x = px; magDebug.y = py; magDebug.r = r;
     magDebug.ex = ex; magDebug.ey = ey; magDebug.ew = bw; magDebug.eh = bh;
@@ -624,6 +658,13 @@ export function drawDragMagnifier(
 export function endDragMagnifier(): void {
     magActive = false;
     (window as unknown as { _dragMag?: typeof magDebug | null })._dragMag = null;
+}
+
+/** True while the magnifier needs frames: its fade is running or, hidden,
+ *  a show is pending. False whenever it is inactive (so the Keep dialog's
+ *  loop park is unaffected) and on touch drags (no gate to animate). */
+export function dragMagnifierAnimating(): boolean {
+    return magActive && !magTouch && magGateAnimating(magGate);
 }
 
 // ============================================================================

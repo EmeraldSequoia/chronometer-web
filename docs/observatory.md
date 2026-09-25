@@ -1026,6 +1026,38 @@ the panel only when none is up. A `pointerdown` on the canvas closes it too,
 passing through to the map drag or body tap underneath
 ([time-controller.md](time-controller.md#closing-the-panel)).
 
+### Magnifier
+
+While dragging, a magnifier bubble (`drawDragMagnifier`, `earth-view.ts`)
+shows a 10° window around the drag point: a same-canvas blit of the rendered
+band (so day/night and the terminator match) with crisp city dots and labels,
+the home marker and a crosshair drawn on top. It stays inside the band, offset
+sideways from the pointer (44 px on touch, clearing the fingertip; 16 px for a
+mouse), and both its content and its position are smoothed (60 ms). Design:
+[planning/2026-07-25-map-pointing-phase-1-magnifier.md](../planning/2026-07-25-map-pointing-phase-1-magnifier.md)
+and [planning/2026-08-08-magnifier-touch-sizing.md](../planning/2026-08-08-magnifier-touch-sizing.md).
+
+On a touch drag the bubble is up for the whole drag: the finger covers the
+very point being chosen, which is what the bubble is for. On a mouse (or
+pen) drag its visibility is gated on how the pointer moves
+(`magnifier-gate.ts`,
+[planning/2026-09-24-magnifier-speed-gating.md](../planning/2026-09-24-magnifier-speed-gating.md)).
+There the bubble is for very small motions only, so it stays off the map until the
+pointer has been at rest for 1 s — at rest meaning an average speed under
+5 CSS px/s over that window, i.e. within 5 px of where it came to rest —
+and then fades in (150 ms). Once shown it stays through small excursions
+whatever their speed and fades out the moment the pointer is 10 px from any
+point it held within the last second — the anchor is the whole trail of the
+last second, so a slow crawl (under 10 px/s) keeps the bubble for any length
+while a 10 px burst hides it whenever it happens; then a fresh 1 s rest is
+needed. The knobs are the constants at the top of the module. The gate steps inside
+`drawDragMagnifier` and reports `dragMagnifierAnimating()` so the
+parked-loop rule keeps frames coming while a rest is counting or a fade
+runs; it drops out with the drag on `pointerup`, so the Keep dialog's loop
+park is untouched. `window._dragMag` exposes the bubble's geometry, opacity,
+shown state, time at rest, drift and whether the drag is a touch drag for
+headless checks.
+
 ### Coordinate conversion
 
 The earth map uses equirectangular (plate carrée) projection:

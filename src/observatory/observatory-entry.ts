@@ -44,7 +44,7 @@ import { getStaticCache, invalidateStaticCache, staticCacheSizeBytes } from './s
 import { drawPlanetHands, waitForPlanetImages } from './planet-hands.js';
 import { drawRiseSetRings, invalidateRingCache } from './ring-view.js';
 import { drawClockHands, drawSubdialHands } from './hand-views.js';
-import { initEarthView, drawEarthView, isInsideEarthMap, earthPixelToLatLon, drawDragCrosshair, drawDragMagnifier, resetDragMagnifier, endDragMagnifier, drawObserverDot, earthMaskSizeBytes } from './earth-view.js';
+import { initEarthView, drawEarthView, isInsideEarthMap, earthPixelToLatLon, drawDragCrosshair, drawDragMagnifier, resetDragMagnifier, endDragMagnifier, dragMagnifierAnimating, drawObserverDot, earthMaskSizeBytes } from './earth-view.js';
 import { initMoonView, drawMoonView } from './moon-view.js';
 import { miniMapTextureSizeBytes } from '../shared/mini-map.js';
 import {
@@ -661,6 +661,10 @@ function tickBody(): void {
     }
 
     drawFrame();
+
+    // The drag magnifier's fade, and its rest clock while it is hidden, need
+    // frames too; its gate steps inside drawFrame, so ask after drawing.
+    if (dragMagnifierAnimating()) animating = true;
 
     // First-frame handoff to the load-progress bar (planning §4g): the canvas
     // now has pixels, so the bootstrap can drop its "Initializing…" overlay.
