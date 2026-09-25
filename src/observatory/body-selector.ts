@@ -11,6 +11,12 @@
  * around them would overlap each other and the hub). The chevrons sit inside
  * their halves as the visual hint. Both dials use the same split; the iOS
  * "altitude forward, azimuth back" rule is gone.
+ *
+ * Feedback on an accepted tap (Steve, 2026-09-24): the tapped half-disc
+ * lights up at once — a flat white wash, the iOS cell-highlight idiom on the
+ * dial's own geometry — and fades out over FLASH_MS, its chevron going to
+ * full white with it. The wash is the whole target (the half-disc), so the
+ * altitude dial's empty right half shows itself when hit.
  */
 
 /** Minimum touch target, CSS px (Apple HIG 44 pt). */
@@ -30,6 +36,10 @@ export const CHEVRON_GAP_EM = 0.3;
 export const CHEVRON_CLEARANCE_EM = 0.35;
 /** The label slide's duration on a body change. */
 export const SLIDE_MS = 250;
+/** The tap wash's fade-out duration. */
+export const FLASH_MS = 600;
+/** The tap wash's peak alpha (white over the tapped half-disc). */
+export const FLASH_PEAK_ALPHA = 0.20;
 
 export const CHEVRON_BACK = '‹';     // ‹
 export const CHEVRON_FORWARD = '›';  // ›
@@ -97,4 +107,20 @@ export interface BodySlide {
 export function slideProgress(slide: BodySlide, nowMs: number): number {
     const t = Math.min(1, Math.max(0, (nowMs - slide.startMs) / SLIDE_MS));
     return t * (2 - t);
+}
+
+/** A tap wash in flight: the half-disc that was hit, lit at `startMs`. */
+export interface BodyFlash {
+    dial: 'alt' | 'az';
+    half: DialHalf;
+    startMs: number;
+}
+
+/**
+ * Level of a tap wash, 1 at the tap decaying to 0 at FLASH_MS: quadratic
+ * ease-out, so it drops fast (the tap registered) and dies with a soft tail.
+ */
+export function flashLevel(flash: BodyFlash, nowMs: number): number {
+    const t = Math.min(1, Math.max(0, (nowMs - flash.startMs) / FLASH_MS));
+    return (1 - t) * (1 - t);
 }

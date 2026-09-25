@@ -613,11 +613,12 @@ drawPeripheralDials(ctx, L)   — drawn into the merged static cache (static-cac
  └── drawEclipseDial    (static ring annulus, port EOEclipseDialShuffleView)
 
 drawPeripheralHands(ctx, L, u, selectedPlanet, ui)  [per frame]
+ ├── tap wash on the hit half-disc (alt or az), under the hand and label
  ├── altitude triangle hand  ({body}Alt)  + ‹ body name › (nudged clear of "30")
  ├── azimuth triangle hand   ({body}Az)   + ‹ body name ›
  └── EOT triangle hand       (eotAngle)
 body-selector.ts — pure geometry: the 44 px tap halves, the label layout
-and nudge, the slide's timing
+and nudge, the slide's and the wash's timing
 ```
 
 ### Hand angles (port of EOHandView.mm)
@@ -652,10 +653,21 @@ via `app-state` (observatory namespace; 0 = Sun is the default and is omitted).
 On a tap the outgoing name **slides out in the tapped direction** while
 fading and the new one slides in from the other side (250 ms, eased, clipped
 to the label zone so nothing crosses the numerals or the hub —
-`beginBodyLabelSlide` / `bodyLabelSliding` in `peripheral-hands.ts`; the loop's
-`animating` includes it), the same whichever target was hit, so the motion
-teaches the chevrons. Cross-tab and share-link changes snap, and so does
-reduced motion.
+`beginBodyLabelSlide` / `bodyLabelSliding` in `peripheral-hands.ts`), the same
+whichever target was hit, so the motion teaches the chevrons. Cross-tab and
+share-link changes snap, and so does reduced motion.
+
+The tap itself is acknowledged by the **tap wash**: the half-disc that was
+hit fills with white at `FLASH_PEAK_ALPHA` (20 %) the instant the click is
+accepted and fades out over `FLASH_MS` (600 ms) with a quadratic ease-out
+(`flashLevel` in `body-selector.ts`; `beginBodyTapFlash` in
+`peripheral-hands.ts`, drawn under the hand and label), while that half's
+chevron goes to full white and fades back with it — the touch counterpart of
+the mouse hover. The wash is the whole target, chord on the vertical
+diameter, so on the altitude gauge a *forward* tap momentarily completes the
+disc on its empty right side. It runs under reduced motion too (an opacity
+fade, no movement — and there the only sign the tap landed). The loop's
+`animating` ORs `bodySelectorAnimating`, which covers the slide and the wash.
 
 The hands track **one** value per axis — `dialAlt` / `dialAz` — whose expression
 reads the selected body from the `dialPlanet` **env variable** (set alongside

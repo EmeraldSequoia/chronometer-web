@@ -47,7 +47,10 @@ import { drawClockHands, drawSubdialHands } from './hand-views.js';
 import { initEarthView, drawEarthView, isInsideEarthMap, earthPixelToLatLon, drawDragCrosshair, drawDragMagnifier, resetDragMagnifier, endDragMagnifier, drawObserverDot, earthMaskSizeBytes } from './earth-view.js';
 import { initMoonView, drawMoonView } from './moon-view.js';
 import { miniMapTextureSizeBytes } from '../shared/mini-map.js';
-import { drawPeripheralHands, cycleSelectablePlanet, beginBodyLabelSlide, bodyLabelSliding, type BodySelectorHover } from './peripheral-hands.js';
+import {
+    drawPeripheralHands, cycleSelectablePlanet, beginBodyLabelSlide, beginBodyTapFlash, bodySelectorAnimating,
+    type BodySelectorHover,
+} from './peripheral-hands.js';
 import { dialHalfAt } from './body-selector.js';
 import { drawDateView } from './date-view.js';
 import { initEclipseView, drawEclipseView } from './eclipse-view.js';
@@ -307,8 +310,11 @@ function onCanvasClick(ev: MouseEvent): void {
     const dir: 1 | -1 = target.half === 'forward' ? 1 : -1;
     const prev = selectedPlanet;
     selectedPlanet = cycleSelectablePlanet(prev, dir);
-    // The name slides out in the tapped direction (the hands sweep concurrently).
-    beginBodyLabelSlide(prev, selectedPlanet, dir, performance.now());
+    const now = performance.now();
+    // The tapped half-disc lights up and fades (the tap wash), and the name
+    // slides out in the tapped direction (the hands sweep concurrently).
+    beginBodyTapFlash(target.dial, target.half, now);
+    beginBodyLabelSlide(prev, selectedPlanet, dir, now);
     // Move the dial target, then reset so dialAlt/dialAz re-evaluate and
     // animate to the new body (same sweep as a location change).
     env.variables.set('dialPlanet', selectedPlanet);
@@ -649,9 +655,9 @@ function tickBody(): void {
             updater.tick(env, perfNow, getNow, withDisplayTime,
                 timingContextForFrame(timeController));
         }
-        // The body-name slide (a tap on the ‹ › selector) needs frames too,
-        // even on a stopped clock.
-        animating = updater.anyAnimating() || bodyLabelSliding(perfNow);
+        // The body selector's tap wash and name slide need frames too, even
+        // on a stopped clock.
+        animating = updater.anyAnimating() || bodySelectorAnimating(perfNow);
     }
 
     drawFrame();

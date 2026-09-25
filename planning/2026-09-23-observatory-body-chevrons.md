@@ -132,3 +132,28 @@ right half).
   (`CHEVRON_HOVER_ALPHA`) **1.0** as starting points. Still Steve's to tune
   in situ.
 
+## 6. Review round 2 (Steve, 2026-09-24): tap feedback
+
+The whole half-dial is the target, and nothing showed *that* a tap had been
+accepted beyond the slide and the sweep — on a phone the finger covers the
+chevron. Steve's strawman was a 10 % white half-disc flash. Built as the
+**tap wash**: the hit half-disc fills with white at `FLASH_PEAK_ALPHA` =
+0.20 the instant the click is accepted and fades over `FLASH_MS` = 600 ms
+with a quadratic ease-out (fast drop, soft tail — the iOS cell-highlight
+idiom on the dial's own geometry), drawn under the hand and label; the
+tapped chevron goes to full white with it and fades back (the touch
+counterpart of the mouse hover). The chord is the vertical diameter, so the
+straight edge reads "half", and a forward tap on the altitude gauge
+momentarily completes its missing right side. Not gated on reduced motion
+(an opacity fade, no movement; there it is the only acknowledgement, since
+the name snaps). `flashLevel` is unit-tested; `bodySelectorAnimating` (slide
+or wash) keeps the loop awake.
+
+Alternatives considered and not built: a ripple spreading from the tap point
+clipped to the half (Material's idiom — foreign here, and motion); a
+chevron-only pop (hidden under the finger, ~7 px on a phone); brightening
+only the band annulus (the altitude gauge has none on its right half).
+
+Built at 0.12 / 300 ms; Steve's first native look (2026-09-24) asked for
+**0.20 / 600 ms**, which is what ships. Still open: whether the flat fill
+wants a soft inner edge.

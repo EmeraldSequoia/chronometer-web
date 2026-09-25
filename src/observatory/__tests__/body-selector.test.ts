@@ -13,12 +13,16 @@
  *  (e) demiRadialTextCenter — the numeral centre the nudge rule reads is the
  *      drawing code's own (radial half at radius − halfH, bottom half at
  *      radius2 − halfH, flipped).
+ *  (f) flashLevel — the tap wash is 1 at the tap, 0 at FLASH_MS, clamped,
+ *      eased out; and the hands module keeps the loop awake for it.
  */
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, afterEach } from 'vitest';
 import {
-    dialHalfAt, layoutBodyLabel, slideProgress, MIN_TARGET_PX, SLIDE_MS, CHEVRON_GAP_EM,
+    dialHalfAt, layoutBodyLabel, slideProgress, flashLevel, MIN_TARGET_PX, SLIDE_MS, FLASH_MS, CHEVRON_GAP_EM,
 } from '../body-selector.js';
-import { cycleSelectablePlanet } from '../peripheral-hands.js';
+import {
+    cycleSelectablePlanet, beginBodyTapFlash, beginBodyLabelSlide, bodySelectorAnimating, resetBodySelectorAnimation,
+} from '../peripheral-hands.js';
 import { demiRadialTextCenter } from '../draw-utils.js';
 
 describe('dialHalfAt', () => {
@@ -82,6 +86,38 @@ describe('slideProgress', () => {
         expect(half).toBeLessThan(1);
         expect(slideProgress(slide, 1000 + SLIDE_MS)).toBe(1);
         expect(slideProgress(slide, 5000)).toBe(1);
+    });
+});
+
+describe('flashLevel', () => {
+    test('is 1 at the tap, decays to 0 at FLASH_MS, clamped, eased out', () => {
+        const flash = { dial: 'alt' as const, half: 'forward' as const, startMs: 1000 };
+        expect(flashLevel(flash, 900)).toBe(1);
+        expect(flashLevel(flash, 1000)).toBe(1);
+        const half = flashLevel(flash, 1000 + FLASH_MS / 2);
+        expect(half).toBeGreaterThan(0);
+        expect(half).toBeLessThan(0.5);                                    // ease-out: most of the drop is early
+        expect(flashLevel(flash, 1000 + FLASH_MS)).toBe(0);
+        expect(flashLevel(flash, 5000)).toBe(0);
+    });
+});
+
+describe('bodySelectorAnimating', () => {
+    afterEach(() => resetBodySelectorAnimation());
+
+    test('a tap wash keeps the loop awake until it has faded, on its own', () => {
+        expect(bodySelectorAnimating(1000)).toBe(false);
+        beginBodyTapFlash('az', 'back', 1000);
+        expect(bodySelectorAnimating(1000)).toBe(true);
+        expect(bodySelectorAnimating(1000 + FLASH_MS - 1)).toBe(true);
+        expect(bodySelectorAnimating(1000 + FLASH_MS)).toBe(false);
+    });
+
+    test('the wash outlives the slide, so the loop runs to the later of the two', () => {
+        beginBodyLabelSlide(0, 1, 1, 1000);
+        beginBodyTapFlash('alt', 'forward', 1000);
+        expect(bodySelectorAnimating(1000 + SLIDE_MS)).toBe(FLASH_MS > SLIDE_MS);
+        expect(bodySelectorAnimating(1000 + Math.max(SLIDE_MS, FLASH_MS))).toBe(false);
     });
 });
 

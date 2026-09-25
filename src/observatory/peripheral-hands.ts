@@ -6,7 +6,8 @@
  * visible body selector (body-selector.ts; docs/observatory.md § Planet
  * selection). On a body change the name slides out in the tapped direction
  * and the new one slides in from the other side (250 ms, clipped to the
- * label zone) while the hands sweep to the new body.
+ * label zone) while the hands sweep to the new body, and the tapped half-disc
+ * lights up and fades (the tap wash, 600 ms) with its chevron at full white.
  *
  * Hand angle conventions (port of EOHandView.mm):
  *   - Azimuth  : planetAzimuth(p)            → 0 = North at top, CW
@@ -23,15 +24,17 @@ import { isReducedMotion } from '../shared/updater.js';
 import { drawTriangleHand } from './hand-views.js';
 import { drawText, demiRadialTextCenter, textVisualHalfHeight } from './draw-utils.js';
 import {
-    layoutBodyLabel, slideProgress,
+    layoutBodyLabel, slideProgress, flashLevel,
     CHEVRON_FONT_RATIO, CHEVRON_ALPHA, CHEVRON_HOVER_ALPHA, CHEVRON_CLEARANCE_EM,
-    CHEVRON_BACK, CHEVRON_FORWARD,
-    type BodySlide, type DialHalf,
+    CHEVRON_BACK, CHEVRON_FORWARD, FLASH_PEAK_ALPHA,
+    type BodySlide, type BodyFlash, type DialHalf,
 } from './body-selector.js';
 
 const HAND_STROKE = 'rgba(200,200,200,1)';
 const HAND_FILL = 'rgba(170,170,170,1)';
 const LABEL_COLOR = 'rgba(255,255,255,1)';   // match the dial titles (full white)
+const FLASH_COLOR = 'rgba(255,255,255,1)';   // the tap wash, at FLASH_PEAK_ALPHA · level
+const HALF_PI = Math.PI / 2;
 
 /** Planet number → dial body key (e.g. 0 → 'sun'). Earth (4) has no entry. */
 const PN_TO_BODY = new Map<number, string>(DIAL_BODIES.map((b) => [b.pn, b.key]));
@@ -70,14 +73,62 @@ export function beginBodyLabelSlide(fromPlanet: number, toPlanet: number, dir: 1
     slide = { from: bodyNameForPlanet(fromPlanet), to: bodyNameForPlanet(toPlanet), dir, startMs: nowMs };
 }
 
-/** True while a slide is running (the render loop keeps producing frames). */
+/** True while a slide is running. */
 export function bodyLabelSliding(nowMs: number): boolean {
     return slide !== null && slideProgress(slide, nowMs) < 1;
 }
 
-/** Tests: drop any slide in flight. */
-export function resetBodyLabelSlide(): void {
+// --- The tap wash (one at a time; a new tap restarts it on its own half) ---
+let flash: BodyFlash | null = null;
+
+/**
+ * Light the half-disc an accepted tap hit. Not gated on reduced motion: it
+ * is an opacity fade with no movement, and under reduced motion (where the
+ * name snaps) it is the only sign that the tap landed.
+ */
+export function beginBodyTapFlash(dial: 'alt' | 'az', half: DialHalf, nowMs: number): void {
+    flash = { dial, half, startMs: nowMs };
+}
+
+/** True while the tap wash is still visible. */
+export function bodyTapFlashing(nowMs: number): boolean {
+    return flash !== null && flashLevel(flash, nowMs) > 0;
+}
+
+/** True while the slide or the wash needs frames (the render loop keeps producing them). */
+export function bodySelectorAnimating(nowMs: number): boolean {
+    return bodyLabelSliding(nowMs) || bodyTapFlashing(nowMs);
+}
+
+/** Tests: drop any slide or wash in flight. */
+export function resetBodySelectorAnimation(): void {
     slide = null;
+    flash = null;
+}
+
+/** The wash's level on `dial` (0 when none is in flight or it is elsewhere). */
+function flashLevelOn(dial: 'alt' | 'az', nowMs: number): number {
+    return flash && flash.dial === dial ? flashLevel(flash, nowMs) : 0;
+}
+
+/**
+ * The tap wash: a flat white fill over the tapped half of the dial's disc —
+ * the chord is the vertical diameter, so the straight edge says "half" and
+ * the arc completes the altitude gauge's missing right side when that is hit.
+ */
+function drawTapFlash(ctx: CanvasRenderingContext2D, cx: number, cy: number, R: number, half: DialHalf, alpha: number): void {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = FLASH_COLOR;
+    ctx.beginPath();
+    // Canvas angles: the left half runs from the bottom (π/2) through the
+    // left (π) to the top (3π/2); the right half from the top (−π/2) through
+    // the right (0) to the bottom (π/2).
+    if (half === 'back') ctx.arc(cx, cy, R, HALF_PI, 3 * HALF_PI);
+    else ctx.arc(cx, cy, R, -HALF_PI, HALF_PI);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
 }
 
 /**
@@ -100,15 +151,23 @@ function drawBodyLabel(
     ctx.restore();
     const lay = layoutBodyLabel(cx, em, nameW, chevW, clearLeftOf);
 
+    const now = ui?.nowMs ?? performance.now();
+    // A chevron is full white under the mouse, and the tapped one goes to
+    // full white with the wash and fades back with it (touch has no hover).
     const hoverHalf = ui?.hover && ui.hover.dial === dial ? ui.hover.half : null;
+    const pressed = flashLevelOn(dial, now);
+    const chevAlpha = (half: DialHalf): number => {
+        if (hoverHalf === half) return CHEVRON_HOVER_ALPHA;
+        const lift = flash?.half === half ? pressed : 0;
+        return CHEVRON_ALPHA + (CHEVRON_HOVER_ALPHA - CHEVRON_ALPHA) * lift;
+    };
     ctx.save();
-    ctx.globalAlpha = hoverHalf === 'back' ? CHEVRON_HOVER_ALPHA : CHEVRON_ALPHA;
+    ctx.globalAlpha = chevAlpha('back');
     drawText(ctx, CHEVRON_BACK, lay.backX, y, chevFont, LABEL_COLOR);
-    ctx.globalAlpha = hoverHalf === 'forward' ? CHEVRON_HOVER_ALPHA : CHEVRON_ALPHA;
+    ctx.globalAlpha = chevAlpha('forward');
     drawText(ctx, CHEVRON_FORWARD, lay.forwardX, y, chevFont, LABEL_COLOR);
     ctx.restore();
 
-    const now = ui?.nowMs ?? performance.now();
     if (slide && slide.to === name && slideProgress(slide, now) < 1) {
         const t = slideProgress(slide, now);
         const zoneW = 2 * lay.zoneHalfW;
@@ -131,7 +190,7 @@ function drawBodyLabel(
  *
  * @param selectedPlanet ECPlanetNumber of the body shown on the alt/az dials.
  *                       Falls back to Sun (0) if not a selectable body.
- * @param ui             Hover state and the frame's time (for the slide).
+ * @param ui             Hover state and the frame's time (for the slide and the wash).
  */
 export function drawPeripheralHands(
     ctx: CanvasRenderingContext2D,
@@ -172,10 +231,16 @@ export function drawPeripheralHands(
     const c30 = demiRadialTextCenter(L.altCX, L.altCY, 10, 12, L.altR - f, L.altR - f + 1, numHalfH);
     const clearLeftOf = c30.x + Math.hypot(numHalfW, numHalfH) + CHEVRON_CLEARANCE_EM * em;
 
+    // The tap wash goes under the hand and the label, over the static dial.
+    const now = ui?.nowMs ?? performance.now();
+    const altFlash = flashLevelOn('alt', now);
+    if (altFlash > 0 && flash) drawTapFlash(ctx, L.altCX, L.altCY, L.altR, flash.half, FLASH_PEAK_ALPHA * altFlash);
     const altAngle = u.get('dialAlt').currentValue;
     drawTriangleHand(ctx, L.altCX, L.altCY, altAngle, L.altR * 0.90, width, HAND_STROKE, HAND_FILL);
     drawBodyLabel(ctx, L.altCX, L.altCY - altLabelR, em, name, 'alt', ui, clearLeftOf);
 
+    const azFlash = flashLevelOn('az', now);
+    if (azFlash > 0 && flash) drawTapFlash(ctx, L.azCX, L.azCY, L.azR, flash.half, FLASH_PEAK_ALPHA * azFlash);
     const azAngle = u.get('dialAz').currentValue;
     drawTriangleHand(ctx, L.azCX, L.azCY, azAngle, L.azR * 0.90, width, HAND_STROKE, HAND_FILL);
     drawBodyLabel(ctx, L.azCX, L.azCY - azLabelR, em, name, 'az', ui);
