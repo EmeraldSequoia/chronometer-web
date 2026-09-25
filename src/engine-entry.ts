@@ -2174,7 +2174,7 @@ async function main() {
     // top row when the row must shorten; rowOrder puts the gear beside ℹ
     // whenever both are rowed (outboard of it — ℹ keeps its usual place).
     const LEFT_CHROME_IDS = ['back-link', 'all-faces-link', 'selected-faces-link', 'edit-picks-link'];
-    const RIGHT_CHROME_IDS = ['fullscreen-btn', 'info-btn', 'face-name', 'settings-btn', 'share-btn', 'observatory-link', 'inspector-link'];
+    const RIGHT_CHROME_IDS = ['fullscreen-btn', 'info-btn', 'face-name', 'settings-btn', 'share-btn', 'observatory-link', 'inspector-link', 'eclipses-link'];
     const RIGHT_ROW_ARM_IDS = new Set(['fullscreen-btn', 'info-btn', 'face-name', 'settings-btn']);
     // The collapsed corner, one row from the corner inward: fullscreen, the
     // ⋮ menu button, and on single-face pages the face name (Steve,
@@ -2207,7 +2207,7 @@ async function main() {
                 // When share (or an app link) is pressed into the row, it
                 // slots in beside the corner rather than outboard of the
                 // face name, so it stays on the side users expect.
-                rowOrder: ['fullscreen-btn', 'share-btn', 'info-btn', 'settings-btn', 'face-name', 'observatory-link', 'inspector-link'],
+                rowOrder: ['fullscreen-btn', 'share-btn', 'info-btn', 'settings-btn', 'face-name', 'observatory-link', 'inspector-link', 'eclipses-link'],
             },
         ];
     }
@@ -3228,7 +3228,7 @@ async function main() {
         },
     });
 
-    // --- Cross-app navigation (header icons + i/o/c/a) and page hotkeys ---
+    // --- Cross-app navigation (header icons + i/o/c/a/e) and page hotkeys ---
     // Skipped in embed mode: the chrome is removed and hotkeys must not
     // navigate the host page's iframe. Key table: help.html#hotkeys.
     if (!isEmbedMode) {
@@ -4154,7 +4154,7 @@ async function main() {
             'location-prompt', 'planet-selector', 'vienna-noon-toggle',
             'kyoto-hand-toggle', 'kyoto-mode-toggle',
             'change-cities-btn', 'edit-picks-link', 'info-overlay',
-            'observatory-link', 'inspector-link',
+            'observatory-link', 'inspector-link', 'eclipses-link',
         ];
         for (const id of removeIds) {
             document.getElementById(id)?.remove();

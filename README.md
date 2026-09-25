@@ -87,6 +87,7 @@ On a physical keyboard, these single-key shortcuts work on every page (they're i
 | `a` | Go to the Chronometer all-faces page |
 | `o` | Go to Observatory |
 | `i` | Go to the Inspector |
+| `e` | Go to the Eclipse Table |
 | `h` | Open the help popup for the current app |
 | `?` | Open help to the Keyboard Shortcuts section |
 | `t` | Show or hide the time controller |

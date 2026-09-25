@@ -439,7 +439,7 @@ lpCityInput.addEventListener('keydown', (e: KeyboardEvent) => {
 // ============================================================================
 
 // ============================================================================
-// Cross-app navigation (header icons + i/o/c/a) and page hotkeys
+// Cross-app navigation (header icons + i/o/c/a/e) and page hotkeys
 // ============================================================================
 
 // This page IS Chronometer, so drop its own entry from the Other Apps section

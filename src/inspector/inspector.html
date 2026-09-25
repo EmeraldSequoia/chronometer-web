@@ -153,12 +153,14 @@
           color: #aab;
       }
 
-      /* Cross-app links (Chronometer / Observatory) — continue the fixed
-         top-right row left of info, settings + share; hrefs wired by shared/app-nav.ts.
-         Both show their colored app icons — deliberately breaking the
-         monochrome style, since these switch apps (discoverability). */
+      /* Cross-app links (Chronometer / Observatory / Eclipses) — continue the
+         fixed top-right row left of info, settings + share; hrefs wired by
+         shared/app-nav.ts. All show their colored app icons — deliberately
+         breaking the monochrome style, since these switch apps
+         (discoverability). */
       #chronometer-link,
-      #observatory-link {
+      #observatory-link,
+      #eclipses-link {
           position: fixed;
           top: 12px;
           display: block;
@@ -174,6 +176,10 @@
 
       #chronometer-link {
           right: 220px;
+      }
+
+      #eclipses-link {
+          right: 272px;
       }
 
       /* ⋮ overflow button (partials/overflow-menu.{html,css}): the corner's
@@ -193,12 +199,14 @@
       body.chrome-collapsed #info-btn,
       body.chrome-collapsed #settings-btn,
       body.chrome-collapsed #chronometer-link,
-      body.chrome-collapsed #observatory-link {
+      body.chrome-collapsed #observatory-link,
+      body.chrome-collapsed #eclipses-link {
           visibility: hidden;
       }
 
       #chronometer-link img,
-      #observatory-link img {
+      #observatory-link img,
+      #eclipses-link img {
           width: 100%;
           height: 100%;
           border-radius: 50%;
@@ -207,7 +215,8 @@
       }
 
       #chronometer-link:hover,
-      #observatory-link:hover {
+      #observatory-link:hover,
+      #eclipses-link:hover {
           filter: brightness(1.35);
       }
 
@@ -747,6 +756,9 @@ overscroll-behavior-y: contain;
       </a>
       <a id="observatory-link" class="app-nav-link" data-page="observatory.html" href="observatory.html" title="Observatory">
         <img src="thumb-observatory.png" alt="Observatory" />
+      </a>
+      <a id="eclipses-link" class="app-nav-link" data-page="eclipse-table.html" href="eclipse-table.html" title="Eclipses">
+        <img src="thumb-eclipses.png" alt="Eclipses" />
       </a>
       <button id="info-btn" title="About Inspector">ℹ&#xFE0E;</button>
       {{SETTINGS_BUTTON}}

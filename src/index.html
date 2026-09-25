@@ -31,6 +31,17 @@
           padding: 48px 24px 16px;
       }
 
+      /* The centred title (~410 px wide) and the fixed top-right button row
+         (five 44 px buttons at a 52 px pitch + 16 px margin = 276 px) share
+         the 48–60 px band; below ~960 px viewport width they would overlap,
+         so drop the header under the row there. (On a phone the corner is
+         collapsed to the ⋮ button and the padding is merely harmless.) */
+      @media (max-width: 980px) {
+          header {
+              padding-top: 72px;
+          }
+      }
+
       header h1 {
           font-size: 28px;
           font-weight: 300;
@@ -165,11 +176,11 @@
           color: #bbd;
       }
 
-      /* Cross-app links (Observatory / Inspector) — fixed top-right row left
-         of the ℹ and ⚙ buttons; hrefs wired by shared/app-nav.ts. Both show their
-         colored app-icon look — deliberately breaking the monochrome style,
-         since these switch apps (discoverability). Inspector's colors match
-         its card in the "Other apps" grid below. */
+      /* Cross-app links (Observatory / Inspector / Eclipses) — fixed top-right
+         row left of the ℹ and ⚙ buttons; hrefs wired by shared/app-nav.ts. All
+         show their colored app-icon look — deliberately breaking the monochrome
+         style, since these switch apps (discoverability). Inspector's colors
+         match its card in the "Other apps" grid below. */
       #inspector-link {
           position: fixed;
           top: 16px;
@@ -197,10 +208,10 @@
           filter: brightness(1.35);
       }
 
-      #observatory-link {
+      #observatory-link,
+      #eclipses-link {
           position: fixed;
           top: 16px;
-          right: 172px;
           display: block;
           width: 44px;
           height: 44px;
@@ -208,7 +219,16 @@
           transition: filter 0.2s;
       }
 
-      #observatory-link img {
+      #observatory-link {
+          right: 172px;
+      }
+
+      #eclipses-link {
+          right: 224px;
+      }
+
+      #observatory-link img,
+      #eclipses-link img {
           width: 100%;
           height: 100%;
           border-radius: 50%;
@@ -216,7 +236,8 @@
           display: block;
       }
 
-      #observatory-link:hover {
+      #observatory-link:hover,
+      #eclipses-link:hover {
           filter: brightness(1.35);
       }
 
@@ -400,7 +421,7 @@ overscroll-behavior-y: contain;
 
       {{OVERFLOW_CSS}}
 
-      /* ⋮ overflow button: on a phone-sized viewport the three corner buttons
+      /* ⋮ overflow button: on a phone-sized viewport the corner buttons
          fold into its menu (index-page.ts updateChromeCollapse, docs/chrome.md).
          visibility, not display, so the menu builder still sees them. */
       #more-btn {
@@ -411,6 +432,7 @@ overscroll-behavior-y: contain;
 
       body.chrome-collapsed #observatory-link,
       body.chrome-collapsed #inspector-link,
+      body.chrome-collapsed #eclipses-link,
       body.chrome-collapsed #info-btn,
       body.chrome-collapsed #settings-btn {
           visibility: hidden;
@@ -469,6 +491,9 @@ overscroll-behavior-y: contain;
     </a>
     <a id="inspector-link" class="app-nav-link" data-page="inspector.html" href="inspector.html" title="Inspector">
       <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.51 6.51 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+    </a>
+    <a id="eclipses-link" class="app-nav-link" data-page="eclipse-table.html" href="eclipse-table.html" title="Eclipses">
+      <img src="thumb-eclipses.png" alt="Eclipses" />
     </a>
     <button id="info-btn" title="About Chronometer">ℹ&#xFE0E;</button>
     {{SETTINGS_BUTTON}}

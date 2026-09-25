@@ -20,7 +20,7 @@ import { markChronometerPage, registerAppNavHotkeys, navSearch } from './shared/
 
 initAppState({ app: 'pick' });
 
-// Cross-app navigation hotkeys (i/o/c/a) only — the pick page has no header
+// Cross-app navigation hotkeys (i/o/c/a/e) only — the pick page has no header
 // app icons, time controller, or help popup. Key table: help.html#hotkeys.
 markChronometerPage();
 registerAppNavHotkeys();

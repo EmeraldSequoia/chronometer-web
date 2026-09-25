@@ -225,15 +225,15 @@
           fill: currentColor;
       }
 
-      /* Cross-app links (Observatory / Inspector) continue the right-edge
-         column below share; hrefs are wired by shared/app-nav.ts.
-         Both show their colored app-icon look — deliberately breaking the
+      /* Cross-app links (Observatory / Inspector / Eclipses) continue the
+         right-edge column below share; hrefs are wired by shared/app-nav.ts.
+         All show their colored app-icon look — deliberately breaking the
          monochrome style, since these switch apps (discoverability).
          Inspector's colors match its card on the index page. */
-      #observatory-link {
+      #observatory-link,
+      #eclipses-link {
           position: absolute;
           right: 16px;
-          top: 120px;
           display: block;
           width: 44px;
           height: 44px;
@@ -241,7 +241,16 @@
           transition: filter 0.2s;
       }
 
-      #observatory-link img {
+      #observatory-link {
+          top: 120px;
+      }
+
+      #eclipses-link {
+          top: 224px;
+      }
+
+      #observatory-link img,
+      #eclipses-link img {
           width: 100%;
           height: 100%;
           border-radius: 50%;
@@ -249,7 +258,8 @@
           display: block;
       }
 
-      #observatory-link:hover {
+      #observatory-link:hover,
+      #eclipses-link:hover {
           filter: brightness(1.35);
       }
 
@@ -302,6 +312,7 @@
       body.is-fullscreen #edit-picks-link,
       body.is-fullscreen #observatory-link,
       body.is-fullscreen #inspector-link,
+      body.is-fullscreen #eclipses-link,
       body.is-fullscreen #location-panel,
       body.is-fullscreen #time-bar,
       body.is-fullscreen #planet-selector,
@@ -341,7 +352,8 @@
       body.chrome-collapsed #settings-btn,
       body.chrome-collapsed #share-btn,
       body.chrome-collapsed #observatory-link,
-      body.chrome-collapsed #inspector-link {
+      body.chrome-collapsed #inspector-link,
+      body.chrome-collapsed #eclipses-link {
           visibility: hidden;
       }
 
@@ -919,6 +931,9 @@ overscroll-behavior-y: contain;
       </a>
       <a id="inspector-link" class="app-nav-link" data-page="inspector.html" href="inspector.html" title="Inspector">
         <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.51 6.51 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+      </a>
+      <a id="eclipses-link" class="app-nav-link" data-page="eclipse-table.html" href="eclipse-table.html" title="Eclipses">
+        <img src="thumb-eclipses.png" alt="Eclipses" />
       </a>
       <div id="info-overlay">
         <div id="info-popup">

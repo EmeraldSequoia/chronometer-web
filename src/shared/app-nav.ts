@@ -1,5 +1,5 @@
 /**
- * Cross-app navigation — hrefs, link wiring, and the i/o/c/a hotkeys behind
+ * Cross-app navigation — hrefs, link wiring, and the i/o/c/a/e hotkeys behind
  * the header app-nav icons and "Other Apps" links on every page.
  *
  * State rule (planning/2026-07-01-observatory-first-class-app.md §2.0): in
@@ -96,8 +96,9 @@ export function initAppNavLinks(flushState?: () => void): void {
 
 /**
  * Register the cross-app navigation hotkeys: `i` Inspector, `o` Observatory,
- * `c` Chronometer index, `a` Chronometer all-faces. No-op when already on the
- * target page; otherwise flush and navigate same-tab with appNavHref.
+ * `c` Chronometer index, `a` Chronometer all-faces, `e` Eclipse Table. No-op
+ * when already on the target page; otherwise flush and navigate same-tab with
+ * appNavHref.
  */
 export function registerAppNavHotkeys(flushState?: () => void): void {
     const go = (page: string) => {
@@ -110,6 +111,7 @@ export function registerAppNavHotkeys(flushState?: () => void): void {
     registerHotkey('o', () => go('observatory.html'));
     registerHotkey('c', () => go('index.html'));
     registerHotkey('a', () => go('all.html'));
+    registerHotkey('e', () => go('eclipse-table.html'));
 }
 
 export const __test__ = {

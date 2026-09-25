@@ -1,6 +1,6 @@
 <!-- "Other Apps" info-popup section, injected via {{OTHER_APPS}} (build.sh)
      into the index, face-page, and Observatory popups. Contains an entry for
-     all three apps; the current app's own entry is removed at runtime
+     every app; the current app's own entry is removed at runtime
      (help-popover.ts `app` option / index.html page script). Styles live in
      help-subview.css. Links are wired by app-nav.ts (clean URLs in storage
      mode — see that module's header comment). -->
@@ -52,6 +52,20 @@
         A live data explorer for the astronomy engine shared by Chronometer and
         Observatory &mdash; rise/set times, planetary positions, and calendar
         and clock values, at any time and location.
+      </p>
+    </div>
+  </div>
+  <div class="other-app" data-app="eclipses">
+    <a href="eclipse-table.html" class="app-nav-link other-app-icon" data-page="eclipse-table.html" title="Eclipses">
+      <img src="thumb-eclipses.png" alt="Eclipses" />
+    </a>
+    <div class="other-app-text">
+      <p class="other-app-title">
+        <a href="eclipse-table.html" class="app-nav-link" data-page="eclipse-table.html">Eclipses</a>
+      </p>
+      <p>
+        Thirty years of solar and lunar eclipses, each with links that open the
+        moment and place of maximum eclipse in the Observatory and Chronometer.
       </p>
     </div>
   </div>

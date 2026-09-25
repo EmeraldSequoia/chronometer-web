@@ -56,6 +56,7 @@ export const ROW_SPECS: readonly RowSpec[] = [
     { label: 'Chronometer', kind: 'nav', id: 'chronometer-link', group: true },
     { label: 'Observatory', kind: 'nav', id: 'observatory-link' },
     { label: 'Inspector', kind: 'nav', id: 'inspector-link' },
+    { label: 'Eclipses', kind: 'nav', id: 'eclipses-link' },
     // Actions, at the bottom just above help (Steve, 2026-09-22).
     { label: 'Share this view', kind: 'click', id: 'share-btn', group: true },
     { label: 'Set location', kind: 'click', id: 'set-location-btn' },

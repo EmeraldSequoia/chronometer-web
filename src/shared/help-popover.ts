@@ -12,7 +12,7 @@ export interface HelpPopoverOptions {
     generalHelpUrl?: string;
     /**
      * The running app. Its own entry is removed from the "Other Apps" section
-     * (partials/other-apps.html), which ships all three entries.
+     * (partials/other-apps.html), which ships every app's entry.
      */
     app?: 'chronometer' | 'observatory' | 'inspector';
     /**

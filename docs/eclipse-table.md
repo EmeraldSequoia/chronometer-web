@@ -117,6 +117,7 @@ Everything links *to* the page; nothing embeds its content.
 | Source | Links |
 |---|---|
 | `index.html` | The "Eclipse Table" face-card, third in the grid (`thumb-eclipses.png` — a center-crop of the Observatory simulator's totality photo, `src/shared/assets/totalEclipse.png`) |
+| Every app page | An "Eclipses" app icon (`#eclipses-link`, the same thumbnail) beside the other cross-app icons in the corner chrome of the index, face pages, Observatory and Inspector, folding into the ⋮ menu with them ([chrome.md](chrome.md)); the "Other Apps" section of the ℹ popup; and the `e` hotkey — all wired by `src/shared/app-nav.ts` ([help-system.md](help-system.md)) |
 | `help.html` | The standalone `.help-nav` entry (the nav is removed in embed mode), plus four in-body links from the "Understanding Eclipses" worked examples — Historical data, Watching a known eclipse (×2), and Discovering dates with no external knowledge |
 | Face help fragments | Basel, Observatory, Selene, and Chandra each carry a one-sentence link with explicit `target="_blank"` — the face-page popover retargets only `http…` links (`help-popover.ts`), so a bare relative link would navigate the running app away |
 
@@ -133,7 +134,7 @@ The page itself has no `<base target="_blank">` (unlike `help.html`): it would h
 | `src/__tests__/eclipse-table-page.test.ts` | Renderer suite (31 tests) |
 | `src/help/eclipse-data.json` | Committed dataset (TT instants) |
 | `scripts/scrape-eclipses.mjs` | Dataset generator (manual, not part of the build) |
-| `src/faces/thumb-eclipses.png` | Index card thumbnail, page favicon, apple-touch-icon |
+| `src/faces/thumb-eclipses.png` | Index card thumbnail, the corner app icon on every other page, page favicon, apple-touch-icon |
 
 ## Related Docs
 

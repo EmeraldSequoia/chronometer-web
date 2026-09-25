@@ -143,6 +143,7 @@
       }
       body.obs-chrome-collapsed #chronometer-link,
       body.obs-chrome-collapsed #inspector-link,
+      body.obs-chrome-collapsed #eclipses-link,
       body.obs-chrome-collapsed #obs-header-actions #info-btn,
       body.obs-chrome-collapsed #obs-header-actions #settings-btn,
       body.obs-chrome-collapsed #obs-header-actions #share-btn {
@@ -175,6 +176,7 @@
       body.is-fullscreen #obs-title,
       body.is-fullscreen #chronometer-link,
       body.is-fullscreen #inspector-link,
+      body.is-fullscreen #eclipses-link,
       body.is-fullscreen #obs-header-actions #info-btn,
       body.is-fullscreen #obs-header-actions #settings-btn,
       body.is-fullscreen #obs-header-actions #share-btn,
@@ -263,19 +265,21 @@
           color: #bbd;
       }
 
-      /* Cross-app links (Chronometer / Inspector) — hrefs wired by
-         shared/app-nav.ts. Both show their colored app-icon look —
+      /* Cross-app links (Chronometer / Inspector / Eclipses) — hrefs wired by
+         shared/app-nav.ts. All show their colored app-icon look —
          deliberately breaking the monochrome style, since these switch
          apps (discoverability). Inspector's colors match its card on the
          index page. */
-      #chronometer-link {
+      #chronometer-link,
+      #eclipses-link {
           display: block;
           width: 44px;
           height: 44px;
           transition: filter 0.2s;
       }
 
-      #chronometer-link img {
+      #chronometer-link img,
+      #eclipses-link img {
           width: 100%;
           height: 100%;
           border-radius: 50%;
@@ -283,7 +287,8 @@
           display: block;
       }
 
-      #chronometer-link:hover {
+      #chronometer-link:hover,
+      #eclipses-link:hover {
           filter: brightness(1.35);
       }
 
@@ -759,6 +764,9 @@ overscroll-behavior-y: contain;
     <div id="obs-header">
       <h1 id="obs-title">Observatory</h1>
       <div id="obs-header-actions">
+        <a id="eclipses-link" class="app-nav-link" data-page="eclipse-table.html" href="eclipse-table.html" title="Eclipses">
+          <img src="thumb-eclipses.png" alt="Eclipses" />
+        </a>
         <a id="chronometer-link" class="app-nav-link" data-page="index.html" href="index.html" title="Chronometer">
           <img src="apple-touch-icon.png" alt="Chronometer" />
         </a>

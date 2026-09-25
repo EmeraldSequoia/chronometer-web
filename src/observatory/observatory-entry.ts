@@ -1598,7 +1598,7 @@ function init(): void {
     pacer.setTargetFps(getPrefs().lowPower ? LOW_POWER_FPS : STEADY_STATE_FPS);
     onPrefsChange((p) => pacer.setTargetFps(p.lowPower ? LOW_POWER_FPS : STEADY_STATE_FPS));
 
-    // --- Cross-app navigation (header icons + i/o/c/a) and page hotkeys ---
+    // --- Cross-app navigation (header icons + i/o/c/a/e) and page hotkeys ---
     // Key table: help.html#hotkeys.
     const flushTime = () => flushTimeState(timeController);
     initAppNavLinks(flushTime);

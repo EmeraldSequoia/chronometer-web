@@ -9,7 +9,7 @@ Alongside (not inside) those layers sits the **Eclipse Table** (`eclipse-table.h
 
 Both are accessed through the ℹ info popup. When the user clicks the ℹ button, the popup shows:
 - Generic project info (title, GitHub links)
-- An expandable "Other Apps" section (cross-links to the other two apps)
+- An expandable "Other Apps" section (cross-links to the other apps)
 - An expandable "General Help Topics" section (iframe)
 - Per-face help content (details sections)
 
@@ -101,7 +101,7 @@ The eclipses section's worked-example screenshots live in `src/help/images/basel
 
 ### Keyboard Shortcuts section
 
-`help.html` also contains a **Keyboard Shortcuts** section (`#hotkeys`) documenting the single-key hotkeys (`c a o i h ? t n l f p ,`). It is app-neutral, so all app flavors (`app=observatory`, `app=inspector`, and the Chronometer default) show it. The runtime registry lives in `src/shared/hotkeys.ts` (one keydown listener, input-focus guard); the cross-app navigation keys are registered by `registerAppNavHotkeys()` in `src/shared/app-nav.ts`, and each entry script registers its page-local keys. **Keep help.html's table, the README table, and the registrations in sync.** The `?` hotkey calls `openGeneralHelpTopic('#hotkeys')` (help-popover.ts), which opens the popup, expands the General Help section, and routes the iframe to `#hotkeys` (help.html opens/scrolls on load and on `hashchange`).
+`help.html` also contains a **Keyboard Shortcuts** section (`#hotkeys`) documenting the single-key hotkeys (`c a o i e h ? t n l f p ,`). It is app-neutral, so all app flavors (`app=observatory`, `app=inspector`, and the Chronometer default) show it. The runtime registry lives in `src/shared/hotkeys.ts` (one keydown listener, input-focus guard); the cross-app navigation keys are registered by `registerAppNavHotkeys()` in `src/shared/app-nav.ts`, and each entry script registers its page-local keys. **Keep help.html's table, the README table, and the registrations in sync.** The `?` hotkey calls `openGeneralHelpTopic('#hotkeys')` (help-popover.ts), which opens the popup, expands the General Help section, and routes the iframe to `#hotkeys` (help.html opens/scrolls on load and on `hashchange`).
 
 ## Architecture
 
@@ -214,9 +214,9 @@ During build, these are copied to `dist/help/images/`.
 | `src/help/images/` | Inline help images (57 files across 9 subdirectories) |
 | `src/face-template.html` | Contains Other Apps + General Help iframe, `#help-content` div, `<template>`, and help CSS |
 | `src/index.html` | Contains Other Apps + General Help iframe (no per-face help) |
-| `src/partials/other-apps.html` | "Other Apps" popup section (all three entries; current app removed at runtime) |
+| `src/partials/other-apps.html` | "Other Apps" popup section (every app's entry; current app removed at runtime) |
 | `src/shared/help-popover.ts` | Shared popup wiring, `app:` filtering, `openGeneralHelpTopic()` for the `?` hotkey |
-| `src/shared/app-nav.ts` | Cross-app link hrefs (clean in storage mode), `.app-nav-link` wiring, i/o/c/a hotkeys |
+| `src/shared/app-nav.ts` | Cross-app link hrefs (clean in storage mode), `.app-nav-link` wiring, i/o/c/a/e hotkeys |
 | `src/shared/hotkeys.ts` | Single-key hotkey registry (input-focus guard, no-modifier match) |
 | `build.sh` | `get_help_file()`, `{{HELP_CONTENT}}`/`{{OTHER_APPS}}` injection, combined help generation |
 | `src/engine-entry.ts` | Template cloning, external link targeting, thumbnail injection, reordering, filtering, iframe resize listener |

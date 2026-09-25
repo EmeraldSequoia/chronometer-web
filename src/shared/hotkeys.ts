@@ -7,7 +7,7 @@
  * contenteditable element, so typing "o" in the city search never navigates.
  *
  * The key table is documented in help.html's "Keyboard Shortcuts" section —
- * keep the two in sync. The cross-app navigation keys (i/o/c/a) are registered
+ * keep the two in sync. The cross-app navigation keys (i/o/c/a/e) are registered
  * by `registerAppNavHotkeys` in app-nav.ts; each entry script registers the
  * page-specific keys (h/t/n/l/…) for the controls that exist on its page.
  */

@@ -1004,7 +1004,7 @@ for (const el of [document.querySelector('.time-section'), catalogEl]) {
     });
 }
 
-// --- Cross-app navigation (header icons + i/o/c/a) and page hotkeys ---
+// --- Cross-app navigation (header icons + i/o/c/a/e) and page hotkeys ---
 // Time state is flushed (writeTimeState) just before navigation so the target
 // app opens at the exact current time, even mid-scrub. Key table:
 // help.html#hotkeys.
@@ -1027,7 +1027,7 @@ registerHotkey(',', () => document.getElementById('settings-btn')?.click());
 // full-width <p> blocks would register as colliding even where their
 // centered text doesn't.
 
-const CHROME_IDS = ['share-btn', 'info-btn', 'settings-btn', 'observatory-link', 'chronometer-link'];
+const CHROME_IDS = ['share-btn', 'info-btn', 'settings-btn', 'observatory-link', 'chronometer-link', 'eclipses-link'];
 /** The collapsed corner: the ⋮ menu button alone (no fullscreen button here). */
 const COLLAPSED_CHROME_IDS = ['more-btn'];
 const CHROME_EDGE_MARGIN = 12; // matches the page's authored top/right insets
