@@ -7,7 +7,7 @@ The original iOS apps were developed by Steve Pucci and Bill Arnett of [Emerald 
 *   [**Emerald Chronometer for iOS's new owner**](https://www.scapaflowllc.com/new-page-1)
 *   [**Emerald Observatory for the iPad's new owner**](https://bjornfreemanbenson.com/emerald-observatory)
 
-This project (the web version here) is under active development as of August 2026.
+This project (the web version here) is in **maintenance mode** as of September 2026: it is essentially feature-complete, and the developers will fix most reported bugs, but expect few new features. See [Reporting issues & contributing](#reporting-issues--contributing).
 
 **How accurate is it?** The astronomical positions come from two Willmann-Bell series published in 1986 and 1991, and their authors printed accuracy tables on the back covers. [Accuracy of the Astronomical Algorithms](docs/accuracy.md) sets those promises beside measurements taken against NASA/JPL's DE441 ephemeris today, and reports what the engine achieves on the hardest thing it computes: eclipse timing. Short version — for every eclipse in the app's table, the length of totality is right to hundredths of a second and its start time to about a second. All of that precision ships with the app rather than arriving from a server: the coefficient tables are about 295 KB compressed, which is why placing a planet never needs the network.
 
@@ -123,6 +123,12 @@ This clones the four reference repos (`.chronometer-ref`, `.esastro-ref`, `.eslo
 ### Implementation docs
 
 The [`docs/`](docs/) directory contains permanent, subsystem-focused reference documentation covering rendering, animation, astronomy, shadows, expressions, and more. Start with [docs/README.md](docs/README.md) for a table of contents.
+
+## Reporting issues & contributing
+
+Found a bug? Please [open an issue](https://github.com/EmeraldSequoia/chronometer-web/issues) — no code required, and a clear report is the most useful help there is. Please include the app's version number, shown at the bottom of the help popup opened by the ⓘ button. The developers are volunteers, so no support or response time is promised, but reports are read and most bugs get fixed.
+
+If you'd like to contribute code, please read [CONTRIBUTING.md](CONTRIBUTING.md) first — in short, open an issue and discuss the change there before implementing it.
 
 ## Architecture
 

@@ -1,0 +1,49 @@
+name: Bug report
+description: Something looks wrong or doesn't work
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem! Fill in whatever you can — only the first box is required.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you saw, and what you expected to see instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: app
+    attributes:
+      label: Which app?
+      options:
+        - Chronometer
+        - Observatory
+        - Inspector
+        - Eclipse table
+        - Not sure / more than one
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Shown at the bottom of the help popup opened by the ⓘ button (on the eclipse table, at the bottom of the page).
+      placeholder: e.g. v2.1.8
+    validations:
+      required: false
+  - type: input
+    id: browser-device
+    attributes:
+      label: Browser and device
+      placeholder: e.g. Safari on iPhone 15, Chrome on Windows 11
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: The page URL, the location and date/time you had set, the watch face, screenshots — anything that might help.
+    validations:
+      required: false
