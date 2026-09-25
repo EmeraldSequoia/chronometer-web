@@ -1016,6 +1016,18 @@ const timeUI: TimeControlsAPI | null = initTimeControls({
         isOverflowMenuOpen(),
 });
 
+// A press on the display closes the controller (the two stories,
+// docs/time-controller.md): here the display is the time readout and the
+// catalog. The press passes through. The location card's Set button is chrome
+// (it opens a dialog over the panel) and leaves it open, like the corners; a
+// hands-free stop press is swallowed before it gets here.
+for (const el of [document.querySelector('.time-section'), catalogEl]) {
+    el?.addEventListener('pointerdown', (e: Event) => {
+        if ((e.target as HTMLElement | null)?.closest('button')) return;
+        if (timeUI?.isPopoverOpen()) timeUI.hidePopover();
+    });
+}
+
 // --- Cross-app navigation (header icons + i/o/c/a) and page hotkeys ---
 // Time state is flushed (writeTimeState) just before navigation so the target
 // app opens at the exact current time, even mid-scrub. Key table:

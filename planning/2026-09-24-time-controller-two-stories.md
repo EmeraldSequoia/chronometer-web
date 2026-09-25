@@ -1,10 +1,9 @@
 # Plan: the time controller's two stories — fade only while scrubbing, Escape and a display press close it, hands-free scrubbing
 
-**Status**: IMPLEMENTED 2026-09-24 (build 2.0.158; record in §9; review
-round 3 in §10, build 2.0.159) — steps 1–6 and 8 of §7 landed and are
-pane-verified on all three pages; pending are step 7 (Steve's native pass)
-and step 9 (the display-press close on the face pages and the Inspector,
-after that pass). Decisions in §8.
+**Status**: COMPLETE 2026-09-24 except the native pass (build 2.0.164;
+records in §9, §10 and §11) — every step of §7 has landed and is
+pane-verified on all three pages; step 7 (Steve's native pass) is the only
+open item. Decisions in §8.
 **Created**: 2026-09-24
 **Baseline**: 4e967cc (`[Observatory] Add chevrons for changing planet on
 alti/az subdials`, build 2.0.157).
@@ -542,3 +541,30 @@ storage writes above. Then step 9.
   zone (over the full-opacity panel) and 0.4 once released (over the 0.38
   panel, ≈ 0.15 effective); the two multiply because the badge is a child of
   the popover.
+
+## 11. Step 9 (2026-09-24, build 2.0.164)
+
+The display-press close on the face pages and the Inspector, brought
+forward on Steve's word before the native pass.
+
+- **Chronometer**: one `pointerdown` listener on `#watch-grid` (the face
+  grid is the display) in engine-entry.ts, after the controller is wired.
+  The press passes through, so on the multi-face pages a face's *click*
+  still navigates to its page — the panel closes on the press first, which
+  is moot but harmless.
+- **Inspector**: the same listener on the time readout (`.time-section`)
+  and the catalog (`#catalog`), skipping presses on a button — the location
+  card's Set lives in the catalog and opens a dialog over the panel, so it is
+  chrome by the §5 rule.
+- Docs: time-controller.md's "Closing the panel" bullet names all three
+  displays; docs/inspector.md gains a sentence; help.html's sentence no
+  longer singles out the Observatory.
+
+Pane, build 2.0.164 (fresh port, `[mem] build 2.0.164`; synthetic
+`pointerdown`s, never a click):
+
+| Page | Result |
+|------|--------|
+| terra.html | press on the face canvas → closed; reopened, press on the ℹ button → open; hands-free lock (`10 day/s ▶`, `.tp-hidden .tp-locked`), press on the face → `Stopped`, `defaultPrevented`, panel still open, classes clear |
+| all.html (16 faces) | press on a face → closed, and still on all.html (no navigation from a press alone) |
+| inspector.html | press on the catalog → closed; reopened, press on Set → open; press on the time readout → closed; reopened, press on ℹ → open |

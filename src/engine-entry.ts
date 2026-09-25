@@ -3100,6 +3100,14 @@ async function main() {
         // every face cache).
     });
 
+    // A press on the display closes the controller (the two stories,
+    // docs/time-controller.md): the face grid is the display here. The press
+    // passes through — on the multi-face pages a face's click still navigates
+    // to its page. Chrome presses (the corner buttons, the bars) leave the
+    // panel open; a hands-free stop press is swallowed before it gets here.
+    grid.addEventListener('pointerdown', () => {
+        if (timeUI?.isPopoverOpen()) timeUI.hidePopover();
+    });
 
     // --- Share button ---
     initShareButton({ getState });

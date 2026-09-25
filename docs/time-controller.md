@@ -178,11 +178,12 @@ release). Two more, for the precise story's "done now":
   pre-close state). A focused date input gives up focus first; the pending
   edit applies on change. Chronometer runs its own Escape ladder with the
   panel as its last rung and passes nothing.
-- **A press on the display** (the Observatory canvas, wired in its entry)
-  closes the panel and passes through, so a map drag with the panel open
-  both closes it and starts the drag. Presses on chrome (Settings, Set
-  location, the corners) leave it open. The face pages and the Inspector
-  are to follow after the Observatory's native pass.
+- **A press on the display** closes the panel and passes through. Each
+  page wires its own display in its entry: the Observatory canvas (a map
+  drag with the panel open both closes it and starts the drag),
+  Chronometer's face grid (on the multi-face pages a face's click still
+  navigates), and the Inspector's time readout and catalog. Presses on
+  chrome — Settings, Set location, the corners, the bars — leave it open.
 
 ## Footprint and placement
 

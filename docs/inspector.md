@@ -59,7 +59,10 @@ play / pause, reverse, a unit chip row with one ◀ ▶ pair (tap to step, hold 
 scrub), rise / set / transit for any body, offset, and "Now". Time state (`t` / `off` / `dir`)
 persists through the shared app-state layer (the `ec:shared` localStorage
 namespace in storage mode, the URL in the fallbacks), so hopping between apps —
-or opening a shared deep link — lands at the same instant and location.
+or opening a shared deep link — lands at the same instant and location. A
+press on the time readout or the catalog closes the panel (the display-press
+rule of [time-controller.md](time-controller.md#closing-the-panel)); the Set
+button and the chrome leave it open.
 
 ### Cross-App Navigation
 
