@@ -183,6 +183,17 @@ describe('rendering', () => {
         expect(result.markerIndex).toBe(pastCount);
     });
 
+    test('after the year\'s last eclipse, the marker closes out the current year', () => {
+        // Late 2026: every 2026 eclipse is past, the next one is in 2027.
+        const now = Date.UTC(2026, 8, 25, 12, 0, 0);
+        const { container, result } = render(now);
+        const marker = container.querySelector('#today')!;
+        expect(container.querySelectorAll('#today').length).toBe(1);
+        expect((marker.closest('details.ek-year') as HTMLElement).dataset.year).toBe('2026');
+        expect(marker.nextElementSibling).toBeNull();
+        expect(result.openYears).toContain(2026);
+    });
+
     test('cards carry the kind icon, derived UTC text, coordinates, and three links', () => {
         const { container } = render(NOW_MS);
         const sorted = [...data.eclipses].sort((a, b) => a.tdMs - b.tdMs);

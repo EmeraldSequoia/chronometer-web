@@ -337,8 +337,18 @@ export function renderEclipseTable(data: EclipseData, container: HTMLElement, no
     let groupBody: HTMLElement | null = null;
     let groupYear = NaN;
 
+    // When the next eclipse opens a new year but today is still in the
+    // previous one, the marker closes out the previous year's group instead
+    // of heading the next.
+    const nowYear = new Date(nowMs).getUTCFullYear();
+    let markerPlaced = false;
+
     rows.forEach((row, i) => {
         const year = new Date(row.utcMs).getUTCFullYear();
+        if (i === markerIndex && year !== groupYear && groupYear === nowYear) {
+            groupBody!.appendChild(buildTodayMarker(doc, nowMs, false));
+            markerPlaced = true;
+        }
         if (year !== groupYear) {
             groupYear = year;
             group = doc.createElement('details');
@@ -378,7 +388,7 @@ export function renderEclipseTable(data: EclipseData, container: HTMLElement, no
             group.appendChild(groupBody);
             container.appendChild(group);
         }
-        if (i === markerIndex) {
+        if (i === markerIndex && !markerPlaced) {
             groupBody!.appendChild(buildTodayMarker(doc, nowMs, false));
         }
         groupBody!.appendChild(buildCard(doc, row.e, row.utcMs, row.utcMs <= nowMs));
