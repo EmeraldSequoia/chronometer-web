@@ -571,7 +571,9 @@ export function registerAstroFunctions(
     // --- Geneva I calendar functions ---
     functions.set('GregorianEra', () => {
         const di = dateToDateInterval(getNow());
-        return di > kECJulianGregorianSwitchoverTimeInterval ? 1 : 0;
+        // `>=`: the switchover instant itself is Gregorian, as in es-calendar
+        // (`t < switchover` takes the Julian branch).
+        return di >= kECJulianGregorianSwitchoverTimeInterval ? 1 : 0;
     });
     functions.set('DSTNumber', () => {
         const now = getNow();

@@ -13,6 +13,7 @@
 
 import {
     localComponentsFromTimeInterval, weekdayFromTimeInterval, daysInMonth,
+    kECJulianGregorianSwitchoverTimeInterval,
     type ESDateComponents,
 } from '../astronomy/es-calendar.js';
 import { dateToDateInterval } from '../astronomy/es-time.js';
@@ -39,6 +40,11 @@ export interface HybridDateFields extends ESDateComponents {
     yearLabel: string;
     /** Leap year under the calendar in force for the date (Julian rules before 1582). */
     leap: boolean;
+    /**
+     * The instant precedes the 15 Oct 1582 switchover, so the fields are Julian
+     * (proleptic Julian in BCE — every BCE date is also `julian`).
+     */
+    julian: boolean;
     /** The zone's UTC offset at the instant, seconds east-positive. */
     tzOffsetSec: number;
 }
@@ -61,6 +67,7 @@ export function hybridDateFields(date: Date, timezone: string | undefined): Hybr
         monthShort: MONTH_SHORT[cs.month - 1],
         yearLabel: cs.era === 0 ? `${cs.year} BCE` : String(cs.year),
         leap: daysInMonth(cs.era, cs.year, 2) === 29,
+        julian: di < kECJulianGregorianSwitchoverTimeInterval,
         tzOffsetSec,
     };
 }

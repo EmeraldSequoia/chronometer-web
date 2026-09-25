@@ -31,6 +31,7 @@ import { TimeController, TimeUnit, RATE_OPTIONS } from './time-controller.js';
 import { computeAstroTarget } from './astro-stepper.js';
 import type { AstroEventType } from './astro-stepper.js';
 import { tzOffsetSecondsAt } from './astro-env.js';
+import { formatZoneLine } from './tz-label.js';
 import {
     localComponentsFromTimeInterval, timeIntervalFromLocalComponents,
     kECJulianGregorianSwitchoverTimeInterval,
@@ -477,31 +478,10 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
     }
 
     /** Format the current timezone for display.
-     *  Output: "America/Los_Angeles\u00a0(PDT)\u00a0UTC-7:00" */
+     *  Output: "America/Los_Angeles\u00a0(PDT)\u00a0UTC-7:00" — and before the
+     *  zone's first rule "(LMT)\u00a0UTC-7:52:58" (tz-label.ts). */
     function formatTimezoneDisplay(olsonId: string | undefined, referenceDate?: Date): string {
-        if (!olsonId) return '';
-        try {
-            const ref = referenceDate || new Date();
-            const shortFmt = new Intl.DateTimeFormat('en-US', {
-                timeZone: olsonId,
-                timeZoneName: 'short',
-            });
-            const shortParts = shortFmt.formatToParts(ref);
-            const abbr = shortParts.find(p => p.type === 'timeZoneName')?.value || '';
-
-            const longFmt = new Intl.DateTimeFormat('en-US', {
-                timeZone: olsonId,
-                timeZoneName: 'longOffset',
-            });
-            const longParts = longFmt.formatToParts(ref);
-            const offsetStr = longParts.find(p => p.type === 'timeZoneName')?.value || '';
-            let utcStr = offsetStr.replace('GMT', 'UTC');
-            utcStr = utcStr.replace(/([+-])0(\d)/, '$1$2');
-
-            return `${olsonId}\u00a0(${abbr})\u00a0${utcStr}`;
-        } catch {
-            return olsonId;
-        }
+        return formatZoneLine(olsonId, referenceDate || new Date(), true);
     }
 
     // ===================================================================
@@ -582,6 +562,21 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
     // Update UI
     // ===================================================================
 
+    /**
+     * Write a label only when it changes. `updateTimeUI` runs every frame, and
+     * an unconditional `textContent =` replaces the element's text node each
+     * time. WebKit dispatches `click` to the common ancestor of the mousedown
+     * and mouseup hit-test *nodes* (text nodes included), so a text node swapped
+     * out between press and release has no ancestor in common with its
+     * replacement and the click is dropped — in Safari the CE/BCE button and the
+     * rate label took several clicks while the clock was running, and worked on
+     * the first click only when the idle loop had stopped rendering (Steve,
+     * 2026-09-25). Same rule as `refreshStepLabels` and the transport-bar cache.
+     */
+    function setText(el: Element, text: string): void {
+        if (el.textContent !== text) el.textContent = text;
+    }
+
     function updateTimeUI() {
         const isReal = timeController.isRealTime;
 
@@ -590,7 +585,7 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
 
         // Always update the displayed time
         const sim = timeController.getDisplayTime();
-        timeBarDate.textContent = formatSimTime(sim);
+        setText(timeBarDate, formatSimTime(sim));
 
         // Toggle at-limit class for boundary indicator
         const simMs = sim.getTime();
@@ -598,14 +593,14 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
         timeBar.classList.toggle('at-limit', atLimit);
 
         if (!isReal) {
-            timeBarRate.textContent = timeController.statusLabel;
+            setText(timeBarRate, timeController.statusLabel);
             // During a map-drag display hold the sim time is frozen while real
             // time flows, so the live offset would drift; explain instead.
-            timeBarOffset.textContent = timeController.isHeld
+            setText(timeBarOffset, timeController.isHeld
                 ? 'Hold for location change'
-                : formatOffset(sim, new Date());
+                : formatOffset(sim, new Date()));
         }
-        tpRateLabel.textContent = timeController.statusLabel;
+        setText(tpRateLabel, timeController.statusLabel);
 
         // Rebuild transport bar
         renderTransport();
@@ -634,11 +629,12 @@ export function initTimeControls(config: TimeControlsConfig): TimeControlsAPI | 
         if (hourEl && active !== hourEl) hourEl.value = simCs.hour.toString();
         if (minuteEl && active !== minuteEl) minuteEl.value = simCs.minute.toString();
 
-        // Update BCE toggle state
+        // Update BCE toggle state (text only on change — see setText: a
+        // per-frame rewrite loses the click in Safari).
         const bceBtn = document.getElementById('tp-bce');
         if (bceBtn) {
             const isBCE = simCs.era === 0;
-            bceBtn.textContent = isBCE ? 'BCE' : 'CE';
+            setText(bceBtn, isBCE ? 'BCE' : 'CE');
             bceBtn.classList.toggle('active', isBCE);
         }
     }

@@ -30,6 +30,7 @@
   <SWheel	refName='year'	    x='-67' y='-26'  dragAnimationType='dragAnimationAlways' modes='front'  radius='32' orientation='three' update='1 * days()' angle='fmod(floor(yearNumber()/100),  10)*2*pi/10' fontSize='14' fontName='Arial' text='0,1,2,3,4,5,6,7,8,9'  strokeColor='fgclr' bgColor='bgclr' />
   <SWheel	refName='year'	    x='-77' y='-26'  dragAnimationType='dragAnimationAlways' modes='front'  radius='32' orientation='three' update='1 * days()' angle='fmod(floor(yearNumber()/1000), 10)*2*pi/10' fontSize='14' fontName='Arial' text='0,1,2,3,4,5,6,7,8,9'  strokeColor='fgclr' bgColor='bgclr' />
   <Qhand	name='bce cover'    x='-62' y='-26' modes='front' length='48' width='12' tail='0' type='rect' update='1 * days()' angle='eraNumber() == 1 ? 0 : pi/2' strokeColor='0x60ff0000' fillColor='0x60ff0000' />
+  <Qhand	name='julian cover'    x='-62' y='-26' modes='front' length='48' width='12' tail='0' type='rect' update='1 * days()' angle='eraNumber() == 1 ? (GregorianEra() ? 0 : pi/2) : 0' strokeColor='0x6000ff00' fillColor='0x6000ff00' />
 
   <static name='front' modes='front'>
     <window	name='year win'	    x='-54' y='-32' w='40' h='12' modes='front' border='2' strokeColor='darkGray' shadowOpacity='0.7' shadowSigma='2.5' shadowOffset='1.5' />

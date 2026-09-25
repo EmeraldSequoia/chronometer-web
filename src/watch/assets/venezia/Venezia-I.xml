@@ -60,6 +60,7 @@
   <SWheel   refName='ddigits'   x='-67' y='dateY+1'  dragAnimationType='dragAnimationAlways' modes='front'  radius='32' orientation='three' update='1 * days()' angle='fmod(floor(yearNumber()/100),  10)*2*pi/10' fontSize='datefs' fontName='Arial' text='0,1,2,3,4,5,6,7,8,9'  strokeColor='bfgclr' bgColor='clear' />
   <SWheel   refName='ddigits'   x='-77' y='dateY+1'  dragAnimationType='dragAnimationAlways' modes='front'  radius='32' orientation='three' update='1 * days()' angle='fmod(floor(yearNumber()/1000), 10)*2*pi/10' fontSize='datefs' fontName='Arial' text='0,1,2,3,4,5,6,7,8,9'  strokeColor='bfgclr' bgColor='clear' />
   <Qhand    name='bce cover'    x='-55-(datefs-1)/2'    y='dateY-yoff2+(datefs-1)/2' modes='front' length='40+(datefs-1)/2' width='datefs-1' tail='0' type='rect' update='1 * days()' angle='eraNumber() == 1 ? 0 : pi/2' strokeColor='0x60ff0000' fillColor='0x60ff0000' />
+  <Qhand    name='julian cover'    x='-55-(datefs-1)/2'    y='dateY-yoff2+(datefs-1)/2' modes='front' length='40+(datefs-1)/2' width='datefs-1' tail='0' type='rect' update='1 * days()' angle='eraNumber() == 1 ? (GregorianEra() ? 0 : pi/2) : 0' strokeColor='0x6000ff00' fillColor='0x6000ff00' />
 
 <!-- am/pm -->
   <QWheel   name='main am/pm'   x='0'      y='-altR-11'                animSpeed='5.0' dragAnimationType='dragAnimationAlways' modes='front'  radius='15' orientation='twelve' update='60'  angle='hour24Number() >= 12 ? 0 : pi'                               fontSize='13' fontName='Arial' marks='0' text='●,' strokeColor='black' bgColor='dialfrontColor' />

@@ -53,6 +53,8 @@ import {
 } from './peripheral-hands.js';
 import { dialHalfAt } from './body-selector.js';
 import { drawDateView } from './date-view.js';
+import { hybridDateFields } from '../shared/hybrid-date.js';
+import { tzAbbreviationAt, utcOffsetLabelAt, isOffsetAbbreviation } from '../shared/tz-label.js';
 import { initEclipseView, drawEclipseView } from './eclipse-view.js';
 
 import { type ObsValueName, buildObsValues } from './obs-values.js';
@@ -298,6 +300,48 @@ function bodyTargetAt(x: number, y: number): BodySelectorHover | null {
 
 /** The chevron target under the mouse, for its hover brightening (mouse only). */
 let bodyHover: BodySelectorHover | null = null;
+
+// ---------------------------------------------------------------------------
+// Date tooltip. The header abbreviates — "BCE", "Julian", "leap", "LMT" — so
+// the date block under the mouse gets a native tooltip (canvas.title) that
+// spells those out and adds the zone's exact offset. Mouse only: touch has no
+// hover, and the labels stand on their own (help/observatory.html). Rewritten
+// only when the text changes, so a running clock never re-triggers it.
+// ---------------------------------------------------------------------------
+
+/** Whether (x, y) — canvas CSS px, like `bodyTargetAt` — is over the date block(s). */
+function dateBoxAt(x: number, y: number, L: LayoutParams): boolean {
+    const inBox = (cx: number, cy: number, w: number, h: number): boolean =>
+        w > 0 && h > 0 && Math.abs(x - cx) <= w / 2 && Math.abs(y - cy) <= h / 2;
+    if (inBox(L.dateCX, L.dateCY, L.dateW, L.dateH)) return true;
+    return L.dateMode === 'split' && inBox(L.date2CX, L.date2CY, L.date2W, L.date2H);
+}
+
+/** Two lines: the full date with its calendar qualifiers, then the zone. */
+function dateTooltipText(): string {
+    const d = timeController.getDisplayTime();
+    const f = hybridDateFields(d, locationTimezone);
+    const quals: string[] = [];
+    if (f.era === 0) quals.push('Before Common Era, proleptic Julian calendar');
+    else if (f.julian) quals.push('Julian calendar');
+    if (f.leap) quals.push('leap year');
+    const dateLine = `${f.weekdayName}, ${f.day} ${f.monthName} ${f.yearLabel}`
+        + (quals.length ? ` — ${quals.join(', ')}` : '');
+    const abbr = tzAbbreviationAt(locationTimezone, d);
+    const utc = utcOffsetLabelAt(locationTimezone, d);
+    const zoneLine = abbr === 'LMT'
+        ? `LMT: local mean time, before standard time — ${utc}`
+        : (!abbr || isOffsetAbbreviation(abbr)) ? utc : `${abbr} — ${utc}`;
+    return `${dateLine}\n${zoneLine}`;
+}
+
+function setDateTooltip(text: string): void {
+    if (text) {
+        if (canvas.title !== text) canvas.title = text;
+    } else if (canvas.hasAttribute('title')) {
+        canvas.removeAttribute('title');
+    }
+}
 
 /** Step the alt/az body when the user taps a chevron target on either dial. */
 function onCanvasClick(ev: MouseEvent): void {
@@ -1225,6 +1269,7 @@ function setupMapDrag(): void {
         const y = ev.clientY - rect.top;
 
         if (dragState === 'dragging') {
+            setDateTooltip('');
             // Only update the location if the pointer is inside the map.
             if (isInsideEarthMap(x, y, layout)) {
                 dragWasTimezoneLocked = ev.altKey;
@@ -1244,10 +1289,12 @@ function setupMapDrag(): void {
                 scheduleFrame();
             }
             canvas.style.cursor = isInsideEarthMap(x, y, layout) ? 'crosshair' : target ? 'pointer' : '';
+            setDateTooltip(ev.pointerType === 'mouse' && dateBoxAt(x, y, layout) ? dateTooltipText() : '');
         }
     });
 
     canvas.addEventListener('pointerleave', () => {
+        setDateTooltip('');
         if (bodyHover) {
             bodyHover = null;
             scheduleFrame();

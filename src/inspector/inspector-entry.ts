@@ -18,6 +18,7 @@ import {
 import { TimeController } from '../shared/time-controller.js';
 import { initTimeControls, flushTimeState, type TimeControlsAPI } from '../shared/time-controls-ui.js';
 import { hybridDateFields } from '../shared/hybrid-date.js';
+import { formatZoneLine } from '../shared/tz-label.js';
 import { registerHotkey } from '../shared/hotkeys.js';
 import { initAppNavLinks, registerAppNavHotkeys } from '../shared/app-nav.js';
 import { createFpsIndicator } from '../shared/fps-indicator.js';
@@ -162,35 +163,10 @@ const ensureTzResolved = createTzResolver({
     onError: (err) => console.error('[tz] timezone correction failed:', err),
 });
 
-/** Format timezone abbreviation and UTC offset, e.g. "(PDT) UTC-7:00". */
+/** Zone abbreviation and UTC offset, e.g. "(PDT) UTC-7:00" — and before the
+ *  zone's first rule "(LMT) UTC-7:52:58" (tz-label.ts). */
 function formatTimezoneInfo(olsonId: string | undefined, referenceDate?: Date): string {
-    if (!olsonId) return '';
-    try {
-        const ref = referenceDate || new Date();
-        // Get short abbreviation like "PDT", "EST"
-        const shortFmt = new Intl.DateTimeFormat('en-US', {
-            timeZone: olsonId,
-            timeZoneName: 'short',
-        });
-        const shortParts = shortFmt.formatToParts(ref);
-        const abbr = shortParts.find(p => p.type === 'timeZoneName')?.value || '';
-
-        // Get UTC offset like "GMT-07:00"
-        const longFmt = new Intl.DateTimeFormat('en-US', {
-            timeZone: olsonId,
-            timeZoneName: 'longOffset',
-        });
-        const longParts = longFmt.formatToParts(ref);
-        const offsetStr = longParts.find(p => p.type === 'timeZoneName')?.value || '';
-        // Convert "GMT-07:00" to "UTC-7:00", "GMT+05:30" to "UTC+5:30", "GMT" to "UTC"
-        let utcStr = offsetStr.replace('GMT', 'UTC');
-        // Remove leading zero: UTC-07:00 → UTC-7:00, UTC+05:30 → UTC+5:30
-        utcStr = utcStr.replace(/([+-])0(\d)/, '$1$2');
-
-        return `(${abbr})\u00a0${utcStr}`;
-    } catch {
-        return '';
-    }
+    return formatZoneLine(olsonId, referenceDate || new Date(), false);
 }
 
 // Display location

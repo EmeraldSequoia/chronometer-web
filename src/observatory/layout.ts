@@ -210,6 +210,15 @@ export interface LayoutParams {
      */
     dateBaselineBottom?: number;
     /**
+     * With `dateCondensed`, the content-x range the date2 line may occupy when
+     * it is wider than its box: it is pushed inside this span (growing toward
+     * the free space beside the dial rather than off the window edge) and, if
+     * wider than the span, shrunk to fit. Set per-anchor (A5: the main dial's
+     * rim + halfPad → the right margin); unset → the box edges.
+     */
+    date2SpanMin?: number;
+    date2SpanMax?: number;
+    /**
      * With `dateCondensed` and no `dateBaselineBottom` (A6 one-row): force this
      * unit for both the weekday and the condensed date line, each ink-centred in
      * its own box. Optional.

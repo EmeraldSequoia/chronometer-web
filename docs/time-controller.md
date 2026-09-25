@@ -102,7 +102,7 @@ hour / minute, applied on change through the hybrid calendar
 compose with the current offset, look the zone's offset up at the result,
 recompose if it differs — so the typed wall time wins across a DST edge or an
 era flip (a BCE date sits on the zone's LMT, an hour's fraction away from
-today's offset).
+today's offset). Like that transport rebuild, every label `updateTimeUI` touches per frame (the CE/BCE button, the rate, offset and date labels): `setText` writes only on change, because WebKit dispatches `click` to the common ancestor of the mousedown and mouseup hit-test *nodes* — a text node replaced between press and release drops the click, which made the CE/BCE button need several clicks in Safari while the clock was running (2026-09-25; pinned by `src/__tests__/time-controls-stable-labels.test.ts`).
 
 ### The scrub fade: two stories
 

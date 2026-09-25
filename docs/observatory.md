@@ -753,13 +753,42 @@ and animated popup height for the Privacy/Support/Disclaimer pages.
 ## Date Display
 
 `date-view.ts` renders the header date stack (port of the EOClock date labels,
-`EOClock.mm:525-570`): weekday, month + day, year, a "leap"/"not leap" indicator
-(under the calendar in force for the date: every fourth year in the Julian era before 1582, the Gregorian %4/%100/%400 rule after), and the timezone abbreviation. All fields use
+`EOClock.mm:525-570`): weekday, month + day, year (with " BCE" in era 0), a small
+dim "Julian" after the year for every date before the 15 Oct 1582 switchover
+(`DateFields.julian`; BCE dates included — "44 BCE  Julian" — since every BCE
+date is proleptic Julian), a "leap" indicator (under the calendar in
+force for the date: every fourth year in the Julian era before 1582, the
+Gregorian %4/%100/%400 rule after), and the timezone abbreviation. All fields use
 the hybrid calendar (`hybridDateFields`, [calendar.md](calendar.md)) in the **location's** timezone (not the browser's; Intl only for the zone abbreviation — it is proleptic Gregorian and read a Julian 1 Sep 1582 as 11 Sep), so the
-display follows the selected location and the scrubbed time. Placement and mode
+display follows the selected location and the scrubbed time. The abbreviation
+comes through `tzAbbreviationAt` (`src/shared/tz-label.ts`), which reads "LMT"
+where Intl has only the local-mean-time offset with seconds to offer
+(`GMT-10:31:26` for Honolulu before 1896; [timezone-and-dst.md](timezone-and-dst.md)).
+Placement and mode
 (`stack`/`row`/`split`) are set per aspect anchor by the adaptive layout (see
 [Adaptive Layout](#adaptive-layout-aspect-anchors)); `extractDateFields` is
-exported so the layout can measure exactly the strings the view renders.
+exported so the layout can measure exactly the strings the view renders
+(`measureRowTexts` for the one-line modes, `measureYearLine` for A1's year line,
+both including the "Julian" segment; "leap" is not reserved, as before).
+
+A forced-unit block (A5's shared-baseline date, A6's row date) never
+overflows: `drawBlock` treats its box as the placement and an optional span
+(`L.date2SpanMin/Max`, default the box edges) as the hard limit — a block
+wider than its box is pushed inside the span, and one wider than the span is
+shrunk uniformly; a block that fits its box is drawn as before. A5 sets the
+span from the main dial's rim at the line's ink top (+ halfPad) to the right
+margin, so a long line (`Sep 25  1401 BCE  Julian LMT leap`) grows leftward
+into the free space beside the dial instead of off the window edge
+(planning/2026-09-25-a5-condensed-date-overflow.md; pinned by
+`src/observatory/__tests__/date-view-overflow.test.ts`).
+
+With a mouse, the date block gets a native tooltip (`canvas.title`, set from
+the idle `pointermove` in `observatory-entry.ts`, mouse pointers only) that
+spells the abbreviations out — "Wednesday, 1 September 1582 — Julian calendar,
+leap year" over "LMT: local mean time, before standard time — UTC-10:31:26".
+It is rewritten only when the text changes, so a running clock never
+re-triggers it; touch gets nothing (the labels stand on their own; see
+`src/help/observatory.html` § Day/date).
 
 ## Eclipse Simulator
 

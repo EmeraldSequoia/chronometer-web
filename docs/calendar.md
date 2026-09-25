@@ -99,6 +99,17 @@ The time bar at the bottom of each face page uses hybrid calendar decomposition:
 - **Date input "Apply"** constructs dates via `timeIntervalFromLocalComponents`
 - **BCE toggle** in the time controller popover switches between CE and BCE eras
 
+### Calendar indicators
+
+Where the calendar in force is shown to the user (planning/2026-09-24-julian-indicator-and-lmt-label.md):
+
+- **Observatory header** (`src/observatory/date-view.ts`): a small dim "Julian" after the year for every date before the switchover, BCE included ("44 BCE  Julian" — every BCE date is proleptic Julian) — `DateFields.julian`, from `HybridDateFields.julian` (`di < kECJulianGregorianSwitchoverTimeInterval`). One word in every layout mode, rather than a "J-BCE" token expanding to "Julian BCE" where room allows. A mouse hover over the date block gets a native tooltip naming the era, the calendar, a leap year and the zone with its exact offset ([observatory.md](observatory.md) § Date Display).
+- **Chronometer year windows** (Babylon, Basel ×2, Firenze, Mauna Kea, Venezia, Vienna): a `julian cover` rect hand right after each `bce cover` in the face XML — green `0x6000ff00` across the window for CE dates in the Julian era, parked under the face otherwise: `angle='eraNumber() == 1 ? (GregorianEra() ? 0 : pi/2) : 0'` (a nested ternary: `&` is not well-formed inside an XML attribute), `update='1 * days()'` because the boundary is mid-year (Basel's BCE covers update yearly; the Julian ones cannot). CE-only so the red and green tints never blend: BCE shows the red cover alone.
+- **Geneva I**: the leap-year dial's `coverleap` wedges (driven by `GregorianEra()`, `Geneva-I.xml:154-159`) cover the Gregorian 100- and 400-year rule positions in the Julian era, when every fourth year is a leap year — when those positions are hidden, the face is in the Julian calendar. No extra part.
+- **Time controller**: `formatSimTime` appends " (Julian)" (above).
+
+`GregorianEra()` is 1 from the switchover instant on (`di >= kECJulianGregorianSwitchoverTimeInterval`, `src/shared/astro-env.ts`), matching es-calendar's `t < switchover` → Julian.
+
 > [!IMPORTANT]
 > The timezone offset passed to `localComponentsFromTimeInterval` must be the **actual UTC offset** of the target timezone (east-positive, in seconds), not `tzDeltaMs`. The helper `targetTzOffsetSec(d)` computes this as `-d.getTimezoneOffset() * 60 + tzDeltaMs / 1000`. The zone offset itself comes from `tzOffsetSecondsAt` (astro-env.ts), which uses `Intl` only to difference two proleptic-Gregorian representations of one instant — calendar-free, so it is safe on either side of the switchover and in BCE; see [timezone-and-dst.md](timezone-and-dst.md).
 

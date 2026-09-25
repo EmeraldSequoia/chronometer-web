@@ -38,6 +38,8 @@ import {
 import {
     type DateFields,
     extractDateFields,
+    JULIAN_LABEL,
+    measureYearLine,
     condensedDateLayout,
     measureRowTexts,
 } from './date-view.js';
@@ -402,7 +404,22 @@ function applyA5(
     // sits halfPad above the footer top.
     const descBottom = bounds.bottom - halfPad;
     L.dateBaselineBottom = descBottom;
-    const dateTop = condensedDateLayout(ctx, fields.weekday, L.dateW, L.dateH, descBottom).top;
+    const dl = condensedDateLayout(ctx, fields.weekday, L.dateW, L.dateH, descBottom);
+    const dateTop = dl.top;
+
+    // The date2 line's allowed span: from the main dial's rim (at the line's
+    // ink top — the rim is furthest right there, the dial's centre being above)
+    // plus halfPad, to the right margin. The template's date2 box stays the
+    // placement; a line wider than it grows leftward into this span before
+    // shrinking (date-view `drawBlock`). Ink top: the month/day's cap height
+    // at the shared unit (day-stable — caps and digits share it).
+    ctx.font = `${dl.u}px Arial, sans-serif`;
+    const mdAsc = ctx.measureText(fields.monthDay).actualBoundingBoxAscent;
+    const inkTopY = dl.baselineY - mdAsc;
+    const dyRim = inkTopY - mainCY;
+    const rimX = Math.abs(dyRim) < mainR ? mainCX + Math.sqrt(mainR * mainR - dyRim * dyRim) : mainCX;
+    L.date2SpanMin = rimX + halfPad;
+    L.date2SpanMax = W - halfPad;
 
     if (!o.a5Row) {
         L.moonR = 0.13 * H; L.moonCY = topRow + L.moonR; L.moonCX = halfPad + L.moonR; return;
@@ -466,7 +483,8 @@ function applyAwide(
     // DATE sizing (split, shared baseline).
     const UNIT_MAX = 72, REF = 100;
     const wkText = fields.weekday, md = fields.monthDay, yr = fields.year, tz = fields.tzAbbrev;
-    const m100 = measureRowTexts(ctx, wkText, md, yr, tz, '', REF);
+    const jul = fields.julian ? JULIAN_LABEL : '';
+    const m100 = measureRowTexts(ctx, wkText, md, yr, jul, tz, '', REF);
     // Size the shared date unit to the actual space it must fit, on both axes —
     // not a single nominal width capped at UNIT_MAX (which pinned the date at 72
     // px and overflowed the side columns on short/chrome-dropped Awide windows).
@@ -481,7 +499,7 @@ function applyAwide(
         REF * sideBudget / m100.weekdayW,     // weekday fits the left column
         availV / 4,                           // scale with the height
     );
-    const rm = measureRowTexts(ctx, wkText, md, yr, tz, '', u);
+    const rm = measureRowTexts(ctx, wkText, md, yr, jul, tz, '', u);
     ctx.font = `${u}px Arial, sans-serif`;
     let maxDesc = 0;
     for (const n of ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']) {
@@ -733,17 +751,22 @@ function applyA1(
     const REL_BIG = 1.0, REL_YEAR = 0.42, REL_SMALL = 0.21;
     const LINE_SPACING = 1.18, LINE_PAD = 0.10, UNIT_MAX = 72, REF = 100;
     const wkText = fields.weekday, md = fields.monthDay, yr = fields.year, tzAbbr = fields.tzAbbrev;
+    const jul = fields.julian ? JULIAN_LABEL : '';
     const w100 = (text: string, rel: number) => { ctx.font = `${rel * REF}px Arial, sans-serif`; return ctx.measureText(text).width; };
-    const lines: { text: string; rel: number; prom: boolean }[] = [
-        { text: wkText, rel: REL_BIG, prom: true },
-        { text: md, rel: REL_BIG, prom: true },
-        { text: yr, rel: REL_YEAR, prom: true },
+    // `w` is the line's width at REF: the year line carries the small "Julian"
+    // qualifier (the renderer's `[yr, julian, leap]`; "leap" is not reserved,
+    // as before), the others are single texts. Ascent/descent below still come
+    // from `text` alone — the year is the tallest thing on its line.
+    const lines: { text: string; rel: number; prom: boolean; w: number }[] = [
+        { text: wkText, rel: REL_BIG, prom: true, w: w100(wkText, REL_BIG) },
+        { text: md, rel: REL_BIG, prom: true, w: w100(md, REL_BIG) },
+        { text: yr, rel: REL_YEAR, prom: true, w: measureYearLine(ctx, yr, jul, '', REF) },
     ];
-    if (tzAbbr) lines.push({ text: tzAbbr, rel: REL_SMALL, prom: false });
+    if (tzAbbr) lines.push({ text: tzAbbr, rel: REL_SMALL, prom: false, w: w100(tzAbbr, REL_SMALL) });
 
     const dateBoxW = W - 2 * halfPad;
     let maxW = 0;
-    for (const l of lines) { const lw = w100(l.text, l.rel); if (lw > maxW) maxW = lw; }
+    for (const l of lines) { if (l.w > maxW) maxW = l.w; }
     const uDate = Math.min(UNIT_MAX, REF * dateBoxW / maxW);
 
     let blockH = (lines.length - 1) * LINE_PAD * uDate;
@@ -827,7 +850,8 @@ function applyA6(
     const u = o.a6FontK * (2 * outerR);         // primary font = ratio · outer-dial ⌀
 
     const wkText = fields.weekday, md = fields.monthDay, yr = fields.year, tzAbbr = fields.tzAbbrev;
-    const { weekdayW, dateW } = measureRowTexts(ctx, wkText, md, yr, tzAbbr, '', u);
+    const jul = fields.julian ? JULIAN_LABEL : '';
+    const { weekdayW, dateW } = measureRowTexts(ctx, wkText, md, yr, jul, tzAbbr, '', u);
     const dialW = 2 * R, mapW = 2 * hr;
 
     const sumEl = 2 * outerR + weekdayW + 2 * outerR + 2 * outerR + dialW + 2 * outerR + 2 * outerR + dateW + mapW;
@@ -931,7 +955,11 @@ const SHIFT_X: (keyof LayoutParams)[] = ['mainCX', 'utcCX', 'solarCX', 'sidCX', 
 const SHIFT_Y: (keyof LayoutParams)[] = ['mainCY', 'utcCY', 'solarCY', 'sidCY', 'moonCY', 'earthCY', 'altCY', 'azCY', 'eclipseCY', 'eotCY', 'dateCY', 'date2CY'];
 
 function shiftLayout(L: LayoutParams, dx: number, dy: number): void {
-    if (dx) for (const k of SHIFT_X) (L[k] as number) += dx;
+    if (dx) {
+        for (const k of SHIFT_X) (L[k] as number) += dx;
+        if (L.date2SpanMin != null) L.date2SpanMin += dx;
+        if (L.date2SpanMax != null) L.date2SpanMax += dx;
+    }
     if (dy) {
         for (const k of SHIFT_Y) (L[k] as number) += dy;
         if (L.dateBaselineBottom != null) L.dateBaselineBottom += dy;

@@ -98,6 +98,7 @@
     <SWheel	refName='year'	    x='yearX-13' y='yearY-0.5'  dragAnimationType='dragAnimationAlways' modes='front'  radius='32' orientation='three' update='3600' angle='fmod(floor(yearNumber()/100),  10)*2*pi/10' fontSize='14' fontName='Arial' text='0,1,2,3,4,5,6,7,8,9'  strokeColor='fgclr' bgColor='bgclr' />
     <SWheel	refName='year'	    x='yearX-23' y='yearY-0.5'  dragAnimationType='dragAnimationAlways' modes='front'  radius='32' orientation='three' update='3600' angle='fmod(floor(yearNumber()/1000), 10)*2*pi/10' fontSize='14' fontName='Arial' text='0,1,2,3,4,5,6,7,8,9'  strokeColor='fgclr' bgColor='bgclr' />
     <Qhand	name='bce cover'    x='yearX-8' y='yearY' modes='front' length='48' width='12' tail='0' type='rect' update='1 * days()' angle='eraNumber() == 1 ? 0 : pi/2' strokeColor='0x60ff0000' fillColor='0x60ff0000' />
+    <Qhand	name='julian cover'    x='yearX-8' y='yearY' modes='front' length='48' width='12' tail='0' type='rect' update='1 * days()' angle='eraNumber() == 1 ? (GregorianEra() ? 0 : pi/2) : 0' strokeColor='0x6000ff00' fillColor='0x6000ff00' />
     
   <hand         name='littlemoon'   x='moonX' y='moonY'  modes='front'  src='../partsBin/moonES80.png'    update='updateAtEnvChangeOnly'	angle='latitude()>0 ? 0 : pi' />
   <terminator   name='term'         x='moonX' y='moonY'  modes='front'  radius='moonR' leavesPerQuadrant='10' incremental='0' leafBorderColor='0xff282828' leafFillColor='0xff171717' leafAnchorRadius='0' update='1 * hours()' updateOffset='0' phaseAngle=		'moonAgeAngle()' rotation='latitude()>0 ? 0 : pi'/>

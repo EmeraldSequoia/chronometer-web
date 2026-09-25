@@ -21,11 +21,20 @@
  * docs/calendar.md) in the location's timezone, so the display follows the
  * selected location and scrubbed time — and reads a Julian 1 Sep 1582 as
  * 1 Sep, where Intl (proleptic Gregorian) read 11 Sep and dropped BCE eras.
- * Only the timezone abbreviation still comes from Intl.
+ * Only the timezone abbreviation still comes from Intl (via `tzAbbreviationAt`,
+ * which reads "LMT" where Intl has only an offset-with-seconds to offer).
+ *
+ * A date under the Julian calendar (before 15 Oct 1582, BCE included — every
+ * BCE date is proleptic Julian) carries a small dim "Julian" after the year,
+ * in the style of "leap" and the zone abbreviation: one word, the same in
+ * every layout mode, so a BCE line reads "44 BCE  Julian" (Steve, 2026-09-24,
+ * over a "J-BCE" token that would expand to "Julian BCE" where room allowed —
+ * a label that varies with the layout, and a code to learn).
  */
 
 import type { LayoutParams } from './layout.js';
 import { hybridDateFields } from '../shared/hybrid-date.js';
+import { tzAbbreviationAt } from '../shared/tz-label.js';
 
 const COLOR = 'rgba(255,255,255,0.9)';
 const COLOR_DIM = 'rgba(255,255,255,0.55)';
@@ -41,10 +50,19 @@ const UNIT_MAX = 72;
 export interface DateFields {
     weekday: string;
     monthDay: string;
+    /** "1582", or "44 BCE". */
     year: string;
     leap: boolean;
+    /**
+     * The date is under the Julian calendar (before 15 Oct 1582, BCE
+     * included): the view says "Julian" after the year.
+     */
+    julian: boolean;
     tzAbbrev: string;
 }
+
+/** The small dim calendar qualifier after the year. */
+export const JULIAN_LABEL = 'Julian';
 
 /**
  * The date strings (in the location's timezone) that the date view renders.
@@ -56,23 +74,13 @@ export function extractDateFields(date: Date, timezone: string | undefined): Dat
     const tz = timezone || undefined;
     const f = hybridDateFields(date, tz);   // iOS bigDate uses "MMM dd"
 
-    let tzAbbrev = '';
-    try {
-        const tzParts = new Intl.DateTimeFormat('en-US', {
-            timeZone: tz,
-            timeZoneName: 'short',
-        }).formatToParts(date);
-        tzAbbrev = tzParts.find((p) => p.type === 'timeZoneName')?.value ?? '';
-    } catch {
-        tzAbbrev = '';
-    }
-
     return {
         weekday: f.weekdayName,
         monthDay: `${f.monthShort} ${f.day}`,
         year: f.yearLabel,
         leap: f.leap,   // Julian rules before the switchover (EOClock.mm:541-547 was Gregorian-only)
-        tzAbbrev,
+        julian: f.julian,
+        tzAbbrev: tzAbbreviationAt(tz, date),
     };
 }
 
@@ -174,12 +182,14 @@ const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', '
 
 /**
  * Widths (at unit `u`) of the A6 row's two text elements: the weekday alone, and
- * the condensed "month-day  year  tz [leap]" line — same segment sizes/gaps the
- * renderer uses, so the harness can lay the row out before drawing.
+ * the condensed "month-day  year  [Julian]  tz  [leap]" line — same segment
+ * sizes/gaps the renderer uses, so the harness can lay the row out before
+ * drawing. `julianText` is `JULIAN_LABEL` or '' (see `DateFields.julian`).
  */
 export function measureRowTexts(
     ctx: CanvasRenderingContext2D,
-    weekday: string, monthDay: string, year: string, tzAbbrev: string, leapText: string,
+    weekday: string, monthDay: string, year: string, julianText: string,
+    tzAbbrev: string, leapText: string,
     u: number,
 ): { weekdayW: number; dateW: number } {
     const wkLine: Line = [{ text: weekday, rel: REL_BIG, color: COLOR }];
@@ -187,9 +197,25 @@ export function measureRowTexts(
         { text: monthDay, rel: REL_BIG, color: COLOR },
         { text: year, rel: REL_YEAR, color: COLOR },
     ];
+    if (julianText) dateLine.push({ text: julianText, rel: REL_SMALL, color: COLOR_DIM });
     if (tzAbbrev) dateLine.push({ text: tzAbbrev, rel: REL_SMALL, color: COLOR_DIM });
     if (leapText) dateLine.push({ text: leapText, rel: REL_SMALL, color: COLOR_DIM });
     return { weekdayW: measureLine(ctx, wkLine, u).w, dateW: measureLine(ctx, dateLine, u).w };
+}
+
+/**
+ * Width (at unit `u`) of the stacked modes' year line, "year [Julian] [leap]",
+ * with the renderer's segment sizes and gaps — for the A1 layout, which sizes
+ * the date column from the widest line.
+ */
+export function measureYearLine(
+    ctx: CanvasRenderingContext2D,
+    year: string, julianText: string, leapText: string, u: number,
+): number {
+    const line: Line = [{ text: year, rel: REL_YEAR, color: COLOR }];
+    if (julianText) line.push({ text: julianText, rel: REL_SMALL, color: COLOR_DIM });
+    if (leapText) line.push({ text: leapText, rel: REL_SMALL, color: COLOR_DIM });
+    return measureLine(ctx, line, u).w;
 }
 
 /**
@@ -224,12 +250,24 @@ export function condensedDateLayout(
  * the A5 split date matches "Jun 18 …" to the weekday's size and baseline).
  * `opts.forceU` overrides the fitted unit; `opts.baselineY` pins the bottom
  * line's baseline (bypassing the ink re-centering).
+ *
+ * A forced unit is a size, not a licence to overflow. The box says where the
+ * block is placed; `opts.spanMin`/`spanMax` (default: the box edges) is the
+ * content-x range it may occupy. A block wider than its box is pushed inside
+ * the span — a corner date grows toward the free space beside the dial rather
+ * than off the window edge — and, if wider than the span, shrunk uniformly to
+ * fit; the baseline pin and segment centring are unchanged. A block that fits
+ * its box is drawn exactly as before. (A5's `Sep 25  2026 BCE  Julian LMT` ran
+ * off the right edge at 1728×970: planning/2026-09-25-a5-condensed-date-overflow.md.)
  */
 function drawBlock(
     ctx: CanvasRenderingContext2D,
     lines: Line[],
     cx: number, cy: number, boxW: number, boxH: number,
-    opts: { tight?: boolean; segCenter?: boolean; forceU?: number; baselineY?: number } = {},
+    opts: {
+        tight?: boolean; segCenter?: boolean; forceU?: number; baselineY?: number;
+        spanMin?: number; spanMax?: number;
+    } = {},
 ): { u: number; baselineY: number } {
     const live = lines.filter((l) => l.some((s) => s.text));
     if (live.length === 0 || boxW <= 0 || boxH <= 0) return { u: 0, baselineY: cy };
@@ -248,9 +286,24 @@ function drawBlock(
         totH += d.h * LINE_SPACING;
         return d;
     });
-    const u = opts.forceU != null
+    let u = opts.forceU != null
         ? opts.forceU
         : Math.min(UNIT_MAX, REF * Math.min(boxW / maxW, boxH / totH));
+
+    // Forced-unit width guard (see the doc comment): push inside the span,
+    // then shrink to it. `cxEff` is the centre the lines are drawn about.
+    let cxEff = cx;
+    if (opts.forceU != null) {
+        const spanMin = opts.spanMin ?? cx - boxW / 2;
+        const spanMax = opts.spanMax ?? cx + boxW / 2;
+        const span = spanMax - spanMin;
+        let w = (maxW / REF) * u;
+        if (span > 0 && w > span) { u *= span / w; w = span; }
+        let left = cxEff - w / 2;
+        if (left + w > spanMax) left = spanMax - w;
+        if (left < spanMin) left = spanMin;
+        cxEff = left + w / 2;
+    }
 
     // Lay the baselines out, collecting them first so we can re-center on real
     // ink below. Two spacing models:
@@ -321,7 +374,7 @@ function drawBlock(
             const m = lineInk(ctx, line, u);
             midline = y - (m.asc - m.desc) / 2;
         }
-        let x = cx - lineW / 2;
+        let x = cxEff - lineW / 2;
         let drawn = 0;
         for (let si = 0; si < line.length; si++) {
             const seg = line[si];
@@ -366,6 +419,9 @@ export function drawDateView(
     const md: Segment = { text: f.monthDay, rel: REL_BIG, color: COLOR };
     const yr: Segment = { text: f.year, rel: REL_YEAR, color: COLOR };
     const leap: Segment = { text: f.leap ? 'leap' : '', rel: REL_SMALL, color: COLOR_DIM };
+    // The calendar qualifier sits right after the year in every composition
+    // (it qualifies the date; the zone and "leap" follow).
+    const julian: Segment = { text: f.julian ? JULIAN_LABEL : '', rel: REL_SMALL, color: COLOR_DIM };
     const tz: Segment = { text: f.tzAbbrev, rel: REL_SMALL, color: COLOR_DIM };
 
     switch (L.dateMode) {
@@ -373,13 +429,14 @@ export function drawDateView(
             // `forceU` (when set) pins the unit so the layout can size the slot
             // from the block's real ink rather than the em-box (A1 extreme
             // portrait). Unset → auto-fit, as before.
-            drawBlock(ctx, [[wk], [md], [yr, leap], [tz]],
+            drawBlock(ctx, [[wk], [md], [yr, julian, leap], [tz]],
                 L.dateCX, L.dateCY, L.dateW, L.dateH, { forceU: L.dateForceU });
             break;
         case 'row': {
             // Condensed info line under the weekday (phone portrait band).
             const small = (text: string): Segment => ({ text, rel: 0.45, color: COLOR });
             const info: Line = [small(f.monthDay), small('·'), small(f.year)];
+            if (f.julian) info.push(small('·'), { text: JULIAN_LABEL, rel: 0.45, color: COLOR_DIM });
             if (f.tzAbbrev) info.push(small('·'), { text: f.tzAbbrev, rel: 0.45, color: COLOR_DIM });
             if (f.leap) info.push(small('·'), { text: 'leap', rel: 0.45, color: COLOR_DIM });
             drawBlock(ctx, [[wk], info], L.dateCX, L.dateCY, L.dateW, L.dateH);
@@ -387,11 +444,12 @@ export function drawDateView(
         }
         case 'split': {
             if (L.dateCondensed) {
-                // Weekday (block 1) + a single condensed "month-day year tz" line
-                // (block 2) — same per-element sizes as the stacked A4 (month-day
-                // big, year medium, tz/leap faint small), no separators. Two
-                // placements:
+                // Weekday (block 1) + a single condensed "month-day year [Julian]
+                // tz [leap]" line (block 2) — same per-element sizes as the
+                // stacked A4 (month-day big, year medium, the rest faint small),
+                // no separators. Two placements:
                 const info: Line = [md, yr];
+                if (f.julian) info.push(julian);
                 if (f.tzAbbrev) info.push(tz);
                 if (f.leap) info.push(leap);
                 if (L.dateBaselineBottom != null) {
@@ -402,7 +460,8 @@ export function drawDateView(
                     drawBlock(ctx, [[wk]], L.dateCX, L.dateCY, L.dateW, L.dateH,
                         { forceU: dl.u, baselineY: dl.baselineY });
                     drawBlock(ctx, [info], L.date2CX, L.date2CY, L.date2W, L.date2H,
-                        { forceU: dl.u, baselineY: dl.baselineY, segCenter: L.dateSegCenter });
+                        { forceU: dl.u, baselineY: dl.baselineY, segCenter: L.dateSegCenter,
+                          spanMin: L.date2SpanMin, spanMax: L.date2SpanMax });
                 } else {
                     // A6 one-row: weekday and date are separate row elements, each
                     // ink-centred in its own box at a shared forced unit.
@@ -418,7 +477,7 @@ export function drawDateView(
                 // (iteration 3: landscape bottom date). Element rendering is
                 // unchanged — only the two lines' vertical order is swapped.
                 // `tight` pulls the year/tz line close to the month-day (iOS).
-                drawBlock(ctx, [[yr, tz, leap], [md]],
+                drawBlock(ctx, [[yr, julian, tz, leap], [md]],
                     L.date2CX, L.date2CY, L.date2W, L.date2H, { tight: true });
             }
             break;

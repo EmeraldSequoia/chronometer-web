@@ -82,9 +82,21 @@ with Chronometer.
 
 <p><b>Day/date</b></p>
 <p>
-  The year, month, day and day of the week appear near the top of the screen.
-  The year is shown in red for BCE dates ("Before Common Era", a.k.a. "BC"). A
-  small indicator appears near the year in leap years.
+  The year, month, day and day of the week appear near the top of the screen,
+  in the calendar of the day: the Gregorian calendar from 15 October 1582 on,
+  the Julian calendar before that. "BCE" follows the year for dates Before the
+  Common Era (a.k.a. "BC"). For dates in the Julian era, up to 4 October 1582,
+  a small "Julian" follows the year; BCE dates are always Julian (proleptic
+  Julian before 1 BCE), so they carry it too. A small "leap" appears in leap
+  years, under the rules of the calendar in force.
+</p>
+<p>
+  The small abbreviation is the location's time zone at the displayed instant.
+  Before standard time zones existed (roughly the 1880s, later in some places)
+  it reads "LMT", local mean time: the time zone database assigns such dates
+  the mean solar time of the zone's reference city, and so does Observatory.
+  With a mouse, resting the pointer on the date spells all of this out, with
+  the zone's exact offset from UTC.
 </p>
 
 <p><b>Main dial</b></p>

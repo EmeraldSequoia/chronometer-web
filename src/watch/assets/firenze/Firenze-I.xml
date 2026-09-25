@@ -47,6 +47,7 @@
   <SWheel   refName='digits'	x='yearX-wheelspace*2'   y='yearY+1'  dragAnimationType='dragAnimationAlways' modes='front'  radius='32' orientation='three' update='1 * days()' angle='fmod(floor(yearNumber()/100),  10)*2*pi/10' fontSize='wheelfs' fontName='Arial' text='0,1,2,3,4,5,6,7,8,9'  strokeColor='fgclr' bgColor='bgclr' />
   <SWheel   refName='digits'	x='yearX-wheelspace*3'   y='yearY+1'  dragAnimationType='dragAnimationAlways' modes='front'  radius='32' orientation='three' update='1 * days()' angle='fmod(floor(yearNumber()/1000), 10)*2*pi/10' fontSize='wheelfs' fontName='Arial' text='0,1,2,3,4,5,6,7,8,9'  strokeColor='fgclr' bgColor='bgclr' />
   <Qhand    name='bce cover'    x='yearX-wheelspace/2-1-wheelfs/2' y='yearY-wheelspace/2+(wheelfs)/2' modes='front' length='wheelspace*4+wheelfs/2' width='wheelfs' tail='0' type='rect' update='1 * days()' angle='eraNumber() == 1 ? 0 : pi/2' strokeColor='0x60ff0000' fillColor='0x60ff0000' />
+  <Qhand    name='julian cover'    x='yearX-wheelspace/2-1-wheelfs/2' y='yearY-wheelspace/2+(wheelfs)/2' modes='front' length='wheelspace*4+wheelfs/2' width='wheelfs' tail='0' type='rect' update='1 * days()' angle='eraNumber() == 1 ? (GregorianEra() ? 0 : pi/2) : 0' strokeColor='0x6000ff00' fillColor='0x6000ff00' />
 
   <QRect    name='wheel patch' x='-r' y='r-20' modes='front' w='r*2' h='20' bgColor='black' />
   
