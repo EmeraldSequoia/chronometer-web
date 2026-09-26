@@ -1,8 +1,8 @@
 # Eclipse Table
 
-`eclipse-table.html` is the primary, bookmarkable answer to "when is the next eclipse?" — a standalone page listing every solar and lunar eclipse from 15 years back to 15 years ahead (currently 2011–2041: 115 rows, 70 solar and 45 lunar), each with deep links that open the moment and place of maximum eclipse in the Observatory and the Chronometer, plus a per-eclipse EclipseWise "Details" link.
+`eclipse-table.html` is the primary, bookmarkable answer to "when is the next eclipse?" — a standalone page listing every solar and lunar eclipse from 15 years back to 15 years ahead (currently 2011–2041: 115 rows, 70 solar and 45 lunar), each with deep links that open the moment and place of maximum eclipse in Observatory and Chronometer, plus a per-eclipse EclipseWise "Details" link.
 
-It is **not** part of the help system. The help pages, the index grid, and several face help fragments link *to* it, and none of them host the content — see [Entry points](#entry-points). The page is also the **single generator** of those deep links: no other page hardcodes an eclipse URL, and prose elsewhere names table rows instead.
+The help pages never host its content: they, the index grid, and several face help fragments link *to* it — see [Entry points](#entry-points) — while the page carries the same corner chrome as every app page, whose ℹ popup embeds the general help ([Corner chrome](#corner-chrome)). The page is also the **single generator** of those deep links: no other page hardcodes an eclipse URL, and prose elsewhere names table rows instead.
 
 Penumbral lunar eclipses are omitted throughout: the shading is barely perceptible by eye, and the app's own eclipse model is umbral-only, so their deep links would show "no eclipse".
 
@@ -125,12 +125,26 @@ In embed mode the help iframe's `<base target="_blank">` carries the in-body lin
 
 The page itself has no `<base target="_blank">` (unlike `help.html`): it would hijack the internal `#today` and show-all anchors, so external links opt in per link.
 
+## Corner Chrome
+
+The page carries the usual corner chrome ([chrome.md](chrome.md)), fixed top-right, from the corner outward: **ℹ** (right 16 px), **Inspector** (68), **Observatory** (120), **Chronometer** (172) — ℹ takes the corner as on every page without ⚙ / share / fullscreen, and the app icons keep the positions they hold on the other pages. It is fixed rather than a page header because the page lands scrolled to today's marker, where a header would be off-screen on arrival. Below ~1150 px the row floats over the 720 px column's top-right band and cards scroll under it, as the index page's row does over its grid (accepted 2026-09-25, [planning/2026-09-25-eclipse-table-corner-chrome.md](../planning/2026-09-25-eclipse-table-corner-chrome.md)).
+
+**Deliberately absent**: ⚙ Settings (no per-app options, render loop or location), Share (the URL is the share), fullscreen (a scrolling document), and the page's own Eclipses icon.
+
+**Collapse**: the phone rule only, like the index — `isPhoneSizedViewport()` sets `body.chrome-collapsed`, hiding the four controls and showing the shared ⋮ menu, whose rows are Chronometer / Observatory / Inspector / About & help.
+
+**ℹ popup**: the shared shell (`shared/help-popover.ts`) with About text, GitHub · Credits · Privacy · Support · Disclaimer, the Other Apps section (own entry removed via `app: 'eclipses'`), the General Help iframe in its default flavor (the page is app-neutral), and the version stamp; no per-page help fragment, since the table explains itself. The About text's "Understanding Eclipses" link opens that topic in the popup's iframe (`openGeneralHelpTopic('#eclipses')`). `build.sh` passes the app name "Eclipses" so the sub-view subtitles read "Emerald Eclipses for the Web".
+
+**Links and state**: `initAppNavLinks()` wires the hrefs; the page never calls `initAppState()` (it has no state), so app-state's lazy URL-backend default makes the links copy the page's own query string — empty on any storage-mode arrival, the state params in the file:// fallback, both correct. No `markChronometerPage()`: the Chronometer icon returns to the tab's last-viewed face page. Hotkeys: `h`, `?`, and the cross-app `i` / `o` / `c` / `a` (`e` no-ops here).
+
+All of this is `initChrome()` in `eclipse-table-page.ts`, a no-op without the markup so the renderer tests are unaffected.
+
 ## File Inventory
 
 | File | Purpose |
 |------|---------|
 | `src/eclipse-table.html` | Page shell (markup, styles, kind icons, `{{ECLIPSE_DATA}}` block) |
-| `src/eclipse-table-page.ts` | Renderer, formatters, and deep-link builders |
+| `src/eclipse-table-page.ts` | Renderer, formatters, and deep-link builders; `initChrome` wires the corner chrome |
 | `src/__tests__/eclipse-table-page.test.ts` | Renderer suite (31 tests) |
 | `src/help/eclipse-data.json` | Committed dataset (TT instants) |
 | `scripts/scrape-eclipses.mjs` | Dataset generator (manual, not part of the build) |

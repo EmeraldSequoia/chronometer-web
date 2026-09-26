@@ -3,7 +3,9 @@
 The top corners of every app page carry the page's buttons: ℹ help, ⚙ settings
 ([preferences.md](preferences.md)), share,
 fullscreen, the cross-app links, and on the face pages the navigation links
-(home, all faces, selected faces, edit selection) and the face name. This doc
+(home, all faces, selected faces, edit selection) and the face name. The
+Eclipse Table, a scrolling document page, carries only ℹ and the cross-app
+links, fixed like the index page's row. This doc
 covers how they are sized, laid out, and folded away when they would cost
 content. It is the implementation record of Part 1 of
 [planning/2026-09-14-user-options-panel.md](../planning/2026-09-14-user-options-panel.md)
@@ -51,7 +53,8 @@ else moving into the ⋮ menu, in two situations.
 not the buttons could be fitted: on a phone the icons are noise even when they
 fit, including on the largest phones (Steve, 2026-09-17). The largest phones
 are ~440–480 px on the short side and the smallest tablets ~600–744, so nothing
-real sits near the threshold. The index page has only this rule.
+real sits near the threshold. The index page and the Eclipse Table have only
+this rule.
 
 **2. Larger viewports — when the buttons would cost content.** The rule is
 per page, and each reads only the *full* set's result for the current viewport,
@@ -62,6 +65,7 @@ so it cannot oscillate between states:
 | Face pages | the full set would **shrink** the faces, or push the grid down by more than `CHROME_COLLAPSE_DY_PX` = 24 (`chromeShouldCollapse` in `grid-layout.ts`) | `onGridResize` in `engine-entry.ts`; `body.chrome-collapsed` |
 | Inspector | the full set would push the header text down by more than the same 24 px | `layoutTopChrome` in `inspector-entry.ts`; `body.chrome-collapsed` |
 | Observatory | title + buttons do not fit the viewport width, **or** CC2 dropped the chrome | `updateHeaderCollapse` in `observatory-entry.ts`; `body.obs-chrome-collapsed` |
+| Eclipse Table | never on larger viewports — the row floats over the 720 px column's margin as the index's does over its grid ([eclipse-table.md](eclipse-table.md)) | `initChrome` in `eclipse-table-page.ts`; `body.chrome-collapsed` |
 
 On the face pages and the Inspector the folded buttons are hidden with
 `visibility: hidden`, not `display: none`, so they keep measurable sizes for

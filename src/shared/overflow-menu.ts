@@ -29,7 +29,7 @@
 
 export interface OverflowMenuOptions {
     /** The running app — decides which "this app's pages" rows can exist. */
-    app: 'chronometer' | 'observatory' | 'inspector';
+    app: 'chronometer' | 'observatory' | 'inspector' | 'eclipses';
 }
 
 /** Exported for tests: the row order and what each row is derived from. */

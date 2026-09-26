@@ -214,6 +214,209 @@
           flex-wrap: wrap;
         }
       }
+
+      /* ── Corner chrome (docs/chrome.md) ─────────────────────────────────
+         ℹ nearest the corner, then the cross-app links outward — Inspector,
+         Observatory, Chronometer — the position each icon already keeps on
+         the other pages. Fixed, like the index page's row: the page lands
+         scrolled to today's marker, so a header that scrolled away would be
+         off-screen on arrival. Below ~1150 px the row floats over the 720 px
+         column's top-right band (accepted trade-off, planning/2026-09-25-
+         eclipse-table-corner-chrome.md §3.1). Hrefs wired by shared/app-nav.ts;
+         behaviour in initChrome (eclipse-table-page.ts). */
+      #info-btn {
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.08);
+        color: #889;
+        border: none;
+        cursor: pointer;
+        padding: 0;
+        z-index: 10;
+        font-size: 18px;
+        font-family: serif;
+        font-style: italic;
+        font-weight: 700;
+        transition: background 0.2s, color 0.2s;
+      }
+      #info-btn:hover {
+        background: rgba(255, 255, 255, 0.15);
+        color: #bbd;
+      }
+      /* The app links show their colored icons — deliberately breaking the
+         monochrome style, since they switch apps (discoverability). */
+      #inspector-link,
+      #observatory-link,
+      #chronometer-link {
+        position: fixed;
+        top: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        z-index: 10;
+        transition: filter 0.2s;
+      }
+      #inspector-link {
+        right: 68px;
+        background: linear-gradient(145deg, #2a2a48 0%, #1e1e36 100%);
+        color: #5ca0d3;
+      }
+      #observatory-link {
+        right: 120px;
+      }
+      #chronometer-link {
+        right: 172px;
+      }
+      #inspector-link svg {
+        width: 18px;
+        height: 18px;
+        fill: currentColor;
+      }
+      #observatory-link img,
+      #chronometer-link img {
+        width: 100%;
+        height: 100%;
+        border-radius: 50%;
+        object-fit: cover;
+        display: block;
+      }
+      #inspector-link:hover,
+      #observatory-link:hover,
+      #chronometer-link:hover {
+        filter: brightness(1.35);
+      }
+      /* ⋮ overflow button (partials/overflow-menu.{html,css}): the corner's
+         collapsed form on phone-sized viewports (initChrome). visibility, not
+         display, so the menu builder still sees the folded controls. */
+      #more-btn {
+        position: fixed;
+        top: 16px;
+        right: 16px;
+      }
+      body.chrome-collapsed #info-btn,
+      body.chrome-collapsed #inspector-link,
+      body.chrome-collapsed #observatory-link,
+      body.chrome-collapsed #chronometer-link {
+        visibility: hidden;
+      }
+      {{OVERFLOW_CSS}}
+
+      /* ── ℹ info popup (behaviour: shared/help-popover.ts) ──────────────
+         No backdrop-filter on the overlay or any child — deliberate. The
+         frosted look is a forward `filter` on the page content itself
+         (body.help-open below): a full-viewport backdrop-filter re-blurs on
+         every frame and intermittently flashes sharp (Chrome/macOS). The full
+         account is on #info-overlay in index.html; see docs/performance.md. */
+      #info-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        background: rgba(0, 0, 0, 0.6);
+        align-items: center;
+        justify-content: center;
+      }
+      #info-overlay.visible {
+        display: flex;
+      }
+      /* The corner controls are direct body children, so this filter never
+         becomes a containing block for them (the Inspector's #app pitfall). */
+      body.help-open > *:not(#info-overlay) {
+        filter: blur(6px);
+      }
+      #info-popup {
+        /* Fully opaque: at 0.98 the page composited through the panel. */
+        background: rgb(30, 30, 50);
+        border: 1px solid #3a3a5e;
+        border-radius: 16px;
+        padding: 0;
+        max-width: 600px;
+        width: 90%;
+        max-height: 90vh;
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior-y: contain;
+        color: #bbc;
+        box-shadow: 0 8px 48px rgba(0, 0, 0, 0.6);
+        position: relative;
+        font-size: 14px;
+        line-height: 1.6;
+        transition: height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        display: flex;
+        flex-direction: column;
+      }
+      #info-slider {
+        display: flex;
+        width: 200%;
+        transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        align-items: flex-start;
+      }
+      #info-main-view,
+      #info-sub-view {
+        padding: 28px 32px;
+        width: 50%;
+        flex-shrink: 0;
+        box-sizing: border-box;
+      }
+      #info-popup h2 {
+        margin: 0 0 12px;
+        font-size: 18px;
+        color: #dde;
+        font-weight: 600;
+      }
+      #info-close {
+        position: absolute;
+        top: 10px;
+        right: 14px;
+        z-index: 10;
+        background: none;
+        border: none;
+        color: #667;
+        font-size: 20px;
+        cursor: pointer;
+        padding: 2px 6px;
+        line-height: 1;
+        transition: color 0.15s;
+      }
+      #info-close:hover {
+        color: #ccf;
+      }
+      .help-separator {
+        border: none;
+        border-top: 1px solid #3a3a5e;
+        margin: 16px 0;
+      }
+      #general-help-section {
+        margin: 0 0 4px;
+        border: 1px solid #3a3a5e;
+        border-radius: 8px;
+        padding: 8px 14px;
+      }
+      #general-help-section summary {
+        cursor: pointer;
+        color: #8af;
+        font-size: 14px;
+      }
+      #general-help-section summary:hover {
+        text-decoration: underline;
+      }
+      #general-help-iframe {
+        width: 100%;
+        border: none;
+        border-radius: 8px;
+        margin-top: 8px;
+      }
+      {{HELP_SUBVIEW_CSS}}
     </style>
   </head>
   <body>
@@ -259,6 +462,100 @@
       </defs>
     </svg>
 
+    <!-- Corner chrome (docs/chrome.md): ℹ + the cross-app links, fixed
+         top-right, folding into the ⋮ menu on phone-sized viewports
+         (initChrome in eclipse-table-page.ts). No ⚙ / share / fullscreen: the
+         page has no settings, no state and nothing to go fullscreen. Hrefs are
+         wired by shared/app-nav.ts. -->
+    <button id="info-btn" title="About the Eclipse Table">ℹ&#xFE0E;</button>
+    <a id="inspector-link" class="app-nav-link" data-page="inspector.html" href="inspector.html" title="Inspector">
+      <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.51 6.51 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+    </a>
+    <a id="observatory-link" class="app-nav-link" data-page="observatory.html" href="observatory.html" title="Observatory">
+      <img src="thumb-observatory.png" alt="Observatory" />
+    </a>
+    <a id="chronometer-link" class="app-nav-link" data-page="index.html" href="index.html" title="Chronometer">
+      <img src="apple-touch-icon.png" alt="Chronometer" />
+    </a>
+    {{OVERFLOW_MENU}}
+
+    <!-- ℹ popup — the shell every page has (behaviour: shared/help-popover.ts):
+         About, project links, Other Apps, the General Help iframe, and the
+         Privacy / Support / Disclaimer sub-views. No per-page help fragment:
+         the table explains itself below. Like the corner
+         controls, this precedes .help-page because the page script inside
+         it runs synchronously and help-popover.ts looks these ids up at
+         init. -->
+    <div id="info-overlay">
+      <div id="info-popup">
+        <button id="info-close">&times;</button>
+        <div id="info-slider">
+          <div id="info-main-view">
+            <h2>Eclipse Table</h2>
+            <p>
+              Every solar and lunar eclipse from fifteen years back to fifteen
+              years ahead, each with links that open the moment and place of
+              maximum eclipse in Observatory and Chronometer. The
+              <a href="help.html#eclipses" id="ek-help-eclipses">Understanding Eclipses</a>
+              help topic explains what the apps show when you arrive.
+            </p>
+            <p>
+              View the project on
+              <a
+                href="https://github.com/EmeraldSequoia/chronometer-web/blob/main/README.md"
+                target="_blank"
+                rel="noopener"
+                >GitHub</a
+              >
+              ·
+              <a
+                href="https://github.com/EmeraldSequoia/chronometer-web/blob/main/README.md#credits"
+                target="_blank"
+                rel="noopener"
+                >Credits</a
+              >
+              ·
+              <a
+                href="privacy.html"
+                class="help-subpage-link"
+                data-template="privacy-template"
+                >Privacy</a
+              >
+              ·
+              <a
+                href="support.html"
+                class="help-subpage-link"
+                data-template="support-template"
+                >Support</a
+              >
+              ·
+              <a
+                href="disclaimer.html"
+                class="help-subpage-link"
+                data-template="disclaimer-template"
+                >Disclaimer</a
+              >
+            </p>
+            <hr class="help-separator" />
+            {{OTHER_APPS}}
+            <details id="general-help-section">
+              <summary>General Help Topics</summary>
+              <iframe id="general-help-iframe"></iframe>
+            </details>
+            <div style="text-align: center; margin-top: 24px; font-size: 11px; color: #667;">v{{VERSION}}</div>
+          </div>
+
+          <div id="info-sub-view">
+            <button id="info-back-btn">← Help</button>
+            <div id="info-sub-content"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <template id="privacy-template"> {{PRIVACY_CONTENT}} </template>
+    <template id="support-template"> {{SUPPORT_CONTENT}} </template>
+    <template id="disclaimer-template"> {{DISCLAIMER_CONTENT}} </template>
+
     <div class="help-page">
       <h1>Eclipse Table</h1>
 
@@ -273,7 +570,7 @@
         Penumbral lunar eclipses are omitted: the shading is barely perceptible by eye.
       </p>
       <p>
-        The <b>Observatory</b> link opens that instant and place in the Observatory, with its
+        The <b>Observatory</b> link opens that instant and place in Observatory, with its
         eclipse simulator active; the <b>Chronometer</b> link opens the Basel, Venezia, and Selene
         watch faces there (Venezia showing the Sun for solar eclipses, the Moon for lunar ones).
         Both arrive with time frozen at maximum, in the eclipse location&rsquo;s own time zone

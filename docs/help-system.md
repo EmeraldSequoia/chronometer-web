@@ -5,7 +5,7 @@ The help system has two layers:
 1. **General Help Topics** — Six topic sections in `src/help.html` (Complications, Accuracy, Eclipses, Astro Stepping, Physics, Keyboard Shortcuts) available from every page via an embedded iframe.
 2. **Per-Face Help** — Face-specific help content injected into each page at build time.
 
-Alongside (not inside) those layers sits the **Eclipse Table** (`eclipse-table.html`), a standalone, bookmarkable page listing every eclipse from 15 years back to 15 years ahead with deep links into both apps. It is not part of the help system: the help pages link to it and never host its content. It has its own doc — [Eclipse Table](eclipse-table.md).
+Alongside (not inside) those layers sits the **Eclipse Table** (`eclipse-table.html`), a standalone, bookmarkable page listing every eclipse from 15 years back to 15 years ahead with deep links into both apps. The help pages link to it and never host its content; like every page it has its own ℹ popup with the shared pieces (Other Apps, the General Help iframe, the sub-views) but no per-page help fragment. It has its own doc — [Eclipse Table](eclipse-table.md).
 
 Both are accessed through the ℹ info popup. When the user clicks the ℹ button, the popup shows:
 - Generic project info (title, GitHub links)
@@ -107,7 +107,7 @@ The eclipses section's worked-example screenshots live in `src/help/images/basel
 
 ### "Other Apps" popup section
 
-`src/partials/other-apps.html` contains one entry per app (icon + title + lead paragraph), each tagged `data-app="chronometer|observatory|inspector"`. `build.sh` injects it via the `{{OTHER_APPS}}` placeholder into the four popups (index, face template, Observatory, Inspector) above the General Help Topics section. At runtime the current app's own entry is removed — the `app:` option to `initHelpPopover()` (face pages, Observatory, Inspector) or a line in `index-page.ts`. Styles live in `partials/help-subview.css` (`#other-apps-section`, `.other-app*`), which all four pages inject.
+`src/partials/other-apps.html` contains one entry per app (icon + title + lead paragraph), each tagged `data-app="chronometer|observatory|inspector"`. `build.sh` injects it via the `{{OTHER_APPS}}` placeholder into the five popups (index, face template, Observatory, Inspector, Eclipse Table) above the General Help Topics section. At runtime the current app's own entry is removed — the `app:` option to `initHelpPopover()` (face pages, Observatory, Inspector, Eclipse Table) or a line in `index-page.ts`. Styles live in `partials/help-subview.css` (`#other-apps-section`, `.other-app*`), which all five pages inject.
 
 The entry links (and the header app icons on every page) carry class `app-nav-link` and are wired by `initAppNavLinks()` in `src/shared/app-nav.ts`: in persistent (localStorage) mode they navigate with a clean URL (state travels via the shared `ec:shared` namespace; only the URL-only `fps` param is carried), while the non-persistent fallbacks copy the full query string. Pending time state is flushed on pointerdown/focus before navigation.
 
@@ -214,6 +214,7 @@ During build, these are copied to `dist/help/images/`.
 | `src/help/images/` | Inline help images (57 files across 9 subdirectories) |
 | `src/face-template.html` | Contains Other Apps + General Help iframe, `#help-content` div, `<template>`, and help CSS |
 | `src/index.html` | Contains Other Apps + General Help iframe (no per-face help) |
+| `src/eclipse-table.html` | Contains Other Apps + General Help iframe (no per-page help — the table explains itself; [eclipse-table.md](eclipse-table.md)) |
 | `src/partials/other-apps.html` | "Other Apps" popup section (every app's entry; current app removed at runtime) |
 | `src/shared/help-popover.ts` | Shared popup wiring, `app:` filtering, `openGeneralHelpTopic()` for the `?` hotkey |
 | `src/shared/app-nav.ts` | Cross-app link hrefs (clean in storage mode), `.app-nav-link` wiring, i/o/c/a/e hotkeys |

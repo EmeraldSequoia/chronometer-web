@@ -351,6 +351,33 @@ describe('year summaries and icon symbols', () => {
             expect(shell.split(`href="#ek-${kind}"`).length, kind).toBeGreaterThanOrEqual(2);
         }
     });
+
+    test('the shell carries the corner chrome and everything build.sh expands for it', () => {
+        const shell = readFileSync(join(__dirname, '../eclipse-table.html'), 'utf-8');
+        // ℹ nearest the corner, then the cross-app links (docs/chrome.md,
+        // planning/2026-09-25-eclipse-table-corner-chrome.md §3.1).
+        expect(shell).toContain('<button id="info-btn"');
+        for (const [id, page] of [
+            ['inspector-link', 'inspector.html'],
+            ['observatory-link', 'observatory.html'],
+            ['chronometer-link', 'index.html'],
+        ]) {
+            expect(shell, id).toContain(`<a id="${id}" class="app-nav-link" data-page="${page}"`);
+        }
+        expect(shell).not.toContain('eclipses-link');  // the current-app rule
+        // The ⋮ menu, the popup's Other Apps section and sub-view styles, and
+        // the Privacy/Support/Disclaimer templates all come from partials.
+        for (const ph of ['OVERFLOW_CSS', 'OVERFLOW_MENU', 'OTHER_APPS', 'HELP_SUBVIEW_CSS',
+            'PRIVACY_CONTENT', 'SUPPORT_CONTENT', 'DISCLAIMER_CONTENT']) {
+            expect(shell, ph).toContain(`{{${ph}}}`);
+        }
+        // The popup shell help-popover.ts looks up by id.
+        for (const id of ['info-overlay', 'info-popup', 'info-close', 'info-slider', 'info-main-view',
+            'info-sub-view', 'info-back-btn', 'info-sub-content', 'general-help-section',
+            'general-help-iframe', 'ek-help-eclipses']) {
+            expect(shell, id).toContain(`id="${id}"`);
+        }
+    });
 });
 
 describe('globe thumbnails', () => {

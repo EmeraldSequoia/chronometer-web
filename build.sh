@@ -487,8 +487,10 @@ echo "  → disclaimer.html"
 
 # eclipse-table.html — eclipse list with app deep links; the committed
 # eclipse-data.json is inlined into its <script type="application/json"> block
-# so the page renders offline / on file:// with no fetch.
-inject_partials < "$SRC/eclipse-table.html" > "$DIST/eclipse-table.html"
+# so the page renders offline / on file:// with no fetch. No per-page help
+# fragment; "Eclipses" names the app in the Privacy/Support/Disclaimer
+# sub-views ("Emerald Eclipses for the Web", matching the page title).
+inject_partials "" "Eclipses" < "$SRC/eclipse-table.html" > "$DIST/eclipse-table.html"
 echo "  → eclipse-table.html"
 
 # cities-data.js — city database for location picker.

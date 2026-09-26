@@ -14,7 +14,7 @@ export interface HelpPopoverOptions {
      * The running app. Its own entry is removed from the "Other Apps" section
      * (partials/other-apps.html), which ships every app's entry.
      */
-    app?: 'chronometer' | 'observatory' | 'inspector';
+    app?: 'chronometer' | 'observatory' | 'inspector' | 'eclipses';
     /**
      * Called once, after the help template has been cloned into #help-content
      * and external links have been retargeted — for page-specific fixups such

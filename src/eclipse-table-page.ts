@@ -13,13 +13,20 @@
  * whenever the leap-second table is updated, with no data re-scrape — the
  * bundle rebuilds on every build.
  *
- * Everything except the module's last line is exported pure logic so the
- * vitest (src/__tests__/eclipse-table-page.test.ts) exercises the real
- * shipped renderer and URL builders.
+ * Everything except the bootstrap at the bottom (initPage + initChrome) is
+ * exported pure logic so the vitest (src/__tests__/eclipse-table-page.test.ts)
+ * exercises the real shipped renderer and URL builders. initChrome wires the
+ * page's corner chrome — ℹ popup, cross-app links, ⋮ collapse, hotkeys — from
+ * the shared modules (planning/2026-09-25-eclipse-table-corner-chrome.md).
  */
 
 import { convertETtoUT } from './astronomy/es-time.js';
 import { renderGlobe } from './shared/mini-map.js';
+import { initAppNavLinks, registerAppNavHotkeys } from './shared/app-nav.js';
+import { registerHotkey } from './shared/hotkeys.js';
+import { initOverflowMenu, closeOverflowMenu } from './shared/overflow-menu.js';
+import { isPhoneSizedViewport } from './shared/chrome-layout.js';
+import { initHelpPopover, openGeneralHelpTopic } from './shared/help-popover.js';
 
 // ---------------------------------------------------------------------------
 // Data types (the shape scrape-eclipses.mjs emits)
@@ -558,4 +565,56 @@ function initPage(): void {
     if (!location.hash && !isReload) armTodayRecenter(window, document);
 }
 
-if (typeof document !== 'undefined') initPage();
+// ---------------------------------------------------------------------------
+// Corner chrome: ℹ popup, cross-app links, ⋮ collapse, hotkeys (docs/chrome.md)
+// ---------------------------------------------------------------------------
+
+/**
+ * Wire the page's corner chrome. No-op without the markup — the tests build
+ * their own fragments and have no #chronometer-link.
+ *
+ * This page never calls initAppState(): it has no state of its own. app-nav's
+ * navSearch() then sees app-state's lazy URL-backend default, so the links
+ * copy this page's own query string — empty on every storage-mode arrival
+ * (those hops are clean), and the state-carrying params in the file:// URL
+ * fallback, where copying them is exactly right. No markChronometerPage()
+ * either: this is not a Chronometer-family page, so the Chronometer icon
+ * returns to the tab's last-viewed face page.
+ */
+function initChrome(): void {
+    if (!document.getElementById('chronometer-link')) return;
+    initAppNavLinks();
+    registerAppNavHotkeys();
+
+    // ℹ popup: About, Other Apps (own entry removed), the General Help iframe
+    // in its default flavor — this page is app-neutral. Nothing to park on
+    // open: there is no render loop. Key table: help.html#hotkeys.
+    initHelpPopover({ app: 'eclipses' });
+    registerHotkey('h', () => document.getElementById('info-btn')?.click());
+    registerHotkey('?', () => openGeneralHelpTopic('#hotkeys'));
+    // The About text's "Understanding Eclipses" link opens that topic in the
+    // popup's own iframe; without JS it still reaches the standalone help.
+    document.getElementById('ek-help-eclipses')?.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        openGeneralHelpTopic('#eclipses');
+    });
+
+    // Collapse rule: a phone-sized viewport folds everything into the ⋮ menu;
+    // wider viewports never collapse (the index page's rule — there is no
+    // content-avoidance engine here; the row floats over the page margin).
+    initOverflowMenu({ app: 'eclipses' });
+    const updateChromeCollapse = (): void => {
+        const collapsed = isPhoneSizedViewport(window.innerWidth, window.innerHeight);
+        if (document.body.classList.contains('chrome-collapsed') !== collapsed) {
+            document.body.classList.toggle('chrome-collapsed', collapsed);
+            if (!collapsed) closeOverflowMenu();
+        }
+    };
+    updateChromeCollapse();
+    window.addEventListener('resize', updateChromeCollapse);
+}
+
+if (typeof document !== 'undefined') {
+    initPage();
+    initChrome();
+}
