@@ -1303,42 +1303,74 @@ function setupMapDrag(): void {
 
     canvas.addEventListener('pointerup', (ev: PointerEvent) => {
         if (dragState !== 'dragging') return;
-        canvas.releasePointerCapture(ev.pointerId);
-        suppressNextClick = true;  // suppress the synthetic click after pointerup
-        endDragMagnifier();
-        canvas.style.cursor = '';  // restore (idle pointermove re-applies crosshair)
-
-        const tzLabel = document.getElementById('map-drag-tz-label');
-        const tzCheckbox = document.getElementById('map-drag-tz-checkbox') as HTMLInputElement;
-
-        // Check if Alt was held on pointerup OR if it was tracked during dragging.
-        const dragEndedWithAlt = ev.altKey || dragWasTimezoneLocked;
-
-        if (dragEndedWithAlt && tzLabel && tzCheckbox) {
-            // Show checkbox and check it by default.
-            tzLabel.style.display = 'flex';
-            tzCheckbox.checked = true;
-        } else {
-            // Hide checkbox
-            if (tzLabel) tzLabel.style.display = 'none';
-
-            // Standard resolution (if dragging without Alt, timezone is already resolved at coordinates).
-            // The drag parsed the DB (startDragAt), so this is normally confident;
-            // it is only a guess if that load failed, and Keep must not store it.
-            const tzRes = resolveTimezoneProvisional(lat, lon, null);
-            locationTimezone = tzRes.tz;
-            tzNeedsResolution = tzRes.provisional;
-            // Still 'dragging' here on purpose: rebuildEnv then defers the
-            // tz relayout, so the dialog and the final crosshair paint
-            // immediately. The relayout runs on Keep (dismissKeepDialog);
-            // Revert never needs one — the layout still matches savedTz.
-            rebuildEnv();
-            scheduleFrame();
-        }
-
-        dragState = 'confirming';
-        showKeepLocationDialog();
+        endDrag(ev, 'release');
     });
+
+    // The browser can take the pointer away mid-drag, with no pointerup to
+    // follow: Chrome on Android does when it hands a touch to its own
+    // pan-gesture handling (forestalled by the canvas's touch-action: none),
+    // and a system interruption — a call, a system gesture, an app switch —
+    // can cancel on any platform. Left in 'dragging', the display froze with
+    // the magnifier up until some later tap's pointerup ended the drag. End
+    // it as an early release instead: the user sees where the drag got to
+    // and decides. A lost capture is the same unknown state.
+    canvas.addEventListener('pointercancel', (ev: PointerEvent) => {
+        if (dragState !== 'dragging') return;
+        endDrag(ev, 'cancel');
+    });
+    canvas.addEventListener('lostpointercapture', (ev: PointerEvent) => {
+        if (dragState !== 'dragging') return;
+        endDrag(ev, 'cancel');
+    });
+}
+
+/**
+ * End the drag — on a release, or on a pointer the browser cancelled — and
+ * raise the Keep/Revert dialog ('dragging' → 'confirming').
+ */
+function endDrag(ev: PointerEvent, how: 'release' | 'cancel'): void {
+    // The pointer is still active while its pointerup/pointercancel is being
+    // dispatched, so this releases cleanly (and the capture is released
+    // implicitly right after anyway); guarded because a throw here would
+    // leave the drag stuck in 'dragging' — the failure this path prevents.
+    try { canvas.releasePointerCapture(ev.pointerId); } catch { /* not captured */ }
+    // A release is followed by a synthetic click on the canvas (always for a
+    // mouse; for a touch only if it stayed within tap slop): swallow it so
+    // it does not step the body selector. A cancel is followed by none.
+    if (how === 'release') suppressNextClick = true;
+    endDragMagnifier();
+    canvas.style.cursor = '';  // restore (idle pointermove re-applies crosshair)
+
+    const tzLabel = document.getElementById('map-drag-tz-label');
+    const tzCheckbox = document.getElementById('map-drag-tz-checkbox') as HTMLInputElement;
+
+    // Check if Alt was held at the end OR if it was tracked during dragging.
+    const dragEndedWithAlt = ev.altKey || dragWasTimezoneLocked;
+
+    if (dragEndedWithAlt && tzLabel && tzCheckbox) {
+        // Show checkbox and check it by default.
+        tzLabel.style.display = 'flex';
+        tzCheckbox.checked = true;
+    } else {
+        // Hide checkbox
+        if (tzLabel) tzLabel.style.display = 'none';
+
+        // Standard resolution (if dragging without Alt, timezone is already resolved at coordinates).
+        // The drag parsed the DB (startDragAt), so this is normally confident;
+        // it is only a guess if that load failed, and Keep must not store it.
+        const tzRes = resolveTimezoneProvisional(lat, lon, null);
+        locationTimezone = tzRes.tz;
+        tzNeedsResolution = tzRes.provisional;
+        // Still 'dragging' here on purpose: rebuildEnv then defers the
+        // tz relayout, so the dialog and the final crosshair paint
+        // immediately. The relayout runs on Keep (dismissKeepDialog);
+        // Revert never needs one — the layout still matches savedTz.
+        rebuildEnv();
+        scheduleFrame();
+    }
+
+    dragState = 'confirming';
+    showKeepLocationDialog();
 }
 
 /**
@@ -1516,6 +1548,12 @@ function dismissKeepDialog(keep: boolean): void {
 
     dragState = 'idle';
     canvas.style.cursor = '';
+    // The release's synthetic click, if there was one, fired right after its
+    // pointerup — long before this. A flag still armed here (a touch drag
+    // past tap slop fires no click; a drag resumed through the backdrop
+    // clicks the common ancestor, not the canvas) would swallow the next
+    // real tap on the canvas: a body-selector chevron.
+    suppressNextClick = false;
     // A timezone correction that was suspended during the drag (or pre-empted
     // by it) completes now, for the settled coordinates, while the DB is still
     // resident: Revert restored the provisional startup guess, Keep resolved a

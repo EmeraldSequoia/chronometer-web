@@ -1043,7 +1043,8 @@ idle → dragging → confirming → idle
   4. The observer dot stays at the saved (home) location (via `dotOverrideLat`/
      `dotOverrideLon` on `drawEarthView`). A 1px red crosshair at 50% opacity
      (`drawDragCrosshair`) marks the rendered (temporary) location.
-- **confirming**: pointer released. A compact "Keep this location?" overlay
+- **confirming**: pointer released — or taken away by the browser (a
+  `pointercancel`, see below). A compact "Keep this location?" overlay
   appears near the map. Enter or clicking Keep persists; Escape or clicking
   Revert restores the saved location.
 
@@ -1101,12 +1102,34 @@ Inverse:  lon = (cssX - ex) / earthW × 360 - 180
 
 Both directions are implemented in `earth-view.ts`.
 
-### Pointer capture
+### Pointer capture, touch-action and cancelled pointers
 
 `canvas.setPointerCapture(ev.pointerId)` is called on `pointerdown` so that
 `pointermove` and `pointerup` events continue to fire on the canvas even if the
 pointer leaves it. This ensures the drag isn't silently dropped. Moves outside
 the earth map rect are ignored (the location stays at the last in-map position).
+
+The canvas — and the Keep/Revert overlay, through whose backdrop a drag can
+be resumed — declares `touch-action: none`. Pointer capture does not stop a
+browser from claiming a touch for its own gestures, and `preventDefault()`
+on `pointerdown` does not either: without the declaration, Chrome on Android
+handed a touch to its pan-gesture handling once the finger had moved past
+its gesture threshold (about 8 CSS px), sent the page a `pointercancel`, and
+delivered no further pointer events. The drag then sat in `dragging` with
+the magnifier up and the display frozen (time is held during a drag) until
+some later tap's `pointerup` ended it (reported on a Pixel, 2026-10-02).
+
+Independently of that, `pointercancel` (and `lostpointercapture`) end the
+drag exactly as `pointerup` does — `endDrag()`, shared by all three — since
+a system interruption can take the pointer away on any platform; the user
+sees where the drag got to and keeps or reverts, as after an early lift.
+The one difference: a release is followed by a synthetic `click` on the
+canvas, which the drag swallows so it does not step the body selector; a
+cancel is followed by none, so nothing is armed. The swallow flag is also
+cleared when the dialog is dismissed — a touch drag past tap slop fires no
+click, and a drag resumed through the backdrop clicks the common ancestor
+rather than the canvas, so an armed flag would otherwise eat the next
+chevron tap.
 
 ### Performance
 

@@ -43,6 +43,12 @@
           -webkit-user-select: none;
           user-select: none;
           -webkit-touch-callout: none;
+          /* Own every touch that starts here. Without this, Chrome on
+             Android hands a touch to its own pan-gesture handling once the
+             finger has moved past its gesture threshold (~8 px) and sends
+             the page a pointercancel instead of further moves — the map
+             drag froze mid-gesture with the magnifier up. */
+          touch-action: none;
       }
 
       /* ── Bottom chrome: ONE row shared by the time-controller button (left)
@@ -578,6 +584,9 @@ overscroll-behavior-y: contain;
              selectable pill text would get selected and eat the next tap. */
           user-select: none;
           -webkit-user-select: none;
+          /* A press through this backdrop resumes the map drag: own those
+             touches too (see #observatory-canvas). */
+          touch-action: none;
       }
 
       .map-drag-confirm.visible {
