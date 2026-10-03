@@ -899,3 +899,78 @@ answers, now folded into the sections above:
 - **The report** for each increment: the diff, what was syntax-checked and
   harness-verified in the VM, what was not (everything UIKit, everything
   on-device), and the §8.3 items it enables.
+
+## 11. Implementation record — step 1 (2026-10-03)
+
+Landed in `ios-backports/Observatory/` (working tree left dirty for the
+maintainer's PR; nothing committed), on top of `881f9c9`:
+
+- **New** `Classes/EOTimeStepper.h/.mm` (the model, Foundation-only: it
+  reaches the clock through an `EOTimeStepperClient` protocol —
+  `timeDidChange` / `transportDidChange` — rather than importing the clock's
+  UIKit-bearing header) and `Classes/EOTimeControllerView.h/.mm` (the panel:
+  top row with `Now ▶` and `×`, status line, STEP BY caption, seven chips —
+  `cent year mon day hour min` and `sec` alone on the second row until the
+  astro chips arrive in step 2 — the 56-unit ◀ ▶ pair with its label, the
+  scrub fade at 0.38, and the drag). Both registered in
+  `Observatory.xcodeproj` by hand (four file references, two build files,
+  the Classes group, the Sources phase; `plutil -lint` passes).
+- **`EOClock.h/.mm`**: the fourteen button ivars, seven step counters,
+  `resetBool`, `doJumps`, `lastButtonPress`, the button creation sites, the
+  reorient lines, the releases and the row's layout constants are gone;
+  `setMode` now means "the panel is open"; the strip (`dateLabel`) is
+  visible while the panel is open **or** the time is not the present
+  (`timeStripVisible`, used by `setStatusBar:` and both
+  `dateLabel.hidden` sites) and carries the status line; `tick` drives the
+  scrub and refreshes the panel; `openTimePanel` / `closeTimePanel` replace
+  the Set/Reset branch (the eclipse demo's location/time-zone restore moved
+  to the close); `goingToBackground` and `prepareToReorient` end a scrub;
+  `moveClockWidgetsForOrientation:` places the panel.
+- `MainViewController.mm`: the `viewDidAppear` strip rule;
+  `OrreryAppDelegate.mm`: `EOTimeStepUnit` registered (`day`).
+
+Deviations from the step as written, all deliberate: the panel's **Now**
+button is included (without it a step-1 build would have no way back to
+the present once "Done" stopped resetting the time), and so is the
+"strip visible while overridden" rule (a closed panel with a set time
+would otherwise show nothing). The **strings files are untouched** (step
+8): the new keys (`sec`, `Step by`, `1 %@`, `10 %@/s`, `Stopped`,
+`real time`, `Now`) fall back to their English keys everywhere; `Set` and
+`Done` are existing keys. New code uses four-space indentation like the
+maintainer's recent additions; edits inside the old files keep their tab
+style.
+
+**Verified in the VM** (Command Line Tools 27.0, clang 21; no Xcode, no iOS
+SDK): `EOTimeStepper.mm` passes `clang -fsyntax-only -x objective-c++
+-fno-objc-arc -DES_IOS=1` against the plain macOS SDK with no UIKit in
+sight; `EOTimeControllerView.mm`, `EOClock.mm`, `MainViewController.mm`
+and `OrreryAppDelegate.mm` pass the same check against the macOS SDK's
+Mac Catalyst UIKit headers (`-target arm64-apple-ios18.0-macabi`, the
+`System/iOSSupport` framework and include paths, plus `-D__FP__` to keep a
+macOS-only Carbon header's `pi` from colliding with `Constants.h`'s macro —
+a harness artefact the iOS build never sees). The only diagnostics are the
+files' pre-existing deprecation warnings; none mention the new code.
+**Not verifiable here**: the Xcode build itself, the nib and scaling
+interplay, touch tracking, and everything in §8.3 — the maintainer's
+device pass is the gate, items 1–4, 6, 8 (Now only) and 14 applying to
+this step.
+
+Suggested commit message (Observatory):
+
+```
+Replace the Set-mode stepper buttons with the time controller panel (step 1)
+
+A panel at the lower right of the display (draggable from its captions)
+replaces the row of fourteen unit buttons: choose a unit chip (century,
+year, month, day, hour, minute, second), then tap ◀ ▶ to step or hold to
+scrub at ten units a second; Now returns to the present.  EOTimeStepper is
+the model (the same ESWatchTime jumps as before, Foundation-only),
+EOTimeControllerView the UIKit panel.  The date strip along the top now
+shows whenever the time is not the present and reports the clock's state.
+The step unit persists as EOTimeStepUnit.  The astro chips, the body row,
+the running transport, the latch, the date fields and the help text follow
+in later steps; new strings fall back to English until the translations
+are done.
+
+Design: chronometer-web planning/2026-09-25-ios-backport-observatory-time-controller.md
+```

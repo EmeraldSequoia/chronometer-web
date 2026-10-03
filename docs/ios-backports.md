@@ -24,7 +24,11 @@ The flow for every back-port:
    repository in `/Users/spucci/git-repositories/<repo>.git` (see below) —
    copies that bare repo out of the VM, and pushes from outside, where
    credentials live. (For the one local-origin repo, esgl, the outside
-   push target is his own git server, not GitHub.)
+   push target is his own git server, not GitHub.) The outside push goes
+   to `main` for a repo Steve maintains himself, or to a **feature branch**
+   that becomes a pull request for a repo with a maintainer of its own
+   (see "Maintained repositories: pull requests" below). Every push to
+   GitHub, to any branch, needs credentials, so the VM never makes one.
 
 ## The clones
 
@@ -76,7 +80,12 @@ parameterizing (or a copy) for these repos. Outside, note the bare repo's
 recorded `origin` is the in-VM clone path, which won't resolve there:
 fetch from the copied `<repo>.git` into an outside checkout, or push
 straight from it with an explicit URL
-(`git -C <repo>.git push git@github.com:EmeraldSequoia/<repo>.git main`).
+(`git -C <repo>.git push git@github.com:EmeraldSequoia/<repo>.git main`,
+or `… steve/time-controller` for a feature branch: the same command
+creates the branch on GitHub the first time, when git prints the link that
+opens its pull request, and updates it afterwards). The bare repo holds
+`main` and every feature branch pushed to it, and leaves the VM again for
+each batch of commits.
 
 If a clone or bare repo is ever recreated, re-pair them with:
 
@@ -84,6 +93,46 @@ If a clone or bare repo is ever recreated, re-pair them with:
 git clone --bare ios-backports/<repo> /Users/spucci/git-repositories/<repo>.git
 git -C ios-backports/<repo> remote add transfer /Users/spucci/git-repositories/<repo>.git
 ```
+
+## Maintained repositories: pull requests (added 2026-10-03)
+
+Observatory — and with it esastro, estime, eslocation and esutil — now has
+a maintainer of its own who pushes to GitHub `main` (see
+[planning/2026-09-25-ios-backport-observatory-time-controller.md](../planning/2026-09-25-ios-backport-observatory-time-controller.md)
+§10). Work there reaches GitHub as a **pull request** for him to merge, not
+as a push to `main`. A pull request is attached to a branch, not to a
+commit: its content is every commit on the branch that `main` lacks,
+GitHub shows them combined ("Files changed") and one by one ("Commits"),
+and every later push to the branch updates the PR. So a multi-step change
+is one branch, one commit per step, one PR:
+
+1. In the clone, before committing the first step, create the branch
+   (uncommitted changes come along): `git -C ios-backports/<repo> switch
+   -c steve/<topic>`. The maintainer's own branches are `bjorn/<topic>`; a
+   branch name is just a label. The identity GitHub shows is the commit's
+   author email — the clones stamp `spucci@emeraldsequoia.com`, as the
+   August commits were.
+2. Commit each step on the branch; `main` in the clone stays at the
+   maintainer's head. `push-to-transfer.sh` pushes `HEAD`, so it carries
+   the branch, and the outside push names it (previous section).
+3. Open the PR on github.com from the branch into `main` as a **draft**
+   after the first push, linking the plan; later pushes flow into it; mark
+   it "Ready for review" after the last step. Whether the per-step commits
+   survive into `main` is the maintainer's merge choice (a regular merge
+   keeps them, "squash and merge" collapses them) — ask for a regular
+   merge in the description if the history matters.
+4. Never rewrite pushed commits (amend, squash, rebase all need a
+   force-push) once the maintainer has started reviewing.
+5. When `main` moves meanwhile (the maintainer's work touches the same
+   files), **merge** `origin/main` into the branch — `git fetch origin &&
+   git merge origin/main`, resolve, commit the merge, push — rather than
+   rebasing a public branch; GitHub's "Update branch" button does the same
+   merge. This is Steve's step, not a session's: on a feature branch the
+   session's freshen ("How a session does a single fix" step 2) no longer
+   applies, and a session works on the branch it finds checked out.
+6. A fix in another repository (esastro's `prevPlanettransit`, Chronometer's
+   twin) is a separate PR in that repository; the dependent PR's description
+   says so.
 
 ## How a session does a single fix
 
@@ -95,7 +144,10 @@ git -C ios-backports/<repo> remote add transfer /Users/spucci/git-repositories/<
 2. **Freshen** (GitHub repos only): `git -C ios-backports/<repo> pull
    --ff-only`. If the pull fails or the tree is already dirty from an
    unpushed earlier fix, stop and ask Steve — never stash or reset someone
-   else's pending work.
+   else's pending work. On a **feature branch** (a pull request in
+   progress, "Maintained repositories" above) there is nothing to pull:
+   `git fetch origin` and report whether `origin/main` has moved; merging
+   it in is Steve's step.
 3. **Make the change**, matching that repo's local style exactly (tabs,
    brace placement, ObjC vs C++ idiom). The "never simplify iOS algorithms"
    rule runs both directions: port the correction faithfully, change
@@ -108,6 +160,16 @@ git -C ios-backports/<repo> remote add transfer /Users/spucci/git-repositories/<
    builds happen outside. Available in-VM:
    - `clang -fsyntax-only` (Apple clang is installed) on the touched file
      where its includes resolve;
+   - UIKit files too, since 2026-10-03: the macOS SDK ships Mac Catalyst
+     headers, so `clang -fsyntax-only -x objective-c++ -fno-objc-arc
+     -DES_IOS=1 -D__FP__ -target arm64-apple-ios18.0-macabi -isysroot $SDK
+     -iframework $SDK/System/iOSSupport/System/Library/Frameworks -isystem
+     $SDK/System/iOSSupport/usr/include` (`SDK=$(xcrun --sdk macosx
+     --show-sdk-path)`, plus `-I` for Classes, EC and the four library
+     `src` dirs, esutil from a scratch clone) type-checks Observatory's
+     `.mm` files; `-D__FP__` sidesteps a macOS-only Carbon header whose
+     `pi` collides with `Constants.h`. A Foundation-only file needs none of
+     the Catalyst flags. In zsh, word-split flag variables as `${=FLAGS}`;
    - numeric cross-checks against chronometer-web, whose engine is the
      verified reference (independently checked against JPL Horizons —
      `docs/astronomy.md` "Measured Accuracy"); the per-fix plans list the
