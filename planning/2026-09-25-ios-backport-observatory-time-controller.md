@@ -1,11 +1,12 @@
 # iOS back-port: the time controller, for Emerald Observatory (iPad)
 
-**Status**: proposed 2026-09-25 — a plan for the Observatory maintainer to
-review on GitHub before anything is built. Nothing is implemented and no
-repository was touched: the iOS sources below were read from fresh,
-read-only clones of the GitHub `main` branches. Emerald Chronometer (iOS)
-is explicitly **out of scope** — its hand-dragging and tappable date
-windows cover the same ground differently.
+**Status**: **decided 2026-10-03** — the maintainer reviewed the proposal
+(committed 2026-09-25 as `92d4d92`) and answered every question in §9; the
+answers are folded into the text below, and the plan is ready to
+implement. Nothing is built yet and no repository has been touched: the iOS
+sources below were read from fresh, read-only clones of the GitHub `main`
+branches. Emerald Chronometer (iOS) is explicitly **out of scope** — its
+hand-dragging and tappable date windows cover the same ground differently.
 
 **Created**: 2026-09-25
 
@@ -148,7 +149,7 @@ back-port.
 ### 3.1 What changes
 
 - The "Set" button opens a **panel** at the lower right of the display
-  instead of revealing a row of buttons; the panel's × (or the same button,
+  (draggable from there) instead of revealing a row of buttons; the panel's × (or the same button,
   now reading "Done") closes it. The strip along the top still appears
   whenever the time is not the present, panel or no panel, and gains a
   **Now** button of its own, so a set time can be *kept* with the panel
@@ -159,22 +160,24 @@ back-port.
   as needed. The label between the pair always names what a tap will do
   ("1 day", "Sunset", "Jupiter transit").
 - **Hold to scrub** at ten units a second (today: twenty, after 0.75 s;
-  the web's 300 ms engagement and 10/s rate are proposed, tunable). The
+  the web's 300 ms engagement and 10/s rate are adopted — §9 decision 8). The
   panel fades to about a third while the scrub runs so the display shows
   through.
-- **Hands-free scrubbing** keeps the old app's latch, narrowed the way the
-  web did it: slide the finger off the button *and off the edge of the
-  screen* before lifting and the scrub runs on until the next tap anywhere;
-  a green padlock on the panel shows when letting go would do that. Today
-  any release outside the button latches (§9 decision 2).
+- **Hands-free scrubbing** keeps the old app's latch as it is: slide the
+  finger off the button before lifting and the scrub runs on, hands-free,
+  until the next tap anywhere; a green padlock on the panel shows while
+  letting go would do that (§9 decision 2). Two things do change: there is
+  one scrub at a time (no second unit can be stacked on a latched one), and
+  *any* tap stops it — today only the same button or Reset does.
 - **New abilities**: a seconds unit; rise, set and transit for nine bodies
   (Sun, Moon, Mercury, Venus, Mars, Jupiter, Saturn, Uranus, Neptune),
   defaulting to the planet on the altitude/azimuth dials; a typed date and
   time with a CE/BCE toggle; a transport row that stops the clock and
-  restarts it at 1× from the set time, forward (and, optionally, backward,
-  §6.3); a status line ("Stopped", "10 day/s ▶", "1× (real time)").
-- **Century** is not a web unit (§9 decision 1 — keep it as an eleventh
-  chip or let year-scrubbing at 10/s cover it).
+  restarts it at 1× from the set time, forward or backward (§6.3); a status
+  line ("Stopped", "10 day/s ▶", "1× (real time)").
+- **Century** stays, as an eleventh chip (§9 decision 1): the panel's first
+  row is `cent year mon day hour min`, and holding scrubs centuries at ten
+  a second.
 - **Escape** on a hardware keyboard closes the panel (a hands-free scrub
   stops first), and a press on the display closes it too and still does what
   it did (tapping the altitude dial both closes the panel and cycles the
@@ -199,18 +202,16 @@ back-port.
 ### 3.3 What gets worse, or is merely different
 
 - **An overlay**. The old row sat in an empty band above the dial and hid
-  nothing; the panel (264×389 canvas units, 433 with the body row) covers
-  the lower-right of the display — the Equation of Time subdial and part of
-  the main dial's evening side — whenever it is open. The scrub fade and the
-  close-on-display-press rule mitigate this; §9 decision 5 is about where it
-  should sit, and a draggable panel is an optional extra (§4.2 j).
+  nothing; the panel (308×389 canvas units, 433 with the body row) opens
+  over the lower-right of the display — the Equation of Time subdial and
+  part of the main dial's evening side. The scrub fade and the
+  close-on-display-press rule mitigate this, and the panel can be dragged
+  anywhere on the canvas (§4.2 j, §9 decision 5).
 - **Two taps instead of one** when the unit changes: today "+1 month, +2
   days, −1 hour" is four taps; with unit chips it is seven. Repeated steps
   of *one* unit cost the same as today.
 - **Steps snap** (no sweep). That is today's behaviour too; the web's hands
   glide because of an animation system iOS does not have (§4.3).
-- **A narrower latch** than today's, if decision 2 follows the web.
-- **Century** goes, if decision 1 follows the web.
 - **Help and App Store text** must be rewritten and re-translated (§5.5):
   "Help Text2/3" describe the row, and "iTC description4" promises "…year
   or century".
@@ -225,20 +226,21 @@ back-port.
 | Web element | iOS primitive | Notes |
 |---|---|---|
 | `#time-popover` / `#tp-panel` (264 px column, 0.96 dark background, 14 px radius, 1 px border) | `EOTimeControllerView : UIView`, `opaque = NO`, background `rgba(26,26,46,.96)`, `layer.cornerRadius 14`, `borderWidth 1`; laid out in code in canvas units, a subview of the `EOBaseView` so it scales and reorients with everything else | No xib, no Auto Layout: the canvas is a fixed 768×1024 that `scaleBaseViewToSize:` scales, and every widget is positioned by `reorientSubView:` from constants set in `initializeConstantsForOrientation:` — the panel follows that convention. Not a `UIPopoverPresentationController`: a system popover cannot fade to reveal the display, is modal by default, and its material clashes with the app's chrome. |
-| Time bar (`#time-bar`: date, offset, rate, Now) | The existing `dateLabel` strip along the top, plus a small `UIButton` ("Now" or the existing "Reset" string, §9 decision 3) at its right end | Shown while the panel is open **or** the time is not real; the status bar hides while it shows, as it does in set mode today. |
+| Time bar (`#time-bar`: date, offset, rate, Now) | The existing `dateLabel` strip along the top, plus a small "Now" `UIButton` (§9 decision 3) at its right end | Shown while the panel is open **or** the time is not real; the status bar hides while it shows, as it does in set mode today. |
 | `⏱ Show / Hide time controller` | The existing Set button (`resetBut`): "Set" when closed, "Done" (existing key) when open | Same place, same size, same `createButtonAtX:` plumbing. |
-| Transport row (`Now ▶`, `‖`, `◀ ▶`, 44 px) and `×` | Four `UIButton`s, 44 units tall, in the panel's top row; act on `TouchDown` | ‖ → `time->stop()`; ▶ → `time->setWarp(1)`; ◀ → `setWarp(-1)` (needs §6.3); Now → `resetToLocal()`; each followed by `resetTargets` + `timeChanged = true`. Explicit `setWarp(±1)` rather than `start()`: `start()` resumes at whatever the warp was before the freeze. |
+| Transport row (`Now ▶`, `‖`, `◀ ▶`, 44 px) and `×` | Four `UIButton`s, 44 units tall, in the panel's top row; act on `TouchDown` | ‖ → `time->stop()`; ▶ → `time->setWarp(1)`; ◀ → `setWarp(-1)` (with §6.3); Now → `resetToLocal()`; each followed by `resetTargets` + `timeChanged = true`. Explicit `setWarp(±1)` rather than `start()`: `start()` resumes at whatever the warp was before the freeze. |
 | `#tp-rate-label` | `UILabel`, 11 pt, `#8af` | "Stopped" / "1× (real time)" / "1×" / "1× ◀" / "10 day/s ▶", from warp and scrub state (§4.2 h). |
-| Unit chips (`.tp-chip`, 5 × 2 grid, 44 px, astro tint) | Ten (or eleven) `UIButton`s, 44 units, `layer` styled like the CSS; the selected one highlighted (`#8af` border and text) | Labels reuse the row's existing localized abbreviations (§5.5). `UISegmentedControl` was considered and rejected: its selection is per control, the astro tint and the two-row split fight it, and its height is not 44. |
+| Unit chips (`.tp-chip`, 5 × 2 grid, 44 px, astro tint) | Eleven `UIButton`s, 44 units tall, in two rows — `cent year mon day hour min`, then `sec rise set transit phase` stretched to the same width — `layer` styled like the CSS; the selected one highlighted (`#8af` border and text) | Labels reuse the row's existing localized abbreviations (§5.5). Six 44-unit cells and five 4-unit gaps make the panel 308 units wide (§4.2 j; §9 decision 1). `UISegmentedControl` was considered and rejected: its selection is per control, the astro tint and the two-row split fight it, and its height is not 44. |
 | Body row (`‹ Name ›`) | Two 44-unit `UIButton`s and a `UILabel` (`#8af`, 15 pt); hidden unless rise / set / transit | Name from `[Utilities nameOfPlanetWithNumber:]` (already localized for all nine bodies). |
-| The pair (`◀ ▶` 56 px, `#tp-step-label`) | Two 56-unit `UIButton`s with `TouchDown` / `TouchUpInside` / `TouchUpOutside` / `TouchCancel` / `TouchDragInside` / `TouchDragOutside` actions taking the `UIEvent`; a bold 15 pt `UILabel` | UIControl keeps tracking a touch wherever it goes, so the release reaches the button with its location, which is what the edge rule needs (§4.2 c–e). |
-| Date inputs (`#tp-year … #tp-minute`, `#tp-bce`) | Five `UITextField`s (number pad, centred, 44 tall) and a CE/BCE `UIButton`; apply on end of editing / Return | Composed with `ESCalendar_timeIntervalFromLocalDateComponents(env->estz(), &cs)` — hybrid calendar, era in `cs.era`, the zone's offset at the target instant, so the web's two-pass composition is unnecessary. A `UIDatePicker` is the native-looking alternative and the reason not to use it is real: it is proleptic Gregorian (ten days off before 1582-10-15) and has no BCE, while the app's range is 4000 BCE – 2800 CE (§9 decision 6). |
-| `.tp-hidden` (0.38), `.tp-lock-zone`, `.tp-locked`, `#tp-lock-badge` | `panel.alpha` animated over 0.15 s; a `UIImageView` with the SF Symbol `lock.fill` tinted `#4cd964`, 96 units, alpha 0.75 in the zone and 0.4 once locked | `alpha` keeps hit-testing (UIKit stops delivering touches only below 0.01), so a held button keeps tracking through the fade — the iOS form of the web's "opacity-only" rule: never `hidden`, never removed, mid-hold. SF Symbols are already used by the app (`info.circle`, MainViewController.mm:32). |
+| The pair (`◀ ▶` 56 px, `#tp-step-label`) | Two 56-unit `UIButton`s with `TouchDown` / `TouchUpInside` / `TouchUpOutside` / `TouchCancel` / `TouchDragInside` / `TouchDragOutside` actions taking the `UIEvent`; a bold 15 pt `UILabel` | UIControl keeps tracking a touch wherever it goes, so the release reaches the button with its location, which is what the latch needs (§4.2 c–e). |
+| Date inputs (`#tp-year … #tp-minute`, `#tp-bce`) | Five `UITextField`s (number pad, centred, 44 tall) and a CE/BCE `UIButton`; apply on end of editing / Return | Composed with `ESCalendar_timeIntervalFromLocalDateComponents(env->estz(), &cs)` — hybrid calendar, era in `cs.era`, the zone's offset at the target instant, so the web's two-pass composition is unnecessary. A `UIDatePicker` is the native-looking alternative and the reason not to use it is real: it is proleptic Gregorian (ten days off before 1582-10-15) and has no BCE, while the app's range is 4000 BCE – 2800 CE (§9 decision 6: the fields). |
+| `.tp-hidden` (0.38), `.tp-lock-zone`, `.tp-locked`, `#tp-lock-badge` | `panel.alpha` animated over 0.15 s; a `UIImageView` with the SF Symbol `lock.fill` tinted `#4cd964`, 96 units, alpha 0.75 while the held touch is off the button and 0.4 once locked | `alpha` keeps hit-testing (UIKit stops delivering touches only below 0.01), so a held button keeps tracking through the fade — the iOS form of the web's "opacity-only" rule: never `hidden`, never removed, mid-hold. SF Symbols are already used by the app (`info.circle`, MainViewController.mm:32). |
 | The hands-free stop (document capture-phase `pointerdown` + click swallower) | A transparent full-canvas `UIButton` ("shield") added above everything while a scrub runs hands-free; its `TouchDown` stops the scrub and the touch goes nowhere else | The app's own idiom: `snoozeBut` (:2197) is exactly this for the alarm. No click swallower is needed — UIKit synthesises no click. |
 | A press on the display closes the panel | A `UILongPressGestureRecognizer` (`minimumPressDuration 0`, `cancelsTouchesInView NO`) on the base view whose delegate ignores touches inside the panel, the Set button and the strip | Recognises at `touchesBegan`, so it acts on the press like the web, and the touch still reaches whatever it landed on (the altitude dial cycles its planet). |
-| Escape (capture-phase, yields to overlays) | `-keyCommands` on `MainViewController` (`UIKeyInputEscape`; optionally `t`); acts only while nothing is presented (`presentedViewController == nil` — the Options screen and alerts own the key otherwise) | iPad hardware keyboards and the Mac. |
+| — (the web's panel stays put) | A `UIPanGestureRecognizer` on the panel view drags it; it opens at the lower-right corner (§4.2 j, §9 decision 5) | The recogniser's delegate refuses touches that begin on a control (`gestureRecognizer:shouldReceiveTouch:` → NO for any `UIControl`), so drags start on the captions, labels or background, and a hold on the pair whose finger slides off the button is never mistaken for a drag (a pan does not overlap a button's default action, so UIKit would otherwise let the superview's recogniser take the touch and cancel the hold). |
+| Escape (capture-phase, yields to overlays) | `-keyCommands` on `MainViewController` (`UIKeyInputEscape` only — no `t` toggle, §9 decision 10); acts only while nothing is presented (`presentedViewController == nil` — the Options screen and alerts own the key otherwise) | iPad hardware keyboards and the Mac. |
 | `updater.reset()` after every transition | `resetTargets` (already what Reset does) after transport changes and Now; `timeChanged = true` after every step, jump or typed date so every `EOScheduledView` redraws at the next tick (≤ 50 ms), as `doJumps` does today | Not `resetTargets` on steps: `EOHandView.resetTarget` re-arms the one-second animated sweep, which is designed for a running clock (it computes the target for *now + 1 s*) and would lag a 10 Hz scrub. |
-| `tu` / `tb` in `app-state` | `NSUserDefaults` keys `EOTimeStepUnit` (string, default `"day"`) and `EOTimeStepBody` (planet number, default −1 = follow the dials), registered in `setupDefaults` | The web also persists the panel's open state and the overridden time itself; iOS keeps its current behaviour (fresh launch = present, panel closed) unless the maintainer wants otherwise (§9 decision 4). |
+| `tu` / `tb` in `app-state` | `NSUserDefaults` keys `EOTimeStepUnit` (string, default `"day"`) and `EOTimeStepBody` (planet number, default −1 = follow the dials), registered in `setupDefaults` | The web also persists the panel's open state and the overridden time itself; iOS keeps its current behaviour: a fresh launch is the present, with the panel closed (§9 decision 4). |
 | `RATE_OPTIONS` / `TICK_INTERVAL_MS` (10 Hz) | The existing 20 Hz `tick` drives the scrub: one unit whenever ≥ 100 ms have passed since the last scrub step | No second timer; no warp — a scrub is a sequence of the same `advanceBy*` jumps a tap makes, exactly like today's `doJumps`, so DST days, Feb 29 and month ends behave as they do now. |
 
 ### 4.2 Behaviour
@@ -246,11 +248,11 @@ back-port.
 The spec the code follows; where the web and today's iOS differ, the choice
 is stated.
 
-a. **Units.** `yr mo day hr min sec` step by `advanceByYears / Months /
-   Days(env)` and `advanceBySeconds(3600 / 60 / 1)`; `rise set transit`
-   search for the chosen body; `phase` searches the Moon's quarters
-   (`nextMoonPhase` / `prevMoonPhase`, as today). The default unit is a
-   day. (Century, if kept: `advanceByYears(±100)`, as today.)
+a. **Units.** `cent yr mo day hr min sec` step by `advanceByYears(±100)`,
+   `advanceByYears / Months / Days(env)` and `advanceBySeconds(3600 / 60 /
+   1)`; `rise set transit` search for the chosen body; `phase` searches the
+   Moon's quarters (`nextMoonPhase` / `prevMoonPhase`, as today). The
+   default unit is a day.
 
 b. **Tap** on ◀ / ▶: `time->stop()` first (every tap stops the clock —
    today's rule and the web's), then the step or the search, then
@@ -269,40 +271,47 @@ c. **Hold** (calendar units only; the astro chips are tap-only, as on the
    fires after 300 ms and engages the scrub — direction and unit recorded,
    the panel fades, the status line shows the rate. From then on `tick`
    advances one unit every 100 ms until the scrub ends. (Today: 750 ms then
-   20/s. Both numbers are one constant each; the web's are proposed for
-   parity and can be tuned on the device.)
+   20/s. Both numbers are one constant each; the web's values are adopted —
+   §9 decision 8 — and remain tunable on the device.)
 
-d. **Release.** `TouchUpInside`, or `TouchUpOutside` anywhere on the
-   display: end the scrub — `time->stop()`, restore the panel, `resetTargets`
-   (so the views re-arm their schedules from the stopped time), write the
-   status line. `TouchCancel` (a system gesture, a rotation, a phone call):
-   end the scrub — unknown state, stop.
+d. **Release.** `TouchUpInside` — the finger lifts on the button — ends the
+   scrub: `time->stop()`, restore the panel, `resetTargets` (so the views
+   re-arm their schedules from the stopped time), write the status line.
+   `TouchUpOutside` — the finger lifts anywhere else — is the latch (e).
+   `TouchCancel` (a system gesture, a rotation, a phone call): end the
+   scrub — unknown state, stop.
 
-e. **Hands-free** (the latch, narrowed): a `TouchUpOutside` whose location
-   (`[[event touchesForView:button] anyObject] locationInView:nil`, in
-   window points) is within 8 points of the window's edge, or beyond it,
-   turns the scrub from *until release* into *until the next press*. While
-   the held touch is in that zone (`TouchDragOutside` reports it) the panel
-   returns to full alpha with the padlock at 0.75; drag back in and it fades
+e. **Hands-free** (the latch, as the app has always had it — §9 decision 2):
+   a `TouchUpOutside` after the hold has engaged turns the scrub from *until
+   release* into *until the next press*, wherever the finger lifts — the
+   web's extra "at the display's edge" condition is not applied, so no touch
+   location is needed. While the held touch is off the button
+   (`TouchDragOutside`; `TouchDragInside` when it returns) the panel comes
+   back to full alpha with the padlock at 0.75, so the outcome of letting
+   go is visible before it happens; drag back onto the button and it fades
    again. Once locked, the padlock stays at 0.4 over the faded panel, the
    button's highlight clears, the shield goes up, and the next press
    anywhere — the shield's `TouchDown` — stops the scrub and is swallowed.
-   The scrub also stops on Escape (the panel stays open), on
-   `goingToBackground` (a suspended app must not run time away when it
-   resumes; today's latched counters do exactly that), and on an
-   orientation change (`prepareToReorient`). Whether an iPad delivers
-   `touchesEnded` or `touchesCancelled` when a finger leaves the screen edge
-   is the same open question the web pass had; a cancel whose last drag
-   location was in the zone should lock too, and the device pass decides
-   whether that rule is needed (§8.3).
+   That stop is the one departure from today's latch, where only the same
+   button or Reset ends it and a second unit can be latched on top of the
+   first: with one pair there is one scrub, and any tap ends it. A
+   `TouchUpOutside` before the hold has engaged (a finger that slid off
+   within the first 300 ms) is a tap — one step, no latch — which keeps a
+   sloppy tap from running time away. The scrub also stops on Escape (the
+   panel stays open), on `goingToBackground` (a suspended app must not run
+   time away when it resumes; today's latched counters do exactly that),
+   and on an orientation change (`prepareToReorient`). A finger that leaves
+   the screen's edge is expected to arrive as `touchesEnded` (a latch); if
+   a device reports a cancel instead, that lift stops — the device pass
+   confirms which (§8.3).
 
 f. **The fade** is the only fade: taps, transport presses, Now, chips and
    the date fields leave the panel at full alpha (the two stories). The
-   fade's level, 0.38, is the web's tuned value; the maintainer sets the
-   final one on a real display.
+   fade's level, 0.38, is the web's tuned value (§9 decision 8), adjustable
+   on a real display.
 
 g. **Transport.** `Now ▶` appears whenever `!time->isCorrect()`; `‖` while
-   `warp != 0`; `◀ ▶` (or `▶` alone, §6.3) while stopped. All act on
+   `warp != 0`; `◀ ▶` while stopped (§6.3 is what makes ◀ work). All act on
    `TouchDown`. After a transport change: `resetTargets`, `timeChanged`,
    strip and status line. Now leaves the panel open (today's Reset closes
    set mode; the panel's × and the Set/Done button do that now).
@@ -325,15 +334,20 @@ i. **The strip** keeps today's content (`dateFormatter`, `<offset>`,
    with the `yearLabel` for dates before 1582-10-15 (a pre-existing
    inconsistency; the web fixed its equivalent in September).
 
-j. **Placement.** Anchored to the canvas's lower-right corner with a
-   12-unit margin in both orientations, over the Equation of Time subdial (and, in landscape, the lower edge of the eclipse simulator) —
-   the web's position and the least time-critical element to cover. The
-   maintainer may prefer another anchor (§9 decision 5); a `UIPanGesture`
-   on the panel's top row to let the user drag it is a cheap extra if the
-   overlap turns out to matter. In canvas units the panel is 264 × 389
-   (433 with the body row): on a 12.9" iPad (scale ≈ 1.33) that is about
-   352 × 519 points with 59-point chips, on an 8.3" mini (scale ≈ 0.97)
-   about 43-point chips.
+j. **Placement.** Opens anchored to the canvas's lower-right corner with a
+   12-unit margin in both orientations, over the Equation of Time subdial
+   (and, in landscape, the lower edge of the eclipse simulator) — the web's
+   position and the least time-critical element to cover — and can be
+   **dragged** from there (§9 decision 5): a `UIPanGestureRecognizer` on the
+   panel whose delegate refuses touches that begin on a control, so drags
+   start on the captions, labels or background and a hold on the pair that
+   slides off the button is never mistaken for a drag. The dragged position
+   is kept while the app runs (across close/open and rotation, clamped to
+   the canvas) and resets to the corner at the next launch; persisting it is
+   one `NSUserDefaults` key if ever wanted. In canvas units the panel is
+   308 × 389 (433 with the body row): on a 12.9" iPad (scale ≈ 1.33) that is
+   about 410 × 519 points with 59-point chips, on an 8.3" mini (scale ≈
+   0.97) about 43-point chips.
 
 k. **Date fields.** Refreshed every tick from
    `ESCalendar_localDateComponentsFromTimeInterval(time->currentTime(),
@@ -380,7 +394,8 @@ o. **Debug builds.** `demoBut` shows while the panel is open, as it shows in
   proposed.
 - Share links, URL state, the `t`/`off`/`dir` persistence, the panel-open
   persistence, and the Observatory web app's chrome-drop layout rule.
-- The `t` and `n` hotkeys (Escape is one line; the rest is a taste call).
+- The `t` and `n` hotkeys (§9 decision 10); Escape stays, as one of the
+  panel's close paths rather than a shortcut.
 - Chronometer iOS.
 
 ## 5. The developer's perspective
@@ -402,8 +417,8 @@ Two new classes and a subtraction:
   UIKit out of it is what makes it syntax-checkable and harness-testable in
   the VM (§8.1) and keeps `EOClock.mm` from growing.
 - **`Classes/EOTimeControllerView.h/.mm`** — the panel: the widgets, their
-  frames in canvas units, the touch handling for the pair (hold timer, edge
-  rule, drag feedback), the fade and padlock, the shield, the date fields
+  frames in canvas units, the touch handling for the pair (hold timer, the
+  latch, lock-zone feedback), the drag, the fade and padlock, the shield, the date fields
   and keyboard avoidance; it drives the stepper and reads it to refresh
   labels once per tick. It knows nothing about the astronomy.
 - **`EOClock.h/.mm`** loses the fourteen button ivars, the seven step
@@ -413,8 +428,8 @@ Two new classes and a subtraction:
   as members, their creation and reorientation, the strip's new content,
   the display-press recogniser, and the "strip visible" rule: about 80
   lines.
-- **`EOScheduledView.mm`** gains direction awareness if reverse running is
-  wanted (§6.3): a dozen lines.
+- **`EOScheduledView.mm`** gains direction awareness for reverse running
+  (§6.3): a dozen lines.
 - **`esastro`** gets a one-line fix (§6.7), mirrored in Chronometer's
   `ECAstronomy.m`.
 
@@ -426,10 +441,9 @@ QuartzCore and the four Emerald libraries are already there.
 
 - **Manual retain/release.** No ARC anywhere (`[super dealloc]`,
   `autorelease`, `release` throughout; no `CLANG_ENABLE_OBJC_ARC` in the
-  project). New files follow suit — or are marked `-fobjc-arc` per file in
-  the target's Compile Sources, which the maintainer may prefer for new
-  code; either is fine, mixing is supported, but the choice should be made
-  once.
+  project). The new files follow suit — no per-file `-fobjc-arc` (§9
+  decision 9): `retain` what is kept, `release` in `dealloc`, `autorelease`
+  temporaries, as `EOClock.mm` does.
 - **Objective-C++.** Every `.mm` includes C++ headers from estime and
   esastro; the stepper is the same kind of file.
 - **Style.** Tabs, K&R braces, `bool`, the app's own `ESAssert`, long
@@ -447,8 +461,8 @@ QuartzCore and the four Emerald libraries are already there.
 - **iPad only, plus the Mac.** `TARGETED_DEVICE_FAMILY = 2`; the app runs
   on Apple silicon Macs as "Designed for iPad" and the maintainer has been
   fixing Mac issues (window resizing, the info button). Mouse input arrives
-  as touches; the hands-free rule's "release outside the window" case is to
-  be verified there (§8.3).
+  as touches; a mouse button released off the pair latches like a finger,
+  and a release outside the window is to be verified there (§8.3).
 - **Deployment target** is `$(RECOMMENDED_IPHONEOS_DEPLOYMENT_TARGET)` —
   unpinned, whatever the maintainer's Xcode recommends. Everything proposed
   here is old UIKit (SF Symbols iOS 13, `UIKeyCommand` iOS 7,
@@ -497,8 +511,9 @@ than breaking — acceptable for a first build, not for release.
 Reused as they are (already translated everywhere): `"cent" "year" "mon"
 "day" "hour" "min" "phase"` for the chips — the row's own abbreviations,
 sized for 45-unit buttons in every language ("Jhd.", "Mo.", "世紀"…), so
-the iOS chips read `year mon day hour min / sec rise set transit phase`
-rather than the web's `yr mo …`; `"Set" "Reset" "Done"`; the nine body
+the iOS chips read `cent year mon day hour min / sec rise set transit phase`
+rather than the web's `yr mo …`; `"Set" "Done"` (the "Reset" title retires
+with the old row — §9 decision 3); the nine body
 names; the two "earliest / latest time supported" strings.
 
 New keys (English key = English text; comment for translators):
@@ -517,24 +532,25 @@ New keys (English key = English text; comment for translators):
 | `%@ rise`, `%@ set`, `%@ transit` | the pair's label for a planet, e.g. "Jupiter rise" |
 | `Moon phase` | the pair's label for the phase chip |
 | `Stopped`, `real time` | status line ("1× (real time)" is built around the glyphs) |
-| `Now` | transport / strip button — or reuse `"Reset"` (§9 decision 3) |
+| `Now` | the transport's and the strip's return-to-present button (§9 decision 3) |
 | `CE`, `BCE` | era toggle |
 | `Help Text2`, `Help Text3` | **rewritten** English (the row, the latch and "Tap 'Reset'" are gone); all seven translations become stale until redone |
 
-About twenty keys times eight files; plus `iTC description4` if the App
-Store copy is kept in sync. The `printLocalizedStrings` block in
+About twenty keys times eight files; the App Store copy (`iTC
+description4`) is the maintainer's own (§9 decision 10). The `printLocalizedStrings` block in
 `OrreryAppDelegate.mm` (a `#if PRINTLOCALIZEDSTRINGS` developer tool)
 carries the English defaults of the help texts and should be updated with
 them.
 
 ### 5.6 Risks and unknowns
 
-- **UIControl touch tracking at the screen edge** (§4.2 e): ended vs
-  cancelled, and the last reported location of a fast slide — decided on
-  the device, as on the web.
-- **The Mac**: does a mouse released outside the window deliver
-  `TouchUpOutside` with an out-of-window location? If not, the Mac loses
-  the hands-free gesture (the web's mouse rule) and nothing else.
+- **Latch accidents**: with the app's own rule any release off the button
+  latches, so a sloppy lift can start a hands-free scrub; the padlock warns
+  before the lift, one tap stops it, and a lift before the hold has engaged
+  (§4.2 e) never latches.
+- **The Mac**: does a mouse button released outside the window deliver
+  `TouchUpOutside`? If it delivers a cancel instead, that release stops
+  rather than latches — the only Mac-specific difference, and harmless.
 - **The portrait reorient quirk** (§5.2) can put the panel 77 units off
   on first try; the `dateLabel` precedent shows the fix.
 - **Keyboard avoidance** is new to the app; a wrong frame calculation
@@ -543,8 +559,8 @@ them.
   the fix, "transit ◀" moves forward.
 - **Redraw cost** during a scrub is today's, halved; no new risk, but the
   10 Hz rate is a knob if an older iPad stutters.
-- **Existing users'** muscle memory: the latch narrowing and the two-tap
-  unit change are the two things support mail would mention.
+- **Existing users'** muscle memory: the two-tap unit change and "any tap
+  stops a latched scrub" are the two things support mail would mention.
 
 ## 6. Exactly what changes, and where
 
@@ -559,10 +575,11 @@ them.
   `-isScrubbing`, `-isLocked`; `-statusString`; `-bodyPlanetNumber`
   (stored, else the dials' planet).
 - `Classes/EOTimeControllerView.h`, `Classes/EOTimeControllerView.mm`
-  (§5.1): `-initWithStepper:` builds the widgets at canvas size 264 × 389
-  (433 with the body row); `-refresh` once per tick (labels, fields,
-  transport row rebuilt only when its state changes, chip highlight);
-  `-endScrubForClose` used by every close path.
+  (§5.1): `-initWithStepper:` builds the widgets at canvas size 308 × 389
+  (433 with the body row) and installs the drag recogniser; `-refresh` once
+  per tick (labels, fields, transport row rebuilt only when its state
+  changes, chip highlight); `-endScrubForClose` used by every close path;
+  `-clampToCanvas` after a drag or a reorientation.
 - Both added to the Observatory target in `Observatory.xcodeproj` (Xcode
   does this on "Add Files…"; no other project change).
 
@@ -614,10 +631,11 @@ Add:
   (`[self resetTargets]`) for the stepper.
 - `goingToBackground` (:622): `[stepper stopScrub]`. `prepareToReorient`
   (:2451): the same. `moveClockWidgetsForOrientation:` (:2212): reorient
-  `timePanel` and `nowBut`.
+  `nowBut`, and `timePanel` to its dragged position clamped to the new
+  canvas (the corner anchor only until the first drag).
 - `dealloc` (:2531): release the two new objects.
 
-### 6.3 Observatory — `Classes/EOScheduledView.mm` (only for reverse running)
+### 6.3 Observatory — `Classes/EOScheduledView.mm` (reverse running)
 
 `tick:` (:75–80) schedules the next update as `floor((now+update)/update)
 * update + updateOffset` and fires when `now > target`; `resetTarget`
@@ -630,14 +648,13 @@ set `target = ceil((now-update)/update) * update - updateOffset` (and
 already handles reverse: `ESWatchTime::isDSTUsingEnv` nudges the sample
 the right way, and `setupLocalEnvironmentForThreadFromActionButton` passes
 `runningBackward()` into the cache pool so "next sunrise" means the
-previous one on the way back, as the rings expect. If the maintainer skips
-reverse, the transport shows `▶` alone while stopped and this file is
-untouched (§9 decision 7).
+previous one on the way back, as the rings expect. Reverse running is in (§9
+decision 7).
 
 ### 6.4 Observatory — `MainViewController`, `OrreryAppDelegate`, `FlipsideViewController`
 
 - `MainViewController.mm`:49 and :72 (`dateLabel.hidden = !setMode`) use
-  the new `timeStripVisible`. Add `-keyCommands` (Escape; optionally `t`)
+  the new `timeStripVisible`. Add `-keyCommands` (Escape only; no `t` toggle, §9 decision 10)
   with `canBecomeFirstResponder`; the handler asks `EOClock` to stop a
   hands-free scrub, else resign a first-responder date field, else close
   the panel — only while `presentedViewController == nil`.
@@ -655,9 +672,10 @@ untouched (§9 decision 7).
   what a step means — a year, month, day, hour, minute or second, or the
   rise, set or transit of a body, or the Moon's quarter phase — then tap
   ◀ or ▶ to step…") and "Help Text3" ("Hold ◀ or ▶ to scrub… slide your
-  finger off the edge of the screen before lifting it to keep scrubbing
-  hands-free; tap anywhere to stop. Tap 'Now' to return to the present.").
-- `iTC description4` (App Store copy) is the maintainer's to update or not.
+  finger off the button before lifting it to keep scrubbing hands-free; tap
+  anywhere to stop. Tap 'Now' to return to the present.").
+- `iTC description4` (App Store copy) is the maintainer's own (§9 decision
+  10).
 
 ### 6.6 Observatory — resources
 
@@ -702,23 +720,24 @@ them and still have a coherent app.
 
 1. **Model + panel with the calendar units and the pair** (`EOTimeStepper`,
    `EOTimeControllerView` with the chips, the pair, tap and hold at
-   300 ms / 10 per second, release stops; the fade; the strip's status
-   text; the Set/Done toggle). The old row goes in the same step — the two
-   cannot coexist in `setMode`. Feature parity with today minus phase,
-   century (if dropped) and the latch. Persist the unit.
+   300 ms / 10 per second, release stops; the fade; the drag; the strip's
+   status text; the Set/Done toggle). The old row goes in the same step —
+   the two cannot coexist in `setMode`. Feature parity with today minus
+   phase and the latch. Persist the unit.
 2. **Astro chips and the body row** (+ the esastro fix, §6.7, and its
    Chronometer twin). Persist the body. The flash on a NaN result.
 3. **Transport and Now** (`‖`, `▶`, `Now ▶`; the strip's Now button; strip
    visible while overridden with the panel closed).
-4. **Reverse** (`◀`, `EOScheduledView` direction awareness) — optional.
-5. **Hands-free**: the edge rule, the padlock and lock-zone feedback, the
-   shield, the stops (Escape, background, rotation).
+4. **Reverse** (`◀`, `EOScheduledView` direction awareness).
+5. **Hands-free**: the latch (any release off the button after the hold has
+   engaged), the padlock and lock-zone feedback, the shield, the stops
+   (Escape, background, rotation).
 6. **Date fields** with the CE/BCE toggle, keyboard avoidance.
-7. **Close rules and keys**: the display-press recogniser, Escape (and
-   `t`), every close path ending a scrub first.
+7. **Close rules and keys**: the display-press recogniser, Escape, every
+   close path ending a scrub first.
 8. **Strings and help** (§6.5), translations arranged.
-9. **Device pass** (§8.3) and tuning of the four knobs: hold delay, scrub
-   rate, edge distance, fade level.
+9. **Device pass** (§8.3) and tuning of the three knobs: hold delay, scrub
+   rate, fade level (§9 decision 8).
 
 ## 8. Validation
 
@@ -788,22 +807,24 @@ with the year label — §4.2 i); 4000 BCE Jan 1 −1 day → stays, "AT LIMIT".
 
 ### 8.3 Device checklist (the maintainer's)
 
-1. Set opens the panel at the anchor in both orientations, after a
-   rotation with it open, and after a window resize on the Mac; Done / ×
-   close it; the status bar hides while the strip shows.
+1. Set opens the panel at the corner in both orientations, after a
+   rotation with it open, and after a window resize on the Mac; a drag
+   from a caption moves it and a drag that starts on a button does not; the
+   dragged position survives close/open and rotation but not a relaunch;
+   Done / × close it; the status bar hides while the strip shows.
 2. Chips: one selected; the pair's label names it; the default is a day;
    the choice survives a relaunch.
 3. Tap ◀ / ▶ for each calendar unit: one step, the strip updates within a
    tick, the clock is stopped, no fade.
 4. Hold: nothing extra for 300 ms, then ten steps a second, the panel at
-   the fade level; release on the button stops; release off the button in
-   the middle of the display stops; release at each edge (right, bottom,
-   top, left) locks with the padlock; drag into the zone and back out shows
-   and hides the padlock; a tap anywhere stops a locked scrub and does
-   nothing else (a tap on the altitude dial while locked must **not** cycle
-   the planet).
-5. Whether an edge slide-off arrives as ended or cancelled (a cancel today
-   stops); a fast slide's last reported position against the 8-point rule.
+   the fade level; release on the button stops; release anywhere off the
+   button locks with the padlock; drag off the button and back on shows
+   and hides the padlock; a lift off the button within the first 300 ms is
+   just a tap; a tap anywhere stops a locked scrub and does nothing else (a
+   tap on the altitude dial while locked must **not** cycle the planet).
+5. A slide off the screen's edge: whether it arrives as ended (latches) or
+   cancelled (stops); on the Mac, a mouse button released outside the
+   window.
 6. Locked scrub + Home (background) → stopped on return; locked scrub +
    rotation → stopped.
 7. Astro chips against §8.2, both directions, for the Sun, Moon and a
@@ -811,7 +832,7 @@ with the year label — §4.2 i); 4000 BCE Jan 1 −1 day → stays, "AT LIMIT".
    hides the row; Longyearbyen's Sun flashes.
 8. Transport: ‖ stops; ▶ runs at 1× from the set time (hands and rings
    move, rise/set hands re-arm); ◀ runs backward with everything moving
-   (if §6.3 is in); Now returns to the present with the panel open.
+   (§6.3); Now returns to the present with the panel open.
 9. Date fields: typed values apply on end of editing; a BCE date; a date
    before 1582-10-15 (Julian: the strip and the year label agree); values
    beyond the limits clamp; the software keyboard does not cover the
@@ -826,50 +847,41 @@ with the year label — §4.2 i); 4000 BCE Jan 1 −1 day → stays, "AT LIMIT".
 13. The alarm still rings at real time while the display time is set.
 14. Debug build: Demo appears with the panel.
 
-## 9. Decisions for the maintainer
+## 9. Decisions (the maintainer, 2026-10-03)
 
 The web decided each of these for itself; the iOS app is the maintainer's,
-and some of them trade the web's choice against an existing iOS habit.
-Recommendations are marked.
+and some of them traded the web's choice against an existing iOS habit. His
+answers, now folded into the sections above:
 
-1. **Century.** Drop it for exact parity (recommended — year scrubbing at
-   ten a second covers a century in ten seconds), or keep it as an eleventh
-   chip (a six-column first row, `cent year mon day hour min`, panel about
-   308 units wide; the existing "cent" string).
-2. **The latch rule.** The web's edge-only rule (recommended: narrow,
-   accident-resistant, one help sentence, the padlock as feedback), or the
-   app's documented any-release-outside latch (one predicate; existing
-   users know it; more accidental locks, which the padlock and tap-to-stop
-   now make visible and cheap).
-3. **"Now" or "Reset"** for the return-to-present button. "Reset" is
-   translated in all eight languages and is what the app has always
-   called it; "Now" matches the web. Either is one key.
-4. **Persist the set time across launches?** The web does (share links);
-   the app never has. Recommended: keep the app's behaviour — a launch is
-   the present.
-5. **Where the panel sits.** Lower right (the web's position; covers the
-   Equation of Time subdial; in landscape it also clips the eclipse
-   simulator's lower edge). Alternatives: upper right under the header
-   (covers the evening side of the rings, which stepping is often about);
-   lower left (covers the azimuth dial); draggable.
-6. **Date entry.** Five fields plus CE/BCE (recommended: the full range and
-   the hybrid calendar), or a `UIDatePicker` (native look; proleptic
-   Gregorian, no BCE — the range would have to be fenced to 1583–2800).
-7. **Reverse running** (§6.3): include it (recommended: the model and the
-   astronomy already support it; the display needs a dozen lines), or
-   ship the transport with `▶` alone.
-8. **Hold delay, scrub rate, edge distance, fade level.** The web's
-   300 ms / 10 per second / 8 points / 0.38 as starting values; the app's
-   750 ms / 20 per second are the incumbents.
-9. **ARC for the new files** (per-file `-fobjc-arc`), or manual
-   retain/release like the rest.
-10. **The `t` hotkey and the App Store description** — small, the
-    maintainer's call.
+1. **Century: keep it** — an eleventh chip; the first row is six wide
+   (`cent year mon day hour min`), the panel 308 units wide (§4.1, §4.2 j).
+2. **The latch: as the app works today** — any release off the button
+   keeps the scrub running, not only a release at the display's edge
+   (§4.2 d–e). Two consequences accepted with it: any tap stops a latched
+   scrub, and there is only ever one scrub (§4.2 e).
+3. **"Now"** for the return-to-present button, in the transport row and on
+   the strip; the "Reset" title retires (§5.5).
+4. **Do not persist the set time** — every launch starts at the present
+   (§4.1).
+5. **Lower right, then draggable** — opens at the web's corner; a pan moves
+   it for the rest of the run (§4.2 j).
+6. **Date entry: the five fields plus CE/BCE** (§4.1, §4.2 k), not a
+   `UIDatePicker`.
+7. **Reverse running: yes** — `◀` in the transport, `EOScheduledView` made
+   direction-aware (§6.3).
+8. **The knobs: the web's values** — 300 ms hold delay, ten units a second,
+   0.38 fade; the web's 8-point edge distance has no role under decision 2.
+9. **No ARC** — the new files use manual retain/release like the rest
+   (§5.2).
+10. **No hotkey** — the `t` toggle is dropped; Escape stays only as one of
+    the panel's close paths (§4.2 n — strike it too if "no hotkey" meant
+    every key). The App Store description is the maintainer's own.
 
 ## 10. Workflow and report format
 
-- **The plan**: Steve commits this file in chronometer-web; the maintainer
-  reviews it on GitHub; the decisions in §9 come back as comments or edits.
+- **The plan**: committed in chronometer-web (`92d4d92`) and reviewed by
+  the maintainer; his decisions are in §9 and applied throughout
+  (2026-10-03).
 - **The code**: per [docs/ios-backports.md](../docs/ios-backports.md), a
   session works in `ios-backports/Observatory/` (and `esastro/`,
   `Chronometer/` for §6.7) after `git pull --ff-only` freshens each clone —

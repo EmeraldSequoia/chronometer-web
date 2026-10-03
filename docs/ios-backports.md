@@ -194,3 +194,26 @@ regeneration for the two XML fixes (`archiveHD/…/archive.dat` is
 generated from the XML and tracked; the regenerated archives ride in a
 follow-on commit — the Babylon code fix is complete as-is), and test on
 device.
+
+## Back-port batch 3 (2026-09-25): the time controller, Observatory only
+
+A feature rather than a fix — the web's time-controller panel (unit chips,
+one ◀ ▶ pair, hold-to-scrub, astro jumps, typed dates, a transport row)
+replacing Observatory's "Set" row of fourteen stepper buttons, rebuilt
+from UIKit primitives on the app's own `ESWatchTime` /
+`ESAstronomyManager`. Chronometer iOS is deliberately excluded (its
+hand-dragging and date windows cover the same ground).
+
+| Plan | Web spec commit(s) | iOS repos touched |
+|---|---|---|
+| [ios-backport-observatory-time-controller](../planning/2026-09-25-ios-backport-observatory-time-controller.md) | e6c349a … 4cb0b74 — the panel as documented in [time-controller.md](time-controller.md) (build 2.0.164) | Observatory; esastro + Chronometer (a one-character `prevPlanettransit` fix, plan §6.7) |
+
+**Status**: **decided, not started** — the plan was committed 2026-09-25
+(`92d4d92`) and the Observatory maintainer answered its ten design
+questions on 2026-10-03 (plan §9). That repo now has an owner of its own
+who pushes to GitHub `main` (v1.6.1 shipped with a UIScene life cycle and
+merged the batch-1 Observatory commits), so the outbound half of the
+workflow above changes shape for it: the clones fast-forward with
+`git pull --ff-only` (every earlier back-port is upstream), and the
+finished work reaches GitHub as a pull request for him to merge, not a
+push to `main` (plan §10).
