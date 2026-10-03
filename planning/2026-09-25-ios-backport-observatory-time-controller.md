@@ -159,8 +159,9 @@ back-port.
   minute, second — or rise, set, transit, phase), then tap ◀ or ▶ as often
   as needed. The label between the pair always names what a tap will do
   ("1 day", "Sunset", "Jupiter transit").
-- **Hold to scrub** at ten units a second (today: twenty, after 0.75 s;
-  the web's 300 ms engagement and 10/s rate are adopted — §9 decision 8). The
+- **Hold to scrub** at twenty units a second — the old row's cadence, kept
+  after the simulator pass showed the web's ten a second looked choppier
+  here (§9 decision 8, revised) — after the web's 300 ms engagement. The
   panel fades to about a third while the scrub runs so the display shows
   through.
 - **Hands-free scrubbing** keeps the old app's latch as it is: slide the
@@ -241,7 +242,7 @@ back-port.
 | Escape (capture-phase, yields to overlays) | `-keyCommands` on `MainViewController` (`UIKeyInputEscape` only — no `t` toggle, §9 decision 10); acts only while nothing is presented (`presentedViewController == nil` — the Options screen and alerts own the key otherwise) | iPad hardware keyboards and the Mac. |
 | `updater.reset()` after every transition | `resetTargets` (already what Reset does) after transport changes and Now; `timeChanged = true` after every step, jump or typed date so every `EOScheduledView` redraws at the next tick (≤ 50 ms), as `doJumps` does today | Not `resetTargets` on steps: `EOHandView.resetTarget` re-arms the one-second animated sweep, which is designed for a running clock (it computes the target for *now + 1 s*) and would lag a 10 Hz scrub. |
 | `tu` / `tb` in `app-state` | `NSUserDefaults` keys `EOTimeStepUnit` (string, default `"day"`) and `EOTimeStepBody` (planet number, default −1 = follow the dials), registered in `setupDefaults` | The web also persists the panel's open state and the overridden time itself; iOS keeps its current behaviour: a fresh launch is the present, with the panel closed (§9 decision 4). |
-| `RATE_OPTIONS` / `TICK_INTERVAL_MS` (10 Hz) | The existing 20 Hz `tick` drives the scrub: one unit whenever ≥ 100 ms have passed since the last scrub step | No second timer; no warp — a scrub is a sequence of the same `advanceBy*` jumps a tap makes, exactly like today's `doJumps`, so DST days, Feb 29 and month ends behave as they do now. |
+| `RATE_OPTIONS` / `TICK_INTERVAL_MS` (10 Hz) | The existing 20 Hz `tick` drives the scrub: one unit per tick (the old row's cadence; revised from the web's ten a second after the simulator pass, since iOS shows no motion between positions) | No second timer; no warp — a scrub is a sequence of the same `advanceBy*` jumps a tap makes, exactly like today's `doJumps`, so DST days, Feb 29 and month ends behave as they do now. |
 
 ### 4.2 Behaviour
 
@@ -270,9 +271,11 @@ c. **Hold** (calendar units only; the astro chips are tap-only, as on the
    web): the tap's step happens at once; an `NSTimer` armed at `TouchDown`
    fires after 300 ms and engages the scrub — direction and unit recorded,
    the panel fades, the status line shows the rate. From then on `tick`
-   advances one unit every 100 ms until the scrub ends. (Today: 750 ms then
-   20/s. Both numbers are one constant each; the web's values are adopted —
-   §9 decision 8 — and remain tunable on the device.)
+   advances one unit per tick — twenty a second, the old row's cadence —
+   until the scrub ends. (Today: 750 ms then 20/s. The web's 300 ms is
+   adopted, §9 decision 8; its ten a second was tried first and looked
+   choppier in the simulator, because iOS draws each position as a jump
+   while the web sweeps the hands between ticks.)
 
 d. **Release.** `TouchUpInside` — the finger lifts on the button — ends the
    scrub: `time->stop()`, restore the panel, `resetTargets` (so the views
@@ -473,7 +476,7 @@ QuartzCore and the four Emerald libraries are already there.
 - **The 20 Hz tick is the app's heartbeat.** Every scrub step sets
   `timeChanged`, and every `EOScheduledView` then redraws — the seven rings
   and the Earth view through Core Graphics `drawRect:`. Today's hold does
-  this at 20 Hz; the proposed 10 Hz halves it.
+  this at 20 Hz, and so does the new one (§4.2 c).
 
 ### 5.3 Maintainability
 
@@ -527,7 +530,7 @@ New keys (English key = English text; comment for translators):
 | `Step by` | caption above the unit chips |
 | `Set date & time` | caption above the date fields |
 | `1 %@` | the pair's label for a calendar unit, e.g. "1 day" (%@ is the unit abbreviation) |
-| `10 %@/s` | scrub rate, e.g. "10 day/s" |
+| `%d %@/s` | scrub rate, e.g. "20 day/s" (%d is the rate, %@ the unit) |
 | `Sunrise`, `Sunset`, `Moonrise`, `Moonset` | the pair's label for the Sun and Moon |
 | `%@ rise`, `%@ set`, `%@ transit` | the pair's label for a planet, e.g. "Jupiter rise" |
 | `Moon phase` | the pair's label for the phase chip |
@@ -557,8 +560,8 @@ them.
   under the split/floating iPad keyboards is the likely first bug.
 - **`prevPlanettransit`** returns the *next* transit today (§6.7): without
   the fix, "transit ◀" moves forward.
-- **Redraw cost** during a scrub is today's, halved; no new risk, but the
-  10 Hz rate is a knob if an older iPad stutters.
+- **Redraw cost** during a scrub is today's; no new risk, and the per-tick
+  cadence is one line to change if an older iPad stutters.
 - **Existing users'** muscle memory: the two-tap unit change and "any tap
   stops a latched scrub" are the two things support mail would mention.
 
@@ -720,7 +723,7 @@ them and still have a coherent app.
 
 1. **Model + panel with the calendar units and the pair** (`EOTimeStepper`,
    `EOTimeControllerView` with the chips, the pair, tap and hold at
-   300 ms / 10 per second, release stops; the fade; the drag; the strip's
+   300 ms / one unit per tick (20 a second), release stops; the fade; the drag; the strip's
    status text; the Set/Done toggle). The old row goes in the same step —
    the two cannot coexist in `setMode`. Feature parity with today minus
    phase and the latch. Persist the unit.
@@ -816,7 +819,7 @@ with the year label — §4.2 i); 4000 BCE Jan 1 −1 day → stays, "AT LIMIT".
    the choice survives a relaunch.
 3. Tap ◀ / ▶ for each calendar unit: one step, the strip updates within a
    tick, the clock is stopped, no fade.
-4. Hold: nothing extra for 300 ms, then ten steps a second, the panel at
+4. Hold: nothing extra for 300 ms, then twenty steps a second (one per tick), the panel at
    the fade level; release on the button stops; release anywhere off the
    button locks with the padlock; drag off the button and back on shows
    and hides the padlock; a lift off the button within the first 300 ms is
@@ -869,8 +872,13 @@ answers, now folded into the sections above:
    `UIDatePicker`.
 7. **Reverse running: yes** — `◀` in the transport, `EOScheduledView` made
    direction-aware (§6.3).
-8. **The knobs: the web's values** — 300 ms hold delay, ten units a second,
-   0.38 fade; the web's 8-point edge distance has no role under decision 2.
+8. **The knobs: the web's values** — 300 ms hold delay and 0.38 fade. The
+   web's ten units a second was adopted too and **revised 2026-10-03** after
+   the simulator pass: iOS draws each scrub position as a jump, with no
+   motion between ticks, so ten a second only looked choppier than the old
+   twenty; the scrub moves one unit per clock tick, twenty a second, as the
+   old row did (§4.2 c). The web's 8-point edge distance has no role under
+   decision 2.
 9. **No ARC** — the new files use manual retain/release like the rest
    (§5.2).
 10. **No hotkey** — the `t` toggle is dropped; Escape stays only as one of
@@ -934,7 +942,7 @@ button is included (without it a step-1 build would have no way back to
 the present once "Done" stopped resetting the time), and so is the
 "strip visible while overridden" rule (a closed panel with a set time
 would otherwise show nothing). The **strings files are untouched** (step
-8): the new keys (`sec`, `Step by`, `1 %@`, `10 %@/s`, `Stopped`,
+8): the new keys (`sec`, `Step by`, `1 %@`, `%d %@/s`, `Stopped`,
 `real time`, `Now`) fall back to their English keys everywhere; `Set` and
 `Done` are existing keys. New code uses four-space indentation like the
 maintainer's recent additions; edits inside the old files keep their tab
@@ -963,7 +971,7 @@ Replace the Set-mode stepper buttons with the time controller panel (step 1)
 A panel at the lower right of the display (draggable from its captions)
 replaces the row of fourteen unit buttons: choose a unit chip (century,
 year, month, day, hour, minute, second), then tap ◀ ▶ to step or hold to
-scrub at ten units a second; Now returns to the present.  EOTimeStepper is
+scrub at twenty units a second; Now returns to the present.  EOTimeStepper is
 the model (the same ESWatchTime jumps as before, Foundation-only),
 EOTimeControllerView the UIKit panel.  The date strip along the top now
 shows whenever the time is not the present and reports the clock's state.
@@ -973,4 +981,107 @@ in later steps; new strings fall back to English until the translations
 are done.
 
 Design: chronometer-web planning/2026-09-25-ios-backport-observatory-time-controller.md
+```
+
+**Revision after the simulator pass (2026-10-03).** The scrub rate is back
+to the old row's: one unit per clock tick, twenty a second
+(`EOTimeStepper scrubTick` steps on every call; the stepper takes the
+clock's `ticksPerSecond` for the status line, now a `%d %@/s` format). The
+web's ten a second had been adopted with decision 8, but it rides on the
+web's animation between ticks, which iOS does not have, so it only halved
+the frame rate of the jumps. The 300 ms hold delay and the 0.38 fade stand.
+
+## 12. Implementation record — step 2 (2026-10-03)
+
+On the same branch, after step 1 and the scrub-rate revision; the trees are
+left dirty for the maintainer's PR (Observatory) and for Steve's own
+commits (esastro, Chronometer):
+
+- **Observatory.** `EOTimeStepper`: four event units (`rise set transit
+  phase`, keys the web's) after the calendar units; the body for rise /
+  set / transit as `EOTimeStepBody` (−1 = follow the dials, read through a
+  new `dialPlanetNumber` client call that returns `altHand.planet`) and
+  the ‹ › cycle through the nine bodies in the web's order;
+  `astroJumpInDirection:` stops the clock first — the library's `prev*`
+  searches read their direction from the watch — and runs
+  `next/prevPlanetriseForPlanetNumber`, `next/prevPlanetsetForPlanetNumber`,
+  `next/prevPlanettransit` and `next/prevMoonPhase` inside the manager's
+  environment bracket, as the old phase buttons did; `pressInDirection:`
+  now answers whether the search found an event and arms no hold for an
+  event unit. The planet-generic rise/set search serves the Sun and Moon
+  too: the library's own `nextSunrise` calls it with `ECPlanetSun`, so one
+  code path covers all nine bodies. `EOTimeControllerView`: eleven chips
+  in two rows (the second row's five share its width), the four event
+  chips tinted; the ‹ Body › row (44-unit buttons, the name from
+  `Utilities nameOfPlanetWithNumber:`) laid out only for rise / set /
+  transit, the panel growing and shrinking from its bottom edge; the
+  pressed pair button turns brown for 0.3 s when a search finds nothing.
+  `OrreryAppDelegate`: `EOTimeStepBody` registered as −1. Strings still
+  fall back to English (step 8): `rise`, `set`, `transit`, `Sunrise`,
+  `Sunset`, `Moonrise`, `Moonset`, `%@ rise`, `%@ set`, `%@ transit`,
+  `Moon phase`; `phase` is an existing key.
+- **esastro** `src/ESAstronomy.cpp`:2973 and **Chronometer**
+  `Classes/ECAstronomy.m`:2804: `prevPlanettransit` asks for the previous
+  transit (§6.7). One word each; both clones were already current with
+  GitHub.
+
+**Verified in the VM.** The compile checks of step 1, all clean (the
+stepper still Foundation-only; the esastro file as host C++). And the §8.1
+harness exists: [2026-10-03-ios-astro-harness/](2026-10-03-ios-astro-harness/)
+builds the real esastro, estime, eslocation and esutil sources for this Mac
+(the time service on its plain system-clock driver, the NTP maker stubbed)
+and replays the §8.2 instants through exactly the calls the stepper makes.
+With the fix, every Sun, Moon, transit and phase value agrees with the web
+gold table **to the second**; the planet rise and set values agree within
+2–7 s (Jupiter and Saturn 5–7 s, Neptune 2 s — the "few seconds" §8.2
+allows: the two engines share the refinement but not every convention);
+Longyearbyen's Sun returns no rise and no set, as the table says. Built
+from the pre-fix `ESAstronomy.cpp`, every "previous transit" equals the
+"next transit" — the bug exactly as §6.7 describes.
+
+**Not verifiable here**: the Xcode build, the body row's layout change and
+the flash on a real screen, and §8.3 item 7.
+
+Suggested commit messages:
+
+Observatory —
+
+```
+Add the astronomical events and the body row to the time controller (step 2)
+
+Four more chips — rise, set, transit, phase — jump to the next or previous
+event instead of stepping a calendar unit: the rising, setting or meridian
+crossing of a chosen body (Sun, Moon, Mercury, Venus, Mars, Jupiter,
+Saturn, Uranus, Neptune), or the Moon's quarter phase.  A ‹ Body › row
+appears for rise, set and transit; it follows the planet on the altitude
+and azimuth dials until stepped, and the choice persists as EOTimeStepBody.
+The searches are the astronomy library's own (nextPlanetriseForPlanetNumber
+and friends, nextMoonPhase as before), run with the clock stopped; a
+search that finds nothing (a polar night) flashes the button.  Event chips
+are tap-only.  Needs esastro's prevPlanettransit fix.
+
+Design: chronometer-web planning/2026-09-25-ios-backport-observatory-time-controller.md
+```
+
+esastro —
+
+```
+Make prevPlanettransit return the previous transit
+
+It passed nextNotPrev=true, the same as nextPlanettransit, so "previous"
+was the next transit.  Only the watchTimeWithPrevPlanetrise/set fallbacks
+(a body with no rise or set that day) reached it before; Observatory's
+time controller now calls it directly.  Checked against the web engine
+with a host harness: previous transits now precede the instant and agree
+with the web's to the second.
+```
+
+Chronometer —
+
+```
+Make prevPlanettransit: return the previous transit
+
+The Objective-C twin of esastro's fix: it passed nextNotPrev:true like
+nextPlanettransit:, so "previous" was the next transit.  Only the
+watchTimeWithPrevPlanetrise:/set: fallbacks reached it.
 ```
