@@ -270,9 +270,13 @@ hand-dragging and date windows cover the same ground).
 |---|---|---|
 | [ios-backport-observatory-time-controller](../planning/2026-09-25-ios-backport-observatory-time-controller.md) | e6c349a … 4cb0b74 — the panel as documented in [time-controller.md](time-controller.md) (build 2.0.164) | Observatory; esastro + Chronometer (a one-character `prevPlanettransit` fix, plan §6.7) |
 
-**Status**: **decided, not started** — the plan was committed 2026-09-25
-(`92d4d92`) and the Observatory maintainer answered its ten design
-questions on 2026-10-03 (plan §9). That repo now has an owner of its own
+**Status**: **built 2026-10-03, device pass pending** — the plan was
+committed 2026-09-25 (`92d4d92`), the Observatory maintainer answered its
+ten design questions on 2026-10-03 (plan §9), and steps 1–8 of its §7 were
+implemented the same day on the Observatory branch `steve/time-controller`
+(plan §11–§18: a record, device checklist and commit message per step),
+with the esastro fix on its own branch; step 9 — the device pass and the
+knob tuning — remains, then the pull request. That repo now has an owner of its own
 who pushes to GitHub `main` (v1.6.1 shipped with a UIScene life cycle and
 merged the batch-1 Observatory commits), so the outbound half of the
 workflow above changes shape for it: the clones fast-forward with
