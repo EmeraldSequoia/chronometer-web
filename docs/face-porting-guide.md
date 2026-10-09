@@ -84,14 +84,12 @@ If the face has hands with `offsetRadius > 0` (e.g., moon orbit, subdial hands),
 
 ## 9. Thumbnails
 
-- **Thumbnail**: Wait for the user to supply a screenshot file — do not attempt to capture one yourself. Once provided, scale it to 400×400 pixels and save it as `src/faces/thumb-<slug>.png` (where `<slug>` is the face folder name). For example, on macOS:
-  ```bash
-  sips -z 400 400 --out src/faces/thumb-<slug>.png <screenshot>.png
-  ```
+- **Thumbnail**: rendered, not screenshotted. With the face in `faces.txt` and a dist server running, `PW_DIR=<dir with playwright installed> node scripts/render-thumbs.mjs <port> <slug>` renders the face at the house capture instant (10:09:30 on 2026-10-16, Cupertino, frozen; see the script for the per-face exceptions) and writes two files: `src/faces/masters/thumb-<slug>.png`, a 1024×1024 master with transparent corners, and `src/faces/thumb-<slug>.png`, the same at 400×400. The 400 one is what the cards and favicons use and what the generated face module inlines into the face bundle (so it must stay small); the build flattens the master onto the page background for the 1024 px `dist/icon-<slug>.png` the web-app manifest (macOS Add to Dock) uses.
   > [!IMPORTANT]
-  > **Transparency Requirement**: The thumbnail file **must** have transparent corners (i.e. all pixels outside the circular watch dial, which is a radius of ~198 pixels from the center of the 400×400 box, must be transparent). Do not bake the dark blue `#1a1a2e` background or any other solid color into the corners of the PNG file. This is crucial for:
+  > **Transparency Requirement**: both files **must** have transparent corners (every pixel outside the circular dial — radius ~198 px of the 400 box, ~506 px of the 1024 master — transparent). Do not bake the dark blue `#1a1a2e` background or any other solid color into the corners. This is crucial for:
   > - Allowing browser tab favicons to render with clean transparent circular borders.
   > - Preventing dark blue square corner outlines from showing up when the apple-touch-icon background is generated dynamically with a custom bezel-matched color.
+  > - The opaque Dock icon is derived from it at build time, never the other way round.
   
   The homepage and picker page will automatically display this thumbnail.
 - **Index card**: The index card is generated automatically at build time based on the `displayName` and `description` attributes defined in your watch XML file.

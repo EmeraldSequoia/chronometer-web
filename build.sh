@@ -377,6 +377,26 @@ splice_loader() {
   ' "$target" > "$target.tmp" && mv "$target.tmp" "$target"
 }
 
+# Per-app web-app manifest: dist/app-<slug>.webmanifest. One per installable
+# page so each gets its own home-screen / Dock name and icon. macOS Safari's
+# "Add to Dock" takes its icon ONLY from here (never apple-touch-icon) and
+# shrinks anything with transparent corners onto a white plate, so the icon
+# must be the opaque full-bleed icon-<x>.png (see "app icons" below). No
+# start_url/id: each page stays its own app. scope ./ keeps cross-app
+# navigation inside the installed standalone container (iOS).
+emit_manifest() {  # emit_manifest <slug> <name> <icon file> <icon px>
+  local slug="$1" name="$2" icon="$3" px="$4"
+  cat > "$DIST/app-$slug.webmanifest" <<EOF
+{
+  "name": "$name",
+  "short_name": "$name",
+  "display": "standalone",
+  "scope": "./",
+  "icons": [{ "src": "$icon", "sizes": "${px}x${px}", "type": "image/png", "purpose": "any" }]
+}
+EOF
+}
+
 # Per-face HTML. The <!--LOADER--> marker (in face-template.html) is replaced
 # post-inject with the bundle manifest + load-progress bootstrap. Manifest order
 # is EXECUTION order: the face module first (it pushes to window.ChronometerFaces),
@@ -395,10 +415,12 @@ for face in "${FACES[@]}"; do
   HELP_FILE=$(get_help_file "$face")
   sed -e "s|{{TITLE}}|$TITLE|g" \
       -e "s|{{ICON}}|$ICON|g" \
+      -e "s|{{MANIFEST}}|app-$face.webmanifest|g" \
       "$SRC/face-template.html" | $INJECTOR "$HELP_FILE" > "$DIST/$face.html"
   emit_loader_block "chronometer" "face-$face.js" "chronometer-engine.js" > "$DIST/.loader.html"
   splice_loader "$DIST/$face.html" "$DIST/.loader.html"
   rm -f "$DIST/.loader.html"
+  emit_manifest "$face" "$TITLE" "icon-$face.png" 1024
   echo "  → $face.html"
 done
 
@@ -423,6 +445,7 @@ done
 
 sed -e "s|{{TITLE}}|All Faces|g" \
     -e "s|{{ICON}}|thumb-all-faces.png|g" \
+    -e "s|{{MANIFEST}}|app-chronometer.webmanifest|g" \
     "$SRC/face-template.html" | inject_partials "$COMBINED_HELP" > "$DIST/all.html"
 emit_loader_block "chronometer" "${ALL_BUNDLES[@]}" > "$DIST/.loader.html"
 splice_loader "$DIST/all.html" "$DIST/.loader.html"
@@ -432,6 +455,7 @@ echo "  → all.html"
 # selected.html — loads all faces; engine filters by picks param
 sed -e "s|{{TITLE}}|Selected Faces|g" \
     -e "s|{{ICON}}|thumb-all-faces.png|g" \
+    -e "s|{{MANIFEST}}|app-chronometer.webmanifest|g" \
     "$SRC/face-template.html" | inject_partials "$COMBINED_HELP" > "$DIST/selected.html"
 emit_loader_block "chronometer" "${ALL_BUNDLES[@]}" > "$DIST/.loader.html"
 splice_loader "$DIST/selected.html" "$DIST/.loader.html"
@@ -499,42 +523,65 @@ cp "$SRC/cities-data.js" "$DIST/cities-data.js"
 echo "  → cities-data.js ($(du -h "$DIST/cities-data.js" | cut -f1))"
 node scripts/make-cities-gz.mjs "$DIST"
 
-# Copy thumbnail images — fail if any expected thumbnail is missing
-for face in "${FACES[@]}"; do
-  thumb="$SRC/faces/thumb-$face.png"
-  if [ ! -f "$thumb" ]; then
-    echo "ERROR: Missing thumbnail: $thumb" >&2
-    exit 1
+# Thumbnails and app icons. scripts/render-thumbs.mjs writes both sizes:
+#   src/faces/masters/thumb-<x>.png — 1024×1024, transparent corners. Only
+#                        read here, to make dist/icon-<x>.png: the same dial
+#                        flattened onto the page background, the web-app
+#                        manifest icon. macOS Safari "Add to Dock" shrinks
+#                        anything with transparent corners onto a white plate,
+#                        so this one is opaque and full-bleed.
+#   src/faces/thumb-<x>.png — 400×400, transparent: copied to dist for the
+#                        index/pick cards, corner app links, favicons and
+#                        apple-touch-icons, and INLINED as a data URL into every
+#                        face bundle and pick-page.js by the generated face
+#                        modules — which is why the masters live elsewhere.
+# src/icon-chronometer.png (the Mauna Kea upper-left crop, the iOS ChronoHD
+# icon framing) and src/icon-inspector.png are opaque 1024 masters: copied as
+# icons, shrunk as thumbs. thumb-eclipses.png is a 400 opaque original (its
+# source art is 316 px) and serves as both.
+ICON_BG='#1a1a2e'
+THUMB_PX=400
+shrink_png() {  # shrink_png <src> <dist file name> <px>
+  if command -v magick >/dev/null 2>&1; then
+    magick "$1" -resize "${3}x${3}" "$DIST/$2"
+  elif command -v sips >/dev/null 2>&1; then
+    sips -z "$3" "$3" "$1" --out "$DIST/$2" >/dev/null
+  else
+    echo "WARNING: neither magick nor sips found — $2 shipped at full size" >&2
+    cp "$1" "$DIST/$2"
   fi
-  cp "$thumb" "$DIST/" && echo "  → $(basename "$thumb")"
+}
+make_icon() {  # make_icon <transparent master> <dist file name>
+  if command -v magick >/dev/null 2>&1; then
+    magick "$1" -background "$ICON_BG" -alpha remove -alpha off "$DIST/$2"
+  else
+    echo "WARNING: ImageMagick (magick) not found — $2 keeps transparent corners; macOS will put the Dock icon on a plate" >&2
+    cp "$1" "$DIST/$2"
+  fi
+}
+need_file() { if [ ! -f "$1" ]; then echo "ERROR: Missing $1" >&2; exit 1; fi; }
+for x in "${FACES[@]}" all-faces observatory; do
+  need_file "$SRC/faces/thumb-$x.png"
+  cp "$SRC/faces/thumb-$x.png" "$DIST/thumb-$x.png"
+  if [ "$x" != all-faces ]; then
+    need_file "$SRC/faces/masters/thumb-$x.png"
+    make_icon "$SRC/faces/masters/thumb-$x.png" "icon-$x.png"
+  fi
 done
-# Copy all-faces thumbnail
-if [ ! -f "$SRC/faces/thumb-all-faces.png" ]; then
-  echo "ERROR: Missing $SRC/faces/thumb-all-faces.png" >&2
-  exit 1
-fi
-cp "$SRC/faces/thumb-all-faces.png" "$DIST/" && echo "  → thumb-all-faces.png"
-# Copy observatory thumbnail
-if [ ! -f "$SRC/faces/thumb-observatory.png" ]; then
-  echo "ERROR: Missing $SRC/faces/thumb-observatory.png" >&2
-  exit 1
-fi
-cp "$SRC/faces/thumb-observatory.png" "$DIST/" && echo "  → thumb-observatory.png"
-# Copy eclipse-table card thumbnail (index page)
-if [ ! -f "$SRC/faces/thumb-eclipses.png" ]; then
-  echo "ERROR: Missing $SRC/faces/thumb-eclipses.png" >&2
-  exit 1
-fi
-cp "$SRC/faces/thumb-eclipses.png" "$DIST/" && echo "  → thumb-eclipses.png"
-# Copy app icon
-if [ ! -f "$SRC/apple-touch-icon.png" ]; then
-  echo "ERROR: Missing $SRC/apple-touch-icon.png" >&2
-  exit 1
-fi
-cp "$SRC/apple-touch-icon.png" "$DIST/" && echo "  → apple-touch-icon.png"
-# Copy web-app manifest (iOS home-screen scope — keeps cross-app navigation
-# inside the installed standalone container)
-cp "$SRC/app.webmanifest" "$DIST/" && echo "  → app.webmanifest"
+need_file "$SRC/faces/thumb-eclipses.png"
+cp "$SRC/faces/thumb-eclipses.png" "$DIST/thumb-eclipses.png"
+cp "$SRC/faces/thumb-eclipses.png" "$DIST/icon-eclipses.png"
+for x in chronometer inspector; do
+  need_file "$SRC/icon-$x.png"
+  cp "$SRC/icon-$x.png" "$DIST/icon-$x.png"
+  shrink_png "$SRC/icon-$x.png" "thumb-$x.png" "$THUMB_PX"
+done
+echo "  → thumb-*.png ($(ls "$DIST"/thumb-*.png | wc -l | tr -d ' ') files), icon-*.png ($(ls "$DIST"/icon-*.png | wc -l | tr -d ' ') files)"
+emit_manifest chronometer "Chronometer" icon-chronometer.png 1024
+emit_manifest observatory "Observatory" icon-observatory.png 1024
+emit_manifest inspector   "Inspector"   icon-inspector.png   1024
+emit_manifest eclipses    "Eclipses"    icon-eclipses.png    400
+echo "  → app-*.webmanifest ($(ls "$DIST"/app-*.webmanifest | wc -l | tr -d ' ') files)"
 
 # Copy help images to dist
 if [ -d "$SRC/help/images" ]; then

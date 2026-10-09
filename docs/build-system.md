@@ -118,8 +118,9 @@ dist/
 │       ├── geneva/
 │       ├── terra/
 │       └── ...
-├── apple-touch-icon.png         # PWA icon
-└── *.png                        # Thumbnail images
+├── app-*.webmanifest            # Per-app web-app manifests (name + Dock/home-screen icon)
+├── icon-*.png                   # 1024 opaque manifest icons (macOS Add to Dock)
+└── thumb-*.png                  # 400 thumbnails: cards, corner app links, favicons, apple-touch-icons
 ```
 
 Note: Help HTML fragments are injected directly into each face's HTML file at build time (inside a `<template>` element), so they do not appear as separate files in `dist/`.
@@ -157,6 +158,7 @@ npx vitest
 | File | Purpose |
 |------|---------|
 | `build.sh` | Main build script |
+| `scripts/render-thumbs.mjs` | Re-renders the face/Observatory thumbnails (1024 masters + 400 thumbs) and the Chronometer app icon from a running dist server; see [Face Porting Guide §9](face-porting-guide.md#9-thumbnails) |
 | `faces.txt` | Root configuration file containing active face slug order |
 | `scripts/generate-face-modules.js` | Build-time Node.js script that compiles face TypeScript modules, cards, and manifests |
 | `src/face-template.html` | HTML template for individual face pages |
