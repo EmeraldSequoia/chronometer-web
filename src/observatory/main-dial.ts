@@ -11,7 +11,7 @@
  *   1. Background circle (translucent white)
  *   2. 24-hour tick marks (3 tiers: heavy, medium, fine)
  *   3. 24-hour demi-radial numbers
- *   4. Zodiac symbol image
+ *   4. Zodiac symbol ring (vector strokes — zodiac-glyphs.ts)
  *   5. 12-hour golden demi-radial markers
  *   6. Planet orbit circles (6 concentric)
  *   7. Second-hand tick marks (no-fives, outer + fine)
@@ -21,9 +21,9 @@
 
 import type { LayoutParams } from './layout.js';
 import { drawTicks, drawCircle, drawFilledCircle, drawDialNumbersDemiRadial, drawDialNumbersUpright, drawText } from './draw-utils.js';
+import { drawZodiacRing } from './zodiac-glyphs.js';
 
 // Image asset imports (bundled as data URLs by esbuild)
-import zodiacPng from '../../.observatory-ref/Resources/zodiac.png';
 import sunPng from '../../.observatory-ref/Resources/sun.png';
 import siderealConstellationPng from '../../.observatory-ref/EO-Sidereal-constellation-names-0-at-top@2x.png';
 
@@ -33,7 +33,6 @@ const TWO_PI = 2 * Math.PI;
 // Image loading
 // ---------------------------------------------------------------------------
 
-let zodiacImg: HTMLImageElement | null = null;
 let sunImg: HTMLImageElement | null = null;
 let siderealConstellationImg: HTMLImageElement | null = null;
 let imagesLoaded = false;
@@ -42,13 +41,6 @@ function loadImages(): Promise<void> {
     if (imagesLoaded) return Promise.resolve();
 
     const promises: Promise<void>[] = [];
-
-    zodiacImg = new Image();
-    promises.push(new Promise<void>((resolve, reject) => {
-        zodiacImg!.onload = () => resolve();
-        zodiacImg!.onerror = () => { console.warn('[MainDial] Failed to load zodiac.png'); resolve(); };
-    }));
-    zodiacImg.src = zodiacPng;
 
     sunImg = new Image();
     promises.push(new Promise<void>((resolve, reject) => {
@@ -74,7 +66,7 @@ const imageLoadPromise = loadImages();
 // Readiness (consulted by static-cache.ts before drawing this layer)
 // ---------------------------------------------------------------------------
 
-/** True once all three dial images have settled (loaded or errored). */
+/** True once both dial images (sun, constellation names) have settled (loaded or errored). */
 export function areDialImagesReady(): boolean {
     return imagesLoaded;
 }
@@ -159,16 +151,11 @@ export function drawMainDial(
     );
 
     // ====================================================================
-    // 4. Zodiac symbol image — centered, half-alpha
-    //    iOS: draws zodiac.png at (-zD/2-1, -zD/2+1) with alpha 0.5
+    // 4. Zodiac symbol ring — twelve vector glyphs at the PNG's positions
+    //    iOS: drew zodiac.png (zD square) centred, alpha 0.5. The strokes
+    //    carry that 50 %-white tone as an opaque grey; see zodiac-glyphs.ts.
     // ====================================================================
-    if (zodiacImg && zodiacImg.complete) {
-        ctx.save();
-        ctx.globalAlpha = 0.5;
-        const zSize = L.zD;
-        ctx.drawImage(zodiacImg, cx - zSize / 2, cy - zSize / 2, zSize, zSize);
-        ctx.restore();
-    }
+    drawZodiacRing(ctx, cx, cy, L.zD / 526);
 
     // ====================================================================
     // 5. 12-hour golden demi-radial markers

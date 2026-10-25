@@ -1,0 +1,48 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+body{margin:0;background:#111;color:#ccc;font:12px Menlo}
+.g{display:inline-block;margin:4px;position:relative}
+.g span{position:absolute;left:4px;top:2px}
+</style></head><body>
+<img id="png" src="zodiac2x.png" style="display:none">
+<div id="sheet"></div>
+<script src="glyphs.js"></script>
+<script>
+const Q = new URLSearchParams(location.search);
+const SIZE = +(Q.get('size')||400), HALF = +(Q.get('half')||18); // frame half-extent in units
+const SHOW_TEXT = Q.get('text')!=='0', SHOW_PNG = Q.get('png')!=='0', SHOW_GRID = Q.get('grid')!=='0';
+const ONLY = Q.get('only'); // comma list of indices
+const k = SIZE/(2*HALF);
+const img = document.getElementById('png');
+function draw(){
+  const sheet=document.getElementById('sheet');
+  GLYPHS.forEach((g,i)=>{
+    if (ONLY && !ONLY.split(',').map(Number).includes(i)) return;
+    const c=document.createElement('canvas'); c.width=c.height=SIZE;
+    const wrap=document.createElement('div'); wrap.className='g'; wrap.appendChild(c);
+    const lab=document.createElement('span'); lab.textContent=i+' '+g.name+' '+g.ch; wrap.appendChild(lab);
+    sheet.appendChild(wrap);
+    const ctx=c.getContext('2d');
+    ctx.fillStyle='#000'; ctx.fillRect(0,0,SIZE,SIZE);
+    const a=i*Math.PI/6, bottom=(i>3&&i<9);
+    const frame=()=>{ ctx.setTransform(k,0,0,k,SIZE/2,SIZE/2); };
+    // PNG crop into frame
+    if (SHOW_PNG){ frame(); if(bottom) ctx.rotate(Math.PI); ctx.translate(0,237); ctx.rotate(-a); ctx.translate(-263,-263);
+      ctx.globalAlpha=0.9; ctx.drawImage(img,0,0,526,526); ctx.globalAlpha=1; }
+    // tint png green: draw a green multiply overlay
+    if (SHOW_PNG){ ctx.setTransform(1,0,0,1,0,0); ctx.globalCompositeOperation='multiply'; ctx.fillStyle='#4f4'; ctx.fillRect(0,0,SIZE,SIZE); ctx.globalCompositeOperation='source-over'; }
+    // grid every 2 units, labelled every 4
+    if (SHOW_GRID){ frame(); ctx.lineWidth=0.06; 
+      for(let u=-HALF;u<=HALF;u+=2){ ctx.strokeStyle=(u%4===0)?'rgba(255,255,255,0.35)':'rgba(255,255,255,0.12)'; if(u===0) ctx.strokeStyle='rgba(255,255,0,0.6)';
+        ctx.beginPath(); ctx.moveTo(u,-HALF); ctx.lineTo(u,HALF); ctx.moveTo(-HALF,u); ctx.lineTo(HALF,u); ctx.stroke(); }
+      ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle='#aaa'; ctx.font='9px Menlo';
+      for(let u=-HALF+2;u<HALF;u+=4){ ctx.fillText(u, SIZE/2+u*k-6, SIZE-2); ctx.fillText(u, 1, SIZE/2+u*k+3); } }
+    // Apple Symbols text reference
+    if (SHOW_TEXT){ frame(); ctx.font="36px 'Apple Symbols'"; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+      ctx.fillStyle='rgba(90,140,255,0.55)'; ctx.fillText(g.ch,0,+(Q.get('base')||12)); }
+    // authored path
+    frame(); ctx.lineWidth=g.w||STROKE_W; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='rgba(255,60,60,0.85)';
+    for(const d of g.d){ ctx.stroke(new Path2D(d)); } ctx.fillStyle=ctx.strokeStyle; for(const d of (g.f||[])){ const p=new Path2D(d); ctx.fill(p); ctx.stroke(p); }
+  });
+}
+if (img.complete) draw(); else img.onload=draw;
+</script></body></html>

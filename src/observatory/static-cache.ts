@@ -73,7 +73,7 @@ export function getStaticCache(L: LayoutParams, noonOnTop: boolean): OffscreenCa
 
     ctx.save();
     ctx.scale(dpr, dpr);
-    // 2. Main orrery dial (needs its three images).
+    // 2. Main orrery dial (needs its two images: sun, constellation names).
     if (areDialImagesReady()) {
         drawMainDial(ctx, L, noonOnTop);
         fixUpSunRegion(ctx, L, noonOnTop, dpr);

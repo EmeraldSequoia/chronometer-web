@@ -1,0 +1,45 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+body{margin:0;background:#1a1a1a;color:#ddd;font:13px Menlo}
+h2{font:14px Menlo;margin:10px 8px 2px}
+.row{display:flex;flex-wrap:wrap;gap:6px;padding:0 6px 6px}
+.cell{position:relative;background:#000}
+.cell span{position:absolute;left:5px;top:3px;font-size:11px;color:#9ad}
+</style></head><body>
+<img id="png" src="zodiac1x.png" style="display:none">
+<h2>Zodiac ring, today's size (s = 1, 526 px) — left: zodiac.png as drawn today · middle: vector strokes, opaque rgb(144,144,144) · right: overlay (PNG green, vector red)</h2>
+<div class="row" id="ring"></div>
+<h2 id="h2">Each sign at 4K magnification (×6 of reference) — left: zodiac.png upscaled as today · middle: vector · right: overlay</h2>
+<div class="row" id="glyphs"></div>
+<script src="glyphs1x.js"></script>
+<script>
+const Q=new URLSearchParams(location.search); const K=+(Q.get('k')||6), HALF=+(Q.get('half')||20);
+const img=document.getElementById('png');
+const ALPHA=0.5; const VEC='rgb(144,144,144)'; // opaque: 50% white over the dial's 12.5%-white-on-black (grey 32)
+function strokeGlyph(ctx,g,color){
+  ctx.lineCap='round'; ctx.lineJoin='round'; ctx.lineWidth=g.w||STROKE_W; ctx.strokeStyle=color; ctx.fillStyle=color;
+  for(const d of g.d) ctx.stroke(new Path2D(d));
+  for(const d of (g.f||[])){ const p=new Path2D(d); ctx.fill(p); ctx.stroke(p); }
+}
+// draw the vector ring: centre (cx,cy), scale s
+function drawRing(ctx,cx,cy,s,color){
+  GLYPHS.forEach((g,i)=>{ const a=i*Math.PI/6, bottom=i>3&&i<9;
+    ctx.save(); ctx.translate(cx,cy); ctx.rotate(a); ctx.translate(0,-237*s); if(bottom) ctx.rotate(Math.PI); ctx.scale(s,s);
+    strokeGlyph(ctx,g,color); ctx.restore(); });
+}
+function panel(parent,label,W,H,fn){ const c=document.createElement('canvas'); c.width=W; c.height=H; const d=document.createElement('div'); d.className='cell'; d.appendChild(c); const sp=document.createElement('span'); sp.textContent=label; d.appendChild(sp); parent.appendChild(d); const ctx=c.getContext('2d'); ctx.fillStyle='rgb(32,32,32)'; ctx.fillRect(0,0,W,H); fn(ctx); }
+function go(){
+  const ring=document.getElementById('ring'); const D=526;
+  panel(ring,'zodiac.png',D,D,ctx=>{ ctx.globalAlpha=ALPHA; ctx.drawImage(img,0,0,D,D); });
+  panel(ring,'vector',D,D,ctx=>{ drawRing(ctx,263,263,1,VEC); });
+  panel(ring,'overlay',D,D,ctx=>{ ctx.drawImage(img,0,0,D,D); ctx.globalCompositeOperation='multiply'; ctx.fillStyle='#4f4'; ctx.fillRect(0,0,D,D); ctx.globalCompositeOperation='source-over'; ctx.globalAlpha=0.75; drawRing(ctx,263,263,1,'#f44'); });
+  const gl=document.getElementById('glyphs'); const P=2*HALF*K;
+  GLYPHS.forEach((g,i)=>{ const a=i*Math.PI/6, bottom=i>3&&i<9;
+    const frame=ctx=>{ ctx.setTransform(K,0,0,K,P/2,P/2); };
+    const pngInFrame=ctx=>{ frame(ctx); if(bottom) ctx.rotate(Math.PI); ctx.translate(0,237); ctx.rotate(-a); ctx.translate(-263,-263); ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high'; ctx.drawImage(img,0,0,526,526); };
+    panel(gl,i+' '+g.name+' png',P,P,ctx=>{ ctx.globalAlpha=ALPHA; pngInFrame(ctx); });
+    panel(gl,'vector',P,P,ctx=>{ frame(ctx); strokeGlyph(ctx,g,VEC); });
+    panel(gl,'overlay',P,P,ctx=>{ pngInFrame(ctx); ctx.setTransform(1,0,0,1,0,0); ctx.globalCompositeOperation='multiply'; ctx.fillStyle='#4f4'; ctx.fillRect(0,0,P,P); ctx.globalCompositeOperation='source-over'; ctx.globalAlpha=0.8; frame(ctx); strokeGlyph(ctx,g,'#f44'); });
+  });
+}
+if(img.complete) go(); else img.onload=go;
+</script></body></html>
