@@ -222,15 +222,26 @@ second hands re-synced every 20 s; under scrub they re-evaluate every tick like
 everything else — mode 3). Uses a two-phase algorithm:
 
 - **Phase 1 (catch-up)**: If the hand is more than 0.002 rad from where it
-  should be, animate at `animSpeed` (2.0 rad/s) to the point where the hand
-  *should be when catch-up finishes* (the correct position advances at
-  `naturalSpeed` during catch-up, so `catchUpTime = error / (animSpeed - naturalSpeed)`).
+  should be, animate at `animSpeed` (2.0 rad/s) **along the shortest path** to
+  the point where the hand *should be when catch-up finishes* (the correct
+  position advances at `naturalSpeed` during catch-up, so a hand that is behind
+  closes at `animSpeed − naturalSpeed` and a hand that is ahead backs up at
+  `animSpeed + naturalSpeed`). The error is the signed shortest-path distance
+  because that is the path `startAnimationRaw` animates; measuring it one way
+  round (as before 2026-10-28) sent any error over π backwards over a duration
+  computed for the forward trip.
 - **Phase 2 (sweep)**: From the catch-up target, sweep at `naturalSpeed` until
   the next update boundary. Phase 2 params are stored in `pendingSweep` and
   picked up by the animate pass when Phase 1 completes.
 
-This handles tab-switch recovery gracefully: the hand catches up at 2 rad/s
-then resumes smooth ticking.
+Tab-switch / sleep recovery: `resyncAfterGap` runs `finish()` then `reset()`.
+`finish()` settles a natural-speed hand **where its sweep has it now** — never
+at `anim.targetValue`, which for these values is the *end* of the sweep, up to
+20 s in the future (snapping there put the second hands up to 20 s ahead on
+every tab return and ran them backwards; fixed 2026-10-28). The hand is then
+exactly right when the sweep ran on through the gap (hidden tab) and behind by
+the gap after a system sleep (the perf clock froze), and the catch-up animates
+only that real error at 2 rad/s before resuming the smooth sweep.
 
 **3. Scrub** (quantized mode, all values):
 During hold-to-scrub, display time jumps by one unit per tick and **every

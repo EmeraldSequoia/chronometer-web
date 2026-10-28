@@ -262,9 +262,9 @@ function updateObsValueEvalAhead(
  * Update a natural-speed value (e.g., second hand) in 1×/−1× mode.
  *
  * Two-phase animation:
- *   Phase 1 (catch-up): Animate at animSpeed from current position to where
- *     the hand should be when catch-up finishes (the correct position advances
- *     at naturalSpeed during catch-up).
+ *   Phase 1 (catch-up): Animate at animSpeed, along the shortest path, from the
+ *     current position to where the hand should be when catch-up finishes (the
+ *     correct position advances at naturalSpeed during catch-up).
  *   Phase 2 (sweep): Sweep at naturalSpeed until the next update boundary.
  *
  * Phase 2 params are stored in v.pendingSweep and picked up by animateObsValue
@@ -299,20 +299,21 @@ function updateNaturalSpeedValue(
     // Effective natural speed (clockwise forward, counter-clockwise reverse)
     const effNaturalSpeed = v.naturalSpeed * timeDirection;
 
-    // Compute error: how far is the hand from where it should be?
+    // Error: the signed shortest-path distance from the hand to where it should
+    // be, measured in the direction of travel — positive = the hand is BEHIND
+    // (it must advance in the travel direction), negative = AHEAD. Shortest path
+    // because that is the path startAnimationRaw animates, and the Phase 1
+    // duration below must be computed for the path the animation actually
+    // takes. (The former clockwise-only normalisation put any error over π — a
+    // hand more than 30 s behind, or any hand that is ahead — the long way
+    // round in the arithmetic but the short way in the animation: backwards,
+    // at a speed computed for the other path.)
     const TWO_PI = 2 * Math.PI;
-    let error: number;
-    if (timeDirection === 1) {
-        // Normalize clockwise [0, 2π)
-        error = currentCorrectAngle - v.anim.currentValue;
-        error = ((error % TWO_PI) + TWO_PI) % TWO_PI;
-    } else {
-        // Normalize counter-clockwise
-        error = v.anim.currentValue - currentCorrectAngle;
-        error = ((error % TWO_PI) + TWO_PI) % TWO_PI;
-    }
+    let error = currentCorrectAngle - v.anim.currentValue;
+    error = error - TWO_PI * Math.round(error / TWO_PI);   // (-π, π]
+    error *= timeDirection;
 
-    if (error < NATURAL_ERROR_THRESHOLD) {
+    if (Math.abs(error) < NATURAL_ERROR_THRESHOLD) {
         // On track — Phase 2 only (sweep at naturalSpeed)
         const sweepAngle = effNaturalSpeed * dtToNextUpdateSec;
         const finalTarget = currentCorrectAngle + sweepAngle;
@@ -322,21 +323,32 @@ function updateNaturalSpeedValue(
         return;
     }
 
-    // Phase 1: Catch-up at animSpeed.
-    // The hand closes the gap at (animSpeed - naturalSpeed) rad/s.
-    // catchUpTime = error / (animSpeed - naturalSpeed)
-    const differentialSpeed = v.animSpeed - v.naturalSpeed;
-    if (differentialSpeed <= 0) {
-        // animSpeed not fast enough to close gap — compress everything
-        const sweepAngle = effNaturalSpeed * dtToNextUpdateSec;
-        const finalTarget = currentCorrectAngle + sweepAngle;
-        startAnimationRaw(v.anim, finalTarget, perfNow,
-            v.animSpeed / K_ANGLE_ANIM_SPEED, dtToNextUpdateMs, v.period);
-        v.pendingSweep = null;
-        return;
+    // Phase 1: Catch-up at animSpeed along the shortest path.
+    //   Behind: the hand gains on the advancing target at (animSpeed − naturalSpeed).
+    //   Ahead:  it backs toward the advancing target at (animSpeed + naturalSpeed).
+    // catchUpTime = |error| / closingSpeed.
+    let behind = error >= 0;
+    if (behind) {
+        const differentialSpeed = v.animSpeed - v.naturalSpeed;
+        if (differentialSpeed <= 0) {
+            // animSpeed not fast enough to close gap — compress everything
+            const sweepAngle = effNaturalSpeed * dtToNextUpdateSec;
+            const finalTarget = currentCorrectAngle + sweepAngle;
+            startAnimationRaw(v.anim, finalTarget, perfNow,
+                v.animSpeed / K_ANGLE_ANIM_SPEED, dtToNextUpdateMs, v.period);
+            v.pendingSweep = null;
+            return;
+        }
+        // The forward chord is error·animSpeed/(animSpeed − naturalSpeed): just
+        // under π of error it already exceeds π, and the animator would take the
+        // short way back with the forward duration. Go back deliberately instead.
+        if (error > Math.PI * differentialSpeed / v.animSpeed) {
+            behind = false;
+            error -= TWO_PI;
+        }
     }
-
-    const catchUpSec = error / differentialSpeed;
+    const closingSpeed = behind ? v.animSpeed - v.naturalSpeed : v.animSpeed + v.naturalSpeed;
+    const catchUpSec = Math.abs(error) / closingSpeed;
     const catchUpMs = catchUpSec * 1000;
 
     if (catchUpMs >= dtToNextUpdateMs) {
@@ -1000,12 +1012,28 @@ export class Updater<K extends string = string> {
      * just snaps where the hand is, and the subsequent stopped-`onBeatStep` settle
      * animates to `A(now)` (so those transitions still flip smoothly). Non-on-beat
      * values always snap to `anim.targetValue` regardless of `env`.
+     *
+     * **Natural-speed values** (`naturalSpeed > 0`) settle where their sweep has
+     * them *now*, not at `anim.targetValue`: that target is the *end* of the
+     * current sweep, up to one update interval in the future. Snapping there put
+     * Observatory's second hands up to 20 s ahead on every tab return, and the
+     * Phase 1 catch-up then ran them backwards (2026-10-28). Settled at the
+     * present, the hand is exactly right when the sweep ran on through the gap
+     * (hidden tab — the perf clock kept counting) and behind by the gap when the
+     * perf clock froze (system sleep); the `reset()` that follows then animates
+     * only the real error.
      */
     finish(env?: Environment): void {
+        const perfNow = performance.now();
         for (const v of this.values) {
             v.pendingSweep = null;
             v.pendingTarget = null;
-            let target = (v.onBeat && env) ? v.evalFn(env) : v.anim.targetValue;
+            let target: number;
+            if (v.naturalSpeed > 0) {
+                target = interpolateValue(v.anim, perfNow);
+            } else {
+                target = (v.onBeat && env) ? v.evalFn(env) : v.anim.targetValue;
+            }
             if (isFinite(v.period)) {
                 target = ((target % v.period) + v.period) % v.period;
             }
