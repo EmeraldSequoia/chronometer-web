@@ -1,5 +1,5 @@
 /**
- * prefers-reduced-motion: transitions jump, content motion still sweeps.
+ * prefers-reduced-motion: transitions jump, content motion still moves.
  * (updater.ts setReducedMotion / transitionMultiplier)
  */
 import { describe, test, expect, vi, afterEach } from 'vitest';
@@ -46,23 +46,30 @@ describe('reduced motion', () => {
         }
     });
 
-    test('a natural-speed hand still sweeps under reduced motion', () => {
+    test('a continuous hand keeps tracking under reduced motion; only its catch-up jumps', () => {
         setReducedMotion(true);
         let perfNow = 1000;
         vi.spyOn(performance, 'now').mockImplementation(() => perfNow);
         let ms = new Date('2025-06-15T12:00:00.000Z').getTime();
         const { getNow, withDisplayTime } = makeOverridableGetNow(() => new Date(ms));
         const env = makeEnv(getNow);
-        const v = createObsValue({ name: 'sec', expr: 'secAngle()', updateInterval: 20, naturalSpeed: 2 * Math.PI / 60 }, env, perfNow);
+        const secAngle = env.functions.get('secAngle')!;
+        const v = createObsValue({ name: 'sec', expr: 'secAngle()', updateInterval: 1, continuous: true }, env, perfNow);
         const u = new Updater();
         u.add(v);
         const ctx: TimingContext = { tickIntervalMs: null, displayDeltaSec: 0, direction: 1 };
         u.tick(env, perfNow, getNow, withDisplayTime, ctx);
         const a0 = v.currentValue;
-        // Half a second later (real and display time), still before the 20 s boundary.
+        // Half a second later (real and display time): the content motion continues.
         perfNow += 500; ms += 500;
         u.tick(env, perfNow, getNow, withDisplayTime, ctx);
-        expect(v.currentValue).not.toBe(a0);       // it moved…
-        expect(u.anyAnimating()).toBe(true);        // …by sweeping, not jumping
+        expect(v.currentValue).not.toBe(a0);                  // it moved…
+        expect(v.currentValue).toBeCloseTo(secAngle(), 9);    // …tracking exactly
+        // Knock the hand 5 s off: the catch-up is a transition, so it jumps.
+        v.anim.currentValue -= 5 * 2 * Math.PI / 60; v.anim.targetValue = v.anim.currentValue;
+        perfNow += 16; ms += 16;
+        u.tick(env, perfNow, getNow, withDisplayTime, ctx);
+        expect(v.currentValue).toBeCloseTo(secAngle(), 9);
+        expect(u.anyAnimating()).toBe(false);
     });
 });

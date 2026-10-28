@@ -22,7 +22,7 @@ import { type AnimatingValue, makeAnimatingValue } from './animation.js';
  * snap update" (no animation). Used by clients with digital readouts (the
  * Inspector), where a value can be any magnitude and a finite settle speed would
  * either crawl or overshoot. Distinct from "snap", which elsewhere means
- * "animate at the default speed rather than the slow naturalSpeed sweep".
+ * "animate at the default speed" (the legacy snap-to-target branch).
  */
 export const JUMP = Infinity;
 
@@ -52,9 +52,10 @@ export interface ObsValue {
     updateInterval: number;
 
     /** Settle / catch-up animation speed, in units/s (rad/s for angular values).
-     *  Governs the *non-budget* animations — the stopped-state settle and the
-     *  legacy snap-to-target / Phase-1 catch-up. (Eval-ahead and scrub ignore it;
-     *  they animate over an explicit time budget.) Default 2.0.
+     *  Governs the *non-budget* animations — the stopped-state settle, the
+     *  legacy snap-to-target, and a continuous value's catch-up after a gap.
+     *  (Eval-ahead and scrub ignore it; they animate over an explicit time
+     *  budget.) Default 2.0.
      *
      *  This is the per-app "default animation speed" carried over from
      *  Chronometer/Observatory, made client-controllable per value. There is no
@@ -64,13 +65,16 @@ export interface ObsValue {
      *  to the correct value on settle rather than creep at a mis-scaled rate. */
     animSpeed: number;
 
-    /** Steady-state sweep speed in rad/s.
-     *  0 = snap-to-target mode (most values).
-     *  >0 = constant-velocity sweep (e.g., second hands = 2π/60 rad/s).
-     *  When >0, the update pass uses a two-phase algorithm:
-     *    Phase 1: catch up at animSpeed to the moving target
-     *    Phase 2: sweep at naturalSpeed until next update */
-    naturalSpeed: number;
+    /** If true, the value is **continuous**: at 1× / −1× the updater evaluates
+     *  it at the current display time *every frame* and sets it directly, and
+     *  only *animates* (at `animSpeed`, shortest path, re-aimed each frame) when
+     *  the drawn position is off by more than the updater's snap threshold —
+     *  after a hidden tab, a sleep, a Now press, at startup. Observatory's second
+     *  hands. `updateInterval` is not consulted at 1× for these (scrub
+     *  re-evaluates every value every tick; stopped settles at the frozen time).
+     *  Replaced the two-phase natural-speed sweep on 2026-10-28; see
+     *  updater.ts `updateObsValueContinuous`. */
+    continuous: boolean;
 
     /** Current computed value. NaN = "don't display this element". */
     currentValue: number;
@@ -83,10 +87,6 @@ export interface ObsValue {
 
     /** performance.now() at which the next update should fire. */
     nextUpdateTime: number;
-
-    /** Pending Phase 2 sweep animation (only for naturalSpeed > 0).
-     *  Set during update pass; consumed during animate pass when Phase 1 ends. */
-    pendingSweep: { target: number; durationMs: number } | null;
 
     /** On-beat scheduling (see {@link onBeat}). When the value has *arrived* at a
      *  boundary and is *sitting* waiting to begin its next snap, this holds the
@@ -149,7 +149,7 @@ export interface ObsValueDef {
     expr: string;
     updateInterval: number;  // seconds
     animSpeed?: number;      // catch-up speed in rad/s; default 2.0
-    naturalSpeed?: number;   // sweep speed in rad/s; default 0 (snap-to-target)
+    continuous?: boolean;    // if true, evaluate every frame and track directly (second hands)
     linear?: boolean;        // if true, value is not an angle — skip fmod wrapping
     period?: number;         // cyclic wrap period (default 2π for angles); ignored when linear
     evalAhead?: boolean;     // if true, use lag-free eval-ahead update
@@ -174,7 +174,6 @@ export function createObsValue(
     const evalFn = compileExpr(expr);
     const initialValue = evalFn(env);
     const animSpeed = def.animSpeed ?? 2.0;      // rad/s
-    const naturalSpeed = def.naturalSpeed ?? 0;   // rad/s
     const linear = def.linear ?? false;
     // Wrap period: linear ⇒ no wrap (Infinity); else the given period or 2π (angle).
     const period = linear ? Infinity : (def.period ?? 2 * Math.PI);
@@ -185,13 +184,12 @@ export function createObsValue(
         evalFn,
         updateInterval: def.updateInterval,
         animSpeed,
-        naturalSpeed,
+        continuous: def.continuous ?? false,
         currentValue: initialValue,
         anim: makeAnimatingValue(initialValue, perfNow),
         // Schedule immediate update on first frame so animation starts right away.
         nextUpdateDisplayTime: 0,
         nextUpdateTime: 0,
-        pendingSweep: null,
         pendingTarget: null,
         linear,
         period,

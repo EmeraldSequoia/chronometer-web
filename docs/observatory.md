@@ -88,7 +88,7 @@ smoothly animated between updates.
 
 > **The ObsValue core is shared.** The generic value type + construction live in
 > [src/shared/obs-value.ts](../src/shared/obs-value.ts); the per-frame
-> update/animate passes (snap-to-target, two-phase `naturalSpeed` sweep, scrub
+> update/animate passes (snap-to-target, continuous per-frame tracking, scrub
 > compression, lag-free eval-ahead) and the **`Updater`** collection live in
 > [src/shared/updater.ts](../src/shared/updater.ts) — the shared updater
 > subsystem, also used by the Inspector. `obs-values.ts` is purely the
@@ -180,11 +180,10 @@ idle), and `avg` is throughput including idle gaps.
 | `expr` | Parsed AST (from expression parser) |
 | `updateInterval` | Seconds (positive = epoch-aligned, negative = sentinel) |
 | `animSpeed` | Catch-up animation speed in rad/s (default 2.0) |
-| `naturalSpeed` | Steady-state sweep speed in rad/s (default 0 = snap-to-target) |
+| `continuous` | If true, evaluated every frame at 1× and set directly; animates only to catch up after a gap (the second hands) |
 | `currentValue` | Current interpolated value (NaN = don't display) |
 | `anim` | AnimatingValue state for smooth interpolation |
 | `nextUpdateTime` | performance.now() of next scheduled re-evaluation |
-| `pendingSweep` | Phase 2 sweep params (target + duration), or null |
 | `linear` | If true, value is not an angle — skip fmod wrapping (see [Earth Map](#earth-map-with-terminator)) |
 | `evalAhead` | If true, use lag-free eval-ahead updates (evaluate the next boundary, sweep there). Not used by Observatory values today; powers the Inspector |
 | `discrete` | If true, evaluate at the current display time and snap (no interpolation) — for step values like event times / integers. Not used by Observatory today; powers the Inspector catalog |
@@ -211,37 +210,46 @@ Values use two scheduling mechanisms:
 
 The update pass dispatches to one of three modes:
 
-**1. Snap-to-target** (`naturalSpeed === 0`, most values):
+**1. Snap-to-target** (most values):
 The expression is evaluated at time T and the value animates at `animSpeed`
 (default 2.0 rad/s) to A(T). Used for hour/minute hands, sun events,
 planet hands, ring stops — anything that just moves to a new position.
 
-**2. Two-phase sweep** (`naturalSpeed > 0`, second hands):
-For constant-velocity values that sweep between infrequent updates at 1× (e.g.,
-second hands re-synced every 20 s; under scrub they re-evaluate every tick like
-everything else — mode 3). Uses a two-phase algorithm:
+**2. Continuous tracking** (`continuous: true`, the four second hands):
+Evaluated at the current display time **every frame** and set directly: a
+second hand's position is a function of display time alone and the running
+loop draws every frame anyway, so the value is simply A(now) — exact at any
+frame rate (under the Low power cap it steps, which is what that preference
+means), in either direction, with no schedule and no future target to go stale
+across a gap. The only *animation* is the transition when the drawn position is
+off by more than the snap threshold (0.05 rad, half a second of second hand —
+after a hidden tab, a system sleep, a Now press, at startup): the hand sweeps
+toward the moving target at `animSpeed` (2 rad/s) along the shortest path,
+re-aimed every frame, and snaps the last sliver. `updateInterval` is not
+consulted at 1× for these; under scrub they re-evaluate every tick like
+everything else (mode 3), and stopped they settle at the frozen time.
 
-- **Phase 1 (catch-up)**: If the hand is more than 0.002 rad from where it
-  should be, animate at `animSpeed` (2.0 rad/s) **along the shortest path** to
-  the point where the hand *should be when catch-up finishes* (the correct
-  position advances at `naturalSpeed` during catch-up, so a hand that is behind
-  closes at `animSpeed − naturalSpeed` and a hand that is ahead backs up at
-  `animSpeed + naturalSpeed`). The error is the signed shortest-path distance
-  because that is the path `startAnimationRaw` animates; measuring it one way
-  round (as before 2026-10-28) sent any error over π backwards over a duration
-  computed for the forward trip.
-- **Phase 2 (sweep)**: From the catch-up target, sweep at `naturalSpeed` until
-  the next update boundary. Phase 2 params are stored in `pendingSweep` and
-  picked up by the animate pass when Phase 1 completes.
+Tab-switch / sleep recovery: `resyncAfterGap` runs `finish()` then `reset()`;
+a continuous value's `targetValue` is never in the future, so the snap is
+harmless, and the next frame's catch-up animates only the real error — nothing
+after a short hidden-tab gap (the hand is behind by the gap, under the
+threshold for anything shorter than half a second, else a sub-frame sweep),
+the sleep length after a sleep.
 
-Tab-switch / sleep recovery: `resyncAfterGap` runs `finish()` then `reset()`.
-`finish()` settles a natural-speed hand **where its sweep has it now** — never
-at `anim.targetValue`, which for these values is the *end* of the sweep, up to
-20 s in the future (snapping there put the second hands up to 20 s ahead on
-every tab return and ran them backwards; fixed 2026-10-28). The hand is then
-exactly right when the sweep ran on through the gap (hidden tab) and behind by
-the gap after a system sleep (the perf clock froze), and the catch-up animates
-only that real error at 2 rad/s before resuming the smooth sweep.
+> **History.** Until 2026-10-28 the second hands used a *two-phase
+> natural-speed sweep*: re-evaluated every 20 s and swept at a configured
+> 2π/60 rad/s in between, with a catch-up phase at `animSpeed` when a
+> re-evaluation found the hand off. Its future sweep target is what `finish()`
+> snapped to on every tab return (the hand jumped up to 20 s ahead and ran
+> backwards), and its direction-dependent catch-up arithmetic disagreed with
+> the shortest-path animator above π of error; it had earlier produced the
+> seconds-scrub jump
+> ([planning/2026-09-24-seconds-scrub-cadence-and-bce-offset.md](../planning/2026-09-24-seconds-scrub-cadence-and-bce-offset.md)).
+> The economy it bought — not evaluating the solar and sidereal expressions
+> every frame — measured ~3 µs per frame for all four hands. Both defects were
+> fixed inside the mechanism first (commit `45e3c8d`, kept for reference), then
+> the mechanism was replaced
+> ([planning/2026-10-28-second-hands-continuous-tracking.md](../planning/2026-10-28-second-hands-continuous-tracking.md)).
 
 **3. Scrub** (quantized mode, all values):
 During hold-to-scrub, display time jumps by one unit per tick and **every
@@ -259,20 +267,20 @@ then jumping
 
 ### Value Catalog
 
-| Group | Values | Update | naturalSpeed |
+| Group | Values | Update | continuous |
 |-------|--------|--------|--------------|
-| Clock hands | h24, h12, minute, second | 1–20s | second: 2π/60 |
-| Sun events | sunrise, sunset, golden×2, civil×2, nautical×2, astro×2, noon, midnight | Sentinel (rise↔set) | 0 |
-| UTC subdial | hour, minute, second | 1–60s | second: 2π/60 |
-| Solar subdial | hour, minute, second | 1–60s | second: 2π/60 |
-| Sidereal subdial | hour, minute, second | 1–60s | second: 2π/60 |
-| Planet hands | saturn, jupiter, mars, earth, venus, mercury, moonOffset | 3600s | 0 |
-| Planet rings | 6 × (rise, set, transit, riseValid, setValid, aboveHorizon) | Sentinel (rise↔set) | 0 |
-| Sun ring | 14 altitude stops + noon + midnight | Sentinel (rise↔set) | 0 |
-| Earth map | earthSslat (linear), earthSslng | Sentinel / 60s | 0 |
-| Moon | moonPhase, moonRotation, moonDistAU (linear) | 60s / 60s / 3600s | 0 |
-| Dials | dialAlt (linear), dialAz, eotAngle | 60s / 60s / 3600s | 0 |
-| Eclipse | eclSeparation/eclShadowSize/eclSunDist/eclMoonDist (linear), eclKind (discrete), eclSunAlt/eclMoonAlt (linear), eclSunAz/eclMoonAz/eclMoonRelAngle, eclRingSunRA/eclRingMoonRA/eclRingNodeRA | `EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION` | 0 |
+| Clock hands | h24, h12, minute, second | 1–15s | second |
+| Sun events | sunrise, sunset, golden×2, civil×2, nautical×2, astro×2, noon, midnight | Sentinel (rise↔set) | — |
+| UTC subdial | hour, minute, second | 1–60s | second |
+| Solar subdial | hour, minute, second | 1–60s | second |
+| Sidereal subdial | hour, minute, second | 1–60s | second |
+| Planet hands | saturn, jupiter, mars, earth, venus, mercury, moonOffset | 3600s | — |
+| Planet rings | 6 × (rise, set, transit, riseValid, setValid, aboveHorizon) | Sentinel (rise↔set) | — |
+| Sun ring | 14 altitude stops + noon + midnight | Sentinel (rise↔set) | — |
+| Earth map | earthSslat (linear), earthSslng | Sentinel / 60s | — |
+| Moon | moonPhase, moonRotation, moonDistAU (linear) | 60s / 60s / 3600s | — |
+| Dials | dialAlt (linear), dialAz, eotAngle | 60s / 60s / 3600s | — |
+| Eclipse | eclSeparation/eclShadowSize/eclSunDist/eclMoonDist (linear), eclKind (discrete), eclSunAlt/eclMoonAlt (linear), eclSunAz/eclMoonAz/eclMoonRelAngle, eclRingSunRA/eclRingMoonRA/eclRingNodeRA | `EC_UPDATE_NEXT_INTERESTING_ECLIPSE_MOTION` | — |
 
 ### Planet Ring Validity Flags
 

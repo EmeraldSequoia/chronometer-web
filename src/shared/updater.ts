@@ -2,7 +2,7 @@
  * Updater — the per-frame logic that drives ObsValues.
  *
  * This is the embryonic "updater" subsystem: it owns the per-value update
- * branches (snap-to-target, two-phase natural-speed sweep, scrub compression,
+ * branches (snap-to-target, continuous per-frame tracking, scrub compression,
  * and lag-free eval-ahead), the per-frame interpolation pass, and the
  * time-shift helper (`makeOverridableGetNow`) used by eval-ahead.
  *
@@ -36,11 +36,11 @@ const K_ANGLE_ANIM_SPEED = 2.0;
 
 /**
  * When the OS asks for reduced motion (`prefers-reduced-motion: reduce`),
- * *transitions* jump instead of sweeping: the catch-up phase of a
- * natural-speed hand, settling to the frozen time when stopped, the legacy
- * 1× snap-to-target, drag-to-explore's fixed-duration updates, and the
- * on-beat settles. Motion that *is* the content — the second hands' natural-
- * speed sweep, the eval-ahead sweep between boundaries, the on-beat sweep to
+ * *transitions* jump instead of sweeping: a continuous hand's catch-up after
+ * a gap, settling to the frozen time when stopped, the legacy 1×
+ * snap-to-target, drag-to-explore's fixed-duration updates, and the on-beat
+ * settles. Motion that *is* the content — the second hands' per-frame
+ * tracking, the eval-ahead sweep between boundaries, the on-beat sweep to
  * the next beat, scrub compression — is untouched. Tracked live from the
  * media query where one exists (not under jsdom / node).
  */
@@ -63,9 +63,18 @@ function transitionMultiplier(v: ObsValue): number {
     return reducedMotion ? 0 : v.animSpeed / K_ANGLE_ANIM_SPEED;
 }
 
-// Error threshold (radians) below which a natural-speed value is considered
-// "on track" and skips the catch-up phase.
-const NATURAL_ERROR_THRESHOLD = 0.002;
+/**
+ * Continuous values: the drawn position is set straight to the evaluated one
+ * when they differ by no more than this (radians, or the value's own units for
+ * a linear value); beyond it the value *animates* toward the moving target at
+ * `animSpeed` (a gap, a Now press, startup). The threshold must exceed the
+ * value's own motion between two frames at the slowest paced rate, or the
+ * tracking would be redrawn as a perpetual one-frame-late animation: a second
+ * hand moves 2π/60 ÷ 10 fps ≈ 0.01 rad per Low-power frame. 0.05 rad is half a
+ * second of second hand, which the 2 rad/s catch-up covers in 25 ms — one
+ * frame — so snapping that last sliver is invisible.
+ */
+const CONTINUOUS_SNAP_THRESHOLD = 0.05;
 
 // ── Tick CPU attribution (diagnostic) ───────────────────────────────────────
 // Module-level accumulators summed over a scrub session; the engine resets at
@@ -194,7 +203,6 @@ function updateObsValueDiscrete(
     }
 
     // Snap — no animation, no interpolation.
-    v.pendingSweep = null;
     v.anim.currentValue = newTarget;
     v.anim.targetValue = newTarget;
     v.anim.animating = false;
@@ -211,7 +219,7 @@ function updateObsValueDiscrete(
  *
  * Either way we evaluate the target *at the next point's display time* and sweep
  * `current → target` over the budget, arriving exactly when display reaches that
- * point. So it is lag-free at every step, and natural-speed sweep falls out: the
+ * point. So it is lag-free at every step, and a constant-velocity sweep falls out: the
  * implied rate is just the slope between A(now) and A(next). `timeDirection` is
  * never 0 here (the dispatch routes stopped continuous values to settle).
  */
@@ -247,7 +255,6 @@ function updateObsValueEvalAhead(
         ? withDisplayTime(nextDisplayMs, () => v.evalFn(env))
         : v.evalFn(env);
 
-    v.pendingSweep = null;
     const multiplier = v.animSpeed / K_ANGLE_ANIM_SPEED;
     if (budgetMs > 0 && isFinite(budgetMs)) {
         // Sweep to the future target over the real-time budget.
@@ -259,120 +266,46 @@ function updateObsValueEvalAhead(
 }
 
 /**
- * Update a natural-speed value (e.g., second hand) in 1×/−1× mode.
+ * Update a **continuous** value (Observatory's second hands) at 1× / −1×:
+ * evaluate at the current display time **every frame** and track it directly.
  *
- * Two-phase animation:
- *   Phase 1 (catch-up): Animate at animSpeed, along the shortest path, from the
- *     current position to where the hand should be when catch-up finishes (the
- *     correct position advances at naturalSpeed during catch-up).
- *   Phase 2 (sweep): Sweep at naturalSpeed until the next update boundary.
+ * A second hand's position is a function of display time alone, and the
+ * running loop draws every frame anyway, so the value is simply A(now) each
+ * frame: exact at any frame rate (under the Low power cap it steps, which is
+ * what that preference means), in either direction, with no schedule and no
+ * future target to go stale across a gap. The only *animation* is the
+ * transition when the drawn position is off by more than
+ * {@link CONTINUOUS_SNAP_THRESHOLD} — after a hidden tab, a system sleep, a Now
+ * press, at startup — which sweeps toward the moving target at `animSpeed`
+ * along the shortest path, re-aimed every frame, and snaps the last sliver.
  *
- * Phase 2 params are stored in v.pendingSweep and picked up by animateObsValue
- * when Phase 1 completes.
+ * This replaced the two-phase natural-speed sweep (a 20 s re-sync with a
+ * known-rate sweep between) on 2026-10-28: its future sweep target and
+ * direction-dependent catch-up arithmetic produced the tab-return jump-and-
+ * run-backwards and the seconds-scrub jump before it, and the economy it
+ * bought was ~3 µs per frame for all four hands
+ * (planning/2026-10-28-second-hands-continuous-tracking.md).
  */
-function updateNaturalSpeedValue(
-    v: ObsValue,
-    env: Environment,
-    perfNow: number,
-    getNow: () => Date,
-    timeDirection: 1 | -1,
-): void {
-    const currentCorrectAngle = v.evalFn(env);
+function updateObsValueContinuous(v: ObsValue, env: Environment, perfNow: number): void {
+    const target = v.evalFn(env);
+    // Every frame (same convention as updateObsValueFixedDuration).
+    v.nextUpdateTime = 0;
 
-    // Schedule next update
-    const nextDisplayMs = computeNextBoundary(
-        v.updateInterval * 1000, getNow, timeDirection, env);
-    v.nextUpdateDisplayTime = nextDisplayMs;
-    v.nextUpdateTime = displayTimeToPerfNow(nextDisplayMs, getNow);
-
-    // Real time until next update
-    const dtToNextUpdateMs = v.nextUpdateTime - perfNow;
-    const dtToNextUpdateSec = dtToNextUpdateMs / 1000;
-    if (dtToNextUpdateSec <= 0 || !isFinite(dtToNextUpdateSec)) {
-        // Edge case: next update is now or in the past — snap
-        startAnimationRaw(v.anim, currentCorrectAngle, perfNow,
-            transitionMultiplier(v), undefined, v.period);
-        v.pendingSweep = null;
+    const current = v.anim.currentValue;
+    let delta = target - current;
+    if (isFinite(v.period)) delta -= v.period * Math.round(delta / v.period);   // shortest path
+    if (Math.abs(delta) <= CONTINUOUS_SNAP_THRESHOLD) {
+        // On track (or the catch-up's last sliver): set it. NaN at either end
+        // fails the comparison and falls through to startAnimationRaw's NaN snap.
+        const t = isFinite(v.period) ? ((target % v.period) + v.period) % v.period : target;
+        v.anim.currentValue = t;
+        v.anim.targetValue = t;
+        v.anim.animating = false;
         return;
     }
-
-    // Effective natural speed (clockwise forward, counter-clockwise reverse)
-    const effNaturalSpeed = v.naturalSpeed * timeDirection;
-
-    // Error: the signed shortest-path distance from the hand to where it should
-    // be, measured in the direction of travel — positive = the hand is BEHIND
-    // (it must advance in the travel direction), negative = AHEAD. Shortest path
-    // because that is the path startAnimationRaw animates, and the Phase 1
-    // duration below must be computed for the path the animation actually
-    // takes. (The former clockwise-only normalisation put any error over π — a
-    // hand more than 30 s behind, or any hand that is ahead — the long way
-    // round in the arithmetic but the short way in the animation: backwards,
-    // at a speed computed for the other path.)
-    const TWO_PI = 2 * Math.PI;
-    let error = currentCorrectAngle - v.anim.currentValue;
-    error = error - TWO_PI * Math.round(error / TWO_PI);   // (-π, π]
-    error *= timeDirection;
-
-    if (Math.abs(error) < NATURAL_ERROR_THRESHOLD) {
-        // On track — Phase 2 only (sweep at naturalSpeed)
-        const sweepAngle = effNaturalSpeed * dtToNextUpdateSec;
-        const finalTarget = currentCorrectAngle + sweepAngle;
-        startAnimationRaw(v.anim, finalTarget, perfNow,
-            v.naturalSpeed / K_ANGLE_ANIM_SPEED, dtToNextUpdateMs, v.period);
-        v.pendingSweep = null;
-        return;
-    }
-
-    // Phase 1: Catch-up at animSpeed along the shortest path.
-    //   Behind: the hand gains on the advancing target at (animSpeed − naturalSpeed).
-    //   Ahead:  it backs toward the advancing target at (animSpeed + naturalSpeed).
-    // catchUpTime = |error| / closingSpeed.
-    let behind = error >= 0;
-    if (behind) {
-        const differentialSpeed = v.animSpeed - v.naturalSpeed;
-        if (differentialSpeed <= 0) {
-            // animSpeed not fast enough to close gap — compress everything
-            const sweepAngle = effNaturalSpeed * dtToNextUpdateSec;
-            const finalTarget = currentCorrectAngle + sweepAngle;
-            startAnimationRaw(v.anim, finalTarget, perfNow,
-                v.animSpeed / K_ANGLE_ANIM_SPEED, dtToNextUpdateMs, v.period);
-            v.pendingSweep = null;
-            return;
-        }
-        // The forward chord is error·animSpeed/(animSpeed − naturalSpeed): just
-        // under π of error it already exceeds π, and the animator would take the
-        // short way back with the forward duration. Go back deliberately instead.
-        if (error > Math.PI * differentialSpeed / v.animSpeed) {
-            behind = false;
-            error -= TWO_PI;
-        }
-    }
-    const closingSpeed = behind ? v.animSpeed - v.naturalSpeed : v.animSpeed + v.naturalSpeed;
-    const catchUpSec = Math.abs(error) / closingSpeed;
-    const catchUpMs = catchUpSec * 1000;
-
-    if (catchUpMs >= dtToNextUpdateMs) {
-        // Can't finish catch-up before next update — compress both phases
-        const sweepAngle = effNaturalSpeed * dtToNextUpdateSec;
-        const finalTarget = currentCorrectAngle + sweepAngle;
-        startAnimationRaw(v.anim, finalTarget, perfNow,
-            v.animSpeed / K_ANGLE_ANIM_SPEED, dtToNextUpdateMs, v.period);
-        v.pendingSweep = null;
-        return;
-    }
-
-    // Phase 1 target: where the correct position will be when catch-up ends
-    const catchUpTarget = currentCorrectAngle + effNaturalSpeed * catchUpSec;
-    startAnimationRaw(v.anim, catchUpTarget, perfNow,
-        transitionMultiplier(v), catchUpMs, v.period);
-
-    // Store Phase 2 for the animate pass to pick up
-    const remainingMs = dtToNextUpdateMs - catchUpMs;
-    const sweepAngle = effNaturalSpeed * (remainingMs / 1000);
-    v.pendingSweep = {
-        target: catchUpTarget + sweepAngle,
-        durationMs: remainingMs,
-    };
+    // Off: sweep toward the (moving) target at animSpeed, re-aimed each frame.
+    // Under reduced motion transitionMultiplier() is 0 — an immediate jump.
+    startAnimationRaw(v.anim, target, perfNow, transitionMultiplier(v), undefined, v.period);
 }
 
 /**
@@ -412,8 +345,6 @@ function updateObsValueScrub(
     startAnimationRaw(v.anim, newTarget, perfNow, v.animSpeed / K_ANGLE_ANIM_SPEED,
         tickIntervalMs, v.period);
 
-    // No pending sweep during scrub — just the per-tick sweep above
-    v.pendingSweep = null;
 }
 
 /**
@@ -423,7 +354,6 @@ function updateObsValueScrub(
 function settleAtNow(v: ObsValue, env: Environment, perfNow: number): void {
     const newTarget = v.evalFn(env);
     v.nextUpdateTime = perfNow + 100;
-    v.pendingSweep = null;
     startAnimationRaw(v.anim, newTarget, perfNow,
         transitionMultiplier(v), undefined, v.period);
 }
@@ -444,7 +374,6 @@ function updateObsValueFixedDuration(
 ): void {
     const newTarget = v.evalFn(env);
     v.nextUpdateTime = 0;  // re-evaluate every frame
-    v.pendingSweep = null;
 
     if (v.discrete) {
         // Discrete values snap — no interpolation.
@@ -470,7 +399,6 @@ function snapToTargetAtBoundary(
     const nextDisplayMs = computeNextBoundary(v.updateInterval * 1000, getNow, timeDirection, env);
     v.nextUpdateDisplayTime = nextDisplayMs;
     v.nextUpdateTime = displayTimeToPerfNow(nextDisplayMs, getNow);
-    v.pendingSweep = null;
     startAnimationRaw(v.anim, newTarget, perfNow,
         transitionMultiplier(v), undefined, v.period);
 }
@@ -734,13 +662,13 @@ function onBeatStep(
  *      scrubbing, else boundary (the one genuinely distinct, client-chosen mode).
  *   2. Stopped (`direction === 0`): continuous value settles at the frozen time.
  *   3. Eval-ahead (`v.evalAhead`): the general continuous mechanism, mode-aware
- *      (1× boundary or scrub tick) — subsumes scrub and natural-speed.
+ *      (1× boundary or scrub tick) — subsumes scrub.
  *   4. Legacy scrub-compression (`tickIntervalMs`) — non-eval-ahead values only.
- *   5. Legacy natural-speed two-phase sweep.
+ *   5. Continuous per-frame tracking (`v.continuous`, the second hands).
  *   6. Legacy snap-to-target at a boundary.
  *
- * Branches 4–6 are the pre-eval-ahead mechanisms Observatory still uses; we
- * converge away from them later.
+ * Branches 4 and 6 are the pre-eval-ahead mechanisms Observatory still uses;
+ * we converge away from them later.
  */
 export function updateObsValue(
     v: ObsValue,
@@ -762,8 +690,8 @@ export function updateObsValue(
     } else if (tickIntervalMs !== null && tickIntervalMs > 0) {
         updateObsValueScrub(v, env, perfNow, getNow, timeDirection,
             tickIntervalMs, displayDeltaPerTickSec);
-    } else if (v.naturalSpeed > 0) {
-        updateNaturalSpeedValue(v, env, perfNow, getNow, timeDirection);
+    } else if (v.continuous) {
+        updateObsValueContinuous(v, env, perfNow);
     } else {
         snapToTargetAtBoundary(v, env, perfNow, getNow, timeDirection);
     }
@@ -801,22 +729,11 @@ export function updateObsValues(
 }
 
 /**
- * ANIMATE one value — interpolate toward its target and handle Phase 2 handoff.
+ * ANIMATE one value — interpolate toward its target.
  * Writes the interpolated result to `currentValue`.
  */
 export function animateObsValue(v: ObsValue, perfNow: number): void {
     v.currentValue = interpolateValue(v.anim, perfNow);
-
-    // Phase 2 handoff: if Phase 1 just finished and sweep is pending
-    if (!v.anim.animating && v.pendingSweep) {
-        const sweep = v.pendingSweep;
-        v.pendingSweep = null;
-        const sweepMultiplier = v.naturalSpeed / K_ANGLE_ANIM_SPEED;
-        startAnimationRaw(v.anim, sweep.target, perfNow,
-            sweepMultiplier, sweep.durationMs, v.period);
-        // Re-interpolate to pick up the new animation immediately
-        v.currentValue = interpolateValue(v.anim, perfNow);
-    }
 }
 
 /**
@@ -842,13 +759,12 @@ export function resetObsValueSchedules(values: ObsValue[]): void {
 }
 
 /**
- * Returns true if any value is still animating (mid-interpolation) or has a
- * pending Phase-2 sweep. The render loop uses this to decide whether to keep
- * rendering while the clock is stopped.
+ * Returns true if any value is still animating (mid-interpolation). The render
+ * loop uses this to decide whether to keep rendering while the clock is stopped.
  */
 export function anyObsAnimating(values: ObsValue[]): boolean {
     for (const v of values) {
-        if (v.anim.animating || v.pendingSweep) return true;
+        if (v.anim.animating) return true;
     }
     return false;
 }
@@ -994,8 +910,7 @@ export class Updater<K extends string = string> {
     /**
      * Snap every in-flight animation to its target and freeze schedules.
      *
-     * For each value: clear any pending Phase-2 sweep, set the animation (and the
-     * displayed `currentValue`) to the target — wrapped to `[0, period)` for cyclic
+     * For each value: set the animation (and the displayed `currentValue`) to the target — wrapped to `[0, period)` for cyclic
      * values, left as-is for linear ones — stop animating, and freeze the schedule
      * (`nextUpdateTime = Infinity`) so nothing re-evaluates until `reset()`.
      *
@@ -1004,36 +919,23 @@ export class Updater<K extends string = string> {
      * idle. Generalizes the legacy `finishAnimations`/`finishLeafAnimations` to the
      * ObsValue fields and the `period` wrap.
      *
-     * **`env` (on-beat freeze paths).** When `env` is supplied, on-beat values snap
-     * to `A(current display time)` instead of `anim.targetValue` — so a clock frozen
+     * **`env` (on-beat freeze paths).** When `env` is supplied, on-beat and
+     * continuous values snap to `A(current display time)` instead of `anim.targetValue` — so a clock frozen
      * *between beats* reads the exact stopped time, not the last/next beat position.
      * Pass `env` on the no-reset freeze paths (pause, scrub-end while stopped). Omit
      * it on paths that `reset()` afterward (step, Now, toggles): there `finish()`
      * just snaps where the hand is, and the subsequent stopped-`onBeatStep` settle
      * animates to `A(now)` (so those transitions still flip smoothly). Non-on-beat
-     * values always snap to `anim.targetValue` regardless of `env`.
-     *
-     * **Natural-speed values** (`naturalSpeed > 0`) settle where their sweep has
-     * them *now*, not at `anim.targetValue`: that target is the *end* of the
-     * current sweep, up to one update interval in the future. Snapping there put
-     * Observatory's second hands up to 20 s ahead on every tab return, and the
-     * Phase 1 catch-up then ran them backwards (2026-10-28). Settled at the
-     * present, the hand is exactly right when the sweep ran on through the gap
-     * (hidden tab — the perf clock kept counting) and behind by the gap when the
-     * perf clock froze (system sleep); the `reset()` that follows then animates
-     * only the real error.
+     * values always snap to `anim.targetValue` regardless of `env`. (A continuous
+     * value's `targetValue` is never in the future — at most the last frame's
+     * evaluation — so the plain snap is right for it too; the two-phase
+     * natural-speed sweep this replaced carried a target up to 20 s ahead, which
+     * is what made every tab return jump, 2026-10-28.)
      */
     finish(env?: Environment): void {
-        const perfNow = performance.now();
         for (const v of this.values) {
-            v.pendingSweep = null;
             v.pendingTarget = null;
-            let target: number;
-            if (v.naturalSpeed > 0) {
-                target = interpolateValue(v.anim, perfNow);
-            } else {
-                target = (v.onBeat && env) ? v.evalFn(env) : v.anim.targetValue;
-            }
+            let target = ((v.onBeat || v.continuous) && env) ? v.evalFn(env) : v.anim.targetValue;
             if (isFinite(v.period)) {
                 target = ((target % v.period) + v.period) % v.period;
             }

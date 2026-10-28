@@ -274,8 +274,8 @@ separate animation loop — see [Terminator](terminator.md).
 
 Built on the primitives above, **`ObsValue`** ([src/shared/obs-value.ts](../src/shared/obs-value.ts)) is a general-purpose, expression-driven animated value: a parsed AST + update interval + animation speeds + an `AnimatingValue`. The per-frame logic that drives ObsValues lives in [src/shared/updater.ts](../src/shared/updater.ts) — the embryonic "updater" subsystem — and runs two passes:
 
-1. **`updateObsValues(values, env, perfNow, getNow, …)`** — for each value whose timer expired, re-evaluate the expression and start an animation. Dispatches to one of: eval-ahead, the per-tick scrub sweep, two-phase `naturalSpeed` sweep, or snap-to-target (under scrub every branch re-evaluates every tick and sweeps over the tick).
-2. **`animateObsValues(values, perfNow)`** — interpolate every value toward its target (and hand off Phase-2 sweeps).
+1. **`updateObsValues(values, env, perfNow, getNow, …)`** — for each value whose timer expired, re-evaluate the expression and start an animation. Dispatches to one of: eval-ahead, the per-tick scrub sweep, continuous per-frame tracking (`continuous: true` — Observatory's second hands, evaluated every frame and set directly, animating only to catch up after a gap), or snap-to-target (under scrub every branch re-evaluates every tick and sweeps over the tick).
+2. **`animateObsValues(values, perfNow)`** — interpolate every value toward its target.
 
 Both operate on a flat `ObsValue[]` and are normally driven through the **`Updater`** (below) rather than called directly. See [Observatory — ObsValue System](observatory.md#obsvalue-system).
 
@@ -293,7 +293,7 @@ Eval-ahead is the *single continuous mechanism*, made **mode-aware** by where th
 
 Two things fall out of this:
 - **Scrub needs no compression branch** — it is just eval-ahead with the next point at the next tick, and is **lag-free at every tick** (the displayed value equals the true value when display reaches that point).
-- **`naturalSpeed` falls out** — a constant-rate value's "natural speed" is the slope between `A(now)` and `A(next)`; sweeping the chord over the budget reproduces constant velocity with the rate *inferred*, not configured.
+- **A constant-rate sweep falls out** — a constant-rate value's "natural speed" is the slope between `A(now)` and `A(next)`; sweeping the chord over the budget reproduces constant velocity with the rate *inferred*, not configured.
 
 > [!IMPORTANT]
 > **Chronometer keeps eval-ahead off** (`EVAL_AHEAD = false` in `hand-values.ts`). For
@@ -340,7 +340,7 @@ The **`ObsValue.discrete`** flag tells the updater to evaluate a value at the **
 
 ### Settle speed and `JUMP` (digital readouts)
 
-`ObsValue.animSpeed` is the per-app "default animation speed" carried over from Chronometer/Observatory. It governs only the **non-budget** animations — the stopped-state *settle* and the legacy snap-to-target (eval-ahead and scrub ignore it, animating over an explicit time budget). For an *angle* a finite speed (2 rad/s) settles in well under a second, but a **linear** value can be any magnitude (seconds-of-day 0–86400, AU, a dateInterval ~7.8×10⁸), so a fixed units/s either crawls or overshoots — e.g. stepping a day jumps sidereal time ~236 s, which at 2 units/s would creep for ~118 s. A client showing **digital** readouts (the Inspector) therefore sets `animSpeed` to the **`JUMP`** sentinel (`= Infinity`, in obs-value.ts), so values *jump* to the correct value on stop/step instead of easing — while play/scrub stay smooth (those are budget-bounded). `JUMP` is deliberately not called "snap" to avoid colliding with the existing "snap = animate at default speed (vs. the slow naturalSpeed sweep)" usage.
+`ObsValue.animSpeed` is the per-app "default animation speed" carried over from Chronometer/Observatory. It governs only the **non-budget** animations — the stopped-state *settle* and the legacy snap-to-target (eval-ahead and scrub ignore it, animating over an explicit time budget). For an *angle* a finite speed (2 rad/s) settles in well under a second, but a **linear** value can be any magnitude (seconds-of-day 0–86400, AU, a dateInterval ~7.8×10⁸), so a fixed units/s either crawls or overshoots — e.g. stepping a day jumps sidereal time ~236 s, which at 2 units/s would creep for ~118 s. A client showing **digital** readouts (the Inspector) therefore sets `animSpeed` to the **`JUMP`** sentinel (`= Infinity`, in obs-value.ts), so values *jump* to the correct value on stop/step instead of easing — while play/scrub stay smooth (those are budget-bounded). `JUMP` is deliberately not called "snap" to avoid colliding with the existing "snap = animate at default speed" (the legacy snap-to-target branch) usage.
 
 **`discrete` is a *client* policy, not a property of the expression.** The client sets it when interpolating a value across a change would be meaningless *for that particular display*. For example, when today's sunrise rolls over to the next day's, the Inspector's *text* readout should **jump** to the new time, whereas a graphical client **animates** the same quantity — Observatory's sunrise hand sweeps smoothly to the new day's position. So `discrete` is rare in Observatory/Chronometer (graphical, animate everywhere) and common only in the Inspector's ephemeris catalog (rise/set/transit, integer date/clock fields, weekday, planet up/down, TZ offset).
 
@@ -369,9 +369,9 @@ The **`ObsValue.discrete`** flag tells the updater to evaluate a value at the **
 When the OS asks for reduced motion (`prefers-reduced-motion: reduce`, read
 live via `matchMedia` in `src/shared/updater.ts`; `setReducedMotion()`
 overrides it), *transitions* jump to their target instead of animating: the
-catch-up phase of a natural-speed hand, settling to the frozen time when
+catch-up of a continuous hand after a gap, settling to the frozen time when
 stopped, the legacy 1× snap-to-target, drag-to-explore's fixed-duration
 updates, and the on-beat settles (`transitionMultiplier()` returns 0, which
 `startAnimationRaw` treats as an immediate jump). Motion that *is* the content
-is untouched: the second hands' natural-speed sweep, the eval-ahead sweep
+is untouched: the second hands' per-frame tracking, the eval-ahead sweep
 between boundaries, the on-beat sweep to the next beat, and scrub compression.

@@ -38,9 +38,10 @@ function harness() {
     functions.set('hoursValue', () => getNow().getTime() / 3_600_000);
     const env = { functions, variables: new Map(), tzOffsetSec: 0 } as unknown as Environment;
 
-    // The Observatory's second hand: a 20 s re-sync interval with a natural sweep.
+    // The Observatory's second hand: continuous (tracked every frame at 1×);
+    // under scrub it takes the every-tick branch like everything else.
     const second = createObsValue(
-        { name: 'second', expr: 'secondValueAngle()', updateInterval: 20, naturalSpeed: TWO_PI / 60 }, env, perf);
+        { name: 'second', expr: 'secondValueAngle()', updateInterval: 1, continuous: true }, env, perf);
     // A slow snap-to-target value on an hourly boundary (a planet hand's cadence).
     const slow = createObsValue(
         { name: 'slow', expr: 'hoursValue()', updateInterval: 3600, linear: true, animSpeed: 1e9 }, env, perf);

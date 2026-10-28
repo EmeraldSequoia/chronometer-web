@@ -133,14 +133,15 @@ function buildValueDefs(): ObsValueDef[] {
     // Planet numbers (matching ECPlanetNumber)
     const SATURN = 7, JUPITER = 6, MARS = 5, VENUS = 3, MERCURY = 2, MOON = 1;
 
-    // Second hands sweep at exactly one revolution per 60 seconds.
-    const SECOND_NATURAL_SPEED = 2 * Math.PI / 60;  // rad/s
+    // Second hands are `continuous`: evaluated every frame at 1× and tracked
+    // directly (updater.ts updateObsValueContinuous). Their updateInterval is
+    // not consulted at 1× (scrub re-evaluates everything every tick).
 
     const clock: ObsValueDef[] = [
         { name: 'h24',    expr: 'hour24ValueAngle() + pi * noonOnTop', updateInterval: 15 },
         { name: 'h12',    expr: 'hour12ValueAngle()',                  updateInterval: 1 },
         { name: 'minute', expr: 'minuteValueAngle()',                  updateInterval: 1 },
-        { name: 'second', expr: 'secondValueAngle()',                  updateInterval: 20, naturalSpeed: SECOND_NATURAL_SPEED },
+        { name: 'second', expr: 'secondValueAngle()',                  updateInterval: 1, continuous: true },
     ];
 
     const sunEvents: ObsValueDef[] = [
@@ -166,21 +167,21 @@ function buildValueDefs(): ObsValueDef[] {
         // UTC subdial is 24h
         { name: 'utcHour',   expr: 'fmod((hour24Value() - tzOffset() / 3600), 24) * 2 * pi / 24 + pi * noonOnTop', updateInterval: 60 },
         { name: 'utcMinute', expr: 'utcMinuteAngle()', updateInterval: 15 },
-        { name: 'utcSecond', expr: 'utcSecondAngle()', updateInterval: 20, naturalSpeed: SECOND_NATURAL_SPEED },
+        { name: 'utcSecond', expr: 'utcSecondAngle()', updateInterval: 1, continuous: true },
     ];
 
     const solar: ObsValueDef[] = [
         // Solar subdial is 12h
         { name: 'solarHour',   expr: 'fmod(solarTimeSec() / 3600, 12) * 2 * pi / 12', updateInterval: 60 },
         { name: 'solarMinute', expr: 'fmod(solarTimeSec() / 60, 60) * 2 * pi / 60',   updateInterval: 15 },
-        { name: 'solarSecond', expr: 'fmod(solarTimeSec(), 60) * 2 * pi / 60',         updateInterval: 20, naturalSpeed: SECOND_NATURAL_SPEED },
+        { name: 'solarSecond', expr: 'fmod(solarTimeSec(), 60) * 2 * pi / 60',         updateInterval: 1, continuous: true },
     ];
 
     const sidereal: ObsValueDef[] = [
         // Sidereal subdial is 24h
         { name: 'sidHour',   expr: 'fmod(lstValue() / 3600, 24) * 2 * pi / 24', updateInterval: 60 },
         { name: 'sidMinute', expr: 'fmod(lstValue() / 60, 60) * 2 * pi / 60',   updateInterval: 15 },
-        { name: 'sidSecond', expr: 'fmod(lstValue(), 60) * 2 * pi / 60',         updateInterval: 20, naturalSpeed: SECOND_NATURAL_SPEED },
+        { name: 'sidSecond', expr: 'fmod(lstValue(), 60) * 2 * pi / 60',         updateInterval: 1, continuous: true },
     ];
 
     const planets: ObsValueDef[] = [
