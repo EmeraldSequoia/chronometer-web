@@ -2,7 +2,8 @@
  * Moon phase display for Observatory.
  *
  * Port of EOMoonView.mm (.observatory-ref/Classes/EOMoonView.mm):
- *   - Draws a photographic full-moon image (moon300.png) scaled by the Moon's
+ *   - Draws a photographic full-moon image (moon300.png, or moon768.png when
+ *     the disc is large on screen — moon-texture.ts) scaled by the Moon's
  *     apparent angular size, which varies with its geocentric distance.
  *   - Overlays a dark terminator tracing the current phase, with a slight
  *     translucency near new moon to simulate earthlight.
@@ -16,8 +17,7 @@
  *   moonDistAU   — distance in AU      (drives apparent size)
  */
 
-// @ts-ignore — esbuild resolves .png as a data URL via --loader:.png=dataurl
-import moonPng from '../shared/assets/moon300.png';
+import { initMoonTexture, getMoonTexture } from '../shared/moon-texture.js';
 
 import type { LayoutParams } from './layout.js';
 import type { ObsValueName } from './obs-values.js';
@@ -37,20 +37,14 @@ const ANGULAR_RADIUS_AT_PERIGEE = Math.atan(LUNAR_RADIUS_KM / PERIGEE_DISTANCE_K
 // Module state
 // ============================================================================
 
-let moonImg: HTMLImageElement | null = null;
-let ready = false;
 
 // ============================================================================
 // Initialization
 // ============================================================================
 
-/** Load the moon image. */
+/** Start loading the Moon texture (the small one; the large follows on demand). */
 export function initMoonView(): void {
-    const img = new Image();
-    img.onload = () => { ready = true; };
-    img.onerror = () => { console.warn('[MoonView] Failed to load moon300.png'); };
-    img.src = moonPng as string;
-    moonImg = img;
+    initMoonTexture();
 }
 
 // ============================================================================
@@ -117,8 +111,6 @@ export function drawMoonView(
     L: LayoutParams,
     u: Updater<ObsValueName>,
 ): void {
-    if (!ready || !moonImg) return;
-
     const pa = u.get('moonPhase').currentValue;
     const rotation = u.get('moonRotation').currentValue;
     const distAU = u.get('moonDistAU').currentValue;
@@ -128,6 +120,10 @@ export function drawMoonView(
     const angularRadiusNow = Math.atan(LUNAR_RADIUS_KM / (distAU * AU_KM));
     const pixelRadius = L.moonR * angularRadiusNow / ANGULAR_RADIUS_AT_PERIGEE;
     if (pixelRadius <= 0) return;
+
+    // The 300 or 768 texture, by the disc's size in device px (moon-texture.ts).
+    const moonImg = getMoonTexture(2 * pixelRadius * L.dpr);
+    if (!moonImg) return;
 
     ctx.save();
     ctx.translate(L.moonCX, L.moonCY);

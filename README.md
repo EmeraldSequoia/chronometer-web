@@ -160,6 +160,23 @@ City and airport search data is derived from [GeoNames](https://www.geonames.org
 
 Map tiles in the location picker are provided by [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (ODbL).
 
+### Imagery
+
+The photographic artwork in Emerald Observatory is NASA imagery, which is not copyrighted; NASA is acknowledged as its source and no endorsement is implied. Source and credit for each image:
+
+- **Sun** (orrery centre and the eclipse simulator's Sun): an SDO AIA 304 Å frame. Courtesy of NASA/SDO and the AIA, EVE, and HMI science teams.
+- **Total solar eclipse** (the simulator's totality): Madras, Oregon, 21 August 2017. NASA/Aubrey Gemignani.
+- **Saturn**: Voyager 2, August 1981 (PIA01364). NASA/JPL.
+- **Jupiter**: Cassini. NASA/JPL/University of Arizona.
+- **Mars**: Viking Orbiter mosaic. NASA/JPL/USGS.
+- **Earth** (orrery): Suomi NPP "Blue Marble 2012". NASA/NOAA/GSFC/Suomi NPP/VIIRS/Norman Kuring.
+- **Venus**: Pioneer Venus Orbiter, ultraviolet, February 1979, retoned to the cloud-top cream. NASA.
+- **Mercury**: MESSENGER global mosaic. NASA/Johns Hopkins University APL/Carnegie Institution of Washington.
+- **Earth maps** (the terrain map and the location picker's globe, and the night lights): NASA Blue Marble and Black Marble, NASA Earth Observatory.
+- **Moon**: NASA photograph, from the iOS Emerald Observatory app.
+
+The starfield and the zodiac symbols are drawn by the app rather than from images.
+
 
 ## License
 

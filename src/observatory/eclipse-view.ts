@@ -32,9 +32,9 @@
 // @ts-ignore — esbuild resolves .png as a data URL via --loader:.png=dataurl
 import moonPng from '../shared/assets/moon300.png';
 // @ts-ignore
-import sunEclipsePng from '../shared/assets/sunEclipse.png';
+import sunEclipsePng from '../shared/assets/sunEclipse160.png';
 // @ts-ignore
-import totalEclipsePng from '../shared/assets/totalEclipse.png';
+import totalEclipsePng from '../shared/assets/totalEclipse450.png';
 // @ts-ignore
 import earthShadowPng from '../shared/assets/earthShadow.png';
 
@@ -82,7 +82,7 @@ const IOS_REF_ECLIPSE_R1 = 49;
 const IOS_MOON_RADIUS_AT_PERIGEE = 20;
 
 // Image feature fractions (EOClock.mm:2160-2161).
-const SUN_RADIUS_FRACTION = 68.0 / 316.0;        // totalEclipse.png: sun disc within image
+const SUN_RADIUS_FRACTION = 68.0 / 316.0;        // totalEclipse450.png: dark-disc diameter ÷ image width (framed to the old asset's ratio)
 const EARTH_SHADOW_RADIUS_FRACTION = 118.0 / 120.0; // earthShadow.png: umbra within image (1-px border)
 
 const ECLIPSE_THRESHOLD = Math.PI / 18;          // 10°
@@ -111,8 +111,8 @@ let initialized = false;
 export function initEclipseView(): void {
     if (initialized) return;
     moonImg = loadImg(moonPng as string, 'moon300.png');
-    sunImg = loadImg(sunEclipsePng as string, 'sunEclipse.png');
-    totalImg = loadImg(totalEclipsePng as string, 'totalEclipse.png');
+    sunImg = loadImg(sunEclipsePng as string, 'sunEclipse160.png');
+    totalImg = loadImg(totalEclipsePng as string, 'totalEclipse450.png');
     shadowImg = loadImg(earthShadowPng as string, 'earthShadow.png');
     initialized = true;
 }

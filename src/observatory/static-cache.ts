@@ -2,7 +2,7 @@
  * Observatory merged static layer — one full-viewport OffscreenCanvas holding
  * everything that changes only on resize / noonOnTop flip / image arrival:
  *
- *   1. Starfield background  (background.ts — drawn in raw device pixels)
+ *   1. Starfield background  (background.ts — procedural, raw device pixels)
  *   2. Main orrery dial      (main-dial.ts — drawn in CSS px under a dpr scale)
  *   3. Peripheral dial bgs   (peripheral-dials.ts — same)
  *
@@ -20,7 +20,7 @@
  */
 
 import type { LayoutParams } from './layout.js';
-import { drawBackground, isBackgroundReady } from './background.js';
+import { drawBackground } from './background.js';
 import { drawMainDial, areDialImagesReady } from './main-dial.js';
 import { drawPeripheralDials } from './peripheral-dials.js';
 
@@ -62,18 +62,14 @@ export function getStaticCache(L: LayoutParams, noonOnTop: boolean): OffscreenCa
     // have kept its save/restore pairs balanced on the previous build.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-    // Opaque black base — the always-there bottom layer that makes the
-    // "never null ⇒ fully opaque" contract unconditional. (drawBackground
-    // repaints it when the image is ready; harmless.)
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, w, h);
-
-    // 1. Starfield — raw device pixels, no dpr scale.
-    if (isBackgroundReady()) drawBackground(ctx, L);
+    // 1. Starfield — raw device pixels, no dpr scale. Procedural, always
+    //    ready, opaque: the bottom layer that makes the "never null ⇒ fully
+    //    opaque" contract unconditional.
+    drawBackground(ctx, L);
 
     ctx.save();
     ctx.scale(dpr, dpr);
-    // 2. Main orrery dial (needs its two images: sun, constellation names).
+    // 2. Main orrery dial (needs its one image: the sun).
     if (areDialImagesReady()) {
         drawMainDial(ctx, L, noonOnTop);
         fixUpSunRegion(ctx, L, noonOnTop, dpr);
@@ -124,10 +120,10 @@ function fixUpSunRegion(
     ctx.beginPath();
     ctx.rect(dx, dy, dw, dh);
     ctx.clip();
-    // Repaint the background patch beneath the layer…
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(dx, dy, dw, dh);
-    if (isBackgroundReady()) drawBackground(ctx, L);
+    // Repaint the background patch beneath the layer (the starfield is a
+    // pure function of the device-px viewport, so this reproduces the stars
+    // under the sun exactly)…
+    drawBackground(ctx, L);
     // …then the layer-local sun composite over it.
     ctx.drawImage(scratch, dx, dy);
     ctx.restore();

@@ -38,7 +38,6 @@ import type { TimeControlsAPI } from '../shared/time-controls-ui.js';
 import { updateDynamicCompositeIcon } from '../shared/composite-icon.js';
 import { type LayoutParams } from './layout.js';
 import { computeLayout, type ObsChrome } from './anchor-layout.js';
-import { waitForBackgroundImage } from './background.js';
 import { waitForImages } from './main-dial.js';
 import { getStaticCache, invalidateStaticCache, staticCacheSizeBytes } from './static-cache.js';
 import { drawPlanetHands, waitForPlanetImages } from './planet-hands.js';
@@ -1809,10 +1808,10 @@ function init(): void {
     fpsIndicator = createFpsIndicator(urlState.fps);
 
     // Wait for images to load, then invalidate the merged static cache so the
-    // starfield + dial layers get painted in. This call is load-bearing: it is
-    // the sole image-arrival rebuild trigger (readiness is not in the cache
-    // key — see static-cache.ts).
-    Promise.all([waitForImages(), waitForPlanetImages(), waitForBackgroundImage()]).then(() => {
+    // dial layer gets painted in (the starfield is procedural and needs no
+    // image). This call is load-bearing: it is the sole image-arrival rebuild
+    // trigger (readiness is not in the cache key — see static-cache.ts).
+    Promise.all([waitForImages(), waitForPlanetImages()]).then(() => {
         invalidateStaticCache();
         // Image load can complete after the loop has idled — kick it so the
         // first real frame draws.

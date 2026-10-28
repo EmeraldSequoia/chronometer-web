@@ -23,40 +23,37 @@ import type { LayoutParams } from './layout.js';
 import { drawTicks, drawCircle, drawFilledCircle, drawDialNumbersDemiRadial, drawDialNumbersUpright, drawText } from './draw-utils.js';
 import { drawZodiacRing } from './zodiac-glyphs.js';
 
-// Image asset imports (bundled as data URLs by esbuild)
-import sunPng from '../../.observatory-ref/Resources/sun.png';
-import siderealConstellationPng from '../../.observatory-ref/EO-Sidereal-constellation-names-0-at-top@2x.png';
+// Image asset import (bundled as a data URL by esbuild). 400² master cut
+// from an SDO AIA 304 Å frame (README.md#credits); the dial draws it at
+// L.sunD, 246 device px on a 4K panel, so nothing upscales there.
+import sunPng from '../shared/assets/sun400.png';
 
 const TWO_PI = 2 * Math.PI;
+
+/** Constellation names on the sidereal subdial: 24 hour slots, each name at
+ *  the odd hour in the middle of its 2h of right ascension (Pisces 0–2h, …). */
+export const SIDEREAL_CONSTELLATION_LABELS =
+    ',Psc,,Ari,,Tau,,Gem,,Can,,Leo,,Vir,,Lib,,Sco,,Sag,,Cap,,Aqr'.split(',');
+export const SIDEREAL_CONSTELLATION_COLOR = 'rgb(224, 224, 224)';
 
 // ---------------------------------------------------------------------------
 // Image loading
 // ---------------------------------------------------------------------------
 
 let sunImg: HTMLImageElement | null = null;
-let siderealConstellationImg: HTMLImageElement | null = null;
 let imagesLoaded = false;
 
 function loadImages(): Promise<void> {
     if (imagesLoaded) return Promise.resolve();
 
-    const promises: Promise<void>[] = [];
-
     sunImg = new Image();
-    promises.push(new Promise<void>((resolve, reject) => {
+    const promise = new Promise<void>((resolve) => {
         sunImg!.onload = () => resolve();
-        sunImg!.onerror = () => { console.warn('[MainDial] Failed to load sun.png'); resolve(); };
-    }));
+        sunImg!.onerror = () => { console.warn('[MainDial] Failed to load sun400.png'); resolve(); };
+    });
     sunImg.src = sunPng;
 
-    siderealConstellationImg = new Image();
-    promises.push(new Promise<void>((resolve, reject) => {
-        siderealConstellationImg!.onload = () => resolve();
-        siderealConstellationImg!.onerror = () => { console.warn('[MainDial] Failed to load sidereal constellation image'); resolve(); };
-    }));
-    siderealConstellationImg.src = siderealConstellationPng;
-
-    return Promise.all(promises).then(() => { imagesLoaded = true; });
+    return promise.then(() => { imagesLoaded = true; });
 }
 
 // Start loading immediately on import
@@ -66,7 +63,7 @@ const imageLoadPromise = loadImages();
 // Readiness (consulted by static-cache.ts before drawing this layer)
 // ---------------------------------------------------------------------------
 
-/** True once both dial images (sun, constellation names) have settled (loaded or errored). */
+/** True once the dial's one image (the sun) has settled (loaded or errored). */
 export function areDialImagesReady(): boolean {
     return imagesLoaded;
 }
@@ -191,7 +188,7 @@ export function drawMainDial(
     // ====================================================================
     // 8. Sun image at center
     //    iOS: sun.png drawn at center with alpha 0.75
-    //    sun.png has no alpha channel (RGB, not RGBA), so the black
+    //    sun400.png has no alpha channel (RGB, not RGBA), so the black
     //    background would show as a square. Use 'lighten' compositing
     //    so black pixels become transparent (lighten(black, X) = X).
     // ====================================================================
@@ -262,13 +259,15 @@ function drawSubdialBackground(
         drawDialNumbersUpright(ctx, cx, cy, extraDots,
             `${L.subdialFontSize - 3 * s}px 'Arial', sans-serif`, '#ffffff', r - L.subdialFontSize - 7 * s);
 
-        // Constellation names overlay image
-        // Port of: EOShuffleView.mm L211-218
-        if (siderealConstellationImg && siderealConstellationImg.complete) {
-            const imgSize = 149 * s;
-            ctx.drawImage(siderealConstellationImg,
-                cx - imgSize / 2, cy - imgSize / 2, imgSize, imgSize);
-        }
+        // Constellation names, one per 30° at the odd slots of a 24-slot
+        // ring (15° + 30°·k clockwise from the top, 0h at the top whatever
+        // noonOnTop says — as the iOS overlay image was). Drawn as text, as
+        // EOShuffleView.mm L205 did before the names were baked into
+        // EO-Sidereal-constellation-names-0-at-top.png; the ink colour and
+        // radius were measured from that image.
+        drawDialNumbersDemiRadial(ctx, cx, cy, SIDEREAL_CONSTELLATION_LABELS,
+            `${L.subdialFontSize}px 'Helvetica Neue', Helvetica, Arial, sans-serif`,
+            SIDEREAL_CONSTELLATION_COLOR, r - 5 * s, r - 5 * s);
     }
 
     // Label text (at bottom of subdial, matching iOS)

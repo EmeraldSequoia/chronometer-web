@@ -22,14 +22,23 @@ import type { ObsValueName } from './obs-values.js';
 import type { Updater } from '../shared/updater.js';
 import { ECPlanetNumber } from '../astronomy/astro-constants.js';
 
-// Image asset imports (bundled as data URLs by esbuild)
-import saturnPng from '../../.observatory-ref/Resources/saturn.png';
-import jupiterPng from '../../.observatory-ref/Resources/jupiter.png';
-import marsPng from '../../.observatory-ref/Resources/mars.png';
-import earthPng from '../../.observatory-ref/Resources/earth.png';
-import venusPng from '../../.observatory-ref/Resources/venus.png';
-import mercuryPng from '../../.observatory-ref/Resources/mercury.png';
-import moonPng from '../../.observatory-ref/Resources/moon75.png';
+// Image asset imports (bundled as data URLs by esbuild). The planet masters
+// are 4× the iOS icons' 75×34 (NASA imagery, README.md#credits), so a 4K
+// panel draws them without upscaling; they are drawn at the iOS size
+// (REF_SCALE), not their natural size.
+import saturnPng from '../shared/assets/planets/saturn300.png';
+import jupiterPng from '../shared/assets/planets/jupiter300.png';
+import marsPng from '../shared/assets/planets/mars300.png';
+import earthPng from '../shared/assets/planets/earth300.png';
+import venusPng from '../shared/assets/planets/venus300.png';
+import mercuryPng from '../shared/assets/planets/mercury300.png';
+import moonPng from '../shared/assets/planets/moon150.png';
+
+/** Master px per iOS authoring px: 300×136 masters for 75×34 icons (the Moon
+ *  dot is the iOS @2x asset); image px ÷ REF_SCALE = size at s = 1, so a
+ *  master's box may differ from 300×136 without changing the drawn size. */
+const REF_SCALE = 4;
+const MOON_REF_SCALE = 2;
 
 // ---------------------------------------------------------------------------
 // Image loading
@@ -90,7 +99,7 @@ function loadPlanetImages(): Promise<void> {
     const moonImg = moonConfig.img;
     promises.push(new Promise<void>((resolve) => {
         moonImg.onload = () => resolve();
-        moonImg.onerror = () => { console.warn('[PlanetHands] Failed to load moon75.png'); resolve(); };
+        moonImg.onerror = () => { console.warn('[PlanetHands] Failed to load moon150.png'); resolve(); };
     }));
     moonConfig.img.src = moonConfig.src;
 
@@ -153,10 +162,10 @@ export function drawPlanetHands(
         // at the same angular position on the dial while the image is right-side-up.
         ctx.rotate(angle + Math.PI);
 
-        // Image size: use natural image dimensions, scaled proportionally
+        // Image size: the iOS authoring size (master ÷ REF_SCALE), scaled
         const s = L.mainR / 365;
-        const imgW = img.naturalWidth * s;
-        const imgH = img.naturalHeight * s;
+        const imgW = img.naturalWidth / REF_SCALE * s;
+        const imgH = img.naturalHeight / REF_SCALE * s;
 
         // iOS: [img drawInRect:CGRectMake(-width/2, radius-length/2, width, length)]
         // In UIKit Y-down, this draws the image centered at +radius (downward
@@ -201,8 +210,8 @@ function drawMoonSubHand(
     if (!moonImg || !moonImg.complete) return;
 
     const moonR = moonConfig.moonOrbitRadius * s;
-    const moonW = moonImg.naturalWidth * s;
-    const moonH = moonImg.naturalHeight * s;
+    const moonW = moonImg.naturalWidth / MOON_REF_SCALE * s;
+    const moonH = moonImg.naturalHeight / MOON_REF_SCALE * s;
 
     ctx.save();
 
