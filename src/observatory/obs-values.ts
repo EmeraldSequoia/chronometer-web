@@ -140,7 +140,7 @@ function buildValueDefs(): ObsValueDef[] {
     const clock: ObsValueDef[] = [
         { name: 'h24',    expr: 'hour24ValueAngle() + pi * noonOnTop', updateInterval: 15 },
         { name: 'h12',    expr: 'hour12ValueAngle()',                  updateInterval: 1 },
-        { name: 'minute', expr: 'minuteValueAngle()',                  updateInterval: 1 },
+        { name: 'minute', expr: 'minuteValueAngle()',                  updateInterval: 0.1 },  // 0.1 s: a 1 s sweep visibly stepped on a 4K display
         { name: 'second', expr: 'secondValueAngle()',                  updateInterval: 1, continuous: true },
     ];
 
