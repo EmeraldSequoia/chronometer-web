@@ -67,6 +67,7 @@ export const enum CacheSlot {
     realMoonAgeAngle,
     tdtCenturies,
     tdtCenturiesDeltaT,
+    tdtCenturiesUT1MinusUTC,
     tdtHundredCenturies,
 
     // WB-specific location-independent slots

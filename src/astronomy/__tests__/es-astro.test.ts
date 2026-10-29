@@ -15,7 +15,9 @@ import {
     dateIntervalToDate,
     convertETtoUT,
 } from '../es-time';
-import { kECLeapTableValidUntilISO } from '../es-leap-second';
+import { kECLeapEraStart, kECContinuousUTCStart } from '../es-leap-second';
+import { kECUTUnitsPerGSTUnit } from '../astro-constants';
+import { ut1MinusUTCForDateInterval } from '../es-ut1-utc';
 import {
     convertUTToGSTP03,
     convertGSTtoLST,
@@ -129,13 +131,18 @@ describe('es-time', () => {
 });
 
 /**
- * ΔT from 1972 onward is a table lookup, not a fit — see convertUTtoET.
- * These pin the exact values; `espenakDeltaT` and `ECMeeusDeltaT` above are
- * unchanged and still cover the polynomial era.
+ * TT − UTC from 1972 onward is a table lookup, not a fit — see convertUTtoET —
+ * and the classical ΔT (TT − UT1, the `deltaT` field) is that minus the IERS
+ * UT1 − UTC. `espenakDeltaT` and `ECMeeusDeltaT` above are unchanged and
+ * still cover the polynomial era.
  */
 describe('es-time leap-second ΔT', () => {
     const deltaTAt = (iso: string) =>
         julianCenturiesSince2000EpochForDateInterval(appleEpoch(new Date(iso)), null).deltaT;
+    const ttMinusUTCAt = (iso: string) => {
+        const r = julianCenturiesSince2000EpochForDateInterval(appleEpoch(new Date(iso)), null);
+        return r.deltaT + r.ut1MinusUTC;
+    };
 
     test.each([
         ['1972-01-02T00:00:00Z', 42.184],   // first day of the leap era
@@ -144,8 +151,13 @@ describe('es-time leap-second ΔT', () => {
         ['2017-01-01T00:00:00Z', 69.184],   // the last leap second
         ['2020-06-21T06:41:00Z', 69.184],   // an eclipse the data test replays
         ['2026-08-18T12:00:00Z', 69.184],   // today
-    ])('ΔT at %s is exactly %s s', (iso, expected) => {
-        expect(deltaTAt(iso)).toBeCloseTo(expected, 5);
+    ])('TT − UTC at %s is exactly %s s', (iso, expected) => {
+        expect(ttMinusUTCAt(iso)).toBeCloseTo(expected, 5);
+    });
+
+    test('ΔT (TT − UT1) is TT − UTC minus the IERS UT1 − UTC', () => {
+        // 2017-01-01: UT1 − UTC was +0.591 s just after the leap second.
+        expect(deltaTAt('2017-01-01T00:00:00Z')).toBeCloseTo(69.184 - 0.591, 3);
     });
 
     test('pre-1972 instants still use the Espenak polynomial', () => {
@@ -162,53 +174,76 @@ describe('es-time leap-second ΔT', () => {
         expect(Math.abs(after - before)).toBeLessThan(0.1);
     });
 
-    test('ΔT is continuous except at the leap seconds themselves', () => {
-        // Sample every 6 hours from 1970 to 2400. Steps of exactly 1 s are
-        // leap seconds; the handovers at 1972 and at the table's expiry, and
-        // everything in between, must stay under 0.1 s.
+    test('TT − UT1 is continuous from 1970 to 2400; TT − UTC steps at the 27 leap seconds', () => {
+        // Sample every 6 hours. deltaT is the classical ΔT = TT − UT1: the
+        // Earth does not step, so neither may it — the leap seconds cancel
+        // between TT − UTC and UT1 − UTC. Their sum, TT − UTC, must step by
+        // exactly 1 s at every leap second and nowhere else.
         const start = appleEpoch(new Date('1970-01-01T00:00:00Z'));
         const step = 6 * 3600;
         const samples = Math.floor((appleEpoch(new Date('2400-01-01T00:00:00Z')) - start) / step);
-        let previous = julianCenturiesSince2000EpochForDateInterval(start, null).deltaT;
+        let previous = julianCenturiesSince2000EpochForDateInterval(start, null);
         let leapSteps = 0;
         for (let i = 1; i <= samples; i++) {
             const t = start + i * step;
-            const current = julianCenturiesSince2000EpochForDateInterval(t, null).deltaT;
-            const jump = current - previous;
-            if (Math.abs(jump - 1) < 1e-6) {
+            const current = julianCenturiesSince2000EpochForDateInterval(t, null);
+            const iso = () => new Date((t + 978307200) * 1000).toISOString();
+            const dtJump = current.deltaT - previous.deltaT;
+            if (Math.abs(dtJump) >= 0.1) {
+                throw new Error(`TT − UT1 jumped ${dtJump.toFixed(4)} s at ${iso()}`);
+            }
+            const ttJump = (current.deltaT + current.ut1MinusUTC) - (previous.deltaT + previous.ut1MinusUTC);
+            if (Math.abs(ttJump - 1) < 1e-6) {
                 leapSteps++;
-            } else if (Math.abs(jump) >= 0.1) {
-                throw new Error(`ΔT jumped ${jump.toFixed(4)} s at ` +
-                    `${new Date((t + 978307200) * 1000).toISOString()}`);
+            } else if (Math.abs(ttJump) >= 0.1) {
+                throw new Error(`TT − UTC jumped ${ttJump.toFixed(4)} s at ${iso()}`);
             }
             previous = current;
         }
         expect(leapSteps).toBe(27);
     });
 
-    test('the rejoin at the table expiry is continuous', () => {
-        const expiry = appleEpoch(new Date(`${kECLeapTableValidUntilISO}T00:00:00Z`));
-        const inside = julianCenturiesSince2000EpochForDateInterval(expiry - 1, null).deltaT;
-        const outside = julianCenturiesSince2000EpochForDateInterval(expiry + 1, null).deltaT;
-        expect(inside).toBeCloseTo(69.184, 5);
-        expect(outside).toBeCloseTo(69.184, 4);
+    test('TT − UTC is 69.184 s from 2017 on, forever (continuous UTC)', () => {
+        for (const iso of ['2017-01-01T00:00:00Z', '2026-10-29T12:00:00Z', '2027-05-20T00:00:00Z',
+                           '2027-06-29T00:00:00Z', '2040-01-01T00:00:00Z', '2150-01-01T00:00:00Z',
+                           '2400-01-01T00:00:00Z']) {
+            const t = appleEpoch(new Date(iso));
+            const { deltaT, ut1MinusUTC } = julianCenturiesSince2000EpochForDateInterval(t, null);
+            expect(deltaT + ut1MinusUTC, iso).toBeCloseTo(69.184, 6);
+        }
+        expect(kECContinuousUTCStart).toBe(appleEpoch(new Date('2027-05-20T00:00:00Z')));
     });
 
-    test('past the expiry ΔT resumes growing at the polynomial rate', () => {
-        // Offset, not clamp: the parabola's curvature is the part of the
-        // physics worth keeping.
-        const y2040 = deltaTAt('2040-01-01T00:00:00Z');
-        expect(y2040).toBeGreaterThan(69.184);
-        expect(y2040 - 69.184).toBeCloseTo(espenakDeltaT(2040) - espenakDeltaT(2027.49), 0);
+    test('ut1MinusUTC is 0 before 1972 and the IERS series from then on', () => {
+        expect(julianCenturiesSince2000EpochForDateInterval(kECLeapEraStart - 1, null).ut1MinusUTC).toBe(0);
+        for (const iso of ['1972-01-01T00:00:00Z', '1985-03-03T03:00:00Z', '2026-10-29T12:00:00Z', '2100-01-01T00:00:00Z']) {
+            const t = appleEpoch(new Date(iso));
+            expect(julianCenturiesSince2000EpochForDateInterval(t, null).ut1MinusUTC, iso)
+                .toBe(ut1MinusUTCForDateInterval(t));
+        }
+        // Today's value is small and negative; a century out the model has
+        // the Earth well behind UTC (tens of seconds), never an hour.
+        const today = julianCenturiesSince2000EpochForDateInterval(appleEpoch(new Date('2026-10-29T00:00:00Z')), null).ut1MinusUTC;
+        expect(Math.abs(today)).toBeLessThan(0.9);
+        const y2100 = julianCenturiesSince2000EpochForDateInterval(appleEpoch(new Date('2100-01-01T00:00:00Z')), null).ut1MinusUTC;
+        expect(y2100).toBeLessThan(-10);
+        expect(y2100).toBeGreaterThan(-120);
+    });
+
+    test('ΔT at the 1972 handover agrees with Meeus to a few tenths', () => {
+        // Meeus's table gives 42.2 s for 1972.0; the leap-exact TT − UTC minus
+        // the back-extrapolated UT1 − UTC must land there too.
+        expect(deltaTAt('1972-01-01T00:00:00Z')).toBeCloseTo(42.2, 0);
     });
 
     test('convertETtoUT inverts the conversion to a millisecond', () => {
-        // One instant per ΔT era: polynomial (1950), exact leap table (2005,
-        // 2024), rejoined polynomial (2040).
+        // One instant per TT − UTC era: polynomial (1950), leap table (2005,
+        // 2024), continuous UTC (2040).
         for (const iso of ['1950-03-01T12:00:00Z', '2005-07-04T00:00:00Z',
                            '2024-04-08T18:17:20Z', '2040-01-01T00:00:00Z']) {
             const ut = appleEpoch(new Date(iso));
-            const et = ut + julianCenturiesSince2000EpochForDateInterval(ut, null).deltaT;
+            const { deltaT, ut1MinusUTC } = julianCenturiesSince2000EpochForDateInterval(ut, null);
+            const et = ut + deltaT + ut1MinusUTC;          // TT = UTC + (TT − UTC)
             expect(Math.abs(convertETtoUT(et) - ut), iso).toBeLessThan(0.001);
         }
     });
@@ -221,6 +256,39 @@ describe('es-time leap-second ΔT', () => {
 });
 
 describe('es-sidereal', () => {
+    test('GST → UT inverts GST(UT) to a millisecond, with UT1 − UTC in play', () => {
+        // 2100 and 2200 are deep in the continuous-UTC model (tens of seconds
+        // of UT1 − UTC); 1975 has the 0.8 s-scale historical value; 2026 is
+        // today. convertGSTtoUTclosest returns a UTC instant, so the round
+        // trip must close on the UTC instant we started from.
+        for (const iso of ['1975-02-10T05:00:00Z', '2026-10-29T12:00:00Z', '2027-07-01T00:00:00Z',
+                           '2100-06-15T18:30:00Z', '2200-01-01T00:00:00Z']) {
+            const t = appleEpoch(new Date(iso));
+            const gst = convertUTToGSTP03(t, null);
+            const back = convertGSTtoUTclosest(gst, t, null);
+            expect(Math.abs(back - t), iso).toBeLessThan(0.002);
+        }
+    });
+
+    test('GST moves with UT1 − UTC: 1 s of it is 15″ of sidereal angle', () => {
+        // Compare the real GST at an instant with what the formula gives when
+        // the same instant is fed as if UT1 − UTC were zero: shift the UTC
+        // instant by −(UT1−UTC) and the GST shifts by that × the sidereal
+        // rate. (Avoids reaching into the formula; uses only public calls.)
+        const t = appleEpoch(new Date('2100-06-15T18:30:00Z'));
+        const dut1 = ut1MinusUTCForDateInterval(t);
+        expect(Math.abs(dut1)).toBeGreaterThan(5);
+        const gstAtT = convertUTToGSTP03(t, null);
+        const gstShifted = convertUTToGSTP03(t - dut1, null);
+        const expectedShift = dut1 * (1 / kECUTUnitsPerGSTUnit) * Math.PI / (12 * 3600);
+        let diff = gstAtT - gstShifted;
+        if (diff > Math.PI) diff -= 2 * Math.PI;
+        if (diff < -Math.PI) diff += 2 * Math.PI;
+        // The shifted instant also moves UT1−UTC by dut1 × slope (~1e-8), so
+        // allow a microradian.
+        expect(Math.abs(diff - expectedShift)).toBeLessThan(1e-6);
+    });
+
     test('GST is reasonable for J2000.0', () => {
         // At J2000.0 (2000-01-01 12:00 UT), GST should be about 18h 41m = 4.894 rad
         const j2000 = appleEpoch(new Date('2000-01-01T12:00:00Z'));

@@ -4,9 +4,10 @@
  * TAI−UTC table behind ΔT for 1972 onward (see
  * planning/2026-08-18-leap-second-deltat.md).
  *
- * Run this by hand every year or two, or whenever the build prints the
- * "leap-second table expired" warning; it is NOT part of the build (build.sh
- * only checks the committed file's expiry date).
+ * Since CGPM Resolution 5 (2026) there will be no leap second after
+ * 2027-05-20, so the list is final (TAI−UTC = 37 s) and this script should
+ * never need to change the table again; it stays as the provenance and
+ * integrity check for the historical rows. Not part of the build.
  *
  *   node scripts/update-leap-seconds.mjs
  *   node scripts/update-leap-seconds.mjs --cache /tmp/leap   # reuse download
@@ -20,12 +21,9 @@
  *
  * The format is one line per TAI−UTC step — `<NTP seconds> <TAI−UTC> # <date>`
  * — plus three metadata lines: `#$` last update, `#@` expiration, and `#h` a
- * SHA-1 over all of those numbers, which this script verifies. The expiration
- * is the reason the file is the right source: the IERS announces leap seconds
- * only about six months ahead (Bulletin C), so `#@` is an authoritative
- * statement of how far into the future the table may be trusted. It becomes
- * `kECLeapTableValidUntil`, past which es-time.ts rejoins the Espenak
- * polynomial rather than pretending to know.
+ * SHA-1 over all of those numbers, which this script verifies. The `#@`
+ * expiry used to drive a build warning (the IERS announced leap seconds only
+ * six months ahead); with continuous UTC it is recorded as provenance only.
  *
  * Timestamps are NTP-epoch (1900-01-01); the app is Apple-epoch (2001-01-01),
  * so the conversion is a constant −3 187 296 000 s.
@@ -58,6 +56,9 @@ const FIRST_ENTRY_TAI = 10;
 
 /** The iOS table this port must agree with (absent in a fresh clone). */
 const IOS_TABLE = join(ROOT, '.estime-ref/src/ESLeapSecond.cpp');
+
+/** Continuous UTC (CGPM Resolution 5, 2026-10-15): no leap second after this. */
+const CONTINUOUS_UTC_START_NTP = 4019760000;   // 2027-05-20 00:00:00 UTC
 
 function die(message) {
     console.error(`update-leap-seconds: ${message}`);
@@ -180,6 +181,10 @@ function buildTable(entries) {
             `expected ${FIRST_ENTRY_NTP}/${FIRST_ENTRY_TAI} (1972-01-01, TAI−UTC = 10 s)`);
     }
     for (let i = 0; i < rows.length; i++) {
+        if (Number(entries[i].ntp) >= CONTINUOUS_UTC_START_NTP) {
+            die(`entry ${i} (${entries[i].comment}) is after continuous UTC began — ` +
+                'the world changed; re-plan before regenerating');
+        }
         if (!Number.isInteger(rows[i].taiMinusUTC)) {
             die(`entry ${i} has a non-integer TAI−UTC (${rows[i].taiMinusUTC})`);
         }
@@ -257,7 +262,7 @@ const isoStamp = (appleSeconds) =>
 
 function generate(rows, meta) {
     const last = rows[rows.length - 1];
-    const validUntil = meta.expires + NTP_TO_APPLE;
+    const validUntil = meta.expires + NTP_TO_APPLE;   // provenance only
     const width = Math.max(...rows.map((r) => String(r.appleSeconds).length));
 
     const tableLines = rows.map((r) => {
@@ -286,24 +291,22 @@ function generate(rows, meta) {
  * lookup rather than a fitted polynomial for the whole modern era — see
  * es-time.ts \`convertUTtoET\`, which is the only consumer.
  *
- * The table is authoritative only as far as the IERS has announced, hence
- * \`kECLeapTableValidUntil\`. build.sh warns once today is past it.
+ * The last row is final: CGPM Resolution 5 (2026-10-15) made UTC continuous
+ * from 2027-05-20 (\`kECContinuousUTCStart\`), and Bulletin C 72 had already
+ * ruled out the one remaining slot before that. So TAI−UTC = ${last.taiMinusUTC} s and
+ * TT − UTC = ${(32.184 + last.taiMinusUTC).toFixed(3)} s for all later dates, exactly, forever. The
+ * Earth-rotation side of ΔT (UT1 − UTC) lives in es-ut1-utc.ts.
  *
  * All times are Apple-epoch seconds (since 2001-01-01 00:00:00 UTC).
  */
-
-/* LEAP-TABLE-EXPIRES ${isoDay(validUntil)} — build.sh greps this line. */
 
 /** 1972-01-01 00:00:00 UTC — the first line of the table, and the start of
  *  the era in which TAI−UTC is defined at all. */
 export const kECLeapEraStart = ${rows[0].appleSeconds};
 
-/** The source file's own expiration (${isoDay(validUntil)}): past this instant the
- *  IERS has announced nothing, so neither can we. */
-export const kECLeapTableValidUntil = ${validUntil};
-
-/** Same instant as an ISO day, for messages and tests. */
-export const kECLeapTableValidUntilISO = '${isoDay(validUntil)}';
+/** 2027-05-20 00:00:00 UTC — continuous UTC begins; no leap second can occur
+ *  at or after this instant (CGPM Resolution 5, 2026). */
+export const kECContinuousUTCStart = ${CONTINUOUS_UTC_START_NTP + NTP_TO_APPLE};
 
 /** TT − TAI, fixed by definition. */
 export const kECTTMinusTAI = 32.184;
@@ -321,7 +324,8 @@ ${tableLines.join('\n')}
 /** Number of rows in \`leapSecondTable\` (2 numbers apiece). */
 export const kECLeapTableEntryCount = ${rows.length};
 
-/** TAI−UTC at the end of the table, i.e. the value in force today. */
+/** TAI−UTC at the end of the table — the value in force today and, under
+ *  continuous UTC, for good. */
 export const kECLeapTableFinalTAIMinusUTC = ${last.taiMinusUTC};
 
 /** Last-entry cache: consecutive calls are almost always in the same era. */
@@ -360,8 +364,9 @@ export function taiMinusUTCForDateInterval(dateInterval: number): number {
 }
 
 /**
- * TT − UTC, in seconds, at \`dateInterval\` — i.e. ΔT with UT taken as UTC.
- * Exact for any instant from ${isoDay(rows[0].appleSeconds)} through the table's expiry.
+ * TT − UTC, in seconds, at \`dateInterval\`. Exact for any instant from
+ * ${isoDay(rows[0].appleSeconds)} on, with no end date. This is what the ephemerides need;
+ * the classical ΔT = TT − UT1 subtracts es-ut1-utc.ts's UT1 − UTC from it.
  */
 export function ttMinusUTCForDateInterval(dateInterval: number): number {
     return kECTTMinusTAI + taiMinusUTCForDateInterval(dateInterval);

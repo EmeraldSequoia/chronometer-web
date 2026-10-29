@@ -67,35 +67,13 @@ if grep -qiE '</script|<!--' src/help/eclipse-data.json; then
   exit 1
 fi
 
-echo "=== Checking leap-second table freshness ==="
-# src/astronomy/es-leap-second.ts is generated from the IERS leap-seconds.list,
-# which states its own expiry (the IERS announces leap seconds only ~6 months
-# ahead). Past that date the table may be missing a leap second, so ΔT could be
-# 1 s stale -- a warning, not an error: the build stays usable and the fix is a
-# one-line command.
-LEAP_FILE="$SRC/astronomy/es-leap-second.ts"
-LEAP_EXPIRY=$(grep -o 'LEAP-TABLE-EXPIRES [0-9][0-9-]*' "$LEAP_FILE" | awk '{print $2}')
-if [ -z "$LEAP_EXPIRY" ]; then
-  echo "ERROR: no LEAP-TABLE-EXPIRES line in $LEAP_FILE" >&2
-  echo "Regenerate with: node scripts/update-leap-seconds.mjs" >&2
-  exit 1
-fi
-TODAY=$(date -u +%Y-%m-%d)
-if [ "$TODAY" \> "$LEAP_EXPIRY" ]; then
-  echo "  ****************************************************************"
-  echo "  * WARNING: leap-second table expired $LEAP_EXPIRY"
-  echo "  * Run: node scripts/update-leap-seconds.mjs"
-  echo "  ****************************************************************"
-else
-  echo "  ✓ Leap-second table valid through $LEAP_EXPIRY"
-fi
-
 echo "=== Checking UT1−UTC table freshness ==="
 # src/astronomy/es-ut1-utc.ts is generated from the IERS finals.all, whose
 # predictions run about a year past its issue date. After that the series
 # continues on a slope-plus-curvature model that drifts from reality by
 # ~0.15 s/yr -- a warning, not an error: hour angles are a few arcseconds
 # off and the fix is a one-line command.
+TODAY=$(date -u +%Y-%m-%d)
 UT1_FILE="$SRC/astronomy/es-ut1-utc.ts"
 UT1_STALE=$(grep -o 'STALE-AFTER [0-9][0-9-]*' "$UT1_FILE" | awk '{print $2}')
 if [ -z "$UT1_STALE" ]; then

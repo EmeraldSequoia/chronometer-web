@@ -39,13 +39,15 @@ import { kECLeapTableFinalTAIMinusUTC, taiMinusUTCForDateInterval } from './es-l
 
 /* UT1-TABLE-ENDS 2027-10-29 STALE-AFTER 2028-10-29 — build.sh greps this line. */
 
-/** First sample (1973-01-02): before it `kECUT1AtFirstSample` is held. */
+/** First sample (1973-01-02): before it the smooth series is extrapolated
+ *  backward at `kECUT1PreTableSlope`. */
 export const kECUT1TableFirstSample = -883526400;
 
-/** UT1−UTC at the first sample, seconds — held for all earlier dates. (The
- *  leap-step-free series can't be held: TAI−UTC steps back through 1972
- *  and the reconstruction would leave the ±0.9 s band.) */
-export const kECUT1AtFirstSample = 0.808;
+/** Slope of the smooth series over its first year, s/s (-1.099 s/yr),
+ *  used to extend it back over 1972, the one year of the leap-second era
+ *  finals.all does not cover. Checked against Meeus's 1972 ΔT in the tests;
+ *  before 1972 UT is treated as UT1 and this is never consulted. */
+export const kECUT1PreTableSlope = -3.483943e-8;
 
 /** Last sample (2027-10-29), the end of the IERS predictions; the model takes over after it. */
 export const kECUT1TableLastSample = 846460800;
@@ -139,6 +141,9 @@ let _cachedIndex = 0;
 /** The stored, leap-step-free series u(t) (see the header), seconds. */
 function smoothSeriesForDateInterval(dateInterval: number): number {
     const n = ut1Table.length;
+    if (dateInterval <= ut1Table[0]) {
+        return (ut1Table[1] + (dateInterval - ut1Table[0]) * kECUT1PreTableSlope * 1000) / 1000;
+    }
     if (dateInterval >= ut1Table[n - 2]) {
         return ut1Table[n - 1] / 1000;
     }
@@ -169,13 +174,11 @@ function smoothSeriesForDateInterval(dateInterval: number): number {
  * UT1 − UTC, in seconds, at `dateInterval` (Apple-epoch seconds).
  *
  * Table-backed (IERS observed + predicted) through 2027-10-29, then the
- * slope-plus-curvature model; before 1973-01-02 the first value is held
- * (|UT1−UTC| was < 0.9 s throughout the leap-second era anyway).
+ * slope-plus-curvature model; before 1973-01-02 the smooth series is
+ * extrapolated back linearly, which covers 1972 to a few hundredths of a
+ * second. Callers treat UT as UT1 before 1972 and don't ask.
  */
 export function ut1MinusUTCForDateInterval(dateInterval: number): number {
-    if (dateInterval <= kECUT1TableFirstSample) {
-        return kECUT1AtFirstSample;
-    }
     if (dateInterval > kECUT1TableLastSample) {
         const tau = (dateInterval - kECUT1TableLastSample) / kSecondsPerYear;
         return kECUT1AtLastSample + kECUT1SlopePerYear * tau

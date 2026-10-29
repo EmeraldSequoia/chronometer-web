@@ -11,8 +11,7 @@ import {
     kECLeapEraStart,
     kECLeapTableEntryCount,
     kECLeapTableFinalTAIMinusUTC,
-    kECLeapTableValidUntil,
-    kECLeapTableValidUntilISO,
+    kECContinuousUTCStart,
     kECTTMinusTAI,
     leapSecondTableEntries,
     taiMinusUTCForDateInterval,
@@ -70,10 +69,9 @@ describe('leap-second table integrity', () => {
         }
     });
 
-    test('expiry constant and its ISO form agree, and lie ahead of the last entry', () => {
-        expect(kECLeapTableValidUntilISO).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-        expect(appleEpoch(`${kECLeapTableValidUntilISO}T00:00:00Z`)).toBe(kECLeapTableValidUntil);
-        expect(kECLeapTableValidUntil).toBeGreaterThan(entries[entries.length - 1].dateInterval);
+    test('continuous UTC begins 2027-05-20, after the last entry', () => {
+        expect(kECContinuousUTCStart).toBe(appleEpoch('2027-05-20T00:00:00Z'));
+        expect(kECContinuousUTCStart).toBeGreaterThan(entries[entries.length - 1].dateInterval);
     });
 
     test('TT − TAI is the defined 32.184 s', () => {

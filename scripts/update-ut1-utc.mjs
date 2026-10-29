@@ -283,6 +283,11 @@ function generate(samples, rows, bulletin, meta) {
     const last = samples[samples.length - 1];
     const lastObserved = rows.filter((r) => r.flag === 'I').at(-1);
     const slopePerYear = bulletin.b * 365.25;
+    // Backward extrapolation for 1972 (the year before finals.all starts):
+    // the smooth series' slope over its first year, in s/s.
+    const yearIn = samples.findIndex((x) => x.apple >= first.apple + 365 * 86400);
+    if (yearIn < 2) die('fewer than a year of samples to take the opening slope from');
+    const preSlope = (samples[yearIn].ms - first.ms) / 1000 / (samples[yearIn].apple - first.apple);
     const staleAfter = addMonths(isoDay(last.apple), STALE_AFTER_MONTHS);
 
     // One line per calendar year: "/* 1973 */ t,ms, t,ms, …"
@@ -335,13 +340,15 @@ import { kECLeapTableFinalTAIMinusUTC, taiMinusUTCForDateInterval } from './es-l
 
 /* UT1-TABLE-ENDS ${isoDay(last.apple)} STALE-AFTER ${staleAfter} — build.sh greps this line. */
 
-/** First sample (${isoDay(first.apple)}): before it \`kECUT1AtFirstSample\` is held. */
+/** First sample (${isoDay(first.apple)}): before it the smooth series is extrapolated
+ *  backward at \`kECUT1PreTableSlope\`. */
 export const kECUT1TableFirstSample = ${first.apple};
 
-/** UT1−UTC at the first sample, seconds — held for all earlier dates. (The
- *  leap-step-free series can't be held: TAI−UTC steps back through 1972
- *  and the reconstruction would leave the ±0.9 s band.) */
-export const kECUT1AtFirstSample = ${first.ut1utc.toFixed(3)};
+/** Slope of the smooth series over its first year, s/s (${(preSlope * 31557600).toFixed(3)} s/yr),
+ *  used to extend it back over 1972, the one year of the leap-second era
+ *  finals.all does not cover. Checked against Meeus's 1972 ΔT in the tests;
+ *  before 1972 UT is treated as UT1 and this is never consulted. */
+export const kECUT1PreTableSlope = ${preSlope.toExponential(6)};
 
 /** Last sample (${isoDay(last.apple)}), the end of the IERS predictions; the model takes over after it. */
 export const kECUT1TableLastSample = ${last.apple};
@@ -381,6 +388,9 @@ let _cachedIndex = 0;
 /** The stored, leap-step-free series u(t) (see the header), seconds. */
 function smoothSeriesForDateInterval(dateInterval: number): number {
     const n = ut1Table.length;
+    if (dateInterval <= ut1Table[0]) {
+        return (ut1Table[1] + (dateInterval - ut1Table[0]) * kECUT1PreTableSlope * 1000) / 1000;
+    }
     if (dateInterval >= ut1Table[n - 2]) {
         return ut1Table[n - 1] / 1000;
     }
@@ -411,13 +421,11 @@ function smoothSeriesForDateInterval(dateInterval: number): number {
  * UT1 − UTC, in seconds, at \`dateInterval\` (Apple-epoch seconds).
  *
  * Table-backed (IERS observed + predicted) through ${isoDay(last.apple)}, then the
- * slope-plus-curvature model; before ${isoDay(first.apple)} the first value is held
- * (|UT1−UTC| was < 0.9 s throughout the leap-second era anyway).
+ * slope-plus-curvature model; before ${isoDay(first.apple)} the smooth series is
+ * extrapolated back linearly, which covers 1972 to a few hundredths of a
+ * second. Callers treat UT as UT1 before 1972 and don't ask.
  */
 export function ut1MinusUTCForDateInterval(dateInterval: number): number {
-    if (dateInterval <= kECUT1TableFirstSample) {
-        return kECUT1AtFirstSample;
-    }
     if (dateInterval > kECUT1TableLastSample) {
         const tau = (dateInterval - kECUT1TableLastSample) / kSecondsPerYear;
         return kECUT1AtLastSample + kECUT1SlopePerYear * tau

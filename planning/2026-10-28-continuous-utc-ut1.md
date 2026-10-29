@@ -1,10 +1,10 @@
 # Continuous UTC: ΔT becomes 69.184 s − (UT1−UTC)
 
-**Status**: **commit 1 built, uncommitted** (rev 3, 2026-10-29) — see §10
-for what landed and the one thing the tests caught. All four questions
-answered by Steve 2026-10-29: Q1, Q2, Q4 as recommended; Q3 as recommended
-except the build warning fires at **12 months**, not 18. Commit 2 (§6) not
-started; Steve tests natively and commits first.
+**Status**: commit 1 landed as **45a39bf**; **commit 2 built, uncommitted**
+(rev 4, 2026-10-29) — §11 has what landed, the three fixes it turned up,
+and the golden audit. All four questions answered by Steve 2026-10-29: Q1,
+Q2, Q4 as recommended; Q3 as recommended except the build warning fires at
+**12 months**, not 18. Native test, then Steve commits.
 **Created**: 2026-10-28
 **Baseline**: 007d31d
 **Predecessor**: [2026-08-18-leap-second-deltat.md](2026-08-18-leap-second-deltat.md)
@@ -368,3 +368,100 @@ Landed, uncommitted, no behavior change (nothing imports the new module):
   seconds as exact +1 s steps, the 2017 known values (−0.407 → +0.591),
   interpolation, cache-vs-cold lookup, the pre-1973 hold, model handover
   continuity in value and slope, the τ² law (32 s per century).
+
+## 11. Outcome of commit 2 (2026-10-29)
+
+Built, uncommitted; typecheck clean, full suite green (72 files, 9032
+tests), goldens recaptured and audited (local only). Steve's native pass
+comes before the commit; the proposed message points here.
+
+**What changed** (15 files):
+
+- `es-leap-second.ts` + its generator: `kECLeapTableValidUntil(ISO)` and the
+  `LEAP-TABLE-EXPIRES` line are gone, `kECContinuousUTCStart` (2027-05-20)
+  is in, the generator dies on any entry at or after it, and build.sh's
+  leap block is removed (Q4).
+- `es-ut1-utc.ts` + its generator: 1972 is now covered by extrapolating the
+  smooth series back one year at its opening slope (`kECUT1PreTableSlope`,
+  −1.1 s/yr). §10's "hold the first value" was wrong for Jan–Jun 1972 by
+  ~0.85 s; the extrapolation reproduces Meeus's 42.2 s ΔT for 1972.0 to
+  0.07 s.
+- `es-time.ts`: `convertUTtoET` has two eras (polynomial before 1972,
+  `32.184 + TAI−UTC` from then on, forever). `julianCenturiesSince2000Epoch-
+  ForDateInterval` returns `deltaT` = **TT − UT1** and a new `ut1MinusUTC`
+  field (0 before 1972 via `ut1MinusUTCForUT`), one new cache slot.
+- `es-sidereal.ts`: both GMST inputs are UT1 (`tu` via TT − UT1, the
+  since-midnight term plus UT1 − UTC); `GSTDifferenceForDate` returns
+  gst(UT1) − UTC-since-midnight, the offset a face adds to the clock.
+  `convertGSTtoUT` is a pure solve again; `convertGSTtoUTclosest` does the
+  UT1 → UTC step and the day choice — see the findings.
+- `es-astro.ts` `EOTSeconds`: the mean sun's hour angle is measured from
+  noon in UT1. `astro-env.ts` `subSolarLongitude`: UT1 − UTC added to the
+  clock seconds (terminator / sub-solar point).
+- Tests: es-astro.test (TT − UTC pinned per era; TT − UT1 continuous
+  1970–2400 while TT − UTC steps exactly 27 times; 69.184 s forever;
+  `ut1MinusUTC` field; 1972 handover vs Meeus; GST↔UT round trip 1975–2200;
+  GST moves by UT1 − UTC × the sidereal rate), es-leap-second.test
+  (continuous-UTC constant), es-ut1-utc.test (all 27 leap seconds as exact
+  steps, the 1972 extrapolation). docs/astronomy.md gained a section and a
+  table row; docs/accuracy.md's "Past 2027" paragraph is rewritten.
+
+**Three things the work turned up** (all fixed here):
+
+1. **UT1 − UTC enters the GST inverse once, at rate 1.** T0 (GST at the UTC
+   midnight) already carries the midnight's UT1 in its `tu`, so
+   gst − T0 = k·(utc·R + dut1), not k·(ut1·R). Subtracting dut1 *after*
+   dividing by R leaves 0.27 % of it: 1.6 ms in 1975, 75 ms at 2100, 1.4 s
+   at 2400. Caught by the round-trip test; the residual now stays under
+   0.04 ms from 1600 to 2400.
+2. **The old day choice drops the right answer at midnight.** The ±12 h
+   test followed by "recompute from the previous midnight and take `ut2` if
+   positive" discards the candidate that is one sidereal day later when
+   the answer sits on the 0/2π seam, and returns a UTC a sidereal day off
+   (86 164.09 s). Latent before (gst − T0 was exactly 0 at midnight with
+   UTC ≡ UT1), exposed by any nonzero UT1 − UTC. Now: candidates a sidereal
+   day apart, chosen by closeness to the target.
+3. **EOT and the sub-solar point silently absorbed UT1 − UTC.** Both built
+   the mean sun's hour angle from UTC seconds; with sidereal time on UT1
+   that leaves EOT = true EOT + (UT1 − UTC) and the terminator shifted by
+   15″ per second. The golden audit caught EOT (its hands moved by exactly
+   DUT1 before the fix and not at all after); the sub-solar point was
+   found by grepping for every hour angle built from the clock.
+
+**Golden audit** (CAPTURE=1, then the field-bucketed numeric diff; display
+years derived from reference time plus the step/scrub action): 33 of 45
+files changed. Every moving angle is one of: rise/set/transit **time**
+hands by ≤ 1 s (1.745e-3 rad on a minute dial, 1.454e-4 on an hour dial —
+the |UT1 − UTC| < 0.9 s that used to be ignored, now applied); sidereal
+hands by UT1 − UTC (6.6e-4 rad at 2028 = −0.26 s; 1.25e-3 at 1999 =
++0.71 s); position angles ≤ 1e-4 rad (≤ 13″ of hour angle). Scenarios run
+through 2028, so the continuous-UTC era is exercised only to its first
+year; the far-future model is covered by unit tests, not goldens. Two
+outliers, both explained and left alone:
+
+- venezia `azb`, 1.2e-3 rad once in 1889 samples: body 6 at altitude
+  −89.13° (the nadir) on 2028-03-09, where azimuth is undefined and a
+  0.26 s shift swings it 4′. Old and new values reproduce exactly off the
+  engine.
+- miami `moon label b` (Moon transit on a 24 h dial), 1.87e-3 rad = 25.7 s
+  at two instants: **not DUT1**. `planettransitTimeRefined` for the Moon
+  converges at Low precision, switches to Full, then oscillates 3.6 s
+  between the two RA models and exhausts its 7 iterations; the fallback is
+  `extrapolateToYEqualX` through three points of which two coincide to
+  sub-µs, and that degenerate quadratic returns whichever root the
+  rounding favours — 48.04 s for every start in the old code, 47.97 or
+  13.70 in the new (the engine's own transit moved 78 ms). A pre-existing
+  solver fragility (the iOS port has the same code) exposed by a
+  perturbation; worth its own small fix and plan, not this commit.
+
+**Native pass — what to look at.** Today nothing should visibly move:
+UT1 − UTC is −0.04 s. Rise/set/transit seconds may differ by up to a
+second from before; EOT and the terminator are unchanged by construction.
+Scrub to 2100: the whole sky, every hour angle and rise/set time shifts by
+~28 s of time (7′ of hour angle) relative to the old build — that is the
+feature. Scrub across 2027-05-20: no step anywhere.
+
+**iOS parity**: both iOS engines are now wrong in the same two ways after
+May 2027 (§6); a back-port plan follows the web commit, Observatory's via
+the GitHub-reviewed route.
+

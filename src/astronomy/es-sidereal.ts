@@ -12,6 +12,7 @@ import { AstroCache, AstroCachePool, pushECAstroCacheInPool, popECAstroCacheToIn
 import {
     julianCenturiesSince2000EpochForDateInterval,
     priorUTMidnightForDateInterval,
+    ut1MinusUTCForUT,
 } from './es-time';
 
 const TWO_PI = Math.PI * 2;
@@ -107,22 +108,37 @@ function convertUTToGSTP03x(
 }
 
 /**
- * Convert a UT date interval to Greenwich Sidereal Time (radians) using P03 model.
+ * Convert a UT(C) date interval to Greenwich Sidereal Time (radians) using the
+ * P03 model.
+ *
+ * Sidereal time is a function of UT1, not UTC: both inputs to the formula —
+ * `tu` (via ΔT = TT − UT1) and the time since midnight — are UT1. The date
+ * interval is UTC, so UT1 − UTC is added to the since-midnight term (the
+ * prior *UTC* midnight is a fine origin: the formula is used mod 2π). Under
+ * continuous UTC this term grows without bound; 1 s of it is 15″ of hour
+ * angle. See planning/2026-10-28-continuous-utc-ut1.md §3c.
  */
 export function convertUTToGSTP03(
     calculationDate: number,
     cache: AstroCache | null,
 ): number {
-    const { julianCenturiesSince2000Epoch, deltaT } =
+    const { julianCenturiesSince2000Epoch, deltaT, ut1MinusUTC } =
         julianCenturiesSince2000EpochForDateInterval(calculationDate, cache);
     const priorUTMidnightD = priorUTMidnightForDateInterval(calculationDate, cache);
-    const utRadiansSinceMidnight = (calculationDate - priorUTMidnightD) * Math.PI / (12 * 3600);
-    return convertUTToGSTP03x(julianCenturiesSince2000Epoch, deltaT, utRadiansSinceMidnight, priorUTMidnightD);
+    const ut1RadiansSinceMidnight = (calculationDate + ut1MinusUTC - priorUTMidnightD) * Math.PI / (12 * 3600);
+    return convertUTToGSTP03x(julianCenturiesSince2000Epoch, deltaT, ut1RadiansSinceMidnight, priorUTMidnightD);
 }
 
 /**
- * Convert GST to UT (returns UT in radians since midnight, plus a potential second UT).
- * There may be two UT values for a given GST; ut2 is set to -1 if there is only one.
+ * Solve GST for the time since the given UTC midnight, in the formula's own
+ * units: radians of UT, where UTC since midnight = ut − (UT1 − UTC)·R⁻¹
+ * (R = sidereal rate, R⁻¹ = kECUTUnitsPerGSTUnit). The UT1 − UTC term enters
+ * once at rate 1 because T0's tu already sits at the midnight's UT1 — see
+ * convertUTToGSTP03 — so gst − T0 = k·(utcSinceMidnight·R + (UT1 − UTC)).
+ * Returns a potential second value too (−1 if there is only one). The
+ * caller that knows the instant finishes the job: convertGSTtoUTclosest.
+ * The 0/2π seam is the caller's to resolve as well — an answer at midnight
+ * can come back as either end.
  */
 export function convertGSTtoUT(
     gst: number,
@@ -140,6 +156,7 @@ export function convertGSTtoUT(
             cachePool ? cachePool.currentCache : null,
         );
 
+    // GST at the UTC midnight with the since-midnight term at zero.
     const T0 = convertUTToGSTP03x(julianCenturiesSince2000Epoch, deltaT, 0, priorUTMidnight);
 
     if (cachePool && priorCache !== undefined) {
@@ -163,60 +180,56 @@ export function convertGSTtoUT(
 }
 
 /**
- * Convert GST to UT, finding the UT closest to a given target date.
+ * Convert GST to UT, finding the UT(C) instant closest to a given target date.
+ *
+ * convertGSTtoUT's reading, as seconds past the target's UTC midnight, is
+ * UTC + (UT1 − UTC)·R⁻¹; UTC is that minus the term, with UT1 − UTC taken at
+ * the reading (it moves at most ~3 ms a day and the reading is within an
+ * hour of the instant even at the 3600 s cap, so this is exact to
+ * microseconds). GST repeats every sidereal day, so the candidates are a
+ * sidereal day apart: pick the one nearest the target. Choosing by
+ * closeness, rather than by which side of ±12 h the first answer fell, is
+ * what keeps an answer at midnight itself — which the solve can return as
+ * either end of the 0/2π seam — from landing a sidereal day off.
  */
 export function convertGSTtoUTclosest(
     gst: number,
     closestToThisDate: number,
     cachePool: AstroCachePool | null,
 ): number {
-    let priorUTMidnightD = priorUTMidnightForDateInterval(
-        closestToThisDate,
-        cachePool ? cachePool.currentCache : null,
-    );
+    const cache = cachePool ? cachePool.currentCache : null;
+    const toSeconds = (12 * 3600) / Math.PI;
+    const siderealDay = 24 * 3600 * kECUTUnitsPerGSTUnit;
 
-    // Calculate answer for this UT date
-    let { ut: ut0, ut2: ut0_2 } = convertGSTtoUT(gst, priorUTMidnightD, cachePool);
-    let utSecondsSinceMidnight = ut0 * (12 * 3600) / Math.PI;
-    let utD = priorUTMidnightD + utSecondsSinceMidnight;
+    const midnight = priorUTMidnightForDateInterval(closestToThisDate, cache);
+    const { ut } = convertGSTtoUT(gst, midnight, cachePool);
+    const reading = midnight + ut * toSeconds;
+    const toUTC = (r: number) => r - ut1MinusUTCForUT(r) * kECUTUnitsPerGSTUnit;
 
-    // If answer is less than target date - 12h, try the next UT date
-    if (utD < closestToThisDate - 12 * 3600.0 * kECUTUnitsPerGSTUnit) {
-        if (ut0_2 > 0) {
-            ut0 = ut0_2;
-            utSecondsSinceMidnight = ut0 * (12 * 3600) / Math.PI;
-            utD = priorUTMidnightD + utSecondsSinceMidnight;
-        } else {
-            priorUTMidnightD += 24 * 3600.0;
-            ({ ut: ut0, ut2: ut0_2 } = convertGSTtoUT(gst, priorUTMidnightD, cachePool));
-            utSecondsSinceMidnight = ut0 * (12 * 3600) / Math.PI;
-            utD = priorUTMidnightD + utSecondsSinceMidnight;
+    let best = toUTC(reading);
+    for (const shift of [-siderealDay, siderealDay]) {
+        const candidate = toUTC(reading + shift);
+        if (Math.abs(candidate - closestToThisDate) < Math.abs(best - closestToThisDate)) {
+            best = candidate;
         }
-    } else if (utD > closestToThisDate + 12 * 3600.0 * kECUTUnitsPerGSTUnit) {
-        priorUTMidnightD -= 24 * 3600.0;
-        ({ ut: ut0, ut2: ut0_2 } = convertGSTtoUT(gst, priorUTMidnightD, cachePool));
-        if (ut0_2 > 0) {
-            ut0 = ut0_2;
-        }
-        utSecondsSinceMidnight = ut0 * (12 * 3600) / Math.PI;
-        utD = priorUTMidnightD + utSecondsSinceMidnight;
     }
-
-    return utD;
+    return best;
 }
 
 /**
  * Compute the difference between GST and UT for a given date.
- * Returns the sidereal-UT offset in radians.
+ * Returns the sidereal-UT offset in radians: what a face adds to the clock's
+ * (UTC) time since midnight to get sidereal time, so UT1 − UTC is inside it.
  */
 export function GSTDifferenceForDate(
     dateInterval: number,
     cache: AstroCache | null,
 ): number {
-    const { julianCenturiesSince2000Epoch, deltaT } =
+    const { julianCenturiesSince2000Epoch, deltaT, ut1MinusUTC } =
         julianCenturiesSince2000EpochForDateInterval(dateInterval, cache);
     const priorUTMidnightD = priorUTMidnightForDateInterval(dateInterval, cache);
-    const utRadiansSinceMidnight = (dateInterval - priorUTMidnightD) * Math.PI / (12 * 3600);
-    const gst = convertUTToGSTP03x(julianCenturiesSince2000Epoch, deltaT, utRadiansSinceMidnight, priorUTMidnightD);
-    return gst - utRadiansSinceMidnight;
+    const utcRadiansSinceMidnight = (dateInterval - priorUTMidnightD) * Math.PI / (12 * 3600);
+    const ut1RadiansSinceMidnight = utcRadiansSinceMidnight + ut1MinusUTC * Math.PI / (12 * 3600);
+    const gst = convertUTToGSTP03x(julianCenturiesSince2000Epoch, deltaT, ut1RadiansSinceMidnight, priorUTMidnightD);
+    return gst - utcRadiansSinceMidnight;
 }

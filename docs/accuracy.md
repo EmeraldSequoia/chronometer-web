@@ -209,15 +209,18 @@ series — not a better lunar one.
 Two separate things degrade as you move away from the present, and it is
 worth keeping them apart.
 
-**Past 2027 — ΔT, not geometry.** The app's leap-second table is exact
-through mid-2027. Beyond it, the engine extrapolates a polynomial for ΔT
-while Horizons freezes TT−UTC at the last announced leap second; by 2041
-those two conventions differ by 10.2 s. Eclipse *start times* therefore
-diverge to a median 6.1 s (worst 18.8 s) — but the *interval lengths*
-stay at a 0.25 s median, because a time-base disagreement cancels between
-the two contacts. Nobody knows how fast the Earth will actually be
-rotating in 2041; this is two honest predictions of an unknowable
-quantity, not an error in either.
+**Past 2027 — Earth rotation, not geometry.** Since continuous UTC
+(CGPM Resolution 5, 2026; in the engine from 2026-10-29) TT−UTC is a
+fixed 69.184 s forever, which is also what Horizons assumes, so the 10.2 s
+convention gap the earlier comparison measured at 2041 (eclipse *start
+times* diverging to a median 6.1 s while interval lengths agreed to
+0.25 s) no longer exists in TT: a stored TT instant maps to the same UTC
+in both. What remains unknowable is UT1 − UTC — how far the Earth's
+rotation will have drifted from UTC — which enters hour angles and
+therefore local contact times at 15″ and 1 s per second of UT1 − UTC. The
+engine models it (IERS predictions for a year, then slope plus secular
+curvature); the honest uncertainty is about 1 s at ten years and tens of
+seconds per century. The comparison has not been re-run since.
 
 **Centuries and millennia out — the theories themselves.** The tables in
 §1 are the answer here. Roughly: the Moon is good to a few arcseconds

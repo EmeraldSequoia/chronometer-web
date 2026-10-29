@@ -18,24 +18,22 @@
  * lookup rather than a fitted polynomial for the whole modern era — see
  * es-time.ts `convertUTtoET`, which is the only consumer.
  *
- * The table is authoritative only as far as the IERS has announced, hence
- * `kECLeapTableValidUntil`. build.sh warns once today is past it.
+ * The last row is final: CGPM Resolution 5 (2026-10-15) made UTC continuous
+ * from 2027-05-20 (`kECContinuousUTCStart`), and Bulletin C 72 had already
+ * ruled out the one remaining slot before that. So TAI−UTC = 37 s and
+ * TT − UTC = 69.184 s for all later dates, exactly, forever. The
+ * Earth-rotation side of ΔT (UT1 − UTC) lives in es-ut1-utc.ts.
  *
  * All times are Apple-epoch seconds (since 2001-01-01 00:00:00 UTC).
  */
-
-/* LEAP-TABLE-EXPIRES 2027-06-28 — build.sh greps this line. */
 
 /** 1972-01-01 00:00:00 UTC — the first line of the table, and the start of
  *  the era in which TAI−UTC is defined at all. */
 export const kECLeapEraStart = -915235200;
 
-/** The source file's own expiration (2027-06-28): past this instant the
- *  IERS has announced nothing, so neither can we. */
-export const kECLeapTableValidUntil = 835833600;
-
-/** Same instant as an ISO day, for messages and tests. */
-export const kECLeapTableValidUntilISO = '2027-06-28';
+/** 2027-05-20 00:00:00 UTC — continuous UTC begins; no leap second can occur
+ *  at or after this instant (CGPM Resolution 5, 2026). */
+export const kECContinuousUTCStart = 832464000;
 
 /** TT − TAI, fixed by definition. */
 export const kECTTMinusTAI = 32.184;
@@ -80,7 +78,8 @@ const leapSecondTable: readonly number[] = [
 /** Number of rows in `leapSecondTable` (2 numbers apiece). */
 export const kECLeapTableEntryCount = 28;
 
-/** TAI−UTC at the end of the table, i.e. the value in force today. */
+/** TAI−UTC at the end of the table — the value in force today and, under
+ *  continuous UTC, for good. */
 export const kECLeapTableFinalTAIMinusUTC = 37;
 
 /** Last-entry cache: consecutive calls are almost always in the same era. */
@@ -119,8 +118,9 @@ export function taiMinusUTCForDateInterval(dateInterval: number): number {
 }
 
 /**
- * TT − UTC, in seconds, at `dateInterval` — i.e. ΔT with UT taken as UTC.
- * Exact for any instant from 1972-01-01 through the table's expiry.
+ * TT − UTC, in seconds, at `dateInterval`. Exact for any instant from
+ * 1972-01-01 on, with no end date. This is what the ephemerides need;
+ * the classical ΔT = TT − UT1 subtracts es-ut1-utc.ts's UT1 − UTC from it.
  */
 export function ttMinusUTCForDateInterval(dateInterval: number): number {
     return kECTTMinusTAI + taiMinusUTCForDateInterval(dateInterval);

@@ -2116,15 +2116,19 @@ export function registerAstroFunctions(
     // overhead, in radians [-π, π]. Port of iOS sslng calculation:
     //   sslng = π - solarTimeAtGreenwich × π / (12 × 3600)
     // solarTimeAtGreenwich = secondsSinceMidnight - tzOffset + EOT
+    // — where "seconds since midnight" is mean solar time at Greenwich,
+    // i.e. UT1, so UT1 − UTC is added to the clock's UTC seconds (it is
+    // unbounded under continuous UTC: 1 s of it is 15″ of longitude).
     functions.set('subSolarLongitude', () =>
         liveAstro((cache, di) => {
         const eotSec = EOTSeconds(di, cache);
+        const { ut1MinusUTC } = julianCenturiesSince2000EpochForDateInterval(di, cache);
         // Compute seconds since local midnight in the target timezone
         const utcMs = getNow().getTime();
         const localSeconds = ((utcMs / 1000) + tzOffsetSeconds) % 86400;
         const secSinceMidnight = ((localSeconds % 86400) + 86400) % 86400;
         // Solar time at Greenwich meridian
-        const solarTimeAtGreenwich = secSinceMidnight - tzOffsetSeconds + eotSec;
+        const solarTimeAtGreenwich = secSinceMidnight - tzOffsetSeconds + ut1MinusUTC + eotSec;
         let sslng = Math.PI - solarTimeAtGreenwich * Math.PI / (12 * 3600);
         // Normalize to [-π, π]
         while (sslng < -Math.PI) sslng += 2 * Math.PI;

@@ -16,12 +16,8 @@ import {
 } from './astro-constants';
 import type { AstroCache } from './astro-cache';
 import { CacheSlot } from './astro-cache';
-import {
-    kECLeapEraStart,
-    kECLeapTableValidUntil,
-    kECLeapTableValidUntilISO,
-    ttMinusUTCForDateInterval,
-} from './es-leap-second';
+import { kECLeapEraStart, ttMinusUTCForDateInterval } from './es-leap-second';
+import { ut1MinusUTCForDateInterval } from './es-ut1-utc';
 
 // ============================================================================
 // Supported astronomical date range
@@ -219,21 +215,6 @@ export function espenakDeltaT(yearValue: number): number {
     }
 }
 
-/**
- * Espenak's ΔT at `kECLeapTableValidUntil` minus the exact value there — the
- * constant that makes the polynomial rejoin the table without a step. Computed
- * once, lazily, from generated constants.
- */
-let _leapRejoinOffset: number | null = null;
-function leapRejoinOffset(): number {
-    if (_leapRejoinOffset === null) {
-        _leapRejoinOffset =
-            espenakDeltaT(yearValueForDateInterval(kECLeapTableValidUntil)) -
-            ttMinusUTCForDateInterval(kECLeapTableValidUntil);
-    }
-    return _leapRejoinOffset;
-}
-
 /** The year-plus-fraction convention the ΔT polynomials are fed. */
 function yearValueForDateInterval(utSeconds: number): number {
     const d = new Date((utSeconds + 978307200) * 1000);
@@ -243,36 +224,33 @@ function yearValueForDateInterval(utSeconds: number): number {
 }
 
 /**
- * Convert UT to ET/TDT by adding ΔT. Three eras, in time order:
+ * Convert UT to ET/TDT by adding TT − UT. Two eras:
  *
- * 1. **Before 1972** — `espenakDeltaT`, the Five Millennium Canon polynomials.
- *    That is what they are for, and there is nothing better.
- * 2. **1972 through {@link kECLeapTableValidUntilISO}** — exact, from the
- *    leap-second table: `TT − UTC = 32.184 + (TAI − UTC)`. No fit is involved,
- *    so within this window ΔT is right to the millisecond rather than to the
- *    several seconds the polynomial had drifted (it predicted the Earth would
- *    keep slowing; instead it sped up, and by 2026 the 2005–2050 branch is
- *    ~5.9 s high — about 3″ of Moon).
- * 3. **After the table's expiry** — the polynomial again, shifted by the
- *    constant that makes it continuous at the handover. The parabola's
- *    curvature is the trustworthy part of the physics (tidal braking, good to
- *    centuries); its decadal level is not, and the offset absorbs that.
+ * 1. **Before 1972** — `espenakDeltaT`, the Five Millennium Canon polynomials,
+ *    with `ut` taken as UT1. That is what they are for, and there is nothing
+ *    better.
+ * 2. **1972 onward** — exact, from the leap-second table:
+ *    `TT − UTC = 32.184 + (TAI − UTC)`, with `ut` taken as UTC (what the
+ *    system clock is). No fit is involved, and since CGPM Resolution 5 (2026)
+ *    made UTC continuous from 2027-05-20 the table's last value, 69.184 s,
+ *    holds forever. The polynomial (it predicted the Earth would keep slowing;
+ *    instead it sped up, and by 2026 its 2005–2050 branch was ~5.9 s high —
+ *    about 3″ of Moon) never comes back.
  *
- * The 1972 boundary itself steps by about 0.07 s (espenakDeltaT(1972.0) ≈ 42.25
- * against the exact 42.184) — far inside the polynomial's own error band there,
- * and not worth blending across.
+ * The 1972 boundary steps by about 0.01 s (espenakDeltaT(1972.0) ≈ 42.25
+ * against 42.184 − (UT1 − UTC) ≈ 42.26) — far inside the polynomial's own
+ * error band there, and not worth blending across.
  *
- * `ut` is UTC, not UT1; the |UT1 − UTC| < 0.9 s difference is unmodelled here
- * exactly as it was before. See planning/2026-08-18-leap-second-deltat.md.
+ * This is the ephemeris side of ΔT. The Earth-rotation side — UT1, which
+ * sidereal time and hour angles need — is `ut1MinusUTCForDateInterval`
+ * (es-ut1-utc.ts), applied by {@link julianCenturiesSince2000EpochForDateInterval}.
+ * See planning/2026-10-28-continuous-utc-ut1.md.
  */
 function convertUTtoET(ut: number, yearValue: number): number {
     if (ut < kECLeapEraStart) {
         return ut + espenakDeltaT(yearValue);
     }
-    if (ut <= kECLeapTableValidUntil) {
-        return ut + ttMinusUTCForDateInterval(ut);
-    }
-    return ut + espenakDeltaT(yearValue) - leapRejoinOffset();
+    return ut + ttMinusUTCForDateInterval(ut);
 }
 
 /**
@@ -297,6 +275,15 @@ export function convertETtoUT(et: number): number {
         ut = et - (convertUTtoET(ut, yearValueForDateInterval(ut)) - ut);
     }
     return ut;
+}
+
+/**
+ * UT1 − UTC for a UT(C) date interval, with the era rule applied: 0 before
+ * 1972, when UTC did not step by whole seconds and `ut` is taken as UT1
+ * (the polynomial ΔT already is TT − UT1 there); the IERS series after.
+ */
+export function ut1MinusUTCForUT(ut: number): number {
+    return ut >= kECLeapEraStart ? ut1MinusUTCForDateInterval(ut) : 0;
 }
 
 // ============================================================================
@@ -369,12 +356,27 @@ let _lastYearValue = 0;
  * Result of computing Julian centuries since J2000.0 epoch.
  */
 export interface JulianCenturiesResult {
+    /** TT (TDT) Julian centuries since J2000.0 — what every ephemeris takes. */
     julianCenturiesSince2000Epoch: number;
+    /**
+     * The classical ΔT = TT − UT1, seconds. From 1972 on this is the exact
+     * TT − UTC (69.184 s since 2017, forever) minus `ut1MinusUTC`; before 1972
+     * it is the polynomial, with UT taken as UT1. Only Earth-rotation code
+     * (sidereal time) needs it.
+     */
     deltaT: number;
+    /**
+     * UT1 − UTC, seconds, from the IERS series in es-ut1-utc.ts; 0 before 1972,
+     * when UT is treated as UT1. Under continuous UTC this grows without bound
+     * (−0.15 s/yr today), so anything that turns a UTC instant into an Earth
+     * rotation angle must add it.
+     */
+    ut1MinusUTC: number;
 }
 
 /**
- * Return TDT/ET Julian centuries since J2000.0 epoch for a given UT date interval.
+ * Return TDT/ET Julian centuries since J2000.0 epoch for a given UT(C) date
+ * interval, plus the two halves of ΔT (see {@link JulianCenturiesResult}).
  * This is the central time-conversion function used throughout the astronomy code.
  */
 export function julianCenturiesSince2000EpochForDateInterval(
@@ -385,6 +387,7 @@ export function julianCenturiesSince2000EpochForDateInterval(
         return {
             julianCenturiesSince2000Epoch: cache.get(CacheSlot.tdtCenturies),
             deltaT: cache.get(CacheSlot.tdtCenturiesDeltaT),
+            ut1MinusUTC: cache.get(CacheSlot.tdtCenturiesUT1MinusUTC),
         };
     }
 
@@ -409,17 +412,19 @@ export function julianCenturiesSince2000EpochForDateInterval(
 
     const yearValue = _lastYearValue + (utSeconds - firstOfThisYearInterval) / (365.25 * 24 * 3600);
     const etSeconds = convertUTtoET(utSeconds, yearValue);
-    const deltaT = etSeconds - utSeconds;
+    const ut1MinusUTC = ut1MinusUTCForUT(utSeconds);
+    const deltaT = etSeconds - utSeconds - ut1MinusUTC;
     const julianDaysSince2000Epoch = julianDateForDate(etSeconds) - kECJulianDateOf2000Epoch;
     const julianCenturiesSince2000Epoch = julianDaysSince2000Epoch / kECJulianDaysPerCentury;
 
     if (cache) {
         cache.set(CacheSlot.tdtCenturies, julianCenturiesSince2000Epoch);
         cache.set(CacheSlot.tdtCenturiesDeltaT, deltaT);
+        cache.set(CacheSlot.tdtCenturiesUT1MinusUTC, ut1MinusUTC);
         cache.set(CacheSlot.tdtHundredCenturies, julianCenturiesSince2000Epoch / 100);
     }
 
-    return { julianCenturiesSince2000Epoch, deltaT };
+    return { julianCenturiesSince2000Epoch, deltaT, ut1MinusUTC };
 }
 
 /**

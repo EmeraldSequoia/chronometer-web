@@ -38,7 +38,8 @@ See [iOS Reference](ios-reference.md) for a complete file listing.
 | `src/astronomy/es-riseset.ts` | Rise/set/transit calculations for sun and moon | `ECAstronomyManager.cpp` |
 | `src/astronomy/es-sidereal.ts` | Sidereal time (GMST, LST) | `ECAstronomy.m` |
 | `src/astronomy/es-time.ts` | Julian date, ΔT, date interval conversions | `ESTime.cpp`, `ESCalendar.cpp` |
-| `src/astronomy/es-leap-second.ts` | TAI−UTC table behind exact ΔT — **generated**, see `scripts/update-leap-seconds.mjs` | `ESLeapSecond.cpp` |
+| `src/astronomy/es-leap-second.ts` | TAI−UTC table behind exact TT−UTC — **generated**, see `scripts/update-leap-seconds.mjs` | `ESLeapSecond.cpp` |
+| `src/astronomy/es-ut1-utc.ts` | UT1−UTC series (IERS) + far-future model, the Earth-rotation side of ΔT — **generated**, see `scripts/update-ut1-utc.mjs` | — |
 | `src/astronomy/es-calendar.ts` | Calendar utilities (day of year, leap year, month lengths) | `ESCalendar.cpp` |
 | `src/astronomy/wb-sun.ts` | Willmann-Bell sun position (Bretagnon & Simon series) | `ESWillmannBellSun.cpp` |
 | `src/astronomy/wb-moon.ts` | Willmann-Bell moon position (Chapront-Touzé tables) | `ESWillmannBellMoon.cpp` |
@@ -94,18 +95,17 @@ correct for what it computes). See
 ### ΔT Is Exact From 1972 Onward (deliberate iOS divergence)
 
 **2026-08-18.** `convertUTtoET` (es-time.ts) no longer asks the Espenak
-polynomial for modern dates. From 1972-01-01 through the leap-second table's
-published expiry it computes ΔT as
+polynomial for modern dates. From 1972-01-01 on it computes TT − UTC as
 
 ```
 TT − UTC = 32.184 s + (TAI − UTC)
 ```
 
 which is exact by definition — `TAI − UTC` is the integer maintained by the
-IERS, tabulated in the generated `src/astronomy/es-leap-second.ts`. Outside
-that window nothing changed: before 1972 the polynomial is still
-authoritative, and past the expiry it resumes with the constant offset that
-makes it continuous at the handover.
+IERS, tabulated in the generated `src/astronomy/es-leap-second.ts`. Before
+1972 the polynomial is still authoritative. (Originally the polynomial also
+resumed past the table's expiry; continuous UTC removed that — see the
+next section.)
 
 iOS `ECAstronomy.m:185–199` still uses the Meeus table/polynomial and needs the
 mirror change. `ESLeapSecond` is already linked into the iOS products —
@@ -123,18 +123,44 @@ inside the leap era moved *closer* to concentric (2013 Nov 03: 0.74″ → 0.32�
 2016 Sep 01: 1.70″ → 0.88″; 2017 Feb 26: 1.03″ → 0.58″; 2020 Jun 21:
 0.89″ → 0.47″; 2023 Apr 20: 1.57″ → 0.76″).
 
-Two things the table deliberately does not fix. It is UTC, not UT1, so
-GST and hour angles still carry the |UT1 − UTC| < 0.9 s ambiguity they always
-did. And past `kECLeapTableValidUntilISO` nobody — including NASA — knows ΔT:
-the IERS announces leap seconds only about six months ahead, which is why the
-source file carries an expiry and build.sh warns once it passes. Our
-post-expiry extrapolation is deliberately lower than the raw polynomial NASA's
-eclipse catalogs assume (72.4 s vs 79 s for 2032) — which is why
 `src/help/eclipse-data.json` stores the ΔT-independent TT instant (`tdMs`)
 rather than anyone's UT label, and consumers derive UT at run time through
 `convertETtoUT` (es-time.ts). See
 [planning/2026-08-18-leap-second-deltat.md](../planning/2026-08-18-leap-second-deltat.md)
 and [planning/2026-08-17-eclipse-precision-and-verification.md](../planning/2026-08-17-eclipse-precision-and-verification.md) §3b.
+
+### Continuous UTC: ΔT Is Two Numbers (2026-10-29)
+
+CGPM Resolution 5 (2026-10-15) ends leap seconds: UTC is continuous from
+2027-05-20 and |UT1 − UTC| may grow to an hour. That splits what used to be
+one ΔT into two quantities the engine now keeps apart
+(`julianCenturiesSince2000EpochForDateInterval` returns both):
+
+- **TT − UTC** — what every ephemeris needs. Exact from the leap table from
+  1972 on, and since the table's last row is now final, **69.184 s forever**.
+  The old "rejoin the polynomial after the table expires" branch is gone,
+  and so is the build warning about the table's expiry.
+- **UT1 − UTC** — what sidereal time, hour angles, transit/rise/set, the
+  equation of time and the terminator need, since the Earth rotation angle
+  is a function of UT1. Generated `src/astronomy/es-ut1-utc.ts`: the IERS
+  finals.all series sampled monthly from 1973 (stored leap-step-free as
+  UT1 − UTC − (TAI − UTC) + 37, so interpolation never smears a leap
+  second; the exact TAI−UTC step is added back), extrapolated linearly over
+  1972, through the IERS's year of predictions, then a model
+  `DUT1(t₀) + s·τ − ½·c·τ²` with s the Bulletin A long-range slope
+  (−0.146 s/yr at generation) and c = 2 × 32 s/cy² the secular tidal/GIA
+  curvature. ±1 s at ten years is the honest uncertainty of any model
+  (planning §8). Regenerate yearly; build.sh warns 12 months after the last
+  sample.
+- The `deltaT` field is the classical **TT − UT1** (= TT − UTC − (UT1 − UTC)),
+  and es-sidereal.ts feeds UT1 into both inputs of the GMST formula; the
+  GST→UT inverse returns UTC. Before 1972 UT is treated as UT1 and
+  UT1 − UTC is 0, as before.
+
+Effect: from 1972 on, hour angles no longer carry the |UT1 − UTC| < 0.9 s
+ambiguity (≤13″, ≤0.9 s of rise/set time) they always did; after 2027 they
+would otherwise have drifted by 15″ per second of UT1 − UTC. See
+[planning/2026-10-28-continuous-utc-ut1.md](../planning/2026-10-28-continuous-utc-ut1.md).
 
 ### Measured Accuracy: Engine vs JPL Horizons
 

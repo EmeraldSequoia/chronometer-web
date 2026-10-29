@@ -316,7 +316,13 @@ export function EOTSeconds(
     // If noonD is more than 12h in the future, use previous day's noon
     const noonUT = (noonD - dateInterval > 43200) ? noonD - 86400 : noonD;
 
-    const secondsFromNoon = dateInterval - noonUT;
+    // The mean sun's hour angle is UT1 − 12h by definition (UT1 *is* mean
+    // solar time at Greenwich), so measure from noon in UT1, not UTC;
+    // otherwise EOT would pick up UT1 − UTC, which under continuous UTC
+    // grows without bound. The final subtraction below is UTC − UTC and is
+    // frame-free.
+    const { ut1MinusUTC } = julianCenturiesSince2000EpochForDateInterval(dateInterval, cache);
+    const secondsFromNoon = dateInterval + ut1MinusUTC - noonUT;
     // Longitude of mean sun: if 1h after noon, sun is 15° west
     const longitudeOfMeanSun = -secondsFromNoon * Math.PI / (12 * 3600);
 

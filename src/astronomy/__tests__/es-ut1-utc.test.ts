@@ -10,7 +10,7 @@
  */
 import { describe, test, expect } from 'vitest';
 import {
-    kECUT1AtFirstSample,
+    kECUT1PreTableSlope,
     kECUT1AtLastSample,
     kECUT1SecularCurvature,
     kECUT1SlopePerYear,
@@ -22,7 +22,7 @@ import {
     ut1MinusUTCForDateInterval,
     ut1TableEntries,
 } from '../es-ut1-utc';
-import { leapSecondTableEntries } from '../es-leap-second';
+import { kECLeapEraStart, leapSecondTableEntries } from '../es-leap-second';
 
 /** Apple epoch seconds for a UTC instant. */
 const appleEpoch = (iso: string) => new Date(iso).getTime() / 1000 - 978307200;
@@ -71,13 +71,15 @@ describe('UT1−UTC table integrity', () => {
         }
     });
 
-    test('every leap second since 1973 is an exact +1 s step in UT1−UTC', () => {
-        const leaps = leapSecondTableEntries().filter((e) => e.dateInterval > kECUT1TableFirstSample);
-        expect(leaps.length).toBe(25);
+    test('every leap second since 1972 is an exact +1 s step in UT1−UTC', () => {
+        // Entry 0 is the 1972-01-01 base row (TAI−UTC = 10), not a step; the
+        // two 1972 steps fall in the back-extrapolated year.
+        const leaps = leapSecondTableEntries().slice(1);
+        expect(leaps.length).toBe(27);
         for (const { dateInterval } of leaps) {
             const before = ut1MinusUTCForDateInterval(dateInterval - 1);
             const after = ut1MinusUTCForDateInterval(dateInterval);
-            expect(after - before).toBeCloseTo(1, 3);
+            expect(after - before, isoDay(dateInterval)).toBeCloseTo(1, 3);
         }
     });
 
@@ -115,15 +117,24 @@ describe('ut1MinusUTCForDateInterval', () => {
         }
     });
 
-    test('before the first sample the UT1−UTC value there is held (not the smooth series)', () => {
-        const first = ut1MinusUTCForDateInterval(kECUT1TableFirstSample);
-        expect(first).toBe(kECUT1AtFirstSample);
-        expect(Math.abs(first)).toBeLessThan(0.9);
-        // 1972 has two leap seconds behind the first sample; the hold must
-        // not step back through them.
-        for (const iso of ['1972-01-01T00:00:00Z', '1972-06-30T23:59:59Z', '1972-07-01T00:00:00Z', '1960-01-01T00:00:00Z']) {
-            expect(ut1MinusUTCForDateInterval(appleEpoch(iso))).toBe(first);
+    test('1972 is covered by extrapolating the smooth series back one year', () => {
+        // finals.all starts 1973-01-02; the leap-second era starts 1972-01-01.
+        // The smooth series' opening slope (about −1.1 s/yr in 1973) carries
+        // it back, and the exact TAI−UTC steps (10 → 11 → 12 during 1972) are
+        // added on top, so the result stays in the ±0.9 s band and Meeus's
+        // ΔT of 42.2 s for 1972.0 is reproduced to a few hundredths.
+        expect(kECUT1PreTableSlope).toBeLessThan(0);
+        expect(kECUT1PreTableSlope * kSecondsPerYear).toBeGreaterThan(-2);
+        for (let t = kECLeapEraStart; t < kECUT1TableFirstSample; t += 86400) {
+            expect(Math.abs(ut1MinusUTCForDateInterval(t)), isoDay(t)).toBeLessThan(0.9);
         }
+        const dut1At1972 = ut1MinusUTCForDateInterval(appleEpoch('1972-01-01T00:00:00Z'));
+        expect(42.184 - dut1At1972).toBeCloseTo(42.2, 0);
+        expect(Math.abs(42.184 - dut1At1972 - 42.2)).toBeLessThan(0.15);
+        // Continuity into the table.
+        const eps = 1;
+        expect(ut1MinusUTCForDateInterval(kECUT1TableFirstSample - eps))
+            .toBeCloseTo(ut1MinusUTCForDateInterval(kECUT1TableFirstSample), 5);
     });
 
     test('the model takes over at the last sample with no step and the IERS slope', () => {
