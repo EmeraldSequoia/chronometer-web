@@ -90,6 +90,28 @@ else
   echo "  ✓ Leap-second table valid through $LEAP_EXPIRY"
 fi
 
+echo "=== Checking UT1−UTC table freshness ==="
+# src/astronomy/es-ut1-utc.ts is generated from the IERS finals.all, whose
+# predictions run about a year past its issue date. After that the series
+# continues on a slope-plus-curvature model that drifts from reality by
+# ~0.15 s/yr -- a warning, not an error: hour angles are a few arcseconds
+# off and the fix is a one-line command.
+UT1_FILE="$SRC/astronomy/es-ut1-utc.ts"
+UT1_STALE=$(grep -o 'STALE-AFTER [0-9][0-9-]*' "$UT1_FILE" | awk '{print $2}')
+if [ -z "$UT1_STALE" ]; then
+  echo "ERROR: no STALE-AFTER line in $UT1_FILE" >&2
+  echo "Regenerate with: node scripts/update-ut1-utc.mjs" >&2
+  exit 1
+fi
+if [ "$TODAY" \> "$UT1_STALE" ]; then
+  echo "  ****************************************************************"
+  echo "  * WARNING: UT1−UTC table is stale (12 months past its last sample, $UT1_STALE)"
+  echo "  * Run: node scripts/update-ut1-utc.mjs"
+  echo "  ****************************************************************"
+else
+  echo "  ✓ UT1−UTC table fresh until $UT1_STALE"
+fi
+
 echo "=== Generating face data modules ==="
 node scripts/generate-face-modules.js
 
