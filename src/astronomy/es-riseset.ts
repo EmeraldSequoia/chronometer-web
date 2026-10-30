@@ -132,12 +132,27 @@ function linearFit(X1: number, Y1: number, X2: number, Y2: number): number {
 }
 
 /**
+ * Two fit abscissae closer than this (seconds) carry no usable slope: the fits
+ * below divide by their difference, and a y-difference across them of more than
+ * microseconds means the two values came from different functions (the Moon's
+ * low- and full-precision models), not from one curve. Exact `!==` tests let
+ * sub-microsecond pairs through. See planning/2026-10-29-moon-transit-degenerate-fit.md.
+ */
+const kFitCoincidentAbscissaTolerance = 1e-3;
+
+/**
  * Extrapolate to find x where f(x) = x, using parabolic/linear fitting.
  * From the original ESAstronomy.cpp.
  */
 function extrapolateToYEqualX(x: number[], y: number[], numValues: number): number {
     if (numValues === 1) {
         return y[0];
+    }
+
+    // The two latest points coincide in x: no line or parabola through them can be
+    // trusted, and the latest value is presumed the most accurate.
+    if (Math.abs(x[numValues - 1] - x[numValues - 2]) < kFitCoincidentAbscissaTolerance) {
+        return y[numValues - 1];
     }
 
     if (numValues > 2) {
@@ -149,7 +164,8 @@ function extrapolateToYEqualX(x: number[], y: number[], numValues: number): numb
         const X3 = x[numValues - 1] - offset;
         const Y3 = y[numValues - 1] - offset;
 
-        if (X1 !== X2 && X1 !== X3 && X2 !== X3) {
+        if (Math.abs(X1 - X2) >= kFitCoincidentAbscissaTolerance
+            && Math.abs(X1 - X3) >= kFitCoincidentAbscissaTolerance) {
             const k1 = Y1 / ((X1 - X2) * (X1 - X3));
             const k2 = Y2 / ((X2 - X1) * (X2 - X3));
             const k3 = Y3 / ((X3 - X1) * (X3 - X2));
@@ -518,6 +534,9 @@ export function planetaryRiseSetTimeRefined(
         if (Math.abs(lastDelta) < 0.1) {
             if (planetNumber === ECPlanetNumber.Moon && precision !== ECWBPrecision.Full) {
                 precision = ECWBPrecision.Full;
+                fitTries = 0;  // Ignore low-precision prior values, as above: they describe a
+                               // function a few seconds away from the full-precision one, and a
+                               // fit through points from both returns a bogus root (2026-10-29)
                 continue;
             }
             // Converged
@@ -583,10 +602,23 @@ export function planettransitTimeRefined(
 
         if (Math.abs(newDate - tryDate) < 0.1) {
             if (planetNumber === ECPlanetNumber.Moon && precision !== ECWBPrecision.Full) {
+                // Low precision has converged; re-solve from this date at full precision.
+                // The low-precision fit points (this one included) describe a function a
+                // few seconds away from the full-precision one, and a parabola through
+                // points from both returns a bogus root — so discard them, and give full
+                // precision the same two shots the exhaustion branch above grants.
+                // Before 2026-10-29 the points were kept, the quadratic degenerated on two
+                // sub-microsecond-apart abscissae, and the exhausted loop returned a root
+                // tens of seconds off that moved with the start date.
+                // See planning/2026-10-29-moon-transit-degenerate-fit.md.
                 precision = ECWBPrecision.Full;
-            } else {
-                return newDate;
+                fitTries = 0;
+                if (i > numIterations - 3) {
+                    i = numIterations - 3;
+                }
+                continue;
             }
+            return newDate;
         }
 
         tryDates[fitTries] = tryDate;
