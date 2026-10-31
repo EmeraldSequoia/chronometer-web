@@ -192,3 +192,22 @@ no plate (this Mac is Tahoe — also confirm the glass tile is gone). iPhone:
 home-screen icon for index/pick/help is the same crop as before, sharper; face pages'
 icons and scope unchanged. Index/pick cards still look right with the
 1024 thumbs.
+
+## Android (added 2026-10-31)
+
+Chrome on Android had the same complaint in a different shape: with only a
+`purpose: any` icon it shrinks the artwork onto a **white disc** to fit the
+launcher's adaptive mask. Fix: every manifest now carries a second entry,
+`icon-<x>-maskable.png` with `purpose: maskable`, built by `make_maskable`
+in build.sh — the artwork scaled to 87 % and centred on the page
+background `#1a1a2e`. Why 87: the W3C safe zone is the central 80 %
+circle; Chrome maps it onto Android's 66/72 dp safe zone, so the launcher's
+mask window shows 72/66 × 0.8 ≈ 87 % of the image. At 87 % a circular dial
+meets a circular launcher's edge exactly — no dark ring (what 80 % gave),
+no clipped rim (what 100 % gave; see the launcher emulation grid). The
+Chronometer crop (square art) gets the same; Eclipses keeps its own
+near-black.
+`background_color` was added for the Android splash screen. Chrome prefers
+the maskable entry; Safari keeps using the `any` one. Verify on the Pixel:
+add to home screen from a face page, Observatory, the index — dark circle,
+dial inside, no white disc.

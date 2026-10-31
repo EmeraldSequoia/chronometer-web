@@ -380,19 +380,29 @@ splice_loader() {
 # Per-app web-app manifest: dist/app-<slug>.webmanifest. One per installable
 # page so each gets its own home-screen / Dock name and icon. macOS Safari's
 # "Add to Dock" takes its icon ONLY from here (never apple-touch-icon) and
-# shrinks anything with transparent corners onto a white plate, so the icon
-# must be the opaque full-bleed icon-<x>.png (see "app icons" below). No
-# start_url/id: each page stays its own app. scope ./ keeps cross-app
-# navigation inside the installed standalone container (iOS).
+# shrinks anything with transparent corners onto a white plate, so the "any"
+# icon must be the opaque full-bleed icon-<x>.png (see "app icons" below).
+# Android Chrome does the same with a white DISC unless a "maskable" icon
+# exists: icon-<x>-maskable.png keeps the artwork inside the central 80 %
+# circle (the W3C safe zone) on the page background, and the launcher cuts
+# its own shape from that. background_color is the Android splash behind
+# the icon. No start_url/id: each page stays its own app. scope ./ keeps
+# cross-app navigation inside the installed standalone container (iOS).
+ICON_BG='#1a1a2e'   # page background; behind every opaque icon and the Android splash
 emit_manifest() {  # emit_manifest <slug> <name> <icon file> <icon px>
   local slug="$1" name="$2" icon="$3" px="$4"
+  local maskable="${icon%.png}-maskable.png"
   cat > "$DIST/app-$slug.webmanifest" <<EOF
 {
   "name": "$name",
   "short_name": "$name",
   "display": "standalone",
   "scope": "./",
-  "icons": [{ "src": "$icon", "sizes": "${px}x${px}", "type": "image/png", "purpose": "any" }]
+  "background_color": "$ICON_BG",
+  "icons": [
+    { "src": "$icon", "sizes": "${px}x${px}", "type": "image/png", "purpose": "any" },
+    { "src": "$maskable", "sizes": "${px}x${px}", "type": "image/png", "purpose": "maskable" }
+  ]
 }
 EOF
 }
@@ -539,7 +549,6 @@ node scripts/make-cities-gz.mjs "$DIST"
 # icon framing) and src/icon-inspector.png are opaque 1024 masters: copied as
 # icons, shrunk as thumbs. thumb-eclipses.png is a 400 opaque original (its
 # source art is 316 px) and serves as both.
-ICON_BG='#1a1a2e'
 THUMB_PX=400
 shrink_png() {  # shrink_png <src> <dist file name> <px>
   if command -v magick >/dev/null 2>&1; then
@@ -559,6 +568,19 @@ make_icon() {  # make_icon <transparent master> <dist file name>
     cp "$1" "$DIST/$2"
   fi
 }
+# Maskable variant: the artwork scaled to <pct> % of the square, centred on
+# the page background (or <bg>), same pixel size as the source. The W3C
+# safe zone is the central 80 % circle; Chrome fits that onto Android's
+# 66/72 dp safe zone, so a launcher's mask window shows ~87 % of the image
+# (72/66 × 0.8). At 87 % a circular dial lands exactly on a circular
+# launcher's edge: no dark ring, no clipped rim. Emulation of the shapes:
+# planning/2026-10-31-android-launcher-emulation.png.
+make_maskable() {  # make_maskable <opaque or transparent source> <dist file name> <pct> [bg]
+  local px
+  if ! command -v magick >/dev/null 2>&1; then cp "$1" "$DIST/$2"; return; fi
+  px=$(magick identify -format '%w' "$1")
+  magick "$1" -resize "$3%" -background "${4:-$ICON_BG}" -gravity center -extent "${px}x${px}" -alpha remove -alpha off "$DIST/$2"
+}
 need_file() { if [ ! -f "$1" ]; then echo "ERROR: Missing $1" >&2; exit 1; fi; }
 for x in "${FACES[@]}" all-faces observatory; do
   need_file "$SRC/faces/thumb-$x.png"
@@ -566,16 +588,20 @@ for x in "${FACES[@]}" all-faces observatory; do
   if [ "$x" != all-faces ]; then
     need_file "$SRC/faces/masters/thumb-$x.png"
     make_icon "$SRC/faces/masters/thumb-$x.png" "icon-$x.png"
+    make_maskable "$SRC/faces/masters/thumb-$x.png" "icon-$x-maskable.png" 87
   fi
 done
 need_file "$SRC/faces/thumb-eclipses.png"
 cp "$SRC/faces/thumb-eclipses.png" "$DIST/thumb-eclipses.png"
 cp "$SRC/faces/thumb-eclipses.png" "$DIST/icon-eclipses.png"
+make_maskable "$SRC/faces/thumb-eclipses.png" "icon-eclipses-maskable.png" 87 '#050409'
 for x in chronometer inspector; do
   need_file "$SRC/icon-$x.png"
   cp "$SRC/icon-$x.png" "$DIST/icon-$x.png"
   shrink_png "$SRC/icon-$x.png" "thumb-$x.png" "$THUMB_PX"
 done
+make_maskable "$SRC/icon-chronometer.png" "icon-chronometer-maskable.png" 87
+make_maskable "$SRC/icon-inspector.png"   "icon-inspector-maskable.png"   87
 echo "  → thumb-*.png ($(ls "$DIST"/thumb-*.png | wc -l | tr -d ' ') files), icon-*.png ($(ls "$DIST"/icon-*.png | wc -l | tr -d ' ') files)"
 emit_manifest chronometer "Chronometer" icon-chronometer.png 1024
 emit_manifest observatory "Observatory" icon-observatory.png 1024
