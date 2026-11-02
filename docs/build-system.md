@@ -118,6 +118,7 @@ dist/
 │       ├── geneva/
 │       ├── terra/
 │       └── ...
+├── .htaccess                    # Apache rules: manifest media type, no-cache for html/js/webmanifest
 ├── app-*.webmanifest            # Per-app web-app manifests (name + Dock/home-screen icon)
 ├── icon-*.png                   # 1024 opaque manifest icons (macOS Add to Dock); *-maskable.png = Android adaptive (art inside the 80 % safe zone)
 └── thumb-*.png                  # 400 thumbnails: cards, corner app links, favicons, apple-touch-icons

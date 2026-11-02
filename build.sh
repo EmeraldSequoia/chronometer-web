@@ -609,6 +609,10 @@ emit_manifest inspector   "Inspector"   icon-inspector.png   1024
 emit_manifest eclipses    "Eclipses"    icon-eclipses.png    400
 echo "  → app-*.webmanifest ($(ls "$DIST"/app-*.webmanifest | wc -l | tr -d ' ') files)"
 
+# Apache rules for the deployed directory (manifest media type, no-cache on
+# the stable-named HTML/manifests/bundles). See the file's own comments.
+cp "$SRC/.htaccess" "$DIST/.htaccess" && echo "  → .htaccess"
+
 # Copy help images to dist
 if [ -d "$SRC/help/images" ]; then
   echo ""

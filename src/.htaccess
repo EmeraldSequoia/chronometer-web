@@ -1,0 +1,23 @@
+# Apache serving rules for the deployed dist/ directory. Copied verbatim by
+# build.sh; harmless in dist.zip (file:// ignores it) and on non-Apache hosts.
+# Each block is guarded so a host without the module serves the files as
+# before instead of returning 500 for the whole directory.
+
+# Safari requires the web-app manifest's real media type for "Add to Dock";
+# Chrome tolerates the server default but macOS does not.
+<IfModule mod_mime.c>
+  AddType application/manifest+json .webmanifest
+</IfModule>
+
+# HTML, manifests and bundles keep the same file names from build to build.
+# With no Cache-Control the browser applies heuristic freshness (10 % of the
+# file's age since Last-Modified) and can keep an old page or engine for
+# days after a deploy — seen 2026-10-31 as an Android shortcut built from a
+# cached observatory.html that still linked the pre-icon manifest. no-cache
+# means "revalidate every time": the ETag makes that a cheap 304, and
+# images (stable content, large) stay cacheable under the default rules.
+<IfModule mod_headers.c>
+  <FilesMatch "\.(html|webmanifest|js)$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+</IfModule>
