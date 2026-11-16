@@ -4,7 +4,7 @@
  * shared/host-notes.ts (the help popup) and privacy.html's inline script.
  */
 import { describe, test, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { JSDOM } from 'jsdom';
@@ -47,6 +47,33 @@ describe('host notes', () => {
         notes.forEach(el => expect(el.hidden, el.dataset.host).toBe(true));
         expect(visibleText(doc)).not.toMatch(/siteground/i);
         expect(visibleText(doc)).toMatch(/Web Server Logs/);
+    });
+
+    // index.html carries an inline copy of the popup wiring (it loads no
+    // engine bundle), which the first cut of this feature missed: the note
+    // showed on privacy.html and every other page's popup, but not there.
+    test('every place that fills the popup sub-view applies the host notes', () => {
+        const src = join(__dirname, '..');
+        const files = (readdirSync(src, { recursive: true }) as string[])
+            .filter(f => /\.(ts|html)$/.test(f) && !f.includes('__tests__'))
+            .filter(f => /subContent\.innerHTML\s*=/.test(readFileSync(join(src, f), 'utf-8')));
+        expect(files.sort()).toEqual(['index.html', join('shared', 'help-popover.ts')]);
+        for (const f of files) {
+            const text = readFileSync(join(src, f), 'utf-8');
+            const after = text.slice(text.search(/subContent\.innerHTML\s*=/)).split('\n').slice(1, 9).join('\n');
+            expect(after, f).toMatch(/applyHostNotes\(subContent\)|querySelectorAll\("\[data-host\]"\)/);
+        }
+    });
+
+    test.each(HOSTS)('index.html inline popup rule on %s → shown=%s', (url, shown) => {
+        const html = readFileSync(join(__dirname, '../index.html'), 'utf-8');
+        const start = html.indexOf('const host = location.hostname.toLowerCase();');
+        const end = html.indexOf('slider.style.transform', start);
+        expect(start).toBeGreaterThan(0);
+        const rule = html.slice(start, end);
+        const dom = new JSDOM(`<div id="info-sub-content">${partial}</div>`, { url, runScripts: 'outside-only' });
+        dom.window.eval(`{ const subContent = document.getElementById('info-sub-content'); ${rule} }`);
+        expect(/SiteGround/.test(visibleText(dom.window.document))).toBe(shown);
     });
 
     test.each(HOSTS)('popup path (applyHostNotes) on %s → shown=%s', (url, shown) => {

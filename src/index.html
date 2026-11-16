@@ -780,6 +780,13 @@ overscroll-behavior-y: contain;
             const template = document.getElementById(templateId);
             if (template && mainView && subView && subContent && slider) {
               subContent.innerHTML = template.innerHTML;
+              // Host notes — the same rule as shared/host-notes.ts, before
+              // the height is measured (a revealed note adds lines).
+              const host = location.hostname.toLowerCase();
+              subContent.querySelectorAll("[data-host]").forEach((el) => {
+                const want = (el.dataset.host || "").toLowerCase();
+                el.hidden = !(want !== "" && (host === want || host.endsWith("." + want)));
+              });
               slider.style.transform = "translateX(-50%)";
               updatePopupHeight(subView);
               scrollPopupToTop();
