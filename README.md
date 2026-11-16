@@ -26,7 +26,7 @@ Every page links to the other apps via the icons in the top-right corner, and yo
 ### Option 1: Run from a server that serves the static files needed:
 * https://spucci.us/ecweb (Chronometer)
 * https://spucci.us/ecweb/observatory.html (Observatory)
-* Add your server here! We're looking for volunteers to host mirror sites to host the static files. All we need is a directory on your server to host the files from the `dist.zip` release archive and serve them over https. (See option 3 for details on how to do this).
+* Add your server here! We're looking for volunteers to host mirror sites to host the static files. All we need is a directory on your server to host the files from the `dist.zip` release archive and serve them over https. (See option 3 for details on how to do this). The app's privacy page describes server logging in general terms, since each host's own logging applies to its visitors; if you'd like yours spelled out, a pull request can add a note that appears only on your site (see the `data-host` block in `src/partials/privacy-content.html`).
 
 ### Option 2: Download and open locally
 

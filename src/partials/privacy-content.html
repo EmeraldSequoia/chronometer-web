@@ -17,9 +17,9 @@
 
 <h2>Web Server Logs</h2>
 <p>
-  When the app is served over HTTP or HTTPS, the hosting provider (SiteGround)
-  records standard web server access logs for each page and resource request.
-  These logs include:
+  When the app is served over HTTP or HTTPS, the web server it is loaded from
+  typically records a standard access log entry for each page and resource
+  request. These logs usually include:
 </p>
 <ul>
   <li>Your <strong>IP address</strong></li>
@@ -34,10 +34,23 @@
   </li>
 </ul>
 <p>
-  These logs are retained by SiteGround for up to 30 days and are used solely
-  for security monitoring and troubleshooting. They are not analyzed for user
-  tracking purposes.
+  How long these logs are kept, and what they are used for, is decided by
+  whoever operates that server and their hosting provider — not by the app. The
+  app is open source and anyone may host a copy, so this can differ from one
+  site to another.
 </p>
+<!-- Host notes: facts that hold only for one known deployment. Each is hidden
+     unless the page was loaded from that host (shared/host-notes.ts in the
+     popup, the inline script in privacy.html) — so a mirror never shows
+     another site's claims. To add one, copy the block and set data-host. -->
+<div data-host="spucci.us" hidden>
+  <p>
+    <strong>On spucci.us:</strong> this copy of the app is hosted by SiteGround.
+    Its access logs are retained by SiteGround for up to 30 days and are used
+    solely for security monitoring and troubleshooting. They are not analyzed
+    for user tracking purposes.
+  </p>
+</div>
 <p>
   When running from <code>file://</code> URLs (a local copy of the app), no
   server is involved and no logs are generated.
@@ -127,4 +140,4 @@
 </p>
 
 <hr />
-<p class="last-updated">Last updated: May 2026</p>
+<p class="last-updated">Last updated: November 2026</p>

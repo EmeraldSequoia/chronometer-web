@@ -7,6 +7,8 @@
 // Privacy/Support/Disclaimer sub-view with animated popup height, and the
 // lazy-loaded General Help iframe.
 
+import { applyHostNotes } from './host-notes';
+
 export interface HelpPopoverOptions {
     /** URL loaded into #general-help-iframe on first expand (default 'help.html?embed=1'). */
     generalHelpUrl?: string;
@@ -155,6 +157,8 @@ export function initHelpPopover(options: HelpPopoverOptions = {}): void {
                 const template = document.getElementById(templateId!) as HTMLTemplateElement | null;
                 if (template && mainView && subView && subContent && slider) {
                     subContent.innerHTML = template.innerHTML;
+                    // Before the height is measured: a revealed note adds lines.
+                    applyHostNotes(subContent);
                     slider.style.transform = 'translateX(-50%)';
                     updatePopupHeight(subView);
                     scrollPopupToTop();

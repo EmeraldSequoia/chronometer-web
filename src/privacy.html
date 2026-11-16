@@ -104,5 +104,16 @@
 
   <body>
     <main>{{PRIVACY_CONTENT}}</main>
+    <script>
+      // Reveal the host notes that apply to the site this page was loaded
+      // from — the same rule as shared/host-notes.ts (this page has no bundle).
+      (function () {
+        var h = location.hostname.toLowerCase();
+        document.querySelectorAll("[data-host]").forEach(function (el) {
+          var want = (el.getAttribute("data-host") || "").toLowerCase();
+          el.hidden = !(want !== "" && (h === want || h.endsWith("." + want)));
+        });
+      })();
+    </script>
   </body>
 </html>
