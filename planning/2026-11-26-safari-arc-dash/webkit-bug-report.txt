@@ -1,5 +1,6 @@
 WebKit Bugzilla report
 Filed as bug 333223: https://bugs.webkit.org/show_bug.cgi?id=333223
+Also filed with Apple as Feedback FB25744647
 Attachment: arc-dash-test.html (same folder)
 
 ------------------------------------------------------------------------
@@ -79,6 +80,7 @@ Call moveTo() with the arc's start point before arc().
 
 ------------------------------------------------------------------------
 FEEDBACK ASSISTANT (second report, from a Mac running macOS 27)
+Filed as FB25744647
 ------------------------------------------------------------------------
 Area:  Safari (or WebKit)
 Title: Canvas 2D setLineDash() ignored when the stroked path is a single
