@@ -1,0 +1,90 @@
+WebKit Bugzilla report
+Filed as bug 333223: https://bugs.webkit.org/show_bug.cgi?id=333223
+Attachment: arc-dash-test.html (same folder)
+
+------------------------------------------------------------------------
+FORM FIELDS
+------------------------------------------------------------------------
+Product:    WebKit
+Component:  Canvas
+Version:    Safari 27 (or the nearest entry the form offers)
+Hardware:   All
+OS:         macOS 27 and iOS 27
+Severity:   Normal
+See Also:   https://bugs.webkit.org/show_bug.cgi?id=306488
+
+Summary:
+REGRESSION (macOS 27 / iOS 27): Canvas 2D setLineDash() is ignored when the stroked path is a single arc()
+
+------------------------------------------------------------------------
+DESCRIPTION
+------------------------------------------------------------------------
+On macOS 27 and iOS 27, a canvas 2D stroke() draws a solid line, ignoring
+the current line dash, when the path being stroked consists of exactly one
+arc() and the line cap is the default "butt". Adding any other element to
+the path restores the dashes.
+
+Steps to reproduce:
+1. Open the attached arc-dash-test.html.
+2. Compare the two arcs. Both are stroked with setLineDash([6, 6]).
+
+Expected:
+Both arcs are dashed.
+
+Actual:
+Arc A (upper), whose path is a single arc(), is drawn solid.
+Arc B (lower), the same arc preceded by a moveTo() to its own start point,
+is dashed correctly.
+
+Affected:
+- Safari 27.0.1 (22625.1.29.11.28) on macOS 27.0.1: reproduces every time
+- Safari on iOS 27.2.1 (iPhone): reproduces
+
+Not affected:
+- Safari 27.0 (21625.1.29.18.28) on macOS 26.7.1: both arcs dashed
+- Chrome on the same machines: both arcs dashed
+
+So this follows the OS version, not the Safari version.
+
+What triggers it (measured in Safari 27.0.1 on macOS 27.0.1 by counting
+dash runs along the arc with getImageData):
+
+Drawn SOLID (bug):
+- beginPath(); arc(); stroke()
+- the same arc built in a Path2D and passed to stroke(path)
+- any line width tried (0.25 to 2), any canvas scale tried (1x to 4.5x)
+- clockwise or anticlockwise, partial arc or full circle
+- with a non-zero lineDashOffset
+
+Drawn dashed (correct):
+- moveTo(arc start) then arc()
+- arc() followed by a moveTo() or lineTo()
+- two consecutive arc() calls covering the same span
+- ellipse() with equal radii in place of arc()
+- the same curve as bezierCurveTo(), quadraticCurveTo() or a polyline
+- a single arc() with lineCap = "round"
+- a single straight line (moveTo + lineTo)
+
+Possible cause (not verified against the source):
+The condition "path is a single arc" matches the stroke-arc fast path
+added in bug 306488, "Use CGContextStrokeArc when available". If that CG
+call exists only on the 27 OS releases, that would explain why the same
+Safari major version is correct on macOS 26. It looks as though the line
+dash is not applied on that path, or the fast path should be skipped when
+a dash is set. Butt caps taking the fast path and round caps not would
+also fit the observation above.
+
+Workaround for page authors:
+Call moveTo() with the arc's start point before arc().
+
+------------------------------------------------------------------------
+FEEDBACK ASSISTANT (second report, from a Mac running macOS 27)
+------------------------------------------------------------------------
+Area:  Safari (or WebKit)
+Title: Canvas 2D setLineDash() ignored when the stroked path is a single
+       arc() (regression in macOS 27 / iOS 27)
+Body:  Start with the line below, then paste the Description above and
+       attach arc-dash-test.html.
+
+       Also filed as WebKit bug 333223:
+       https://bugs.webkit.org/show_bug.cgi?id=333223

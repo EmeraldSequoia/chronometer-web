@@ -1,0 +1,26 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>setLineDash ignored for a single arc()</title>
+<p>Both arcs should be dashed. On macOS 27 / iOS 27 the upper arc (A) is solid.</p>
+<canvas id="c" width="400" height="200"></canvas>
+<script>
+const ctx = document.getElementById('c').getContext('2d');
+const R = 200, A0 = -2.2, A1 = -0.94;
+ctx.lineWidth = 2;
+ctx.font = '14px sans-serif';
+ctx.setLineDash([6, 6]);
+
+// A (upper). The path is a single arc(): drawn SOLID (bug).
+ctx.fillText('A', 20, 80);
+ctx.beginPath();
+ctx.arc(200, 240, R, A0, A1);
+ctx.stroke();
+
+// B (lower). The same arc, 60px down, preceded by a moveTo to its own
+// start point: drawn dashed (correct).
+ctx.fillText('B', 20, 140);
+ctx.beginPath();
+ctx.moveTo(200 + R * Math.cos(A0), 300 + R * Math.sin(A0));
+ctx.arc(200, 300, R, A0, A1);
+ctx.stroke();
+</script>
