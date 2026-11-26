@@ -3404,6 +3404,10 @@ function drawTerraChannelLines(
             ctx.globalAlpha = 1;
             ctx.setLineDash([2, 3]);
             ctx.beginPath();
+            // Safari on macOS 27 / iOS 27 ignores the dash pattern when the
+            // path is a single arc(); an explicit moveTo to the arc's start
+            // (a no-op geometrically) makes it honour the dashes.
+            ctx.moveTo(channelR * Math.cos(startAngle), channelR * Math.sin(startAngle));
             ctx.arc(0, 0, channelR, startAngle, endAngle, false);
             ctx.stroke();
         }
