@@ -1897,6 +1897,92 @@ function drawHandShape(
 // Cost basis: live drawWheel was 45% of Safari draw issuance
 // (planning/2026-07-04-phase3-face-buffer-caching.md, "Ceiling results").
 // ?ablate=nowheelcache selects the fully live path for A/B.
+// ----------------------------------------------------------------------------
+// Drawn wheel labels: labels painted as shapes instead of as font glyphs.
+//
+// '●' (the AM/PM and validity indicators) is the only one. Where Arial's
+// U+25CF is not available the fallback font's dot is larger and sits lower,
+// which is enough to show through a 2-unit window (the red "no event" dot
+// under Venezia's rise/transit/set squares on iPhone). Each entry carries the
+// metrics of the glyph it replaces, so the shape lands where the glyph does
+// on the desktop and no font is consulted for it.
+// ----------------------------------------------------------------------------
+interface DrawnWheelLabel {
+    /** Advance width of the glyph it replaces, XML units. */
+    width(fontSize: number): number;
+    /** Font box (ascent, descent) of the font it was set in, XML units. */
+    fontBox(fontSize: number): { asc: number; desc: number };
+    /** Paint in the current fillStyle; the origin is where fillText would be
+     *  anchored after the textVisualCenterY offset (the slot origin). */
+    draw(c: RenderContext, fontSize: number): void;
+}
+
+// Browsers report the font box in whole pixels at the font size.
+const arialFontBox = (fontSize: number) => ({
+    asc: Math.round(0.905 * fontSize),
+    desc: Math.round(0.212 * fontSize),
+});
+
+const DRAWN_WHEEL_LABELS: Record<string, DrawnWheelLabel> = {
+    // Arial's U+25CF: advance 0.604 em; ink centred 0.282 em above the
+    // baseline; outline radius 0.215 em, which rasterises as 0.22.
+    '●': {
+        width: fontSize => 0.604 * fontSize,
+        fontBox: arialFontBox,
+        draw(c, fontSize) {
+            const { asc, desc } = arialFontBox(fontSize);
+            c.beginPath();
+            c.arc(0, (asc - desc) / 2 - 0.282 * fontSize, 0.22 * fontSize, 0, 2 * Math.PI);
+            c.fill();
+        },
+    },
+};
+
+/** Width of one (trimmed) wheel label, XML units. `c.font` must be set. */
+function wheelLabelWidth(c: RenderContext, label: string, fontSize: number): number {
+    const drawn = DRAWN_WHEEL_LABELS[label];
+    return drawn ? drawn.width(fontSize) : c.measureText(label).width;
+}
+
+/**
+ * Slot size shared by every label of a wheel, XML units: the widest label and
+ * the font's line height. A wheel made only of drawn labels takes the height
+ * from their own font box, so its layout does not depend on the font either.
+ * `c.font` must be set.
+ */
+function measureWheelLabels(
+    c: RenderContext,
+    labels: string[],
+    fontSize: number,
+): { maxW: number; maxH: number } {
+    let maxW = 0;
+    let drawnOnly: DrawnWheelLabel | null = null;
+    let anyText = false;
+    for (const lab of labels) {
+        const t = lab.trim();
+        maxW = Math.max(maxW, wheelLabelWidth(c, t, fontSize));
+        if (!t) continue;
+        const drawn = DRAWN_WHEEL_LABELS[t];
+        if (drawn) drawnOnly = drawn; else anyText = true;
+    }
+    if (drawnOnly && !anyText) {
+        const { asc, desc } = drawnOnly.fontBox(fontSize);
+        return { maxW, maxH: asc + desc };
+    }
+    const m = c.measureText('Xg');  // measure with descender
+    return { maxW, maxH: m.fontBoundingBoxAscent + m.fontBoundingBoxDescent };
+}
+
+/**
+ * Paint one (trimmed) wheel label at the slot origin. Expects `c.font`,
+ * center alignment, the alphabetic baseline and the fillStyle to be set.
+ */
+function drawWheelLabel(c: RenderContext, label: string, fontSize: number): void {
+    const drawn = DRAWN_WHEEL_LABELS[label];
+    if (drawn) drawn.draw(c, fontSize);
+    else c.fillText(label, 0, textVisualCenterY(c, label));
+}
+
 interface WheelGlyphAtlas {
     atlas: OffscreenCanvas;
     /** Per-label atlas cells (px); null for empty labels. */
@@ -1938,11 +2024,8 @@ function getWheelGlyphAtlas(
     // Metrics are transform-independent: measure at unit scale.
     const probe = new OffscreenCanvas(1, 1).getContext('2d')!;
     probe.font = `${fontSize}px "${fontName}"`;
-    const m0 = probe.measureText('Xg');
-    const maxHu = m0.fontBoundingBoxAscent + m0.fontBoundingBoxDescent;
     const trimmed = labels.map(l => l.trim());
-    let maxWu = 0;
-    for (const lab of trimmed) maxWu = Math.max(maxWu, probe.measureText(lab).width);
+    const { maxW: maxWu, maxH: maxHu } = measureWheelLabels(probe, trimmed, fontSize);
 
     const PAD = 2; // px of AA-bleed margin per side
     const cellH = Math.ceil(maxHu * dev) + 2 * PAD;
@@ -1950,7 +2033,7 @@ function getWheelGlyphAtlas(
     let xPx = 0;
     for (const lab of trimmed) {
         if (!lab) { cells.push(null); continue; }
-        const sw = Math.ceil(probe.measureText(lab).width * dev) + 2 * PAD;
+        const sw = Math.ceil(wheelLabelWidth(probe, lab, fontSize) * dev) + 2 * PAD;
         cells.push({ sx: xPx, sw });
         xPx += sw;
     }
@@ -1969,7 +2052,7 @@ function getWheelGlyphAtlas(
         actx.save();
         actx.translate(cell.sx + cell.sw / 2, cellH / 2);
         actx.scale(dev, dev);
-        actx.fillText(trimmed[i], 0, textVisualCenterY(actx, trimmed[i]));
+        drawWheelLabel(actx, trimmed[i], fontSize);
         actx.restore();
     }
     ga = { atlas, cells, cellH, dev, maxWu, maxHu };
@@ -2112,15 +2195,7 @@ function drawWheel(
         c.textBaseline = 'alphabetic';
 
         // Compute max label dimensions for consistent positioning
-        let maxW = 0;
-        const metrics = c.measureText('Xg');  // measure with descender
-        // Use actual measured height for vertical positioning
-        const measuredH = metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent;
-        const maxH = measuredH;
-        for (const lab of labels) {
-            const m = c.measureText(lab.trim());
-            maxW = Math.max(maxW, m.width);
-        }
+        const { maxW, maxH } = measureWheelLabels(c, labels, fontSize);
 
         // angle1/angle2 define the arc range (default: full circle)
         const angle1 = part.angle1 ? evalAttr(part.angle1, env) : 0;
@@ -2273,7 +2348,7 @@ function drawWheel(
                         c.translate(-(tradius - maxW / 2), 0);
                         break;
                 }
-                c.fillText(label, 0, textVisualCenterY(c, label));
+                drawWheelLabel(c, label, fontSize);
                 c.restore();
             }
 
